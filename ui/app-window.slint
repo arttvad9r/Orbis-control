@@ -121,25 +121,27 @@ export component AppWindow inherits Window {
                 spacing: 4px;
                 SectionHeader { title: "GPU Mode"; }
                 if (root.ui-state.gpu-section-error) : Rectangle {
-                    height: 22px;
+                    height: 24px;
                     border-radius: 4px;
                     background: Palette.surface-pressed;
                     border-width: 1px;
                     border-color: Palette.error;
                     HorizontalLayout {
-                        padding-left: 6px;
-                        spacing: 5px;
-                        alignment: center;
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 8px;
+                        // вертикальный индикатор слева (не отдельная точка)
                         Rectangle {
-                            width: 6px;
-                            height: 6px;
-                            border-radius: 3px;
+                            width: 3px;
+                            height: 14px;
+                            border-radius: 1.5px;
                             background: Palette.error;
+                            y: (parent.height - 14px) / 2;
                         }
                         Text {
                             text: "GPU backend error";
                             font-size: 12px;
-                            color: Palette.error;
+                            color: Palette.text-primary;
                             vertical-alignment: center;
                         }
                     }
