@@ -28,6 +28,7 @@ orbis-config = { workspace = true }
 orbis-capabilities = { workspace = true }
 orbis-providers = { workspace = true }
 orbis-test-support = { workspace = true }
+orbis-session-protocol = { path = "../orbis-session-protocol", version = "0.1.0" }
 
 [features]
 mock = ["orbis-providers/mock"]
