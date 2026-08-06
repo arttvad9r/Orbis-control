@@ -1,0 +1,64 @@
+
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.freedesktop.DBus.Introspectable">
+    <method name="Introspect">
+      <arg type="s" direction="out"/>
+    </method>
+  </interface>
+  <interface name="org.freedesktop.DBus.Peer">
+    <method name="Ping">
+    </method>
+    <method name="GetMachineId">
+      <arg type="s" direction="out"/>
+    </method>
+  </interface>
+  <interface name="org.freedesktop.DBus.Properties">
+    <method name="Get">
+      <arg name="interface_name" type="s" direction="in"/>
+      <arg name="property_name" type="s" direction="in"/>
+      <arg type="v" direction="out"/>
+    </method>
+    <method name="Set">
+      <arg name="interface_name" type="s" direction="in"/>
+      <arg name="property_name" type="s" direction="in"/>
+      <arg name="value" type="v" direction="in"/>
+    </method>
+    <method name="GetAll">
+      <arg name="interface_name" type="s" direction="in"/>
+      <arg type="a{sv}" direction="out"/>
+    </method>
+    <signal name="PropertiesChanged">
+      <arg name="interface_name" type="s"/>
+      <arg name="changed_properties" type="a{sv}"/>
+      <arg name="invalidated_properties" type="as"/>
+    </signal>
+  </interface>
+  <interface name="xyz.ljones.AsusArmoury">
+    <method name="RestoreDefault">
+    </method>
+    <!--
+     Applies queued GPU value if present and returns whether anything was applied.
+     -->
+    <method name="ApplyQueuedGpuValue">
+      <arg type="b" direction="out"/>
+    </method>
+    <property name="AvailableAttrs" type="as" access="read"/>
+    <property name="CurrentValue" type="i" access="readwrite"/>
+    <!--
+     If return is `-1` then there is no default value
+     -->
+    <property name="DefaultValue" type="i" access="read"/>
+    <property name="MaxValue" type="i" access="read"/>
+    <property name="MinValue" type="i" access="read"/>
+    <property name="Name" type="s" access="read"/>
+    <property name="PossibleValues" type="ai" access="read"/>
+    <!--
+     Returns queued GPU value when present, otherwise `-1`.
+     -->
+    <property name="QueuedGpuValue" type="i" access="read"/>
+    <property name="ScalarIncrement" type="i" access="read"/>
+  </interface>
+</node>
+

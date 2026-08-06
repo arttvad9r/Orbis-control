@@ -1,0 +1,10 @@
+probe_version = "0.1.0"
+collected_at = "2026-08-06T18:37:30+0300"
+kernel = "7.1.6"
+arch = "x86_64"
+distro = "anonymized"
+dmi = {"sys_vendor": "ASUSTeK COMPUTER INC.", "product_name": "ASUS TUF Gaming A17 FA707NV_FA707NV", "board_name": "FA707NV", "bios_version": "FA707NV.316", "bios_date": "11/04/2024"}
+modules_asus_wmi = ["asus_armoury", "asus_nb_wmi", "asus_wmi", "nvidia_wmi_ec_backlight", "wmi", "wmi_bmof"]
+anonymized = true
+forbidden_fields_absent = true
+read_only = true

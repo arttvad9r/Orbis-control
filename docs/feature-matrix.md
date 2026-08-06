@@ -1,8 +1,11 @@
 # Feature Matrix — Orbis Control
 
-> Дата: 2026-08-06. Источники: `docs/research-report.md`, живой D-Bus introspection
-> на ASUS TUF Gaming A17 FA707NV (ядро 7.1.6, asusd 6.3.8), исходники asusctl 6.3.11,
-> G-Helper e439349f, cardwire 1de887f.
+> Дата: 2026-08-06 (обновлено после ревью Этапа 0). Источники:
+> `docs/research-report.md`, живой D-Bus introspection на ASUS TUF Gaming A17 FA707NV
+> (ядро 7.1.6, asusd 6.3.8), исходники asusctl 6.3.11, G-Helper e439349f,
+> cardwire 1de887f.
+> Целевые дистрибутивы: **NixOS** (официальная платформа разработки), Fedora,
+> Arch, Ubuntu LTS, Debian, openSUSE.
 
 ## Статусы функций
 
@@ -15,7 +18,8 @@
 | ⛔ недостижимая | Нет стабильного Linux-интерфейса |
 
 Сопоставление статусов с capability-моделью (§7 задания) приведено в
-`docs/architecture.md`.
+`docs/architecture.md`. Семантика статусов (что значит каждый статус, пример
+FA707NV) — в `docs/provider-matrix.md` §Семантика capability-статусов.
 
 ---
 
@@ -165,12 +169,22 @@ engineering в стабильной версии.
 
 | Параметр | Статус | Linux-реализация | Backend |
 |---|---|---|---|
-| SPL (PPT PL1), SPPT (PL2), FPPT (PL3) | 🔵 | `ppt_pl1_spl`, `ppt_pl2_sppt`, `ppt_pl3_fppt` | asusd `AsusArmoury` |
+| SPL (PPT PL1), SPPT (PL2), FPPT (PL3) | 🔵→🟡 | `ppt_pl1_spl`, `ppt_pl2_sppt`, `ppt_pl3_fppt` | asusd `AsusArmoury` / kernel |
 | CPU temperature limit | 🔵 | asusd/asus-armoury (по моделям) | asusd |
-| GPU Dynamic Boost | 🔵 | `nv_dynamic_boost` | asusd |
-| GPU temp target | 🔵 | `nv_temp_target` | asusd |
+| GPU Dynamic Boost | 🔵→🟡 | `nv_dynamic_boost` | asusd / kernel |
+| GPU temp target | 🔵→🟡 | `nv_temp_target` | asusd / kernel |
 | CPU boost policy / EPP | ✅ | EPP-свойства asusd + sysfs | asusd |
 | Динамическое определение полей | ✅ | `AvailableAttrs`/`MinValue/MaxValue/ScalarIncrement` | asusd |
+
+> **Уточнение для FA707NV (не фиксировать по наличию файлов!):** via asusd D-Bus
+> `ppt_*`/`nv_*` устойчиво падают с ENODEV (errno 19) → статус через asusd
+> `Unsupported` (`EnablePptGroup=false`, `SupportedProperties` без PPT-группы).
+> Прямое чтение kernel sysfs работает (read `Supported`), запись требует root
+> (write `PermissionDenied`). Эффективный статус UI без hardwared: **ReadOnly**.
+> Семантика значений (`ppt_pl1_spl=5`) — верифицируется на Этапе 3.
+> `cpufv` (CPU boost): `PermissionDenied` (файл 0200 root:root).
+> Детали: `docs/research-report.md` §4.1.1, фикстура
+> `tests/fixtures/hardware/fa707nv/expected-capabilities.json`.
 
 Правила: min/max/step/current/default от backend; никаких универсальных значений
 мощности; перед записью — проверка диапазона, подтверждение, read-back, журнал,

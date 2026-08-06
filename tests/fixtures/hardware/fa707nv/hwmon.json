@@ -1,0 +1,181 @@
+{
+  "devices": {
+    "hwmon0": {
+      "name": "nvme",
+      "entries": {
+        "temp1_alarm": "0",
+        "temp1_crit": "78850",
+        "temp1_input": "45850",
+        "temp1_label": "Composite",
+        "temp1_max": "76850",
+        "temp1_min": "-150",
+        "temp2_input": "45850",
+        "temp2_label": "Sensor 1",
+        "temp2_max": "65261850",
+        "temp2_min": "-273150",
+        "temp3_input": "69850",
+        "temp3_label": "Sensor 2",
+        "temp3_max": null,
+        "temp3_min": null
+      }
+    },
+    "hwmon1": {
+      "name": "nvme",
+      "entries": {
+        "temp1_alarm": "0",
+        "temp1_crit": "89850",
+        "temp1_input": "39850",
+        "temp1_label": "Composite",
+        "temp1_max": "86850",
+        "temp1_min": "-150",
+        "temp2_input": "39850",
+        "temp2_label": "Sensor 1",
+        "temp2_max": "65261850",
+        "temp2_min": "-273150"
+      }
+    },
+    "hwmon10": {
+      "name": "asus_custom_fan_curve",
+      "entries": {
+        "pwm1_auto_point1_pwm": "0",
+        "pwm1_auto_point1_temp": "50",
+        "pwm1_auto_point2_pwm": "8",
+        "pwm1_auto_point2_temp": "55",
+        "pwm1_auto_point3_pwm": "13",
+        "pwm1_auto_point3_temp": "60",
+        "pwm1_auto_point4_pwm": "26",
+        "pwm1_auto_point4_temp": "65",
+        "pwm1_auto_point5_pwm": "36",
+        "pwm1_auto_point5_temp": "70",
+        "pwm1_auto_point6_pwm": "54",
+        "pwm1_auto_point6_temp": "75",
+        "pwm1_auto_point7_pwm": "77",
+        "pwm1_auto_point7_temp": "79",
+        "pwm1_auto_point8_pwm": "102",
+        "pwm1_auto_point8_temp": "85",
+        "pwm1_enable": "2",
+        "pwm2_auto_point1_pwm": "0",
+        "pwm2_auto_point1_temp": "45",
+        "pwm2_auto_point2_pwm": "8",
+        "pwm2_auto_point2_temp": "50",
+        "pwm2_auto_point3_pwm": "13",
+        "pwm2_auto_point3_temp": "55",
+        "pwm2_auto_point4_pwm": "26",
+        "pwm2_auto_point4_temp": "60",
+        "pwm2_auto_point5_pwm": "36",
+        "pwm2_auto_point5_temp": "65",
+        "pwm2_auto_point6_pwm": "54",
+        "pwm2_auto_point6_temp": "70",
+        "pwm2_auto_point7_pwm": "77",
+        "pwm2_auto_point7_temp": "75",
+        "pwm2_auto_point8_pwm": "102",
+        "pwm2_auto_point8_temp": "80",
+        "pwm2_enable": "2"
+      }
+    },
+    "hwmon11": {
+      "name": "ucsi_source_psy_USBC000:002",
+      "entries": {
+        "curr1_input": "0",
+        "curr1_max": "0",
+        "in0_input": "0",
+        "in0_max": "0",
+        "in0_min": "0"
+      }
+    },
+    "hwmon12": {
+      "name": "iwlwifi_1_1",
+      "entries": {
+        "temp1_input": "51000"
+      }
+    },
+    "hwmon13": {
+      "name": "amdgpu",
+      "entries": {
+        "in0_input": "770",
+        "in0_label": "vddgfx",
+        "in1_input": "1079",
+        "in1_label": "vddnb",
+        "power1_input": "12023000",
+        "power1_label": "PPT",
+        "temp1_input": "46000",
+        "temp1_label": "edge"
+      }
+    },
+    "hwmon2": {
+      "name": "acpitz_0",
+      "entries": {
+        "temp1_input": "48000"
+      }
+    },
+    "hwmon3": {
+      "name": "ACAD",
+      "entries": {}
+    },
+    "hwmon4": {
+      "name": "BAT1",
+      "entries": {
+        "curr1_input": "0",
+        "in0_input": "16704"
+      }
+    },
+    "hwmon5": {
+      "name": "k10temp",
+      "entries": {
+        "temp1_input": "48250",
+        "temp1_label": "Tctl"
+      }
+    },
+    "hwmon6": {
+      "name": "ucsi_source_psy_USBC000:001",
+      "entries": {
+        "curr1_input": "0",
+        "curr1_max": "0",
+        "in0_input": "0",
+        "in0_max": "0",
+        "in0_min": "0"
+      }
+    },
+    "hwmon7": {
+      "name": "spd5118",
+      "entries": {
+        "temp1_crit": "85000",
+        "temp1_crit_alarm": "0",
+        "temp1_enable": "1",
+        "temp1_input": "46250",
+        "temp1_lcrit": "0",
+        "temp1_lcrit_alarm": "0",
+        "temp1_max": "55000",
+        "temp1_max_alarm": "0",
+        "temp1_min": "0",
+        "temp1_min_alarm": "0"
+      }
+    },
+    "hwmon8": {
+      "name": "spd5118",
+      "entries": {
+        "temp1_crit": "85000",
+        "temp1_crit_alarm": "0",
+        "temp1_enable": "1",
+        "temp1_input": "47250",
+        "temp1_lcrit": "0",
+        "temp1_lcrit_alarm": "0",
+        "temp1_max": "55000",
+        "temp1_max_alarm": "0",
+        "temp1_min": "0",
+        "temp1_min_alarm": "0"
+      }
+    },
+    "hwmon9": {
+      "name": "asus",
+      "entries": {
+        "fan1_input": "2700",
+        "fan1_label": "cpu_fan",
+        "fan2_input": "2800",
+        "fan2_label": "gpu_fan",
+        "pwm1_enable": "2",
+        "pwm2_enable": "0"
+      }
+    }
+  }
+}

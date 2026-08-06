@@ -1,0 +1,207 @@
+
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.freedesktop.DBus.Peer">
+    <method name="Ping">
+    </method>
+    <method name="GetMachineId">
+      <arg type="s" direction="out"/>
+    </method>
+  </interface>
+  <interface name="org.freedesktop.DBus.Introspectable">
+    <method name="Introspect">
+      <arg type="s" direction="out"/>
+    </method>
+  </interface>
+  <interface name="org.freedesktop.DBus.Properties">
+    <method name="Get">
+      <arg name="interface_name" type="s" direction="in"/>
+      <arg name="property_name" type="s" direction="in"/>
+      <arg type="v" direction="out"/>
+    </method>
+    <method name="Set">
+      <arg name="interface_name" type="s" direction="in"/>
+      <arg name="property_name" type="s" direction="in"/>
+      <arg name="value" type="v" direction="in"/>
+    </method>
+    <method name="GetAll">
+      <arg name="interface_name" type="s" direction="in"/>
+      <arg type="a{sv}" direction="out"/>
+    </method>
+    <signal name="PropertiesChanged">
+      <arg name="interface_name" type="s"/>
+      <arg name="changed_properties" type="a{sv}"/>
+      <arg name="invalidated_properties" type="as"/>
+    </signal>
+  </interface>
+  <interface name="org.supergfxctl.Daemon">
+    <!--
+     Get supergfxd version
+     -->
+    <method name="Version">
+      <arg type="s" direction="out"/>
+    </method>
+    <!--
+     Get the current graphics mode:
+     ```rust
+     enum GfxMode {
+         Hybrid,
+         Integrated,
+         NvidiaNoModeset,
+         Vfio,
+         AsusEgpu,
+         AsusMuxDgpu,
+         None,
+     }
+     # use supergfxctl::pci_device;
+     # assert_eq!(pci_device::GfxMode::None as u8, 6);
+     # assert_eq!(pci_device::GfxMode::Hybrid as u8, GfxMode::Hybrid as u8);
+     # assert_eq!(pci_device::GfxMode::Integrated as u8, GfxMode::Integrated as u8);
+     # assert_eq!(pci_device::GfxMode::NvidiaNoModeset  as u8, GfxMode::NvidiaNoModeset as u8);
+     # assert_eq!(pci_device::GfxMode::Vfio as u8, GfxMode::Vfio as u8);
+     # assert_eq!(pci_device::GfxMode::AsusEgpu as u8, GfxMode::AsusEgpu as u8);
+     # assert_eq!(pci_device::GfxMode::AsusMuxDgpu as u8, GfxMode::AsusMuxDgpu as u8);
+     # assert_eq!(pci_device::GfxMode::None as u8, GfxMode::None as u8);
+     ```
+     -->
+    <method name="Mode">
+      <arg type="u" direction="out"/>
+    </method>
+    <!--
+     Get list of supported modes
+     -->
+    <method name="Supported">
+      <arg type="au" direction="out"/>
+    </method>
+    <!--
+     Get the vendor name of the dGPU
+     -->
+    <method name="Vendor">
+      <arg type="s" direction="out"/>
+    </method>
+    <!--
+     Get the current power status:
+     enum GfxPower {
+         Active,
+         Suspended,
+         Off,
+         AsusDisabled,
+         Unknown,
+     }
+     -->
+    <method name="Power">
+      <arg type="u" direction="out"/>
+    </method>
+    <!--
+     Set the graphics mode:
+     ```rust
+     enum GfxMode {
+         Hybrid,
+         Integrated,
+         NvidiaNoModeset,
+         Vfio,
+         AsusEgpu,
+         AsusMuxDgpu,
+         None,
+     }
+     # use supergfxctl::pci_device;
+     # assert_eq!(pci_device::GfxMode::None as u8, 6);
+     # assert_eq!(pci_device::GfxMode::Hybrid as u8, GfxMode::Hybrid as u8);
+     # assert_eq!(pci_device::GfxMode::Integrated as u8, GfxMode::Integrated as u8);
+     # assert_eq!(pci_device::GfxMode::NvidiaNoModeset  as u8, GfxMode::NvidiaNoModeset as u8);
+     # assert_eq!(pci_device::GfxMode::Vfio as u8, GfxMode::Vfio as u8);
+     # assert_eq!(pci_device::GfxMode::AsusEgpu as u8, GfxMode::AsusEgpu as u8);
+     # assert_eq!(pci_device::GfxMode::AsusMuxDgpu as u8, GfxMode::AsusMuxDgpu as u8);
+     # assert_eq!(pci_device::GfxMode::None as u8, GfxMode::None as u8);
+     ```
+
+     Returns action required:
+     ```rust
+     enum UserActionRequired {
+         Logout,
+         Reboot,
+         SwitchToIntegrated,
+         AsusEgpuDisable,
+         Nothing,
+     }
+     # use supergfxctl::actions;
+     # assert_eq!(actions::UserActionRequired::Nothing as u8, 4);
+     # assert_eq!(actions::UserActionRequired::Logout as u8, UserActionRequired::Logout as u8);
+     # assert_eq!(actions::UserActionRequired::Reboot as u8, UserActionRequired::Reboot as u8);
+     # assert_eq!(actions::UserActionRequired::SwitchToIntegrated as u8, UserActionRequired::SwitchToIntegrated as u8);
+     # assert_eq!(actions::UserActionRequired::AsusEgpuDisable as u8, UserActionRequired::AsusEgpuDisable as u8);
+     # assert_eq!(actions::UserActionRequired::Nothing as u8, UserActionRequired::Nothing as u8);
+     ```
+     -->
+    <method name="SetMode">
+      <arg name="mode" type="u" direction="in"/>
+      <arg type="u" direction="out"/>
+    </method>
+    <!--
+     Get the `String` name of the pending mode change if any
+     -->
+    <method name="PendingMode">
+      <arg type="u" direction="out"/>
+    </method>
+    <!--
+     Get the `String` name of the pending required user action if any
+     -->
+    <method name="PendingUserAction">
+      <arg type="u" direction="out"/>
+    </method>
+    <!--
+     Get the base config, args in order are:
+     pub mode: GfxMode,
+     vfio_enable: bool,
+     vfio_save: bool,
+     compute_save: bool,
+     always_reboot: bool,
+     no_logind: bool,
+     logout_timeout_s: u64,
+     -->
+    <method name="Config">
+      <arg type="(ubbbbtu)" direction="out"/>
+    </method>
+    <!--
+     Set the base config, args in order are:
+     pub mode: GfxMode,
+     vfio_enable: bool,
+     vfio_save: bool,
+     compute_save: bool,
+     always_reboot: bool,
+     no_logind: bool,
+     logout_timeout_s: u64,
+     -->
+    <method name="SetConfig">
+      <arg name="config" type="(ubbbbtu)" direction="in"/>
+    </method>
+    <!--
+     Be notified when the dgpu status changes:
+     enum GfxPower {
+         Active,
+         Suspended,
+         Off,
+         AsusDisabled,
+         AsusMuxDiscreet,
+         Unknown,
+     }
+     -->
+    <signal name="NotifyGfxStatus">
+      <arg name="status" type="u"/>
+    </signal>
+    <!--
+     Recieve a notification if the graphics mode changes and to which mode
+     -->
+    <signal name="NotifyGfx">
+      <arg name="vendor" type="u"/>
+    </signal>
+    <!--
+     Recieve a notification on required action if mode changes
+     -->
+    <signal name="NotifyAction">
+      <arg name="action" type="u"/>
+    </signal>
+  </interface>
+</node>
+

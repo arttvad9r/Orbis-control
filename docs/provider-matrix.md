@@ -1,7 +1,10 @@
 # Provider Matrix — Orbis Control
 
-> Дата: 2026-08-06. Связывает функции (`docs/feature-matrix.md`) с провайдерами,
-> backend-интерфейсами и статусами. Полный контракт trait-ов — в `docs/architecture.md`.
+> Дата: 2026-08-06 (обновлено после ревью Этапа 0). Связывает функции
+> (`docs/feature-matrix.md`) с провайдерами, backend-интерфейсами и статусами.
+> Полный контракт trait-ов — в `docs/architecture.md`.
+> Целевые дистрибутивы: **NixOS** (официальная платформа разработки), Fedora,
+> Arch, Ubuntu LTS, Debian, openSUSE.
 
 ## Принципы
 
@@ -15,6 +18,33 @@
    отсутствие конфликтующего владельца.
 4. Приоритет backend: asusd(D-Bus) → asus-armoury(kernel) → стандартный kernel ABI →
    узкий helper → экспериментальный интерфейс (feature flag).
+
+### Семантика capability-статусов (уточнена после ревью)
+
+Для каждого неработающего атрибута провайдер обязан сохранять: путь; тип операции;
+точный `errno`; текст ошибки; права; владельца; режим файла; `uevent` (если применимо);
+драйвер; kernel version; результат повторной проверки; результат проверки через asusd;
+результат D-Bus introspection; предположительную стабильность ошибки.
+
+| Статус | Условие |
+|---|---|
+| `PermissionDenied` | ядро или D-Bus отклоняет операцию из-за прав (EACCES/EPERM/polkit) |
+| `Unsupported` | драйвер/firmware устойчиво возвращает `ENODEV`/`ENOTSUP`/`EOPNOTSUPP`, реализация отсутствует для модели, поддержка достоверно опровергнута |
+| `TemporarilyUnavailable` | функция может стать доступна без изменения программы/оборудования (смена профиля, подключение питания, загрузка драйвера, выход GPU из переходного состояния, перезапуск backend) |
+| `ReadOnly` | значение достоверно читается, запись отсутствует или запрещена архитектурой backend |
+| `Unknown` | информации недостаточно |
+
+**Пример FA707NV (см. фикстуру `tests/fixtures/hardware/fa707nv/`):**
+
+- `ppt_*`, `nv_dynamic_boost`, `nv_temp_target`: via asusd — `Unsupported` (ENODEV,
+  errno 19, устойчиво; `SupportedProperties` без PPT-группы); via kernel — read
+  `Supported`, write `PermissionDenied` (файлы `-rw-r--r-- root:root`).
+  Эффективный статус UI без hardwared: `ReadOnly`. Семантика значений
+  (`ppt_pl1_spl=5`) — верифицируется на Этапе 3.
+- `cpufv`: `PermissionDenied` (файл `0200 root:root`, чтение EACCES).
+- `gpu_mux_mode`: `SupportedWithRequirement (Reboot)` — MUX защёлкивается firmware;
+  наблюдаемое расхождение «requested=0, DRM eDP активен на dGPU».
+- `charge_mode`: `ReadOnly` (sysfs `0444`, режим задаётся через asusd/WMI).
 
 ---
 
@@ -56,9 +86,11 @@ CPU, 8×(temp,pwm) GPU, enabled.
 | 2 | kernel ABI | asus-nb-wmi `ppt_pl1_spl` и т.д. | то же |
 | 3 | — | CPU temperature limit (по моделям) | asusd/asus-armoury |
 
-Важно: на эталоне PPT-объекты существуют, но `CurrentValue` недоступен →
-статус **TemporarilyUnavailable/Unsupported**, а не Supported. UI обязан это
-отражать.
+Важно (FA707NV): via asusd объекты существуют, но `CurrentValue` падает с ENODEV
+(errno 19) — статус через asusd **Unsupported**; прямое чтение kernel работает
+(read **Supported**), запись требует root (write **PermissionDenied**). Эффективный
+статус без hardwared: **ReadOnly**. UI обязан это отражать; семантика значений
+`ppt_*=5` верифицируется на Этапе 3.
 
 ---
 

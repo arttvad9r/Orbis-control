@@ -36,6 +36,44 @@
 | 6 | `Traciges/Ayuz` | `3b094780e9650dbe956f2498d675ab02664d6649` | GPL-3.0 | GTK4/Rust референс |
 | 7 | `SuperGify/supergfxd` | (clone failed; API снят через установленный сервис) | GPL-3.0 | Legacy GPU-mode fallback |
 
+### 2.1 Полная воспроизводимость исследования
+
+| Репозиторий | Canonical URL | Ветка | Tag | git describe | Дата/время получения (UTC) | Файл лицензии | Перенос кода | Справочный материал |
+|---|---|---|---|---|---|---|---|---|
+| g-helper | https://github.com/seerge/g-helper | main | — | `e439349` | 2026-08-06 ~15:15 | `LICENSE` (GPL-3.0) | Нет (только компоновка как референс) | Да |
+| asusctl | https://github.com/OpenGamingCollective/asusctl | main | — | `dfe548a` | 2026-08-06 ~15:15 | `LICENSE` (MPL-2.0) | Нет (только D-Bus взаимодействие; при переносе — MPL требования) | Да |
+| cardwire | https://github.com/OpenGamingCollective/cardwire | main | — | `1de887f` | 2026-08-06 ~15:15 | `LICENSE` (GPL-3.0) | Нет (взаимодействие по D-Bus) | Да |
+| g-helper-linux (UdayaSri0) | https://github.com/UdayaSri0/g-helper-linux | main | — | `5c1459b` | 2026-08-06 ~15:15 | `LICENSE-APACHE`, `LICENSE-MIT` | Нет | Да |
+| g-helper-linux (utajum) | https://github.com/utajum/g-helper-linux | master | — | `4cc1bb7` | 2026-08-06 ~15:15 | отсутствует | **Нет (лицензия не подтверждена)** | Ограниченно |
+| Ayuz | https://github.com/Traciges/Ayuz | main | v1.1.9 | `v1.1.9` | 2026-08-06 ~15:15 | `LICENSE` (GPL-3.0) | Нет | Да |
+| supergfxd | https://github.com/SuperGify/supergfxd | — | — | **не подтверждён** (clone не удался) | — | не проверена | **Нет, до проверки лицензии и исходной версии** | Ограниченно (только D-Bus API установленного пакета) |
+
+Использованные файлы/интерфейсы: для g-helper — `app/Settings.Designer.cs`,
+`app/Fans.Designer.cs`, `app/Extra.Designer.cs`, `app/UI/RForm.cs`, `app/Mode/Modes.cs`,
+`app/Settings.cs`; для asusctl — `rog-dbus/src/*.rs`, `rog-platform/src/platform.rs`,
+`rog-control-center/src/shortcuts.rs`, `asusd-user/src/`; для cardwire —
+`crates/cardwire-daemon/src/interface/*.rs`, `models.rs`.
+
+### 2.2 supergfxd: зафиксировано по установленному пакету
+
+- **Версия установленного пакета**: `supergfxctl-5.2.7` (Nix store path:
+  `/nix/store/n4mwd9yk3fqh6rb4p7yh8rjq8v2zmgpm-supergfxctl-5.2.7/bin/supergfxd`).
+- **Источник пакета Nix**: nixpkgs (пакет `supergfxctl`), подключён в системной
+  конфигурации `/home/artt/.nixos/nixos/modules/hardware/asus.nix`
+  (`services.supergfxd.enable = true;`).
+- **D-Bus**: service `org.supergfxctl.Daemon` (system bus), объект
+  `/org/supergfxctl/Gfx`, интерфейс `org.supergfxctl.Daemon`:
+  - методы: `Config() -> (ubbbbtu)`, `Mode() -> u`, `PendingMode() -> u`,
+    `PendingUserAction() -> u`, `Power() -> u`, `SetConfig(ubbbbtu)`,
+    `SetMode(u) -> u`, `Supported() -> au`, `Vendor() -> s`, `Version() -> s`;
+  - сигналы: `NotifyAction(u)`, `NotifyGfx(u)`, `NotifyGfxStatus(u)`.
+- **busctl introspect**: см. фикстуру
+  `tests/fixtures/hardware/fa707nv/supergfxd-introspection-00-org_supergfxctl_Gfx.xml`
+  (снято `busctl --system introspect --xml-interface ...`).
+- **Исходный commit не подтверждён** — clone `git clone https://github.com/SuperGify/supergfxd`
+  не удался в момент исследования (сетевой сбой). Реализация supergfxd НЕ копируется
+  до проверки лицензии и исходной версии; в проекте используется только D-Bus API.
+
 Примечания:
 
 - **asusctl** использует MPL-2.0: при переносе его кода (не планируется в стабильной
@@ -48,6 +86,11 @@
 ---
 
 ## 3. Установленная система (источник истины №1)
+
+> **NixOS — официальная целевая платформа** (наравне с Fedora, Arch, Ubuntu,
+> Debian, openSUSE; см. `docs/architecture.md` §Совместимость). Разработка и
+> аппаратная проверка выполняются на NixOS; окружение воспроизводимо через
+> `flake.nix` (dev shell, `nix build`, `nix run`, `nix flake check`).
 
 Все данные ниже сняты с реального ноутбука, на котором ведётся разработка:
 
@@ -148,6 +191,29 @@
 `AvailableAttrs` содержит только `scalar_increment`. Провайдер обязан при пробе
 пытаться прочитать и помечать `Unsupported`/`TemporarilyUnavailable`, а не
 предполагать поддержку по имени объекта.
+
+### 4.1.1 Точные ошибки и семантика для PPT / Dynamic Boost / Temperature Target (FA707NV)
+
+Зафиксировано 2026-08-06 двумя путями:
+
+| Путь | Результат | Точная ошибка | Классификация |
+|---|---|---|---|
+| asusd D-Bus `CurrentValue` (`xyz.ljones.AsusArmoury`) | ошибка | `Failed to get property CurrentValue ... Could not read current value`; журнал asusd: `[ERROR asusd::asus_armoury] Failed to read: Io(Os { code: 19, ... message: "No such device" })` | **Unsupported (asusd backend)**: errno 19 = ENODEV, устойчиво; `SupportedProperties` платформы не включает PPT-группу, `EnablePptGroup=false` |
+| Прямой sysfs (`/sys/devices/platform/asus-nb-wmi/ppt_pl1_spl` и т.д.) | чтение успешно | нет ошибки | read: **Supported (kernel)**; write: **PermissionDenied** (файлы `-rw-r--r-- root:root`, запись требует root) |
+| Значения прямого чтения | `ppt_pl1_spl=5`, `ppt_pl2_sppt=5`, `ppt_fppt=5`, `nv_dynamic_boost=5`, `nv_temp_target=75` | — | **семантика значений требует верификации** по документации драйвера `asus_armoury` перед отображением в UI; для `nv_temp_target` 75 читается правдоподобно (°C), для `ppt_*`=5 единицы не подтверждены |
+| `cpufv` (CPU boost) | чтение запрещено | `Отказано в доступе` (EACCES) | **PermissionDenied**: файл `-w------- root:root` (0200), root-only |
+
+Итог для capability-модели FA707NV (не фиксировать окончательный статус только по
+наличию файлов!):
+
+- **PPT / Dynamic Boost / Temp Target**: via asusd — `Unsupported` (ENODEV);
+  via kernel — read `Supported`, write `PermissionDenied` (нужен hardwared/root).
+  Эффективный статус для UI без hardwared: **ReadOnly** с пояснением.
+  Семантика значений — открытый вопрос до Этапа 3.
+- **cpufv**: `PermissionDenied` (root-only).
+- Детальные права/ошибки сохранены в фикстуре
+  `tests/fixtures/hardware/fa707nv/sysfs-tree.json` и
+  `tests/fixtures/hardware/fa707nv/expected-capabilities.json`.
 
 Прочие интерфейсы (из исходников asusctl 6.3.11, `rog-dbus/src/`):
 

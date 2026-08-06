@@ -329,3 +329,21 @@ PKGBUILD, Fedora spec, Debian packaging, AppImage; `.desktop`, AppStream, SVG ic
 systemd user unit; D-Bus activation; polkit policy (при наличии hardwared);
 uninstall-документация. Установка не отключает чужие сервисы, не меняет grub,
 не ставит модули ядра, не добавляет пользователя в широкие группы.
+
+## 16. Совместимость и NixOS
+
+Целевые дистрибутивы: **NixOS** (официальная платформа разработки и аппаратной
+проверки), Fedora, Arch Linux, Ubuntu LTS, Debian, openSUSE. NixOS добавляется к
+перечисленным, а не заменяет их; приложение не привязывается только к NixOS.
+
+NixOS-интеграция (`packaging/nix/`):
+
+- `flake.nix` + `flake.lock` — dev shell (Rust toolchain, cargo, rustfmt, clippy,
+  pkg-config, зависимости Slint для Wayland/X11, D-Bus инструменты для тестов),
+  `nix build`, `nix run`, `nix flake check`;
+- `package.nix` — сборка workspace;
+- `module.nix` — NixOS-модуль (на Этапе 2 **не включает реальные аппаратные
+  операции**; только сервис/опции, безопасные для системы).
+
+Запуск mock-приложения на NixOS — без изменения системной конфигурации
+(`nix run .#orbis-control -- --mock-device zephyrus-full`).

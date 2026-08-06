@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "device": "ASUS TUF Gaming A17 FA707NV (board FA707NV, BIOS FA707NV.316)",
+  "source_probe": "tools/probe/probe.py v0.1.0, collected 2026-08-06",
+  "kernel": "7.1.6",
+  "notes": "Ожидаемая capability-модель для фикстуры. Используется snapshot-тестами orbis-capabilities. ВСЕ значения — из read-only probe, никаких записей.",
+  "features": {
+    "performance_profile": {
+      "status": "Supported",
+      "backend": "asusd/xyz.ljones.Platform + kernel platform_profile",
+      "endpoint": "/sys/firmware/acpi/platform_profile",
+      "current": "balanced",
+      "choices": ["quiet", "balanced", "performance"],
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "profile_on_ac": {
+      "status": "Supported",
+      "backend": "asusd/xyz.ljones.Platform",
+      "current": "balanced",
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "profile_on_battery": {
+      "status": "Supported",
+      "backend": "asusd/xyz.ljones.Platform",
+      "current": "quiet",
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "charge_limit": {
+      "status": "Supported",
+      "backend": "asusd/xyz.ljones.Platform + sysfs charge_control_end_threshold",
+      "endpoint": "/sys/class/power_supply/BAT1/charge_control_end_threshold",
+      "current": 80,
+      "range": [40, 100],
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "charge_mode": {
+      "status": "ReadOnly",
+      "backend": "kernel asus-nb-wmi (asus_armoury)",
+      "endpoint": "/sys/devices/platform/asus-nb-wmi/charge_mode",
+      "reason": "sysfs attr mode 0444 root:root; value readable (1), write отсутствует; режим устанавливается через asusd/WMI",
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "gpu_mux": {
+      "status": "SupportedWithRequirement",
+      "backend": "asusd/xyz.ljones.AsusArmoury /gpu_mux_mode + kernel",
+      "endpoint": "/sys/devices/platform/asus-nb-wmi/gpu_mux_mode",
+      "current": 0,
+      "possible": [0, 1],
+      "requirement": "Reboot",
+      "reason": "Hardware MUX value is latched by firmware; observed: DRM eDP active on card2 (dGPU) while requested gpu_mux_mode=0",
+      "risk": "Confirmation"
+    },
+    "dgpu_disable": {
+      "status": "Supported",
+      "backend": "asusd/xyz.ljones.AsusArmoury /dgpu_disable + kernel",
+      "endpoint": "/sys/devices/platform/asus-nb-wmi/dgpu_disable",
+      "current": 0,
+      "possible": [0, 1],
+      "requirement": "Logout",
+      "risk": "Confirmation"
+    },
+    "panel_overdrive": {
+      "status": "Supported",
+      "backend": "asusd/xyz.ljones.AsusArmoury /panel_overdrive + kernel",
+      "endpoint": "/sys/devices/platform/asus-nb-wmi/panel_od",
+      "current": 1,
+      "possible": [0, 1],
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "ppt_pl1_spl": {
+      "status": "ReadOnly",
+      "backend": "kernel asus-nb-wmi (asus_armoury)",
+      "endpoint": "/sys/devices/platform/asus-nb-wmi/ppt_pl1_spl",
+      "current": 5,
+      "reason": "kernel attr читается (значение требует верификации семантики); asusd D-Bus CurrentValue падает с ENODEV (errno 19); запись требует root -> PermissionDenied для пользователя",
+      "asusd_dbus": "Unsupported (ENODEV)",
+      "requirement": "None",
+      "risk": "Confirmation"
+    },
+    "ppt_pl2_sppt": {
+      "status": "ReadOnly",
+      "backend": "kernel asus-nb-wmi (asus_armoury)",
+      "endpoint": "/sys/devices/platform/asus-nb-wmi/ppt_pl2_sppt",
+      "current": 5,
+      "reason": "аналогично ppt_pl1_spl: kernel читается, asusd ENODEV, запись требует root",
+      "asusd_dbus": "Unsupported (ENODEV)",
+      "requirement": "None",
+      "risk": "Confirmation"
+    },
+    "ppt_fppt": {
+      "status": "ReadOnly",
+      "backend": "kernel asus-nb-wmi (asus_armoury)",
+      "endpoint": "/sys/devices/platform/asus-nb-wmi/ppt_fppt",
+      "current": 5,
+      "reason": "аналогично ppt_pl1_spl: kernel читается, asusd ENODEV, запись требует root",
+      "asusd_dbus": "Unsupported (ENODEV)",
+      "requirement": "None",
+      "risk": "Confirmation"
+    },
+    "nv_dynamic_boost": {
+      "status": "ReadOnly",
+      "backend": "kernel asus-nb-wmi (asus_armoury)",
+      "endpoint": "/sys/devices/platform/asus-nb-wmi/nv_dynamic_boost",
+      "current": 5,
+      "reason": "kernel attr читается; asusd D-Bus CurrentValue падает с ENODEV (errno 19); запись требует root",
+      "asusd_dbus": "Unsupported (ENODEV)",
+      "requirement": "None",
+      "risk": "Confirmation"
+    },
+    "nv_temp_target": {
+      "status": "ReadOnly",
+      "backend": "kernel asus-nb-wmi (asus_armoury)",
+      "endpoint": "/sys/devices/platform/asus-nb-wmi/nv_temp_target",
+      "current": 75,
+      "reason": "kernel attr читается (75 C); asusd D-Bus CurrentValue падает с ENODEV (errno 19); запись требует root",
+      "asusd_dbus": "Unsupported (ENODEV)",
+      "requirement": "None",
+      "risk": "Confirmation"
+    },
+    "cpu_boost_cpufv": {
+      "status": "PermissionDenied",
+      "backend": "kernel asus-nb-wmi",
+      "endpoint": "/sys/devices/platform/asus-nb-wmi/cpufv",
+      "reason": "sysfs attr mode 0200 root:root (write-only, root); чтение для пользователя запрещено",
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "fans": {
+      "status": "Supported",
+      "backend": "hwmon asus (hwmon9) + asus_custom_fan_curve (hwmon10)",
+      "endpoints": ["/sys/class/hwmon/hwmon9", "/sys/class/hwmon/hwmon10"],
+      "fan_count": 2,
+      "fans": ["cpu_fan", "gpu_fan"],
+      "curve_points": 8,
+      "curve_temp_range": [45, 85],
+      "curve_pwm_range": [0, 102],
+      "requirement": "None",
+      "risk": "Confirmation"
+    },
+    "fan_curves_per_profile": {
+      "status": "Supported",
+      "backend": "asusd/xyz.ljones.FanCurves",
+      "requirement": "None",
+      "risk": "Confirmation"
+    },
+    "battery_telemetry": {
+      "status": "Supported",
+      "backend": "UPower /org/freedesktop/UPower/devices/battery_BAT1",
+      "model": "A32-K55",
+      "capacity_percent": 89,
+      "charge_cycles": 0,
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "keyboard_backlight": {
+      "status": "Supported",
+      "backend": "kernel leds + asusd Aura",
+      "endpoint": "/sys/class/leds/asus::kbd_backlight",
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "aura_rgb": {
+      "status": "Supported",
+      "backend": "asusd/xyz.ljones.Aura",
+      "endpoint": "/xyz/ljones/aura/tuf",
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "anime_matrix": {
+      "status": "Unsupported",
+      "backend": "asusd/xyz.ljones.Anime",
+      "reason": "TUF FA707NV не имеет AniMe Matrix; объект Anime не экспонируется",
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "slash_lighting": {
+      "status": "Unsupported",
+      "backend": "asusd/xyz.ljones.Slash",
+      "reason": "модель без Slash-полосы",
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "display_refresh": {
+      "status": "Supported",
+      "backend": "DRM/KScreen",
+      "reason": "внутренний дисплей card2-eDP-2 1920x1080 (в момент probe активен на dGPU-стороне MUX)",
+      "requirement": "None",
+      "risk": "Safe"
+    },
+    "display_backlight": {
+      "status": "Supported",
+      "backend": "kernel backlight nvidia_0 (nvidia_wmi_ec_backlight)",
+      "endpoint": "/sys/class/backlight/nvidia_0",
+      "requirement": "None",
+      "risk": "Safe"
+    }
+  },
+  "backends": {
+    "asusd": { "present": true, "version": "6.3.8", "service": "xyz.ljones.Asusd" },
+    "supergfxd": { "present": true, "version": "supergfxctl-5.2.7", "service": "org.supergfxctl.Daemon" },
+    "cardwire": { "present": false },
+    "ppd": { "present": false },
+    "upower": { "present": true, "service": "org.freedesktop.UPower" }
+  }
+}

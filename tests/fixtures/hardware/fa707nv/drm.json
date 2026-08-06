@@ -1,0 +1,72 @@
+{
+  "connectors": {
+    "card1-DP-2": {
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card1-DP-3": {
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card1-DP-4": {
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card1-DP-5": {
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card1-DP-6": {
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card1-DP-7": {
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card1-DP-8": {
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card1-DP-9": {
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card1-Writeback-1": {
+      "status": "unknown",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card1-eDP-1": {
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card2-DP-1": {
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card2-HDMI-A-1": {
+      "status": "disconnected",
+      "enabled": "disabled",
+      "modes": []
+    },
+    "card2-eDP-2": {
+      "status": "connected",
+      "enabled": "enabled",
+      "modes": [
+        "1920x1080",
+        "1920x1080"
+      ]
+    }
+  }
+}

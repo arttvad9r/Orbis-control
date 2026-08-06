@@ -1,0 +1,276 @@
+{
+  "files": {
+    "/sys/class/dmi/id/sys_vendor": {
+      "value": "ASUSTeK COMPUTER INC.",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/dmi/id/product_name": {
+      "value": "ASUS TUF Gaming A17 FA707NV_FA707NV",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/dmi/id/board_name": {
+      "value": "FA707NV",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/dmi/id/bios_version": {
+      "value": "FA707NV.316",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/dmi/id/bios_date": {
+      "value": "11/04/2024",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/firmware/acpi/platform_profile": {
+      "value": "balanced",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/firmware/acpi/platform_profile_choices": {
+      "value": "quiet balanced performance",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/power_supply/BAT1/charge_control_end_threshold": {
+      "value": "80",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/power_supply/BAT1/uevent": {
+      "value": "DEVTYPE=power_supply\nPOWER_SUPPLY_NAME=BAT1\nPOWER_SUPPLY_TYPE=Battery\nPOWER_SUPPLY_STATUS=Not charging\nPOWER_SUPPLY_PRESENT=1\nPOWER_SUPPLY_TECHNOLOGY=Li-ion\nPOWER_SUPPLY_CYCLE_COUNT=0\nPOWER_SUPPLY_VOLTAGE_MIN_DESIGN=15860000\nPOWER_SUPPLY_VOLTAGE_NOW=16704000\nPOWER_SUPPLY_CURRENT_NOW=0\nPOWER_SUPPLY_CHARGE_FULL_DESIGN=5675000\nPOWER_SUPPLY_CHARGE_FULL=5053000\nPOWER_SUPPLY_CHARGE_NOW=4814000\nPOWER_SUPPLY_CAPACITY=95\nPOWER_SUPPLY_CAPACITY_LEVEL=Normal\nPOWER_SUPPLY_TYPE=Battery\nPOWER_SUPPLY_MODEL_NAME=A32-K55\nPOWER_SUPPLY_MANUFACTURER=ASUS ",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/power_supply/BAT1/energy_full": {
+      "value": null,
+      "stat": null
+    },
+    "/sys/class/power_supply/BAT1/energy_full_design": {
+      "value": null,
+      "stat": null
+    },
+    "/sys/class/power_supply/BAT1/capacity": {
+      "value": "95",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/power_supply/BAT1/status": {
+      "value": "Not charging",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/power_supply/BAT1/manufacturer": {
+      "value": "ASUS",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/power_supply/BAT1/model_name": {
+      "value": "A32-K55",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/backlight/nvidia_0/brightness": {
+      "value": "100",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/backlight/nvidia_0/max_brightness": {
+      "value": "100",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/backlight/nvidia_0/type": {
+      "value": "raw",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/leds/asus::kbd_backlight/brightness": {
+      "value": "3",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "/sys/class/leds/asus::kbd_backlight/max_brightness": {
+      "value": "3",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    }
+  },
+  "platform": {
+    "charge_mode": {
+      "value": "1",
+      "stat": {
+        "mode": "0o444",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "dgpu_disable": {
+      "value": "0",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "gpu_mux_mode": {
+      "value": "0",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "nv_dynamic_boost": {
+      "value": "5",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "nv_temp_target": {
+      "value": "75",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "panel_od": {
+      "value": "1",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "ppt_fppt": {
+      "value": "5",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "ppt_pl1_spl": {
+      "value": "5",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "ppt_pl2_sppt": {
+      "value": "5",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "throttle_thermal_policy": {
+      "value": "0",
+      "stat": {
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    },
+    "cpufv": {
+      "value": null,
+      "stat": {
+        "mode": "0o200",
+        "uid": 0,
+        "gid": 0,
+        "size": 4096
+      }
+    }
+  },
+  "kernel": "7.1.6"
+}
