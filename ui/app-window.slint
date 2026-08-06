@@ -300,7 +300,7 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // Нижний служебный блок
+            // Нижний служебный блок: версия • mock-профиль (без повтора названия)
             Rectangle {
                 height: 26px;
                 border-radius: 4px;
@@ -310,15 +310,20 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     padding-left: 8px;
                     padding-right: 8px;
+                    spacing: 8px;
                     alignment: center;
                     Text {
-                        text: "Orbis Control " + root.ui-state.version;
+                        text: "v" + root.ui-state.version;
                         font-size: 11px;
-                        color: Palette.text-secondary;
+                        color: Palette.text-disabled;
                     }
-                    Rectangle { }
                     Text {
-                        text: "mock: " + root.ui-state.mock-profile;
+                        text: "•";
+                        font-size: 11px;
+                        color: Palette.text-disabled;
+                    }
+                    Text {
+                        text: "Mock: " + root.ui-state.mock-profile;
                         font-size: 11px;
                         color: Palette.text-disabled;
                     }
