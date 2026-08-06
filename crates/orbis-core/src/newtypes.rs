@@ -26,7 +26,7 @@ macro_rules! range_newtype {
             /// Конструктор с валидацией диапазона.
             #[allow(unused_comparisons)] // для типов, покрывающих весь диапазон (FanPwm/u8)
             pub fn new(value: $inner) -> std::result::Result<Self, CoreError> {
-                if value < $min || value > $max {
+                if !($min..=$max).contains(&value) {
                     return Err(CoreError::out_of_range(stringify!($name), value, $min, $max));
                 }
                 Ok(Self(value))

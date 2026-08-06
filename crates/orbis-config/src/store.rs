@@ -62,7 +62,7 @@ impl Default for UiConfig {
 }
 
 /// Правило автоматизации для источника питания.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PowerAutomationConfig {
     /// Профиль производительности.
@@ -71,12 +71,6 @@ pub struct PowerAutomationConfig {
     pub gpu_policy: Option<GpuMode>,
     /// Политика частоты экрана.
     pub refresh_policy: Option<String>,
-}
-
-impl Default for PowerAutomationConfig {
-    fn default() -> Self {
-        Self { profile: None, gpu_policy: None, refresh_policy: None }
-    }
 }
 
 /// Секция автоматизации.
@@ -128,7 +122,7 @@ impl Default for BatteryConfig {
 }
 
 /// Экспериментальные возможности.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExperimentalConfig {
     /// Экспериментальные функции включены в целом.
@@ -137,12 +131,6 @@ pub struct ExperimentalConfig {
     pub undervolting: bool,
     /// Прямой raw WMI (запрещено в стабильной сборке).
     pub raw_wmi: bool,
-}
-
-impl Default for ExperimentalConfig {
-    fn default() -> Self {
-        Self { enabled: false, undervolting: false, raw_wmi: false }
-    }
 }
 
 /// Пользовательская конфигурация приложения.
@@ -295,25 +283,25 @@ mod tests {
 
     #[test]
     fn bad_theme_rejected() {
-        let mut cfg = AppConfig::default();
-        cfg.ui.theme = "neon".into();
+        let cfg = AppConfig {
+            ui: UiConfig { theme: "neon".into(), ..UiConfig::default() },
+            ..AppConfig::default()
+        };
         assert!(matches!(cfg.validate(), Err(ConfigError::Schema(_))));
     }
 
     #[test]
     fn wrong_version_rejected() {
-        let mut cfg = AppConfig::default();
-        cfg.config_version = 99;
+        let cfg = AppConfig { config_version: 99, ..AppConfig::default() };
         assert!(matches!(cfg.validate(), Err(ConfigError::UnsupportedVersion(99))));
     }
 
     #[test]
     fn charge_limit_range() {
-        let mut cfg = AppConfig::default();
-        cfg.battery.charge_limit = Some(150);
-        assert!(cfg.validate().is_err());
-        cfg.battery.charge_limit = Some(0);
-        assert!(cfg.validate().is_ok());
+        let bad = AppConfig { battery: BatteryConfig { charge_limit: Some(150) }, ..AppConfig::default() };
+        assert!(bad.validate().is_err());
+        let good = AppConfig { battery: BatteryConfig { charge_limit: Some(0) }, ..AppConfig::default() };
+        assert!(good.validate().is_ok());
     }
 
     #[test]

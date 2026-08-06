@@ -7,7 +7,7 @@ use crate::newtypes::{Percent, TemperatureC};
 use crate::profile::PerformanceProfile;
 
 /// Идентификатор вентилятора.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FanId {
     /// CPU-вентилятор.

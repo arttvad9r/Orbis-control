@@ -8,7 +8,7 @@ use crate::error::CoreError;
 ///
 /// Внутренние имена: Silent, Balanced, Turbo. Отображение на platform-профили
 /// системы выполняется через [`PlatformProfile`] и зависит от backend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PerformanceProfile {
     /// Silent — тихий режим (quiet/low-power).
