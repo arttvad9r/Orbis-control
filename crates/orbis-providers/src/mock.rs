@@ -77,7 +77,10 @@ impl MockStateError {
 }
 
 /// Общее состояние mock-устройства.
-#[derive(Debug, Clone)]
+///
+/// `PartialEq, Eq` нужны для проверки детерминированности mock-профилей
+/// (см. `orbis-test-support::devices::all_profiles_are_deterministic`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MockState {
     /// Текущий профиль.
     pub profile: PerformanceProfile,

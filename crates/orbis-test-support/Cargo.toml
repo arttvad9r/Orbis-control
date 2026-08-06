@@ -12,6 +12,7 @@ description = "Orbis Control: mock-профили устройств и тест
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 orbis-core = { workspace = true }
 orbis-capabilities = { workspace = true }
 orbis-providers = { workspace = true }
