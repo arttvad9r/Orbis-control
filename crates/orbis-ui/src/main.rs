@@ -9,8 +9,9 @@
 //! детерминированно через `slint::platform` + SoftwareRenderer (масштаб 100%,
 //! без окна, без новых зависимостей).
 
-// UiAction::Perf больше не конструируется в production: Performance Mode идёт
-// через worker. Контроллер пока используется для GPU/Battery (синхронно).
+// UiAction::Perf и UiAction::Gpu больше не конструируются в production:
+// Performance и GPU Mode идут через worker. Контроллер пока используется для
+// Battery Charge Limit (синхронно).
 #[allow(dead_code)]
 mod controller;
 
@@ -18,8 +19,11 @@ use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use orbis_application::{AppService, CommandError, PerformanceCommandOutcome};
-use orbis_core::action::ApplyResult;
+use orbis_application::{
+    AppService, CommandError, GpuCommandOutcome, PerformanceCommandOutcome, SetGpuModeError,
+};
+use orbis_core::action::{ActionRequirement, ApplyResult};
+use orbis_core::gpu::GpuMode;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::mock::MockProvider;
 use orbis_test_support::devices::build_state_arc;
@@ -143,11 +147,11 @@ fn from_slint(state: &UiState) -> controller::UiState {
 /// Создать окно, установить состояние и подключить обработчики.
 fn build_app(
     state: &controller::UiState,
-    perf_tx: Option<UnboundedSender<WorkerCommand>>,
+    worker_tx: Option<UnboundedSender<WorkerCommand>>,
 ) -> Result<AppWindow, slint::PlatformError> {
     let app = AppWindow::new()?;
     app.set_ui_state(to_slint(state));
-    wire_callbacks(&app, perf_tx);
+    wire_callbacks(&app, worker_tx);
     Ok(app)
 }
 
@@ -182,6 +186,31 @@ fn performance_available_mask(available: &[PerformanceProfile]) -> i32 {
     mask
 }
 
+/// UI-boundary: преобразование UI-индекса карточки GPU в доменный режим.
+///
+/// 0 -> Eco, 1 -> Standard, 2 -> Ultimate, 3 -> Optimized; любое другое
+/// значение -> None.
+fn gpu_mode_from_index(index: i32) -> Option<GpuMode> {
+    match index {
+        0 => Some(GpuMode::Eco),
+        1 => Some(GpuMode::Standard),
+        2 => Some(GpuMode::Ultimate),
+        3 => Some(GpuMode::Optimized),
+        _ => None,
+    }
+}
+
+/// UI-boundary: индекс выбранной карточки GPU из доменного режима
+/// (обратный `gpu_mode_from_index`).
+fn gpu_selected_index(mode: GpuMode) -> i32 {
+    match mode {
+        GpuMode::Eco => 0,
+        GpuMode::Standard => 1,
+        GpuMode::Ultimate => 2,
+        GpuMode::Optimized => 3,
+    }
+}
+
 /// Применить authoritative Performance-результат к UI-состоянию.
 ///
 /// Обновляются только Performance-поля (selected и маска доступности);
@@ -191,11 +220,76 @@ fn apply_performance_outcome(state: &mut controller::UiState, outcome: &Performa
     state.available_perf_mask = performance_available_mask(&outcome.state.available);
 }
 
+/// Применить authoritative GPU-результат к UI-состоянию.
+///
+/// Обновляются только GPU-поля: selected (из outcome.state.requested),
+/// Ultimate-pending indicator (только активный Ultimate/Reboot pending) и
+/// error banner. Маска доступности и disabled-флаг сохраняются (GpuState не
+/// содержит available modes); Performance/Battery поля не изменяются.
+fn apply_gpu_outcome(state: &mut controller::UiState, outcome: &GpuCommandOutcome) {
+    state.gpu_selected = gpu_selected_index(outcome.state.requested);
+
+    state.gpu_ultimate_pending = match &outcome.result {
+        ApplyResult::Pending { requirement } => {
+            outcome.state.requested == GpuMode::Ultimate
+                && *requirement == ActionRequirement::Reboot
+        }
+        _ => false,
+    };
+
+    match &outcome.result {
+        ApplyResult::Applied => {
+            state.gpu_section_error = false;
+            tracing::debug!(
+                "gpu: режим применён: requested={:?}, mux={:?}, access={:?}, power={:?}",
+                outcome.state.requested,
+                outcome.state.mux,
+                outcome.state.access_policy,
+                outcome.state.power_state,
+            );
+        }
+        ApplyResult::Pending { requirement } => {
+            state.gpu_section_error = false;
+            tracing::debug!("gpu: результат Pending: requirement={requirement:?}");
+        }
+        ApplyResult::Failed { .. } | ApplyResult::RolledBack { .. } => {
+            state.gpu_section_error = true;
+            tracing::warn!("gpu: результат не применился: {:?}", outcome.result);
+        }
+    }
+}
+
+/// Применить полный GPU-результат worker-а к UI-состоянию.
+///
+/// Ok -> authoritative state; Command error -> selected/pending/mask/disabled
+/// сохраняются, выставляется существующий GPU error banner; ReadBack error ->
+/// mutation могла выполниться, но authoritative read-back не получен: selected
+/// не меняется, error banner выставляется.
+fn apply_gpu_result(
+    state: &mut controller::UiState,
+    result: Result<GpuCommandOutcome, SetGpuModeError>,
+) {
+    match result {
+        Ok(outcome) => apply_gpu_outcome(state, &outcome),
+        Err(CommandError::Command(e)) => {
+            state.gpu_section_error = true;
+            tracing::warn!("gpu: команда не выполнена: {e:?}");
+        }
+        Err(CommandError::ReadBack { result, source }) => {
+            state.gpu_section_error = true;
+            tracing::warn!(
+                "gpu: команда выполнена ({result:?}), но read-back не удался: {source:?}"
+            );
+        }
+    }
+}
+
 /// Применить событие worker-а к UI-состоянию.
 ///
-/// Ok -> authoritative state; Err (Command/ReadBack) -> UiState не изменяется,
-/// ошибка сохраняется в диагностическом журнале (UI-отображение ошибок — отдельный
-/// микрошаг).
+/// Performance: Ok -> authoritative state; Err (Command/ReadBack) -> UiState не
+/// изменяется, ошибка сохраняется в диагностическом журнале.
+/// GPU: Ok -> authoritative GPU state; Err -> error banner + tracing, selected
+/// не меняется (authoritative state отсутствует).
 fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) {
     match event {
         WorkerEvent::Performance(Ok(outcome)) => {
@@ -217,10 +311,8 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
                 "performance: команда выполнена ({result:?}), но read-back не удался: {source:?}"
             );
         }
-        // Временная совместимость: production UI пока отправляет только
-        // Performance-команды, а публичный WorkerEvent уже содержит GPU.
-        WorkerEvent::Gpu(_) => {
-            tracing::debug!("GPU worker event ignored until GPU UI wiring is added");
+        WorkerEvent::Gpu(result) => {
+            apply_gpu_result(state, result);
         }
     }
 }
@@ -234,19 +326,20 @@ fn handle_worker_event(app: &AppWindow, event: WorkerEvent) {
 
 /// Регистрация Slint callbacks.
 ///
-/// Performance: отправляет типизированную команду в worker (async результат
-/// вернётся через event sink); controller::apply(UiAction::Perf) НЕ вызывается.
-/// GPU/Battery: читают самый свежий ui-state из AppWindow и используют
-/// существующий controller::apply (синхронно).
-fn wire_callbacks(app: &AppWindow, perf_tx: Option<UnboundedSender<WorkerCommand>>) {
+/// Performance и GPU Mode: отправляют типизированные команды в общий worker
+/// (async результаты вернутся через event sink); controller::apply(UiAction::Perf)
+/// и UiAction::Gpu НЕ вызываются.
+/// Battery: читает самый свежий ui-state из AppWindow и использует
+/// существующий controller::apply(UiAction::Charge) (синхронно).
+fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerCommand>>) {
     {
-        let perf_tx = perf_tx;
+        let worker_tx = worker_tx.clone();
         app.on_perf_clicked(move |i| {
             let Some(profile) = performance_profile_from_index(i) else {
                 tracing::warn!("perf-clicked с неизвестным индексом: {i}");
                 return;
             };
-            match &perf_tx {
+            match &worker_tx {
                 Some(tx) => {
                     if let Err(e) = tx.send(WorkerCommand::SetPerformance(profile)) {
                         tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
@@ -259,12 +352,24 @@ fn wire_callbacks(app: &AppWindow, perf_tx: Option<UnboundedSender<WorkerCommand
         });
     }
     {
-        let weak = app.as_weak();
+        let worker_tx = worker_tx.clone();
         app.on_gpu_clicked(move |i| {
-            if let Some(app) = weak.upgrade() {
-                let mut s = from_slint(&app.get_ui_state());
-                controller::apply(&mut s, controller::UiAction::Gpu(i));
-                app.set_ui_state(to_slint(&s));
+            let Some(mode) = gpu_mode_from_index(i) else {
+                tracing::warn!("gpu-clicked с неизвестным индексом: {i}");
+                return;
+            };
+            // Безопасная политика для текущего UI: обычный клик не является
+            // подтверждением потенциально чувствительной операции.
+            let confirmed = false;
+            match &worker_tx {
+                Some(tx) => {
+                    if let Err(e) = tx.send(WorkerCommand::SetGpuMode { mode, confirmed }) {
+                        tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
+                    }
+                }
+                None => {
+                    tracing::warn!("gpu-clicked вне интерактивного режима (worker отсутствует)");
+                }
             }
         });
     }
@@ -384,9 +489,9 @@ fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("mock profile 'zephyrus-full' отсутствует"))?;
     let provider = Arc::new(MockProvider::new(mock_state));
     let service = AppService::new(provider);
-    let (perf_tx, perf_rx) = orbis_ui::worker::command_channel();
+    let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();
 
-    let app = build_app(&state, Some(perf_tx.clone()))?;
+    let app = build_app(&state, Some(worker_tx.clone()))?;
     app.window()
         .set_size(LogicalSize::new(425.0, window_height(&state)));
 
@@ -401,7 +506,7 @@ fn main() -> anyhow::Result<()> {
             tracing::warn!("не удалось вернуть событие worker-а в event loop: {e:?}");
         }
     };
-    runtime.spawn(run_worker(service, perf_rx, event_sink));
+    runtime.spawn(run_worker(service, worker_rx, event_sink));
 
     app.show()?;
     slint::run_event_loop()?;
@@ -410,7 +515,7 @@ fn main() -> anyhow::Result<()> {
     // runtime. Weak в worker-е не удерживает окно живым; после drop(app) sender
     // закрыт -> worker завершается.
     drop(app);
-    drop(perf_tx);
+    drop(worker_tx);
     drop(runtime);
     Ok(())
 }
@@ -418,6 +523,7 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 
     fn base_state() -> controller::UiState {
         controller::UiState::from_mock_profile("zephyrus-full")
@@ -536,5 +642,154 @@ mod tests {
             })),
         );
         assert_eq!(s, before);
+    }
+
+    #[test]
+    fn gpu_index_mapping() {
+        assert_eq!(gpu_mode_from_index(0), Some(GpuMode::Eco));
+        assert_eq!(gpu_mode_from_index(1), Some(GpuMode::Standard));
+        assert_eq!(gpu_mode_from_index(2), Some(GpuMode::Ultimate));
+        assert_eq!(gpu_mode_from_index(3), Some(GpuMode::Optimized));
+        assert_eq!(gpu_mode_from_index(-1), None);
+        assert_eq!(gpu_mode_from_index(9), None);
+    }
+
+    fn applied_outcome(requested: GpuMode) -> GpuCommandOutcome {
+        GpuCommandOutcome {
+            result: ApplyResult::Applied,
+            state: orbis_application::GpuState {
+                requested,
+                mux: GpuMuxState::Integrated,
+                access_policy: GpuAccessPolicy::Blocked,
+                power_state: GpuPowerState::Active,
+                requirement: ActionRequirement::None,
+            },
+        }
+    }
+
+    #[test]
+    fn authoritative_gpu_applied_updates_ui() {
+        let mut s = base_state();
+        // отличимые Performance/Battery/GPU-поля
+        s.perf_selected = 0;
+        s.charge_limit = 65;
+        s.available_gpu_mask = 0b1111;
+        s.gpu_ultimate_disabled = false;
+        s.gpu_section_error = true; // стартовая ошибка
+
+        apply_gpu_result(&mut s, Ok(applied_outcome(GpuMode::Optimized)));
+
+        assert_eq!(s.gpu_selected, 3); // Optimized
+        assert!(!s.gpu_ultimate_pending);
+        assert!(!s.gpu_section_error);
+        // mask/disabled сохранены
+        assert_eq!(s.available_gpu_mask, 0b1111);
+        assert!(!s.gpu_ultimate_disabled);
+        // Performance/Battery сохранены
+        assert_eq!(s.perf_selected, 0);
+        assert_eq!(s.charge_limit, 65);
+    }
+
+    #[test]
+    fn ultimate_pending_updates_existing_ui() {
+        let mut s = base_state();
+        let outcome = GpuCommandOutcome {
+            result: ApplyResult::Pending {
+                requirement: ActionRequirement::Reboot,
+            },
+            state: orbis_application::GpuState {
+                requested: GpuMode::Ultimate,
+                mux: GpuMuxState::Integrated,
+                access_policy: GpuAccessPolicy::Unblocked,
+                power_state: GpuPowerState::Active,
+                requirement: ActionRequirement::Reboot,
+            },
+        };
+        apply_gpu_result(&mut s, Ok(outcome));
+
+        assert_eq!(s.gpu_selected, 2); // Ultimate
+        assert!(s.gpu_ultimate_pending);
+        assert!(!s.gpu_section_error);
+    }
+
+    #[test]
+    fn eco_logout_pending_does_not_set_ultimate_flag() {
+        let mut s = base_state();
+        let outcome = GpuCommandOutcome {
+            result: ApplyResult::Pending {
+                requirement: ActionRequirement::Logout,
+            },
+            state: orbis_application::GpuState {
+                requested: GpuMode::Eco,
+                mux: GpuMuxState::Integrated,
+                access_policy: GpuAccessPolicy::Blocked,
+                power_state: GpuPowerState::Suspended,
+                requirement: ActionRequirement::Logout,
+            },
+        };
+        apply_gpu_result(&mut s, Ok(outcome));
+
+        assert_eq!(s.gpu_selected, 0); // Eco
+        assert!(!s.gpu_ultimate_pending);
+        assert!(!s.gpu_section_error);
+    }
+
+    #[test]
+    fn gpu_command_error_preserves_state_and_sets_error() {
+        let mut s = base_state();
+        s.perf_selected = 0;
+        s.charge_limit = 65;
+        let selected_before = s.gpu_selected;
+        let pending_before = s.gpu_ultimate_pending;
+        let mask_before = s.available_gpu_mask;
+        let disabled_before = s.gpu_ultimate_disabled;
+
+        apply_gpu_result(
+            &mut s,
+            Err(CommandError::Command(
+                orbis_providers::error::ProviderError::Unsupported("x".into()),
+            )),
+        );
+
+        assert_eq!(s.gpu_selected, selected_before);
+        assert_eq!(s.gpu_ultimate_pending, pending_before);
+        assert_eq!(s.available_gpu_mask, mask_before);
+        assert_eq!(s.gpu_ultimate_disabled, disabled_before);
+        assert!(s.gpu_section_error);
+        assert_eq!(s.perf_selected, 0);
+        assert_eq!(s.charge_limit, 65);
+    }
+
+    #[test]
+    fn gpu_readback_error_preserves_state_and_sets_error() {
+        let mut s = base_state();
+        let before = s.clone();
+
+        apply_gpu_result(
+            &mut s,
+            Err(CommandError::ReadBack {
+                result: ApplyResult::Applied,
+                source: orbis_providers::error::ProviderError::Timeout("t".into()),
+            }),
+        );
+
+        assert_eq!(s.gpu_selected, before.gpu_selected);
+        assert_eq!(s.gpu_ultimate_pending, before.gpu_ultimate_pending);
+        assert_eq!(s.available_gpu_mask, before.available_gpu_mask);
+        assert_eq!(s.gpu_ultimate_disabled, before.gpu_ultimate_disabled);
+        assert!(s.gpu_section_error);
+        assert_eq!(s.perf_selected, before.perf_selected);
+        assert_eq!(s.charge_limit, before.charge_limit);
+    }
+
+    #[test]
+    fn successful_gpu_result_clears_previous_error() {
+        let mut s = base_state();
+        s.gpu_section_error = true;
+
+        apply_gpu_result(&mut s, Ok(applied_outcome(GpuMode::Standard)));
+
+        assert!(!s.gpu_section_error);
+        assert_eq!(s.gpu_selected, 1); // Standard из authoritative state
     }
 }
