@@ -29,6 +29,8 @@ pub struct UiState {
     pub gpu_section_error: bool,
     /// Лимит зарядки, %.
     pub charge_limit: i32,
+    /// Функция Battery Charge Limit доступна (из mock-состояния).
+    pub charge_limit_enabled: bool,
     /// Телеметрия.
     pub cpu_temp: i32,
     pub gpu_temp: i32,
@@ -91,6 +93,7 @@ impl UiState {
             .percent
             .map(|p| i32::from(p.get()))
             .unwrap_or(80);
+        let charge_limit_enabled = state.charge_limit.enabled;
 
         let cpu_temp = state
             .telemetry
@@ -135,6 +138,7 @@ impl UiState {
             gpu_ultimate_disabled: false,
             gpu_section_error: false,
             charge_limit,
+            charge_limit_enabled,
             cpu_temp,
             gpu_temp,
             cpu_fan_rpm,
@@ -181,11 +185,17 @@ pub fn apply(state: &mut UiState, action: UiAction) {
             }
         }
         UiAction::Charge(v) => {
-            let raw = v.round() as i32;
-            let clamped = raw.clamp(40, 100);
-            // шаг 5 от 40: 40, 45, ..., 100
-            let snapped = 40 + ((clamped - 40 + 2) / 5) * 5;
-            state.charge_limit = snapped.clamp(40, 100);
+            // Только симуляция: обновляем локальное UI-состояние; аппаратный
+            // лимит заряда не применяется (временный in-process срез).
+            let iv = v.round() as i32;
+            let integral = (v - iv as f32).abs() < 1e-3;
+            if integral
+                && state.charge_limit_enabled
+                && (40..=100).contains(&iv)
+                && (iv - 40) % 5 == 0
+            {
+                state.charge_limit = iv;
+            }
         }
         _ => {}
     }
@@ -422,13 +432,103 @@ mod tests {
     }
 
     #[test]
-    fn charge_snap_to_step() {
+    fn initial_charge_is_80() {
+        let s = UiState::from_mock_profile("zephyrus-full");
+        assert_eq!(s.charge_limit, 80);
+        assert!(s.charge_limit_enabled);
+    }
+
+    #[test]
+    fn charge_80_to_40() {
         let mut s = UiState::from_mock_profile("zephyrus-full");
-        apply(&mut s, UiAction::Charge(43.0));
-        assert_eq!(s.charge_limit, 45);
-        apply(&mut s, UiAction::Charge(99.0));
-        assert_eq!(s.charge_limit, 100);
-        apply(&mut s, UiAction::Charge(10.0));
+        apply(&mut s, UiAction::Charge(40.0));
         assert_eq!(s.charge_limit, 40);
+    }
+
+    #[test]
+    fn charge_40_to_100() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Charge(40.0));
+        apply(&mut s, UiAction::Charge(100.0));
+        assert_eq!(s.charge_limit, 100);
+    }
+
+    #[test]
+    fn charge_100_to_75() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Charge(100.0));
+        apply(&mut s, UiAction::Charge(75.0));
+        assert_eq!(s.charge_limit, 75);
+    }
+
+    #[test]
+    fn repeated_charge_is_idempotent() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Charge(75.0));
+        let before = s.clone();
+        apply(&mut s, UiAction::Charge(75.0));
+        assert_eq!(s, before);
+        assert_eq!(s.charge_limit, 75);
+    }
+
+    #[test]
+    fn charge_below_minimum_rejected() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let before = s.clone();
+        apply(&mut s, UiAction::Charge(35.0));
+        apply(&mut s, UiAction::Charge(39.0));
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn charge_above_maximum_rejected() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let before = s.clone();
+        apply(&mut s, UiAction::Charge(101.0));
+        apply(&mut s, UiAction::Charge(105.0));
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn charge_off_step_rejected() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let before = s.clone();
+        apply(&mut s, UiAction::Charge(41.0));
+        apply(&mut s, UiAction::Charge(83.0));
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn charge_disabled_rejected() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.charge_limit_enabled = false;
+        let before = s.clone();
+        apply(&mut s, UiAction::Charge(60.0));
+        assert_eq!(s, before);
+        assert_eq!(s.charge_limit, 80);
+    }
+
+    #[test]
+    fn charge_does_not_affect_other_sections() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Gpu(2)); // Ultimate pending
+        let before = s.clone();
+        apply(&mut s, UiAction::Charge(60.0));
+        // Меняется только charge_limit.
+        assert_eq!(s.charge_limit, 60);
+        assert_eq!(s.perf_selected, before.perf_selected);
+        assert_eq!(s.gpu_selected, before.gpu_selected);
+        assert_eq!(s.gpu_ultimate_pending, before.gpu_ultimate_pending);
+        assert_eq!(s.gpu_section_error, before.gpu_section_error);
+        assert_eq!(s.cpu_temp, before.cpu_temp);
+        assert_eq!(s.battery_percent, before.battery_percent);
+    }
+
+    #[test]
+    fn rust_to_slint_preserves_charge() {
+        let s = UiState::from_mock_profile("zephyrus-full");
+        let slint_state = crate::to_slint(&s);
+        assert_eq!(slint_state.charge_limit, 80);
+        assert!(slint_state.charge_limit_enabled);
     }
 }

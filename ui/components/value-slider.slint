@@ -67,9 +67,10 @@ export component ValueSlider inherits Rectangle {
                     : Palette.text-primary;
                 border-width: touch.has-hover ? 1.5px : 1px;
                 border-color: root.disabled ? Palette.text-disabled : Palette.accent-default;
-                // бегунок с рамкой целиком остаётся внутри трека:
-                // ход ограничен так, чтобы на 100% правый край рамки не выходил за трек
-                x: root.frac * (parent.width - 17px);
+                // travel = ширина трека - ширина бегунка: на 100% правый внешний
+                // край бегунка совпадает с правой границей трека (рамка рисуется
+                // внутри границ элемента и не выходит за контейнер)
+                x: root.frac * (parent.width - 15px);
                 y: (parent.height - 15px) / 2;
             }
 
@@ -79,10 +80,13 @@ export component ValueSlider inherits Rectangle {
                 y: (parent.height - 22px) / 2;
                 enabled: !root.disabled;
                 pointer-event(ev) => {
-                    if (ev.kind == PointerEventKind.down || ev.kind == PointerEventKind.move) {
+                    // Только при нажатии или перетаскивании (не при hover-движении).
+                    if (ev.kind == PointerEventKind.down
+                        || (ev.kind == PointerEventKind.move && self.pressed)) {
                         let raw = root.min + (self.mouse-x / parent.width) * (root.max - root.min);
-                        root.internal-value = root.snap(raw);
-                        root.changed(root.internal-value);
+                        // Значение отправляется в controller; отображаемое значение
+                        // возвращается из ui-state через root.value (единый источник).
+                        root.changed(root.snap(raw));
                     }
                 }
             }

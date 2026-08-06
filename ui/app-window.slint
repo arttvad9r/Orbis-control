@@ -11,11 +11,12 @@ export struct UiState {
     perf-selected: int,             // 0=Silent, 1=Balanced, 2=Turbo
     available-perf-mask: int,       // bit0=Silent, bit1=Balanced, bit2=Turbo
     gpu-selected: int,              // 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized
-    available-gpu-mask: int,        // bit0=Eco, bit1=Standard, bit2=Ultimate, bit3=Optimized              // 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized
+    available-gpu-mask: int,        // bit0=Eco, bit1=Standard, bit2=Ultimate, bit3=Optimized
     gpu-ultimate-pending: bool,
     gpu-ultimate-disabled: bool,
     gpu-section-error: bool,
     charge-limit: int,
+    charge-limit-enabled: bool,
     cpu-temp: int,
     gpu-temp: int,
     cpu-fan-rpm: int,
@@ -62,6 +63,7 @@ export component AppWindow inherits Window {
         gpu-ultimate-disabled: false,
         gpu-section-error: false,
         charge-limit: 80,
+        charge-limit-enabled: false,
         cpu-temp: 0,
         gpu-temp: 0,
         cpu-fan-rpm: 0,
@@ -212,6 +214,7 @@ export component AppWindow inherits Window {
                     max: 100;
                     step: 5;
                     value: root.ui-state.charge-limit;
+                    disabled: !root.ui-state.charge-limit-enabled;
                     changed(v) => {
                         root.charge-changed(v);
                     }
