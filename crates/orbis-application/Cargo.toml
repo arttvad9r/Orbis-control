@@ -1,0 +1,24 @@
+[package]
+name = "orbis-application"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Orbis Control: application boundary между UI и provider traits (Performance Mode)"
+
+# Production-зависимости: без mock-only feature. Используется прямая path-зависимость,
+# потому что workspace-декларация orbis-providers не позволяет member-у переопределить
+# default-features (ограничение Cargo). Обычная сборка не обязана компилировать
+# MockProvider/orbis-test-support.
+[dependencies]
+orbis-core = { workspace = true }
+orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false }
+
+[dev-dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+orbis-test-support = { workspace = true }
+# Тестовая сборка включает feature `mock` для доступа к MockProvider.
+orbis-providers = { path = "../orbis-providers", version = "0.1.0", features = ["mock"] }

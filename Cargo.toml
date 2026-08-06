@@ -5,6 +5,7 @@ members = [
     "crates/orbis-config",
     "crates/orbis-capabilities",
     "crates/orbis-providers",
+    "crates/orbis-application",
     "crates/orbis-sessiond",
     "crates/orbis-ui",
     "crates/orbis-cli",
