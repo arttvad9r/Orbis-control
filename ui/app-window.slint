@@ -1,0 +1,329 @@
+// Orbis Control — главное окно (минимальный визуальный прототип).
+// Ширина 425 logical px, без боковой панели. Секции: Performance, GPU,
+// Battery Charge Limit, Telemetry, нижний служебный блок.
+
+import { ModeCard } from "components/mode-card.slint";
+import { SectionHeader } from "components/section-header.slint";
+import { ValueSlider } from "components/value-slider.slint";
+import { Palette } from "themes/dark.slint";
+
+export struct UiState {
+    perf-selected: int,             // 0=Silent, 1=Balanced, 2=Turbo
+    gpu-selected: int,              // 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized
+    gpu-ultimate-pending: bool,
+    gpu-ultimate-disabled: bool,
+    gpu-section-error: bool,
+    charge-limit: int,
+    cpu-temp: int,
+    gpu-temp: int,
+    cpu-fan-rpm: int,
+    gpu-fan-rpm: int,
+    battery-percent: int,
+    power-ac-mw: int,
+    version: string,
+    mock-profile: string,
+}
+
+component TelemetryCell {
+    in property <string> value;
+    in property <string> label;
+
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: center;
+        Text {
+            text: root.value;
+            font-size: 13px;
+            font-weight: 600;
+            color: Palette.text-primary;
+        }
+        Text {
+            text: root.label;
+            font-size: 12px;
+            color: Palette.text-secondary;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    width: 425px;
+    height: 415px;
+    title: "Orbis Control";
+    background: Palette.window-background;
+
+    in-out property <UiState> ui-state: {
+        perf-selected: 1,
+        gpu-selected: 1,
+        gpu-ultimate-pending: false,
+        gpu-ultimate-disabled: false,
+        gpu-section-error: false,
+        charge-limit: 80,
+        cpu-temp: 0,
+        gpu-temp: 0,
+        cpu-fan-rpm: 0,
+        gpu-fan-rpm: 0,
+        battery-percent: 0,
+        power-ac-mw: 0,
+        version: "0.1.0",
+        mock-profile: "zephyrus-full",
+    };
+
+    callback perf-clicked(int);
+    callback gpu-clicked(int);
+    callback charge-changed(float);
+    callback close-clicked();
+    callback minimize-clicked();
+
+    VerticalLayout {
+        // ---- Верхняя панель ----
+        Rectangle {
+            height: 34px;
+            background: Palette.titlebar-background;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 6px;
+                alignment: center;
+
+                Text {
+                    text: "Orbis Control";
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: Palette.text-primary;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { }
+
+                // свернуть
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 4px;
+                    background: min-touch.has-hover ? Palette.surface-hover : transparent;
+                    min-touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => { root.minimize-clicked(); }
+                    }
+                    Path {
+                        width: 12px;
+                        height: 12px;
+                        x: (parent.width - 12px) / 2;
+                        y: (parent.height - 12px) / 2;
+                        commands: "M 1 6 L 11 6";
+                        stroke: Palette.text-secondary;
+                        stroke-width: 2px;
+                        stroke-line-cap: round;
+                        viewbox-width: 12;
+                        viewbox-height: 12;
+                    }
+                }
+
+                // закрыть
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 4px;
+                    background: close-touch.has-hover ? Palette.error : transparent;
+                    close-touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => { root.close-clicked(); }
+                    }
+                    Path {
+                        width: 12px;
+                        height: 12px;
+                        x: (parent.width - 12px) / 2;
+                        y: (parent.height - 12px) / 2;
+                        commands: "M 1 1 L 11 11 M 11 1 L 1 11";
+                        stroke: close-touch.has-hover ? #FFFFFF : Palette.text-secondary;
+                        stroke-width: 2px;
+                        stroke-line-cap: round;
+                        viewbox-width: 12;
+                        viewbox-height: 12;
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Palette.border-default;
+        }
+
+        // ---- Контент ----
+        VerticalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            spacing: 8px;
+
+            // Performance Mode
+            VerticalLayout {
+                spacing: 4px;
+                SectionHeader { title: "Performance Mode"; }
+                HorizontalLayout {
+                    spacing: 4px;
+                    ModeCard {
+                        title: "Silent";
+                        compact: false;
+                        accent: Palette.silent;
+                        icon-kind: 0;
+                        selected: root.ui-state.perf-selected == 0;
+                        clicked => { root.perf-clicked(0); }
+                    }
+                    ModeCard {
+                        title: "Balanced";
+                        compact: false;
+                        accent: Palette.balanced;
+                        icon-kind: 1;
+                        selected: root.ui-state.perf-selected == 1;
+                        clicked => { root.perf-clicked(1); }
+                    }
+                    ModeCard {
+                        title: "Turbo";
+                        compact: false;
+                        accent: Palette.turbo;
+                        icon-kind: 2;
+                        selected: root.ui-state.perf-selected == 2;
+                        clicked => { root.perf-clicked(2); }
+                    }
+                }
+            }
+
+            // GPU Mode
+            VerticalLayout {
+                spacing: 4px;
+                SectionHeader { title: "GPU Mode"; }
+                if (root.ui-state.gpu-section-error) : Rectangle {
+                    height: 22px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.error;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        spacing: 5px;
+                        alignment: center;
+                        Rectangle {
+                            width: 6px;
+                            height: 6px;
+                            border-radius: 3px;
+                            background: Palette.error;
+                        }
+                        Text {
+                            text: "GPU backend error";
+                            font-size: 12px;
+                            color: Palette.error;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 4px;
+                    ModeCard {
+                        title: "Eco";
+                        compact: true;
+                        accent: Palette.eco;
+                        icon-kind: 0;
+                        selected: root.ui-state.gpu-selected == 0;
+                        clicked => { root.gpu-clicked(0); }
+                    }
+                    ModeCard {
+                        title: "Standard";
+                        compact: true;
+                        accent: Palette.standard;
+                        icon-kind: 1;
+                        selected: root.ui-state.gpu-selected == 1;
+                        clicked => { root.gpu-clicked(1); }
+                    }
+                    ModeCard {
+                        title: "Ultimate";
+                        compact: true;
+                        accent: Palette.ultimate;
+                        icon-kind: 2;
+                        selected: root.ui-state.gpu-selected == 2;
+                        pending: root.ui-state.gpu-ultimate-pending;
+                        disabled: root.ui-state.gpu-ultimate-disabled;
+                        subtitle: root.ui-state.gpu-ultimate-disabled ? "MUX unavailable" : "";
+                        clicked => { root.gpu-clicked(2); }
+                    }
+                    ModeCard {
+                        title: "Optimized";
+                        compact: true;
+                        accent: Palette.optimized;
+                        icon-kind: 1;
+                        selected: root.ui-state.gpu-selected == 3;
+                        clicked => { root.gpu-clicked(3); }
+                    }
+                }
+            }
+
+            // Battery Charge Limit
+            VerticalLayout {
+                spacing: 4px;
+                SectionHeader { title: "Battery Charge Limit"; }
+                ValueSlider {
+                    min: 40;
+                    max: 100;
+                    step: 5;
+                    value: root.ui-state.charge-limit;
+                    changed(v) => {
+                        root.charge-changed(v);
+                    }
+                }
+            }
+
+            // Telemetry
+            VerticalLayout {
+                spacing: 4px;
+                SectionHeader { title: "Telemetry"; }
+                VerticalLayout {
+                    spacing: 4px;
+                    HorizontalLayout {
+                        spacing: 14px;
+                        TelemetryCell { value: root.ui-state.cpu-temp + "°C"; label: "CPU"; }
+                        TelemetryCell { value: root.ui-state.gpu-temp + "°C"; label: "GPU"; }
+                    }
+                    HorizontalLayout {
+                        spacing: 14px;
+                        TelemetryCell { value: root.ui-state.cpu-fan-rpm + " rpm"; label: "CPU fan"; }
+                        TelemetryCell { value: root.ui-state.gpu-fan-rpm + " rpm"; label: "GPU fan"; }
+                    }
+                    HorizontalLayout {
+                        spacing: 14px;
+                        TelemetryCell { value: root.ui-state.battery-percent + "%"; label: "Battery"; }
+                        TelemetryCell { value: root.ui-state.power-ac-mw / 1000 + " W"; label: "Power (AC)"; }
+                    }
+                }
+            }
+
+            // Нижний служебный блок
+            Rectangle {
+                height: 26px;
+                border-radius: 4px;
+                background: Palette.surface-pressed;
+                border-width: 1px;
+                border-color: Palette.border-default;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    alignment: center;
+                    Text {
+                        text: "Orbis Control " + root.ui-state.version;
+                        font-size: 11px;
+                        color: Palette.text-secondary;
+                    }
+                    Rectangle { }
+                    Text {
+                        text: "mock: " + root.ui-state.mock-profile;
+                        font-size: 11px;
+                        color: Palette.text-disabled;
+                    }
+                }
+            }
+        }
+    }
+}
