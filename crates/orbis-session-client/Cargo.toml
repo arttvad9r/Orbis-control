@@ -1,0 +1,19 @@
+[package]
+name = "orbis-session-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Orbis Control: client-side read-only provider поверх session D-Bus protocol"
+
+[dependencies]
+async-trait = { workspace = true }
+zbus = { workspace = true }
+orbis-core = { path = "../orbis-core", version = "0.1.0" }
+orbis-providers = { path = "../orbis-providers", version = "0.1.0" }
+orbis-session-protocol = { path = "../orbis-session-protocol", version = "0.1.0" }
+
+[dev-dependencies]
+tokio = { workspace = true }

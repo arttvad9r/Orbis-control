@@ -8,6 +8,7 @@ members = [
     "crates/orbis-application",
     "crates/orbis-sessiond",
     "crates/orbis-session-protocol",
+    "crates/orbis-session-client",
     "crates/orbis-ui",
     "crates/orbis-cli",
     "crates/orbis-test-support",
