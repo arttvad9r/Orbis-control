@@ -5,12 +5,16 @@
   "kernel": "7.1.6",
   "notes": "Ожидаемая capability-модель для фикстуры. Используется snapshot-тестами orbis-capabilities. ВСЕ значения — из read-only probe, никаких записей.",
   "features": {
-    "performance_profile": {
+    "performance": {
       "status": "Supported",
       "backend": "asusd/xyz.ljones.Platform + kernel platform_profile",
       "endpoint": "/sys/firmware/acpi/platform_profile",
       "current": "balanced",
-      "choices": ["quiet", "balanced", "performance"],
+      "choices": [
+        "quiet",
+        "balanced",
+        "performance"
+      ],
       "requirement": "None",
       "risk": "Safe"
     },
@@ -33,7 +37,10 @@
       "backend": "asusd/xyz.ljones.Platform + sysfs charge_control_end_threshold",
       "endpoint": "/sys/class/power_supply/BAT1/charge_control_end_threshold",
       "current": 80,
-      "range": [40, 100],
+      "range": [
+        40,
+        100
+      ],
       "requirement": "None",
       "risk": "Safe"
     },
@@ -50,7 +57,10 @@
       "backend": "asusd/xyz.ljones.AsusArmoury /gpu_mux_mode + kernel",
       "endpoint": "/sys/devices/platform/asus-nb-wmi/gpu_mux_mode",
       "current": 0,
-      "possible": [0, 1],
+      "possible": [
+        0,
+        1
+      ],
       "requirement": "Reboot",
       "reason": "Hardware MUX value is latched by firmware; observed: DRM eDP active on card2 (dGPU) while requested gpu_mux_mode=0",
       "risk": "Confirmation"
@@ -60,7 +70,10 @@
       "backend": "asusd/xyz.ljones.AsusArmoury /dgpu_disable + kernel",
       "endpoint": "/sys/devices/platform/asus-nb-wmi/dgpu_disable",
       "current": 0,
-      "possible": [0, 1],
+      "possible": [
+        0,
+        1
+      ],
       "requirement": "Logout",
       "risk": "Confirmation"
     },
@@ -69,7 +82,10 @@
       "backend": "asusd/xyz.ljones.AsusArmoury /panel_overdrive + kernel",
       "endpoint": "/sys/devices/platform/asus-nb-wmi/panel_od",
       "current": 1,
-      "possible": [0, 1],
+      "possible": [
+        0,
+        1
+      ],
       "requirement": "None",
       "risk": "Safe"
     },
@@ -123,7 +139,7 @@
       "requirement": "None",
       "risk": "Confirmation"
     },
-    "cpu_boost_cpufv": {
+    "cpu_boost": {
       "status": "PermissionDenied",
       "backend": "kernel asus-nb-wmi",
       "endpoint": "/sys/devices/platform/asus-nb-wmi/cpufv",
@@ -134,16 +150,28 @@
     "fans": {
       "status": "Supported",
       "backend": "hwmon asus (hwmon9) + asus_custom_fan_curve (hwmon10)",
-      "endpoints": ["/sys/class/hwmon/hwmon9", "/sys/class/hwmon/hwmon10"],
+      "endpoints": [
+        "/sys/class/hwmon/hwmon9",
+        "/sys/class/hwmon/hwmon10"
+      ],
       "fan_count": 2,
-      "fans": ["cpu_fan", "gpu_fan"],
+      "fans": [
+        "cpu_fan",
+        "gpu_fan"
+      ],
       "curve_points": 8,
-      "curve_temp_range": [45, 85],
-      "curve_pwm_range": [0, 102],
+      "curve_temp_range": [
+        45,
+        85
+      ],
+      "curve_pwm_range": [
+        0,
+        102
+      ],
       "requirement": "None",
       "risk": "Confirmation"
     },
-    "fan_curves_per_profile": {
+    "fan_curves": {
       "status": "Supported",
       "backend": "asusd/xyz.ljones.FanCurves",
       "requirement": "None",
@@ -165,21 +193,21 @@
       "requirement": "None",
       "risk": "Safe"
     },
-    "aura_rgb": {
+    "aura": {
       "status": "Supported",
       "backend": "asusd/xyz.ljones.Aura",
       "endpoint": "/xyz/ljones/aura/tuf",
       "requirement": "None",
       "risk": "Safe"
     },
-    "anime_matrix": {
+    "anime": {
       "status": "Unsupported",
       "backend": "asusd/xyz.ljones.Anime",
       "reason": "TUF FA707NV не имеет AniMe Matrix; объект Anime не экспонируется",
       "requirement": "None",
       "risk": "Safe"
     },
-    "slash_lighting": {
+    "slash": {
       "status": "Unsupported",
       "backend": "asusd/xyz.ljones.Slash",
       "reason": "модель без Slash-полосы",
@@ -202,10 +230,25 @@
     }
   },
   "backends": {
-    "asusd": { "present": true, "version": "6.3.8", "service": "xyz.ljones.Asusd" },
-    "supergfxd": { "present": true, "version": "supergfxctl-5.2.7", "service": "org.supergfxctl.Daemon" },
-    "cardwire": { "present": false },
-    "ppd": { "present": false },
-    "upower": { "present": true, "service": "org.freedesktop.UPower" }
+    "asusd": {
+      "present": true,
+      "version": "6.3.8",
+      "service": "xyz.ljones.Asusd"
+    },
+    "supergfxd": {
+      "present": true,
+      "version": "supergfxctl-5.2.7",
+      "service": "org.supergfxctl.Daemon"
+    },
+    "cardwire": {
+      "present": false
+    },
+    "ppd": {
+      "present": false
+    },
+    "upower": {
+      "present": true,
+      "service": "org.freedesktop.UPower"
+    }
   }
 }
