@@ -9,13 +9,16 @@
 //! - server bootstrap helper (`server`), принимающий transport-configured
 //!   `zbus::connection::Builder` и регистрирующий protocol name/path;
 //! - composition helper (`composition`) полного read-only пути: готовая UPower
-//!   Connection → source → provider → session server.
+//!   Connection → source → provider → session server;
+//! - real D-Bus bootstrap helper (`bootstrap`), открывающий system/session bus
+//!   и передающий connections в composition layer.
 //!
-//! Запуск демона и реальная session bus наполняются отдельными микрошагами.
+//! Запуск демона и lifecycle наполняются отдельными микрошагами.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod bootstrap;
 pub mod composition;
 pub mod server;
 pub mod service;
