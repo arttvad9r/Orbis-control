@@ -1,0 +1,23 @@
+# Build
+/target
+**/*.rs.bk
+Cargo.lock
+!packaging/appimage/**/Cargo.lock
+
+# Local config/state/cache (XDG)
+.config/orbis-control/
+.state/orbis-control/
+.cache/orbis-control/
+
+# Screenshots / artifacts
+tests/screenshots/artifacts/
+*.png.tmp
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store

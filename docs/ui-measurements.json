@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "generated": "2026-08-06",
+  "source": "G-Helper commit e439349fc6d99720861128b55421d05fc0f36ec7 (app/Settings.Designer.cs, app/Fans.Designer.cs, app/Extra.Designer.cs, app/UI/RForm.cs)",
+  "methodology": "WinForms AutoScaleDimensions=192x192 -> normalized 96-DPI logical pixels (divide by 2). Normalization is NOT final until visual check against reference screenshots.",
+  "dpi_scale_192": 2.0,
+
+  "windows": {
+    "main": {
+      "client_size_192": [849, 2075],
+      "client_size_logical": [424.5, 1037.5],
+      "height_dynamic": true,
+      "auto_scale_dimensions": [192, 192],
+      "notes": "Height varies: unsupported sections are hidden."
+    },
+    "fans": {
+      "client_size_192": [1350, 1100],
+      "client_size_logical": [675, 550]
+    },
+    "extra": {
+      "client_size_192": [1013, 1759],
+      "client_size_logical": [506.5, 879.5]
+    }
+  },
+
+  "panels_192": {
+    "performance": { "location": [11, 11], "size": [827, 208], "logical_size": [413.5, 104.0], "padding": [20, 20, 20, 11] },
+    "gpu":         { "location": [11, 219], "size": [827, 432], "logical_size": [413.5, 216.0] },
+    "screen":      { "location": [11, 651], "size": [827, 187], "logical_size": [413.5, 93.5] },
+    "battery":     { "location": [11, 1683], "size": [827, 104], "logical_size": [413.5, 52.0], "padding": [20, 15, 20, 0] },
+    "keyboard":    { "location": [11, 1394], "size": [827, 146], "logical_size": [413.5, 73.0] },
+    "matrix":      { "location": [11, 1071], "size": [827, 183], "logical_size": [413.5, 91.5], "padding": [20, 20, 20, 11] },
+    "footer":      { "location": [11, 1887], "size": [827, 88], "logical_size": [413.5, 44.0], "padding": [20, 10, 20, 20] },
+    "inner_width_192": 787,
+    "inner_width_logical": 393.5
+  },
+
+  "performance": {
+    "row_height_192": 128,
+    "row_height_logical": 64,
+    "buttons": [
+      { "name": "silent", "location_192": [4, 4], "size_192": [188, 120], "size_logical": [94, 60] },
+      { "name": "balanced", "location_192": [200, 4], "size_192": [188, 120], "size_logical": [94, 60] },
+      { "name": "turbo", "location_192": [396, 4], "size_192": [188, 120], "size_logical": [94, 60] },
+      { "name": "fans", "location_192": [592, 4], "size_192": [191, 120], "size_logical": [95.5, 60] }
+    ],
+    "gap_192": 8,
+    "gap_logical": 4,
+    "column_count": 4
+  },
+
+  "gpu": {
+    "table_size_192": [787, 256],
+    "table_size_logical": [393.5, 128],
+    "buttons": [
+      { "name": "eco", "location_192": [4, 4], "size_192": [188, 120], "size_logical": [94, 60] },
+      { "name": "standard", "location_192": [396, 4], "size_192": [188, 120], "size_logical": [94, 60] },
+      { "name": "ultimate", "location_192": [592, 4], "size_192": [191, 120], "size_logical": [95.5, 60] },
+      { "name": "optimized", "location_192": [4, 132], "size_192": [188, 120], "size_logical": [94, 60] }
+    ],
+    "layout": [
+      ["eco", null, "standard", "ultimate"],
+      ["optimized", null, null, null]
+    ]
+  },
+
+  "screen": {
+    "panel_size_192": [827, 187],
+    "buttons": [
+      { "name": "auto", "location_192": [4, 4], "size_192": [188, 72], "size_logical": [94, 36] },
+      { "name": "60hz", "location_192": [200, 4], "size_192": [188, 72], "size_logical": [94, 36] },
+      { "name": "120hz", "location_192": [396, 4], "size_192": [188, 72], "size_logical": [94, 36] },
+      { "name": "max", "location_192": [592, 4], "size_192": [191, 72], "size_logical": [95.5, 36] }
+    ]
+  },
+
+  "battery": {
+    "slider_192": { "location": [20, 60], "size": [707, 40], "logical_size": [353.5, 20] },
+    "button_full_192": { "location": [728, 62], "size": [73, 36], "logical_size": [36.5, 18] }
+  },
+
+  "footer": {
+    "buttons": [
+      { "name": "donate", "size_192": [254, 48], "size_logical": [127, 24] },
+      { "name": "updates", "size_192": [254, 48], "size_logical": [127, 24] },
+      { "name": "quit", "size_192": [255, 48], "size_logical": [127.5, 24] }
+    ],
+    "button_height_logical": 24
+  },
+
+  "fans_window": {
+    "panel_fans_192": { "location": [530, 0], "size": [820, 1100], "logical_size": [410, 550] },
+    "table_charts_192": { "size": [810, 918], "row_styles": ["25%", "25%", "25%", "25%"] },
+    "charts_192": {
+      "cpu": { "location": [12, 10], "size": [786, 208], "logical_size": [393, 104] },
+      "gpu": { "location": [12, 238], "size": [786, 208], "logical_size": [393, 104] },
+      "mid": { "location": [12, 466], "size": [786, 208], "logical_size": [393, 104] },
+      "xgm": { "location": [12, 694], "size": [786, 209], "logical_size": [393, 104.5] }
+    },
+    "title_192": { "size": [810, 66], "logical_size": [405, 33] },
+    "hysteresis_192": { "location": [0, 860], "size": [810, 130], "logical_size": [405, 65] },
+    "modes_table_192": { "location": [330, 0], "size": [480, 66], "columns": [60, 60, "100%", 60] }
+  },
+
+  "extra_window": {
+    "panel_width_192": 949,
+    "panel_width_logical": 474.5,
+    "padding_192": 15,
+    "padding_logical": 7.5,
+    "sections_192": [
+      { "name": "bindings_header", "size": [949, 51] },
+      { "name": "bindings", "size": [949, 395] },
+      { "name": "backlight_header", "size": [949, 51] },
+      { "name": "backlight", "size": [949, 444] },
+      { "name": "backlight_extra", "size": [949, 115] },
+      { "name": "acpi", "size": [949, 69] },
+      { "name": "cores", "size": [949, 59] },
+      { "name": "apu_mem", "size": [949, 57] },
+      { "name": "settings", "size": [949, 472] },
+      { "name": "power", "size": [949, 54] },
+      { "name": "services", "size": [949, 75] }
+    ]
+  },
+
+  "colors_gh_dark": {
+    "formBack": "#1C1C1C",
+    "buttonMain": "#2E2E2E",
+    "buttonSecond": "#242424",
+    "foreMain": "#F0F0F0",
+    "chartMain": "#232323",
+    "hover_shift": 0.04,
+    "pressed_shift": 0.08
+  },
+
+  "colors_orbis_dark_initial": {
+    "window.background": "#1F1F1F",
+    "titlebar.background": "#242529",
+    "surface.default": "#303030",
+    "surface.hover": "#383838",
+    "surface.pressed": "#292929",
+    "surface.disabled": "#292929",
+    "border.default": "#444444",
+    "text.primary": "#F2F2F2",
+    "text.secondary": "#B7B7B7",
+    "text.disabled": "#777777",
+    "accent.default": "#2DA8F2",
+    "warning": "#E5A94F",
+    "error": "#E35D6A",
+    "success": "#4BC39A"
+  },
+
+  "mode_accents_initial": {
+    "silent": "#49C6A5",
+    "balanced": "#2DA8F2",
+    "turbo": "#EF6376",
+    "eco": "#67C66A",
+    "standard": "#2DA8F2",
+    "ultimate": "#E6A04B",
+    "optimized": "#2DA8F2"
+  },
+
+  "typography": {
+    "font_stack": ["Segoe UI", "Inter", "Noto Sans", "system-ui"],
+    "body_px": [13, 14],
+    "title_px": [13, 14],
+    "title_weight": "semibold",
+    "telemetry_px": [12, 13]
+  },
+
+  "geometry_initial": {
+    "content_width_logical": 425,
+    "content_width_tolerance_logical": 8,
+    "title_bar_height_logical": 34,
+    "horizontal_padding_logical": 10,
+    "section_top_padding_logical": 10,
+    "section_title_height_logical": 20,
+    "section_gap_logical": [8, 12],
+    "button_row_height_logical": 64,
+    "mode_card_height_logical": 60,
+    "card_gap_logical": 4,
+    "card_corner_radius_logical": [5, 6],
+    "border_width_logical": [1, 2],
+    "icon_size_in_cards_logical": [20, 24],
+    "footer_button_height_logical": [27, 30]
+  },
+
+  "visual_regression": {
+    "baselines": [
+      "main-minimal",
+      "main-full",
+      "main-selected-silent",
+      "main-selected-turbo",
+      "main-gpu-pending",
+      "main-disabled-features",
+      "fans-default",
+      "fans-edited",
+      "extra",
+      "diagnostics",
+      "dialogs-reboot",
+      "dialogs-error"
+    ],
+    "max_diff_percent": 3.0,
+    "max_element_shift_logical_px": 2.0,
+    "scales": [1.0, 1.25, 1.5, 1.75, 2.0]
+  }
+}
