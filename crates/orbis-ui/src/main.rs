@@ -314,6 +314,11 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         WorkerEvent::Gpu(result) => {
             apply_gpu_result(state, result);
         }
+        // Временная совместимость: production UI пока отправляет только
+        // Performance/GPU-команды, а публичный WorkerEvent уже содержит Battery.
+        WorkerEvent::ChargeLimit(_) => {
+            tracing::debug!("Battery worker event ignored until Battery UI wiring is added");
+        }
     }
 }
 

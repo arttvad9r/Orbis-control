@@ -1,7 +1,7 @@
 //! # orbis-ui worker
 //!
 //! Независимый от Slint последовательный async-worker для команд Performance
-//! Mode и GPU Mode.
+//! Mode, GPU Mode и Battery Charge Limit.
 //!
 //! - worker владеет `AppService<P>` и command receiver;
 //! - команды обрабатываются строго по порядку (одна за другой, общий FIFO для
@@ -10,22 +10,23 @@
 //!   преобразований (ни строк, ни UI-типов, ни banner-текстов);
 //! - worker не знает о UI-типах и свойствах окна (подключение event sink к
 //!   событийному циклу интерфейса — следующий микрошаг);
-//! - worker не принимает решений о Confirmation/Logout/Reboot и не меняет
-//!   флаг `confirmed`;
+//! - worker не принимает решений о Confirmation/Logout/Reboot, не меняет
+//!   флаг `confirmed` и не выполняет clamp/округление percent;
 //! - в production-коде worker не создаёт runtime, не вызывает `spawn` и не
 //!   порождает потоки;
 //! - после закрытия всех command senders `recv()` возвращает `None` и worker
 //!   завершается.
 
 use orbis_application::{
-    AppService, GpuCommandOutcome, PerformanceCommandOutcome, SetGpuModeError, SetPerformanceError,
+    AppService, ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome,
+    SetChargeLimitError, SetGpuModeError, SetPerformanceError,
 };
 use orbis_core::gpu::GpuMode;
 use orbis_core::profile::PerformanceProfile;
-use orbis_providers::traits::{GpuProvider, PerformanceProvider};
+use orbis_providers::traits::{BatteryProvider, GpuProvider, PerformanceProvider};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-/// Типизированная команда worker-а (Performance Mode / GPU Mode).
+/// Типизированная команда worker-а (Performance Mode / GPU Mode / Battery).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkerCommand {
     /// Установить профиль производительности.
@@ -40,6 +41,14 @@ pub enum WorkerCommand {
         /// Флаг подтверждения пользователя.
         confirmed: bool,
     },
+    /// Установить Battery Charge Limit.
+    ///
+    /// `percent` передаётся в `AppService`/provider без изменения: worker не
+    /// выполняет clamp, округление или проверку шага 5.
+    SetChargeLimit {
+        /// Целевой процент лимита зарядки.
+        percent: u8,
+    },
 }
 
 /// Событие результата команды.
@@ -53,6 +62,8 @@ pub enum WorkerEvent {
     Performance(Result<PerformanceCommandOutcome, SetPerformanceError>),
     /// Полный результат команды GPU Mode.
     Gpu(Result<GpuCommandOutcome, SetGpuModeError>),
+    /// Полный результат команды Battery Charge Limit.
+    ChargeLimit(Result<ChargeLimitCommandOutcome, SetChargeLimitError>),
 }
 
 /// Создать command channel для worker.
@@ -66,7 +77,8 @@ pub fn command_channel() -> (
     tokio::sync::mpsc::unbounded_channel()
 }
 
-/// Последовательный worker для Performance Mode и GPU Mode.
+/// Последовательный worker для Performance Mode, GPU Mode и Battery Charge
+/// Limit.
 ///
 /// - `service` — владеемый `AppService<P>`;
 /// - `receiver` — команды в порядке получения;
@@ -81,7 +93,7 @@ pub async fn run_worker<P, F>(
     mut receiver: UnboundedReceiver<WorkerCommand>,
     mut emit: F,
 ) where
-    P: PerformanceProvider + GpuProvider + Send + Sync + 'static,
+    P: PerformanceProvider + GpuProvider + BatteryProvider + Send + Sync + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
     while let Some(command) = receiver.recv().await {
@@ -91,6 +103,9 @@ pub async fn run_worker<P, F>(
             }
             WorkerCommand::SetGpuMode { mode, confirmed } => {
                 WorkerEvent::Gpu(service.set_gpu_mode(mode, confirmed).await)
+            }
+            WorkerCommand::SetChargeLimit { percent } => {
+                WorkerEvent::ChargeLimit(service.set_charge_limit(percent).await)
             }
         };
         emit(event);
@@ -105,13 +120,17 @@ mod tests {
     use async_trait::async_trait;
     use orbis_application::{AppService, CommandError};
     use orbis_core::action::{ActionRequirement, ApplyResult};
+    use orbis_core::battery::ChargeLimit;
     use orbis_core::diagnostics::DiagnosticEntry;
     use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
     use orbis_core::identity::BackendIdentity;
+    use orbis_core::newtypes::Percent;
     use orbis_core::profile::PerformanceProfile;
     use orbis_providers::error::{ProviderError, ValidationResult};
     use orbis_providers::mock::{MockErrorMode, MockProvider};
-    use orbis_providers::traits::{GpuProvider, PerformanceProvider, Provider, ProviderHealth};
+    use orbis_providers::traits::{
+        BatteryProvider, GpuProvider, PerformanceProvider, Provider, ProviderHealth,
+    };
     use orbis_test_support::devices::build_state_arc;
 
     use super::{WorkerCommand, WorkerEvent, command_channel, run_worker};
@@ -290,8 +309,8 @@ mod tests {
     /// без изменения; остальные методы возвращают детерминированные значения.
     ///
     /// Реализует те же traits, что и production `run_worker` требует от `P`
-    /// (`PerformanceProvider + GpuProvider`); `PerformanceProvider` нужен только
-    /// из-за общего bound.
+    /// (`PerformanceProvider + GpuProvider + BatteryProvider`); Performance и
+    /// Battery реализации нужны только из-за общего bound.
     struct ScriptedProvider {
         last: tokio::sync::RwLock<Option<(GpuMode, bool)>>,
         profile: tokio::sync::RwLock<PerformanceProfile>,
@@ -409,6 +428,32 @@ mod tests {
         }
 
         fn validate_mode(&self, _mode: GpuMode) -> ValidationResult {
+            ValidationResult::Valid
+        }
+    }
+
+    #[async_trait]
+    impl BatteryProvider for ScriptedProvider {
+        async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
+            Ok(ChargeLimit::new(
+                true,
+                Some(Percent::new(80).expect("const")),
+                Percent::new(40).expect("const"),
+                Percent::new(100).expect("const"),
+                1,
+            )
+            .expect("valid"))
+        }
+
+        async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {
+            Ok(ApplyResult::Applied)
+        }
+
+        async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
+            Ok(ApplyResult::Applied)
+        }
+
+        fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
             ValidationResult::Valid
         }
     }
@@ -653,6 +698,198 @@ mod tests {
         let second = result_rx.recv().await.expect("event2");
         assert!(matches!(second, WorkerEvent::Gpu(Ok(_))));
         assert_eq!(provider.last().await, Some((GpuMode::Optimized, true)));
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    // -----------------------------------------------------------------------
+    // Battery worker-тесты
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn executes_charge_limit_command() {
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker(service(), rx, move |event| {
+                let _ = result_tx.send(event);
+            })
+            .await;
+        });
+
+        tx.send(WorkerCommand::SetChargeLimit { percent: 40 })
+            .expect("send");
+
+        let event = result_rx.recv().await.expect("event");
+        match event {
+            WorkerEvent::ChargeLimit(Ok(outcome)) => {
+                assert_eq!(outcome.result, ApplyResult::Applied);
+                assert_eq!(outcome.state.percent.map(|p| p.get()), Some(40));
+                assert!(outcome.state.enabled);
+                assert_eq!(outcome.state.min.get(), 40);
+                assert_eq!(outcome.state.max.get(), 100);
+                assert_eq!(outcome.state.step, 1);
+            }
+            other => panic!("ожидался Ok(ChargeLimit), получено: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn charge_limit_value_passed_unmodified() {
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker(service(), rx, move |event| {
+                let _ = result_tx.send(event);
+            })
+            .await;
+        });
+
+        // 83 не кратно 5: worker/application не должны округлять или проверять шаг.
+        tx.send(WorkerCommand::SetChargeLimit { percent: 83 })
+            .expect("send");
+
+        let event = result_rx.recv().await.expect("event");
+        match event {
+            WorkerEvent::ChargeLimit(Ok(outcome)) => {
+                assert_eq!(outcome.result, ApplyResult::Applied);
+                assert_eq!(outcome.state.percent.map(|p| p.get()), Some(83));
+            }
+            other => panic!("ожидался Ok(ChargeLimit), получено: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn performance_gpu_and_charge_preserve_fifo_order() {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let app_service = AppService::new(provider.clone());
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // Отправить все команды до запуска worker: порядок канала фиксирован.
+        tx.send(WorkerCommand::SetPerformance(PerformanceProfile::Silent))
+            .expect("send1");
+        tx.send(WorkerCommand::SetGpuMode {
+            mode: GpuMode::Optimized,
+            confirmed: false,
+        })
+        .expect("send2");
+        tx.send(WorkerCommand::SetChargeLimit { percent: 40 })
+            .expect("send3");
+        tx.send(WorkerCommand::SetPerformance(PerformanceProfile::Turbo))
+            .expect("send4");
+
+        let worker = tokio::spawn(async move {
+            run_worker(app_service, rx, move |event| {
+                let _ = result_tx.send(event);
+            })
+            .await;
+        });
+
+        let first = result_rx.recv().await.expect("event1");
+        let second = result_rx.recv().await.expect("event2");
+        let third = result_rx.recv().await.expect("event3");
+        let fourth = result_rx.recv().await.expect("event4");
+        match (first, second, third, fourth) {
+            (
+                WorkerEvent::Performance(Ok(a)),
+                WorkerEvent::Gpu(Ok(g)),
+                WorkerEvent::ChargeLimit(Ok(c)),
+                WorkerEvent::Performance(Ok(b)),
+            ) => {
+                assert_eq!(a.state.current, PerformanceProfile::Silent);
+                assert_eq!(g.state.requested, GpuMode::Optimized);
+                assert_eq!(c.state.percent.map(|p| p.get()), Some(40));
+                assert_eq!(b.state.current, PerformanceProfile::Turbo);
+            }
+            other => panic!("ожидался порядок Perf(Gpu(Charge(Perf)), получено: {other:?}"),
+        }
+
+        // Финальное authoritative provider state через публичные traits.
+        assert_eq!(
+            provider.current_profile().await.unwrap(),
+            PerformanceProfile::Turbo
+        );
+        assert_eq!(provider.requested_mode().await.unwrap(), GpuMode::Optimized);
+        assert_eq!(
+            provider
+                .charge_limit()
+                .await
+                .unwrap()
+                .percent
+                .map(|p| p.get()),
+            Some(40)
+        );
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn charge_limit_command_error_not_lost() {
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let provider = Arc::new(MockProvider::new(state.clone()));
+        let app_service = AppService::new(provider.clone());
+
+        // Начальный ChargeLimit через публичный provider API до ошибки.
+        let before = provider.charge_limit().await.expect("initial charge limit");
+
+        // Ошибка до команды: мутация не должна примениться.
+        state.write().await.error_mode = MockErrorMode::BackendDown;
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker(app_service, rx, move |event| {
+                let _ = result_tx.send(event);
+            })
+            .await;
+        });
+
+        tx.send(WorkerCommand::SetChargeLimit { percent: 40 })
+            .expect("send");
+
+        let event = result_rx.recv().await.expect("event");
+        match event {
+            WorkerEvent::ChargeLimit(Err(CommandError::Command(
+                ProviderError::BackendUnavailable(_),
+            ))) => {}
+            other => panic!("ожидался Err(Command(BackendUnavailable)), получено: {other:?}"),
+        }
+
+        // ChargeLimit не изменился (percent не стал 40).
+        state.write().await.error_mode = MockErrorMode::None;
+        let after = provider
+            .charge_limit()
+            .await
+            .expect("charge limit unchanged");
+        assert_eq!(after, before);
+        assert_ne!(after.percent.map(|p| p.get()), Some(40));
 
         drop(tx);
         tokio::time::timeout(std::time::Duration::from_secs(5), worker)
