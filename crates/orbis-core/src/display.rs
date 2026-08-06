@@ -72,7 +72,10 @@ mod tests {
     fn display_with_modes() {
         let d = DisplayMode {
             current_hz: Some(RefreshHz::new(165).unwrap()),
-            modes: vec![RefreshMode::new(RefreshHz::new(60).unwrap()), RefreshMode::new(RefreshHz::new(165).unwrap())],
+            modes: vec![
+                RefreshMode::new(RefreshHz::new(60).unwrap()),
+                RefreshMode::new(RefreshHz::new(165).unwrap()),
+            ],
             overdrive: Some(true),
             hdr: HdrState::Disabled,
         };

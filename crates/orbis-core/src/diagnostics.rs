@@ -20,7 +20,12 @@ pub struct DiagnosticEntry {
 impl DiagnosticEntry {
     /// Обычная запись.
     pub fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
-        Self { key: key.into(), value: value.into(), severity: WarningSeverity::Info, source: None }
+        Self {
+            key: key.into(),
+            value: value.into(),
+            severity: WarningSeverity::Info,
+            source: None,
+        }
     }
 
     /// Запись с серьёзностью.
@@ -29,7 +34,12 @@ impl DiagnosticEntry {
         value: impl Into<String>,
         severity: WarningSeverity,
     ) -> Self {
-        Self { key: key.into(), value: value.into(), severity, source: None }
+        Self {
+            key: key.into(),
+            value: value.into(),
+            severity,
+            source: None,
+        }
     }
 }
 

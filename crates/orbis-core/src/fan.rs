@@ -72,7 +72,11 @@ impl FanCurve {
     ///   (в ядре политика задаётся `allow_decreasing`);
     /// - значения в пределах [0, 100];
     /// - последняя точка обеспечивает охлаждение (не 0 % при высокой температуре).
-    pub fn validate(&self, max_points: usize, allow_decreasing: bool) -> std::result::Result<(), CoreError> {
+    pub fn validate(
+        &self,
+        max_points: usize,
+        allow_decreasing: bool,
+    ) -> std::result::Result<(), CoreError> {
         if self.points.is_empty() {
             return Err(CoreError::invariant("FanCurve.points", "пустая кривая"));
         }
@@ -124,7 +128,10 @@ mod tests {
         FanCurve {
             profile: PerformanceProfile::Balanced,
             fan: FanId::Cpu,
-            points: points.into_iter().map(|(t_, p_)| FanCurvePoint::new(t(t_), p(p_))).collect(),
+            points: points
+                .into_iter()
+                .map(|(t_, p_)| FanCurvePoint::new(t(t_), p(p_)))
+                .collect(),
         }
     }
 

@@ -13,8 +13,8 @@ use orbis_core::display::DisplayMode;
 use orbis_core::fan::FanCurve;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
-use orbis_core::limits::{PowerLimitField, PowerLimits};
 use orbis_core::lighting::LightingMode;
+use orbis_core::limits::{PowerLimitField, PowerLimits};
 use orbis_core::profile::PerformanceProfile;
 use orbis_core::telemetry::Telemetry;
 
@@ -82,16 +82,25 @@ pub trait FanProvider: Provider {
     async fn fan_ids(&self) -> Result<Vec<orbis_core::fan::FanId>, ProviderError>;
 
     /// Текущие RPM.
-    async fn fan_rpms(&self) -> Result<Vec<(orbis_core::fan::FanId, orbis_core::newtypes::Rpm)>, ProviderError>;
+    async fn fan_rpms(
+        &self,
+    ) -> Result<Vec<(orbis_core::fan::FanId, orbis_core::newtypes::Rpm)>, ProviderError>;
 
     /// Кривая для профиля и вентилятора.
-    async fn fan_curve(&self, profile: PerformanceProfile, fan: &orbis_core::fan::FanId) -> Result<FanCurve, ProviderError>;
+    async fn fan_curve(
+        &self,
+        profile: PerformanceProfile,
+        fan: &orbis_core::fan::FanId,
+    ) -> Result<FanCurve, ProviderError>;
 
     /// Установить кривую.
     async fn set_fan_curve(&self, curve: &FanCurve) -> Result<ApplyResult, ProviderError>;
 
     /// Сбросить кривые к заводским.
-    async fn set_curves_to_defaults(&self, profile: PerformanceProfile) -> Result<ApplyResult, ProviderError>;
+    async fn set_curves_to_defaults(
+        &self,
+        profile: PerformanceProfile,
+    ) -> Result<ApplyResult, ProviderError>;
 
     /// Количество точек кривой, требуемое backend.
     fn curve_point_count(&self) -> usize;
@@ -110,7 +119,11 @@ pub trait PowerLimitProvider: Provider {
     async fn power_limits(&self) -> Result<PowerLimits, ProviderError>;
 
     /// Установить значение поля.
-    async fn set_power_limit(&self, field: PowerLimitField, value: i32) -> Result<ApplyResult, ProviderError>;
+    async fn set_power_limit(
+        &self,
+        field: PowerLimitField,
+        value: i32,
+    ) -> Result<ApplyResult, ProviderError>;
 
     /// Сбросить все поля к заводским.
     async fn restore_defaults(&self) -> Result<ApplyResult, ProviderError>;
@@ -167,7 +180,10 @@ pub trait DisplayProvider: Provider {
     async fn display_mode(&self) -> Result<DisplayMode, ProviderError>;
 
     /// Установить частоту.
-    async fn set_refresh_rate(&self, hz: orbis_core::newtypes::RefreshHz) -> Result<ApplyResult, ProviderError>;
+    async fn set_refresh_rate(
+        &self,
+        hz: orbis_core::newtypes::RefreshHz,
+    ) -> Result<ApplyResult, ProviderError>;
 
     /// Установить Panel Overdrive (если доступен).
     async fn set_overdrive(&self, enabled: bool) -> Result<ApplyResult, ProviderError>;
@@ -186,7 +202,10 @@ pub trait LightingProvider: Provider {
     async fn set_mode(&self, mode: &LightingMode) -> Result<ApplyResult, ProviderError>;
 
     /// Установить яркость.
-    async fn set_brightness(&self, percent: orbis_core::newtypes::Percent) -> Result<ApplyResult, ProviderError>;
+    async fn set_brightness(
+        &self,
+        percent: orbis_core::newtypes::Percent,
+    ) -> Result<ApplyResult, ProviderError>;
 }
 
 /// AniMe Matrix.
@@ -202,7 +221,10 @@ pub trait AnimeProvider: Provider {
     async fn set_enabled(&self, enabled: bool) -> Result<ApplyResult, ProviderError>;
 
     /// Установить яркость.
-    async fn set_brightness(&self, percent: orbis_core::newtypes::Percent) -> Result<ApplyResult, ProviderError>;
+    async fn set_brightness(
+        &self,
+        percent: orbis_core::newtypes::Percent,
+    ) -> Result<ApplyResult, ProviderError>;
 }
 
 /// Горячие клавиши.

@@ -21,8 +21,11 @@ pub enum PerformanceProfile {
 
 impl PerformanceProfile {
     /// Все стандартные профили.
-    pub const ALL: [PerformanceProfile; 3] =
-        [PerformanceProfile::Silent, PerformanceProfile::Balanced, PerformanceProfile::Turbo];
+    pub const ALL: [PerformanceProfile; 3] = [
+        PerformanceProfile::Silent,
+        PerformanceProfile::Balanced,
+        PerformanceProfile::Turbo,
+    ];
 
     /// Разбор из строки CLI/конфига.
     pub fn parse(s: &str) -> std::result::Result<Self, CoreError> {
@@ -124,11 +127,26 @@ mod tests {
 
     #[test]
     fn parse_variants() {
-        assert_eq!(PerformanceProfile::parse("silent").unwrap(), PerformanceProfile::Silent);
-        assert_eq!(PerformanceProfile::parse("QUIET").unwrap(), PerformanceProfile::Silent);
-        assert_eq!(PerformanceProfile::parse("balanced").unwrap(), PerformanceProfile::Balanced);
-        assert_eq!(PerformanceProfile::parse("turbo").unwrap(), PerformanceProfile::Turbo);
-        assert_eq!(PerformanceProfile::parse("performance").unwrap(), PerformanceProfile::Turbo);
+        assert_eq!(
+            PerformanceProfile::parse("silent").unwrap(),
+            PerformanceProfile::Silent
+        );
+        assert_eq!(
+            PerformanceProfile::parse("QUIET").unwrap(),
+            PerformanceProfile::Silent
+        );
+        assert_eq!(
+            PerformanceProfile::parse("balanced").unwrap(),
+            PerformanceProfile::Balanced
+        );
+        assert_eq!(
+            PerformanceProfile::parse("turbo").unwrap(),
+            PerformanceProfile::Turbo
+        );
+        assert_eq!(
+            PerformanceProfile::parse("performance").unwrap(),
+            PerformanceProfile::Turbo
+        );
     }
 
     #[test]

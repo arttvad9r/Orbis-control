@@ -76,8 +76,20 @@ pub struct AutomationRule {
 
 impl AutomationRule {
     /// Новое правило по умолчанию (cooldown 1500 мс, включено).
-    pub fn new(id: impl Into<String>, trigger: AutomationTrigger, action: AutomationAction, priority: u8) -> Self {
-        Self { id: id.into(), trigger, action, priority, cooldown_ms: 1500, enabled: true }
+    pub fn new(
+        id: impl Into<String>,
+        trigger: AutomationTrigger,
+        action: AutomationAction,
+        priority: u8,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            trigger,
+            action,
+            priority,
+            cooldown_ms: 1500,
+            enabled: true,
+        }
     }
 }
 

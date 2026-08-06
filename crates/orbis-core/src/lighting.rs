@@ -46,8 +46,14 @@ mod tests {
     #[test]
     fn parse_variants() {
         assert_eq!(LightingMode::parse("off").unwrap(), LightingMode::Off);
-        assert_eq!(LightingMode::parse("breathing").unwrap(), LightingMode::Breathing);
-        assert_eq!(LightingMode::parse("rainbow").unwrap(), LightingMode::Rainbow);
+        assert_eq!(
+            LightingMode::parse("breathing").unwrap(),
+            LightingMode::Breathing
+        );
+        assert_eq!(
+            LightingMode::parse("rainbow").unwrap(),
+            LightingMode::Rainbow
+        );
     }
 
     #[test]

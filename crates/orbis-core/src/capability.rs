@@ -219,12 +219,18 @@ pub struct Capability {
 impl Capability {
     /// Создать capability с пустой причиной.
     pub fn new(status: CapabilityStatus) -> Self {
-        Self { status, reason: None }
+        Self {
+            status,
+            reason: None,
+        }
     }
 
     /// Создать capability с причиной.
     pub fn with_reason(status: CapabilityStatus, reason: CapabilityReason) -> Self {
-        Self { status, reason: Some(reason) }
+        Self {
+            status,
+            reason: Some(reason),
+        }
     }
 }
 
@@ -301,7 +307,13 @@ mod tests {
                 },
             ),
         );
-        assert_eq!(caps.status(FeatureId::GpuMux), CapabilityStatus::SupportedWithRequirement);
-        assert_eq!(caps.reason(FeatureId::GpuMux).unwrap().requirement, Some(ActionRequirement::Reboot));
+        assert_eq!(
+            caps.status(FeatureId::GpuMux),
+            CapabilityStatus::SupportedWithRequirement
+        );
+        assert_eq!(
+            caps.reason(FeatureId::GpuMux).unwrap().requirement,
+            Some(ActionRequirement::Reboot)
+        );
     }
 }

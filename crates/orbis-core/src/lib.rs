@@ -37,7 +37,9 @@ pub mod warning;
 pub use action::{ActionRequirement, ApplyResult, PendingAction};
 pub use automation::{AutomationAction, AutomationRule, AutomationTrigger};
 pub use battery::ChargeLimit;
-pub use capability::{Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId};
+pub use capability::{
+    Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId,
+};
 pub use diagnostics::{DiagnosticEntry, DiagnosticReport};
 pub use display::{DisplayMode, HdrState, RefreshMode};
 pub use error::CoreError;

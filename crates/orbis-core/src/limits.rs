@@ -61,7 +61,14 @@ pub struct PowerLimitValue {
 
 impl PowerLimitValue {
     /// Конструктор с валидацией диапазона.
-    pub fn new(value: i32, min: i32, max: i32, step: i32, default: Option<i32>, unit: Unit) -> std::result::Result<Self, CoreError> {
+    pub fn new(
+        value: i32,
+        min: i32,
+        max: i32,
+        step: i32,
+        default: Option<i32>,
+        unit: Unit,
+    ) -> std::result::Result<Self, CoreError> {
         if min > max {
             return Err(CoreError::invariant("PowerLimitValue.min", "min > max"));
         }
@@ -69,7 +76,12 @@ impl PowerLimitValue {
             return Err(CoreError::invariant("PowerLimitValue.step", "step <= 0"));
         }
         if value < min || value > max {
-            return Err(CoreError::out_of_range("PowerLimitValue.value", value, min, max));
+            return Err(CoreError::out_of_range(
+                "PowerLimitValue.value",
+                value,
+                min,
+                max,
+            ));
         }
         if let Some(d) = default {
             if d < min || d > max {
@@ -79,7 +91,14 @@ impl PowerLimitValue {
                 ));
             }
         }
-        Ok(Self { value, min, max, step, default, unit })
+        Ok(Self {
+            value,
+            min,
+            max,
+            step,
+            default,
+            unit,
+        })
     }
 
     /// Значение выровнено по шагу от минимума?
@@ -137,8 +156,14 @@ mod tests {
     #[test]
     fn limits_map() {
         let mut fields = BTreeMap::new();
-        fields.insert(PowerLimitField::Spl, PowerLimitValue::new(45, 20, 80, 5, None, Unit::Watts).unwrap());
-        fields.insert(PowerLimitField::GpuTempTarget, PowerLimitValue::new(75, 60, 87, 1, None, Unit::DegreesC).unwrap());
+        fields.insert(
+            PowerLimitField::Spl,
+            PowerLimitValue::new(45, 20, 80, 5, None, Unit::Watts).unwrap(),
+        );
+        fields.insert(
+            PowerLimitField::GpuTempTarget,
+            PowerLimitValue::new(75, 60, 87, 1, None, Unit::DegreesC).unwrap(),
+        );
         let limits = PowerLimits { fields };
         assert_eq!(limits.get(&PowerLimitField::Spl).unwrap().value, 45);
         assert!(limits.get(&PowerLimitField::Fppt).is_none());

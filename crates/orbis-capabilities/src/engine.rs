@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use orbis_core::capability::{Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId, RiskLevel};
+use orbis_core::capability::{
+    Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId, RiskLevel,
+};
 use orbis_core::identity::{BackendIdentity, DeviceIdentity};
 use orbis_core::warning::{Warning, WarningSeverity};
 
@@ -45,20 +47,39 @@ impl ProbeReport {
     ) -> Self {
         let mut features = BTreeMap::new();
         for part in parts {
-            features.insert(part.feature, Capability { status: part.status, reason: part.reason });
+            features.insert(
+                part.feature,
+                Capability {
+                    status: part.status,
+                    reason: part.reason,
+                },
+            );
         }
-        Self { device, capabilities: DeviceCapabilities { features }, backends, warnings }
+        Self {
+            device,
+            capabilities: DeviceCapabilities { features },
+            backends,
+            warnings,
+        }
     }
 
     /// Количество функций с заданным статусом.
     pub fn count_status(&self, status: CapabilityStatus) -> usize {
-        self.capabilities.features.values().filter(|c| c.status == status).count()
+        self.capabilities
+            .features
+            .values()
+            .filter(|c| c.status == status)
+            .count()
     }
 }
 
 /// Удобный конструктор части без причины.
 pub fn part(feature: FeatureId, status: CapabilityStatus) -> CapabilityPart {
-    CapabilityPart { feature, status, reason: None }
+    CapabilityPart {
+        feature,
+        status,
+        reason: None,
+    }
 }
 
 /// Удобный конструктор части с причиной.
@@ -102,7 +123,11 @@ pub fn ensure_reasons(report: &ProbeReport) -> Vec<Warning> {
             warnings.push(Warning {
                 severity: WarningSeverity::Warning,
                 code: "capability.missing_reason".into(),
-                message: format!("{}: нет причины для статуса {}", feature.as_str(), cap.status.as_str()),
+                message: format!(
+                    "{}: нет причины для статуса {}",
+                    feature.as_str(),
+                    cap.status.as_str()
+                ),
                 details: None,
             });
         }
@@ -120,7 +145,10 @@ mod tests {
         let report = build_from_parts(
             None,
             vec![
-                part(FeatureId::GpuMux, CapabilityStatus::SupportedWithRequirement),
+                part(
+                    FeatureId::GpuMux,
+                    CapabilityStatus::SupportedWithRequirement,
+                ),
                 part(FeatureId::Anime, CapabilityStatus::Unsupported),
                 part(FeatureId::Fans, CapabilityStatus::Supported),
             ],
@@ -128,7 +156,10 @@ mod tests {
         );
         assert_eq!(report.count_status(CapabilityStatus::Supported), 1);
         assert_eq!(report.count_status(CapabilityStatus::Unsupported), 1);
-        assert_eq!(report.capabilities.status(FeatureId::Anime), CapabilityStatus::Unsupported);
+        assert_eq!(
+            report.capabilities.status(FeatureId::Anime),
+            CapabilityStatus::Unsupported
+        );
     }
 
     #[test]
@@ -136,7 +167,10 @@ mod tests {
         let report = build_from_parts(
             None,
             vec![
-                part(FeatureId::GpuMux, CapabilityStatus::SupportedWithRequirement),
+                part(
+                    FeatureId::GpuMux,
+                    CapabilityStatus::SupportedWithRequirement,
+                ),
                 part(FeatureId::Fans, CapabilityStatus::Supported),
             ],
             vec![],
@@ -179,7 +213,11 @@ mod tests {
         let report = build_from_parts(
             None,
             vec![part(FeatureId::Fans, CapabilityStatus::Supported)],
-            vec![BackendIdentity { id: "hwmon".into(), version: None, service: None }],
+            vec![BackendIdentity {
+                id: "hwmon".into(),
+                version: None,
+                service: None,
+            }],
         );
         let json = serde_json::to_string(&report).unwrap();
         let back: ProbeReport = serde_json::from_str(&json).unwrap();

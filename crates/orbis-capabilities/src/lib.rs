@@ -10,4 +10,6 @@ pub mod engine;
 pub mod fixture;
 
 pub use engine::{ProbeReport, build_from_parts};
-pub use fixture::{ExpectedCapabilitiesFixture, ExpectedFeature, parse_status, privacy_check_fixture_dir};
+pub use fixture::{
+    ExpectedCapabilitiesFixture, ExpectedFeature, parse_status, privacy_check_fixture_dir,
+};

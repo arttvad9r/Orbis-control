@@ -11,7 +11,9 @@
 pub mod paths;
 pub mod store;
 
-pub use store::{AppConfig, AutomationConfig, BatteryConfig, ExperimentalConfig, UiConfig, load_or_default};
+pub use store::{
+    AppConfig, AutomationConfig, BatteryConfig, ExperimentalConfig, UiConfig, load_or_default,
+};
 
 use std::path::PathBuf;
 

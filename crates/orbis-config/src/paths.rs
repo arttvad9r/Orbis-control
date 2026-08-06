@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::{config_dir, CONFIG_DIR_NAME};
+use crate::{CONFIG_DIR_NAME, config_dir};
 
 /// Имя файла конфигурации.
 pub const CONFIG_FILE: &str = "config.toml";
@@ -54,7 +54,10 @@ mod tests {
     fn paths_from_explicit_dirs() {
         let td = tempfile::tempdir().unwrap();
         let cfg = td.path().join("cfg");
-        assert_eq!(config_dir_with(Some(cfg.clone()), None), cfg.join("orbis-control"));
+        assert_eq!(
+            config_dir_with(Some(cfg.clone()), None),
+            cfg.join("orbis-control")
+        );
     }
 
     #[test]

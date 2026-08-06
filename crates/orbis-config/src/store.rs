@@ -10,8 +10,8 @@ use thiserror::Error;
 use orbis_core::gpu::GpuMode;
 use orbis_core::profile::PerformanceProfile;
 
-use crate::paths;
 use crate::CONFIG_VERSION;
+use crate::paths;
 
 /// Ошибки конфигурации.
 #[derive(Debug, Error)]
@@ -117,7 +117,9 @@ pub struct BatteryConfig {
 
 impl Default for BatteryConfig {
     fn default() -> Self {
-        Self { charge_limit: Some(80) }
+        Self {
+            charge_limit: Some(80),
+        }
     }
 }
 
@@ -168,11 +170,16 @@ impl AppConfig {
             return Err(ConfigError::UnsupportedVersion(self.config_version));
         }
         if !matches!(self.ui.theme.as_str(), "dark" | "light") {
-            return Err(ConfigError::Schema(format!("theme '{}' не в (dark, light)", self.ui.theme)));
+            return Err(ConfigError::Schema(format!(
+                "theme '{}' не в (dark, light)",
+                self.ui.theme
+            )));
         }
         if let Some(limit) = self.battery.charge_limit {
             if !(0..=100).contains(&limit) {
-                return Err(ConfigError::Schema(format!("charge_limit {limit} вне [0,100]")));
+                return Err(ConfigError::Schema(format!(
+                    "charge_limit {limit} вне [0,100]"
+                )));
             }
         }
         Ok(())
@@ -243,7 +250,9 @@ pub fn backup_before_migration(dir: &Path) -> Result<Option<PathBuf>, ConfigErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn temp_test_env() -> tempfile::TempDir { tempfile::tempdir().expect("tempdir") }
+    fn temp_test_env() -> tempfile::TempDir {
+        tempfile::tempdir().expect("tempdir")
+    }
 
     #[test]
     fn default_is_valid() {
@@ -284,7 +293,10 @@ mod tests {
     #[test]
     fn bad_theme_rejected() {
         let cfg = AppConfig {
-            ui: UiConfig { theme: "neon".into(), ..UiConfig::default() },
+            ui: UiConfig {
+                theme: "neon".into(),
+                ..UiConfig::default()
+            },
             ..AppConfig::default()
         };
         assert!(matches!(cfg.validate(), Err(ConfigError::Schema(_))));
@@ -292,15 +304,31 @@ mod tests {
 
     #[test]
     fn wrong_version_rejected() {
-        let cfg = AppConfig { config_version: 99, ..AppConfig::default() };
-        assert!(matches!(cfg.validate(), Err(ConfigError::UnsupportedVersion(99))));
+        let cfg = AppConfig {
+            config_version: 99,
+            ..AppConfig::default()
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(ConfigError::UnsupportedVersion(99))
+        ));
     }
 
     #[test]
     fn charge_limit_range() {
-        let bad = AppConfig { battery: BatteryConfig { charge_limit: Some(150) }, ..AppConfig::default() };
+        let bad = AppConfig {
+            battery: BatteryConfig {
+                charge_limit: Some(150),
+            },
+            ..AppConfig::default()
+        };
         assert!(bad.validate().is_err());
-        let good = AppConfig { battery: BatteryConfig { charge_limit: Some(0) }, ..AppConfig::default() };
+        let good = AppConfig {
+            battery: BatteryConfig {
+                charge_limit: Some(0),
+            },
+            ..AppConfig::default()
+        };
         assert!(good.validate().is_ok());
     }
 

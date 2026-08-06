@@ -19,17 +19,17 @@ use orbis_core::display::DisplayMode;
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
-use orbis_core::limits::{PowerLimitField, PowerLimits};
 use orbis_core::lighting::LightingMode;
+use orbis_core::limits::{PowerLimitField, PowerLimits};
 use orbis_core::newtypes::{Percent, RefreshHz, Rpm};
 use orbis_core::profile::PerformanceProfile;
 use orbis_core::telemetry::Telemetry;
 
 use crate::error::{OperationId, ProviderError, ValidationResult};
 use crate::traits::{
-    AnimeProvider, AutomationProvider, BatteryProvider, DisplayProvider, FanProvider, FirmwareUpdateProvider,
-    FirmwareUpdate, GpuProvider, HotkeyProvider, LightingProvider, PerformanceProvider, PowerLimitProvider, Provider,
-    ProviderHealth, TelemetryProvider,
+    AnimeProvider, AutomationProvider, BatteryProvider, DisplayProvider, FanProvider,
+    FirmwareUpdate, FirmwareUpdateProvider, GpuProvider, HotkeyProvider, LightingProvider,
+    PerformanceProvider, PowerLimitProvider, Provider, ProviderHealth, TelemetryProvider,
 };
 
 /// Способ имитации ошибки в mock-режиме.
@@ -162,7 +162,10 @@ impl MockState {
                 hdr: orbis_core::display::HdrState::Disabled,
             },
             lighting: LightingMode::Static,
-            fans: vec![(FanId::Cpu, Rpm::new(2400).expect("const")), (FanId::Gpu, Rpm::new(2600).expect("const"))],
+            fans: vec![
+                (FanId::Cpu, Rpm::new(2400).expect("const")),
+                (FanId::Gpu, Rpm::new(2600).expect("const")),
+            ],
             telemetry: Telemetry::empty(),
             op_delay: Duration::from_millis(5),
             error_mode: MockErrorMode::None,
@@ -209,7 +212,11 @@ fn default_curve(profile: PerformanceProfile, fan: FanId) -> FanCurve {
         )
     })
     .collect();
-    FanCurve { profile, fan, points }
+    FanCurve {
+        profile,
+        fan,
+        points,
+    }
 }
 
 /// Общий mock-провайдер: реализует все trait-ы поверх `MockState`.
@@ -237,7 +244,10 @@ impl MockProvider {
     }
 
     /// Выполнить мутацию с учётом ошибок.
-    async fn mutate<T>(&self, f: impl FnOnce(&mut MockState) -> Result<T, MockStateError>) -> Result<T, ProviderError> {
+    async fn mutate<T>(
+        &self,
+        f: impl FnOnce(&mut MockState) -> Result<T, MockStateError>,
+    ) -> Result<T, ProviderError> {
         self.delay().await;
         let mut guard = self.state.write().await;
         guard.ops += 1;
@@ -257,7 +267,10 @@ impl MockProvider {
     }
 
     /// Прочитать состояние с учётом ошибок.
-    async fn read<T>(&self, f: impl FnOnce(&MockState) -> Result<T, MockStateError>) -> Result<T, ProviderError> {
+    async fn read<T>(
+        &self,
+        f: impl FnOnce(&MockState) -> Result<T, MockStateError>,
+    ) -> Result<T, ProviderError> {
         self.delay().await;
         let mut guard = self.state.write().await;
         guard.ops += 1;
@@ -280,7 +293,11 @@ impl Provider for MockProvider {
     }
 
     fn backend(&self) -> BackendIdentity {
-        BackendIdentity { id: "mock".into(), version: Some("0.1.0".into()), service: None }
+        BackendIdentity {
+            id: "mock".into(),
+            version: Some("0.1.0".into()),
+            service: None,
+        }
     }
 
     fn timeout(&self) -> Duration {
@@ -296,7 +313,10 @@ impl Provider for MockProvider {
     }
 
     fn diagnostics(&self) -> Vec<DiagnosticEntry> {
-        vec![DiagnosticEntry::new("provider.mock", "mock backend v0.1.0 (Этап 2, без аппаратных операций)")]
+        vec![DiagnosticEntry::new(
+            "provider.mock",
+            "mock backend v0.1.0 (Этап 2, без аппаратных операций)",
+        )]
     }
 }
 
@@ -331,9 +351,9 @@ impl PerformanceProvider for MockProvider {
 
     fn validate_set_profile(&self, profile: PerformanceProfile) -> ValidationResult {
         match profile {
-            PerformanceProfile::Silent | PerformanceProfile::Balanced | PerformanceProfile::Turbo => {
-                ValidationResult::Valid
-            }
+            PerformanceProfile::Silent
+            | PerformanceProfile::Balanced
+            | PerformanceProfile::Turbo => ValidationResult::Valid,
         }
     }
 }
@@ -341,31 +361,46 @@ impl PerformanceProvider for MockProvider {
 #[async_trait]
 impl FanProvider for MockProvider {
     async fn fan_ids(&self) -> Result<Vec<FanId>, ProviderError> {
-        self.read(|s| Ok(s.fans.iter().map(|(f, _)| f.clone()).collect())).await
+        self.read(|s| Ok(s.fans.iter().map(|(f, _)| f.clone()).collect()))
+            .await
     }
 
     async fn fan_rpms(&self) -> Result<Vec<(FanId, Rpm)>, ProviderError> {
         self.read(|s| Ok(s.fans.clone())).await
     }
 
-    async fn fan_curve(&self, profile: PerformanceProfile, fan: &FanId) -> Result<FanCurve, ProviderError> {
-        self.read(|s| s.fan_curves.get(&(profile, fan.clone())).cloned().ok_or(MockStateError::Unsupported))
-            .await
+    async fn fan_curve(
+        &self,
+        profile: PerformanceProfile,
+        fan: &FanId,
+    ) -> Result<FanCurve, ProviderError> {
+        self.read(|s| {
+            s.fan_curves
+                .get(&(profile, fan.clone()))
+                .cloned()
+                .ok_or(MockStateError::Unsupported)
+        })
+        .await
     }
 
     async fn set_fan_curve(&self, curve: &FanCurve) -> Result<ApplyResult, ProviderError> {
         self.validate_curve(curve).into_result()?;
         self.mutate(|s| {
-            s.fan_curves.insert((curve.profile, curve.fan.clone()), curve.clone());
+            s.fan_curves
+                .insert((curve.profile, curve.fan.clone()), curve.clone());
             Ok(ApplyResult::Applied)
         })
         .await
     }
 
-    async fn set_curves_to_defaults(&self, profile: PerformanceProfile) -> Result<ApplyResult, ProviderError> {
+    async fn set_curves_to_defaults(
+        &self,
+        profile: PerformanceProfile,
+    ) -> Result<ApplyResult, ProviderError> {
         self.mutate(|s| {
             for fan in [FanId::Cpu, FanId::Gpu] {
-                s.fan_curves.insert((profile, fan.clone()), default_curve(profile, fan));
+                s.fan_curves
+                    .insert((profile, fan.clone()), default_curve(profile, fan));
             }
             Ok(ApplyResult::Applied)
         })
@@ -394,10 +429,18 @@ impl PowerLimitProvider for MockProvider {
         self.read(|s| Ok(s.power_limits.clone())).await
     }
 
-    async fn set_power_limit(&self, field: PowerLimitField, value: i32) -> Result<ApplyResult, ProviderError> {
+    async fn set_power_limit(
+        &self,
+        field: PowerLimitField,
+        value: i32,
+    ) -> Result<ApplyResult, ProviderError> {
         self.validate_power_limit(&field, value).into_result()?;
         self.mutate(|s| {
-            let entry = s.power_limits.fields.get_mut(&field).ok_or(MockStateError::Unsupported)?;
+            let entry = s
+                .power_limits
+                .fields
+                .get_mut(&field)
+                .ok_or(MockStateError::Unsupported)?;
             entry.value = value;
             Ok(ApplyResult::Applied)
         })
@@ -471,7 +514,11 @@ impl GpuProvider for MockProvider {
         self.read(|s| Ok(s.gpu_mode)).await
     }
 
-    async fn set_mode(&self, mode: GpuMode, _confirmed: bool) -> Result<ApplyResult, ProviderError> {
+    async fn set_mode(
+        &self,
+        mode: GpuMode,
+        _confirmed: bool,
+    ) -> Result<ApplyResult, ProviderError> {
         self.validate_mode(mode).into_result()?;
         self.mutate(|s| {
             let req = Self::requirement_static(mode);
@@ -601,16 +648,24 @@ impl LightingProvider for MockProvider {
 #[async_trait]
 impl AnimeProvider for MockProvider {
     async fn available(&self) -> Result<bool, ProviderError> {
-        self.read(|s| Ok(s.mux == GpuMuxState::Discrete || matches!(s.lighting, LightingMode::Rainbow))).await
+        self.read(|s| {
+            Ok(s.mux == GpuMuxState::Discrete || matches!(s.lighting, LightingMode::Rainbow))
+        })
+        .await
     }
 
     async fn enabled(&self) -> Result<bool, ProviderError> {
-        self.read(|s| Ok(matches!(s.lighting, LightingMode::Rainbow))).await
+        self.read(|s| Ok(matches!(s.lighting, LightingMode::Rainbow)))
+            .await
     }
 
     async fn set_enabled(&self, enabled: bool) -> Result<ApplyResult, ProviderError> {
         self.mutate(|s| {
-            s.lighting = if enabled { LightingMode::Rainbow } else { LightingMode::Off };
+            s.lighting = if enabled {
+                LightingMode::Rainbow
+            } else {
+                LightingMode::Off
+            };
             Ok(ApplyResult::Applied)
         })
         .await
@@ -696,8 +751,14 @@ mod tests {
     #[tokio::test]
     async fn profile_set_roundtrip() {
         let (state, provider) = setup();
-        assert_eq!(provider.current_profile().await.unwrap(), PerformanceProfile::Balanced);
-        let res = provider.set_profile(PerformanceProfile::Turbo).await.unwrap();
+        assert_eq!(
+            provider.current_profile().await.unwrap(),
+            PerformanceProfile::Balanced
+        );
+        let res = provider
+            .set_profile(PerformanceProfile::Turbo)
+            .await
+            .unwrap();
         assert!(res.is_applied());
         assert_eq!(state.read().await.profile, PerformanceProfile::Turbo);
         assert_eq!(state.read().await.ops, 2); // read + write
@@ -713,8 +774,15 @@ mod tests {
     #[tokio::test]
     async fn ultimate_creates_pending() {
         let (state, provider) = setup();
-        let res = crate::traits::GpuProvider::set_mode(&provider, GpuMode::Ultimate, true).await.unwrap();
-        assert!(matches!(res, ApplyResult::Pending { requirement: ActionRequirement::Reboot }));
+        let res = crate::traits::GpuProvider::set_mode(&provider, GpuMode::Ultimate, true)
+            .await
+            .unwrap();
+        assert!(matches!(
+            res,
+            ApplyResult::Pending {
+                requirement: ActionRequirement::Reboot
+            }
+        ));
         assert!(state.read().await.pending_action.is_some());
         assert_eq!(state.read().await.mux, GpuMuxState::Discrete);
     }
@@ -740,14 +808,28 @@ mod tests {
     #[tokio::test]
     async fn refresh_rate_validate() {
         let (_, provider) = setup();
-        assert!(provider.set_refresh_rate(RefreshHz::new(144).unwrap()).await.is_ok());
-        assert!(provider.set_refresh_rate(RefreshHz::new(5).unwrap()).await.is_err());
+        assert!(
+            provider
+                .set_refresh_rate(RefreshHz::new(144).unwrap())
+                .await
+                .is_ok()
+        );
+        assert!(
+            provider
+                .set_refresh_rate(RefreshHz::new(5).unwrap())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
     async fn three_fan_support() {
         let (state, provider) = setup();
-        state.write().await.fans.push((FanId::Mid, Rpm::new(1500).unwrap()));
+        state
+            .write()
+            .await
+            .fans
+            .push((FanId::Mid, Rpm::new(1500).unwrap()));
         let fans = provider.fan_ids().await.unwrap();
         assert_eq!(fans.len(), 3);
     }

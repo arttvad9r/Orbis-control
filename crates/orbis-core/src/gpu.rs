@@ -21,8 +21,12 @@ pub enum GpuMode {
 
 impl GpuMode {
     /// Все режимы.
-    pub const ALL: [GpuMode; 4] =
-        [GpuMode::Eco, GpuMode::Standard, GpuMode::Ultimate, GpuMode::Optimized];
+    pub const ALL: [GpuMode; 4] = [
+        GpuMode::Eco,
+        GpuMode::Standard,
+        GpuMode::Ultimate,
+        GpuMode::Optimized,
+    ];
 
     /// Разбор из строки CLI/конфига.
     pub fn parse(s: &str) -> std::result::Result<Self, CoreError> {

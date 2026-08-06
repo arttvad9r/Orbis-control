@@ -125,8 +125,14 @@ impl HardwareSnapshot {
                 mux: GpuMuxState::Unknown,
                 access_policy: GpuAccessPolicy::Unknown,
             },
-            charge_limit: ChargeLimit::new(false, None, Percent::new(40).expect("const"), Percent::new(100).expect("const"), 1)
-                .expect("valid"),
+            charge_limit: ChargeLimit::new(
+                false,
+                None,
+                Percent::new(40).expect("const"),
+                Percent::new(100).expect("const"),
+                1,
+            )
+            .expect("valid"),
             display: DisplayMode::default(),
             telemetry: Telemetry::empty(),
             warnings: Vec::new(),

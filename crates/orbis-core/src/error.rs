@@ -36,7 +36,12 @@ pub enum CoreError {
 
 impl CoreError {
     /// Значение вне диапазона.
-    pub fn out_of_range(field: &str, value: impl fmt::Display, min: impl fmt::Display, max: impl fmt::Display) -> Self {
+    pub fn out_of_range(
+        field: &str,
+        value: impl fmt::Display,
+        min: impl fmt::Display,
+        max: impl fmt::Display,
+    ) -> Self {
         Self::OutOfRange {
             field: field.to_string(),
             value: value.to_string(),
@@ -65,7 +70,12 @@ impl CoreError {
 impl fmt::Display for CoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::OutOfRange { field, value, min, max } => {
+            Self::OutOfRange {
+                field,
+                value,
+                min,
+                max,
+            } => {
                 write!(f, "{field}: значение {value} вне диапазона [{min}, {max}]")
             }
             Self::Invariant { field, message } => write!(f, "{field}: {message}"),

@@ -39,7 +39,11 @@ pub struct BackendIdentity {
 impl BackendIdentity {
     /// Простой backend без версии.
     pub fn simple(id: &str) -> Self {
-        Self { id: id.to_string(), version: None, service: None }
+        Self {
+            id: id.to_string(),
+            version: None,
+            service: None,
+        }
     }
 }
 

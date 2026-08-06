@@ -46,7 +46,13 @@ impl ChargeLimit {
                 ));
             }
         }
-        Ok(Self { enabled, percent, min, max, step })
+        Ok(Self {
+            enabled,
+            percent,
+            min,
+            max,
+            step,
+        })
     }
 }
 

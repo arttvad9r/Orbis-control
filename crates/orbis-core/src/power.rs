@@ -52,7 +52,10 @@ mod tests {
     fn parse_variants() {
         assert_eq!(PowerSource::parse("AC").unwrap(), PowerSource::Ac);
         assert_eq!(PowerSource::parse("battery").unwrap(), PowerSource::Battery);
-        assert_eq!(PowerSource::parse("usb-c").unwrap(), PowerSource::UsbCPdLowPower);
+        assert_eq!(
+            PowerSource::parse("usb-c").unwrap(),
+            PowerSource::UsbCPdLowPower
+        );
         assert!(PowerSource::parse("whatever").is_none());
     }
 }

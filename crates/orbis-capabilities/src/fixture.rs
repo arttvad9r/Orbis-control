@@ -6,7 +6,9 @@ use std::path::Path;
 use serde::Deserialize;
 use thiserror::Error;
 
-use orbis_core::capability::{Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId, RiskLevel};
+use orbis_core::capability::{
+    Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId, RiskLevel,
+};
 use orbis_core::identity::BackendIdentity;
 
 /// Ошибки работы с фикстурами.
@@ -127,8 +129,10 @@ impl ExpectedCapabilitiesFixture {
     pub fn to_device_capabilities(&self) -> Result<DeviceCapabilities, FixtureError> {
         let mut features = std::collections::BTreeMap::new();
         for (name, raw) in &self.features {
-            let feature = feature_from_str(name).ok_or_else(|| FixtureError::UnknownFeature(name.clone()))?;
-            let status = parse_status(&raw.status).ok_or_else(|| FixtureError::UnknownFeature(format!("{name}:{}", raw.status)))?;
+            let feature =
+                feature_from_str(name).ok_or_else(|| FixtureError::UnknownFeature(name.clone()))?;
+            let status = parse_status(&raw.status)
+                .ok_or_else(|| FixtureError::UnknownFeature(format!("{name}:{}", raw.status)))?;
             let reason = raw.reason.clone().map(|reason| CapabilityReason {
                 reason,
                 suggestion: String::new(),
@@ -148,7 +152,11 @@ impl ExpectedCapabilitiesFixture {
         self.backends
             .iter()
             .filter(|(_, b)| b.present)
-            .map(|(id, b)| BackendIdentity { id: id.clone(), version: b.version.clone(), service: b.service.clone() })
+            .map(|(id, b)| BackendIdentity {
+                id: id.clone(),
+                version: b.version.clone(),
+                service: b.service.clone(),
+            })
             .collect()
     }
 }
@@ -163,8 +171,17 @@ fn feature_from_str(s: &str) -> Option<FeatureId> {
 /// Возвращает список найденных проблем (пусто = чисто).
 pub fn privacy_check_fixture_dir(dir: &Path) -> Vec<String> {
     const FORBIDDEN: &[&str] = &[
-        "serial_number", "serial", "hostname", "machine-id", "machine_id",
-        "mac=", "uuid", "/home/", "password", "token", "secret",
+        "serial_number",
+        "serial",
+        "hostname",
+        "machine-id",
+        "machine_id",
+        "mac=",
+        "uuid",
+        "/home/",
+        "password",
+        "token",
+        "secret",
     ];
     let mut problems = Vec::new();
     let entries = match fs::read_dir(dir) {
@@ -194,7 +211,10 @@ mod tests {
     fn parse_status_all() {
         assert_eq!(parse_status("supported"), Some(CapabilityStatus::Supported));
         assert_eq!(parse_status("read_only"), Some(CapabilityStatus::ReadOnly));
-        assert_eq!(parse_status("permission_denied"), Some(CapabilityStatus::PermissionDenied));
+        assert_eq!(
+            parse_status("permission_denied"),
+            Some(CapabilityStatus::PermissionDenied)
+        );
         assert_eq!(parse_status("bogus"), None);
     }
 
@@ -219,10 +239,19 @@ mod tests {
             .join("../../tests/fixtures/hardware/fa707nv/expected-capabilities.json");
         let fixture = ExpectedCapabilitiesFixture::load(&path).expect("fixture");
         let caps = fixture.to_device_capabilities().expect("caps");
-        assert_eq!(caps.status(FeatureId::GpuMux), CapabilityStatus::SupportedWithRequirement);
+        assert_eq!(
+            caps.status(FeatureId::GpuMux),
+            CapabilityStatus::SupportedWithRequirement
+        );
         assert_eq!(caps.status(FeatureId::Anime), CapabilityStatus::Unsupported);
-        assert_eq!(caps.status(FeatureId::CpuBoost), CapabilityStatus::PermissionDenied);
-        assert_eq!(caps.status(FeatureId::PptPl1Spl), CapabilityStatus::ReadOnly);
+        assert_eq!(
+            caps.status(FeatureId::CpuBoost),
+            CapabilityStatus::PermissionDenied
+        );
+        assert_eq!(
+            caps.status(FeatureId::PptPl1Spl),
+            CapabilityStatus::ReadOnly
+        );
         // фикстура не должна содержать персональных данных
         let problems = privacy_check_fixture_dir(path.parent().unwrap());
         assert!(problems.is_empty(), "проблемы: {problems:?}");

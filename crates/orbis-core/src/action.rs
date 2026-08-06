@@ -93,14 +93,19 @@ mod tests {
     #[test]
     fn apply_result_helpers() {
         assert!(ApplyResult::Applied.is_applied());
-        let pending = ApplyResult::Pending { requirement: ActionRequirement::Reboot };
+        let pending = ApplyResult::Pending {
+            requirement: ActionRequirement::Reboot,
+        };
         assert!(!pending.is_applied());
         assert_eq!(pending.requirement(), Some(ActionRequirement::Reboot));
     }
 
     #[test]
     fn apply_result_serde() {
-        let r = ApplyResult::Failed { reason: "ENODEV".into(), backend: "asusd".into() };
+        let r = ApplyResult::Failed {
+            reason: "ENODEV".into(),
+            backend: "asusd".into(),
+        };
         let json = serde_json::to_string(&r).unwrap();
         let back: ApplyResult = serde_json::from_str(&json).unwrap();
         assert_eq!(back, r);

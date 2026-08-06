@@ -30,17 +30,32 @@ pub struct Warning {
 impl Warning {
     /// Информационное предупреждение.
     pub fn info(code: &str, message: impl Into<String>) -> Self {
-        Self { severity: WarningSeverity::Info, code: code.into(), message: message.into(), details: None }
+        Self {
+            severity: WarningSeverity::Info,
+            code: code.into(),
+            message: message.into(),
+            details: None,
+        }
     }
 
     /// Предупреждение.
     pub fn warn(code: &str, message: impl Into<String>) -> Self {
-        Self { severity: WarningSeverity::Warning, code: code.into(), message: message.into(), details: None }
+        Self {
+            severity: WarningSeverity::Warning,
+            code: code.into(),
+            message: message.into(),
+            details: None,
+        }
     }
 
     /// Ошибка.
     pub fn error(code: &str, message: impl Into<String>) -> Self {
-        Self { severity: WarningSeverity::Error, code: code.into(), message: message.into(), details: None }
+        Self {
+            severity: WarningSeverity::Error,
+            code: code.into(),
+            message: message.into(),
+            details: None,
+        }
     }
 }
 
