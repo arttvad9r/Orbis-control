@@ -8,9 +8,9 @@
 //! - provider state перечитывается после каждой команды (authoritative read-back);
 //! - состояние не кэшируется внутри сервиса.
 //!
-//! На текущем этапе поддерживается только Performance Mode. В будущем слой
-//! смогут использовать orbis-ui (через асинхронный worker), orbis-sessiond, CLI
-//! и интеграционные тесты.
+//! На текущем этапе поддерживаются Performance Mode и Battery Charge Limit.
+//! В будущем слой смогут использовать orbis-ui (через асинхронный worker),
+//! orbis-sessiond, CLI и интеграционные тесты.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -18,9 +18,10 @@
 use std::sync::Arc;
 
 use orbis_core::action::ApplyResult;
+use orbis_core::battery::ChargeLimit;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
-use orbis_providers::traits::PerformanceProvider;
+use orbis_providers::traits::{BatteryProvider, PerformanceProvider};
 
 /// Authoritative состояние Performance Mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,24 +32,31 @@ pub struct PerformanceState {
     pub available: Vec<PerformanceProfile>,
 }
 
-/// Результат команды: исходный `ApplyResult` + authoritative состояние после
-/// операции.
+/// Общий результат application-команды: исходный `ApplyResult` + authoritative
+/// состояние после операции.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PerformanceCommandOutcome {
+pub struct CommandOutcome<S> {
     /// Результат мутации, возвращённый provider-ом без преобразований.
     pub result: ApplyResult,
     /// Состояние, перечитанное из provider после команды.
-    pub state: PerformanceState,
+    pub state: S,
 }
 
-/// Ошибка команды Performance Mode.
+/// Результат команды Performance Mode (alias общего `CommandOutcome`).
+pub type PerformanceCommandOutcome = CommandOutcome<PerformanceState>;
+
+/// Результат команды Battery Charge Limit: authoritative состояние — это
+/// существующий `ChargeLimit` из provider read-back.
+pub type ChargeLimitCommandOutcome = CommandOutcome<ChargeLimit>;
+
+/// Общая ошибка application-команды.
 ///
 /// Различает два принципиально разных случая:
 /// - команда provider не выполнилась (или была отклонена);
 /// - команда выполнилась (есть `ApplyResult`), но обязательный authoritative
 ///   read-back после неё завершился ошибкой.
 #[derive(Debug)]
-pub enum SetPerformanceError {
+pub enum CommandError {
     /// Ошибка самой команды provider: мутация не выполнена или отклонена.
     Command(ProviderError),
     /// Команда выполнена (сохранён `ApplyResult`), но повторное чтение
@@ -61,19 +69,19 @@ pub enum SetPerformanceError {
     },
 }
 
-impl std::fmt::Display for SetPerformanceError {
+impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Command(e) => write!(f, "команда Performance Mode не выполнена: {e}"),
+            Self::Command(e) => write!(f, "application-команда не выполнена: {e}"),
             Self::ReadBack { result, source } => write!(
                 f,
-                "команда Performance Mode выполнена ({result:?}), но read-back не удался: {source}"
+                "application-команда выполнена ({result:?}), но read-back не удался: {source}"
             ),
         }
     }
 }
 
-impl std::error::Error for SetPerformanceError {
+impl std::error::Error for CommandError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Command(e) => Some(e),
@@ -82,23 +90,32 @@ impl std::error::Error for SetPerformanceError {
     }
 }
 
-/// Application service для Performance Mode.
+/// Ошибка команды Performance Mode (alias общего `CommandError`).
+pub type SetPerformanceError = CommandError;
+
+/// Ошибка команды Battery Charge Limit (alias общего `CommandError`).
+pub type SetChargeLimitError = CommandError;
+
+/// Application service.
 ///
 /// Владеет provider через `Arc<P>` и предоставляет типизированные async-команды.
-/// Не привязан к конкретному provider: работает с любым `P: PerformanceProvider`.
+/// Не привязан к конкретному provider: методы доступны в зависимости от того,
+/// какие provider traits реализует `P` (независимые impl-блоки).
 pub struct AppService<P> {
     provider: Arc<P>,
+}
+
+impl<P> AppService<P> {
+    /// Создать сервис над провайдером.
+    pub fn new(provider: Arc<P>) -> Self {
+        Self { provider }
+    }
 }
 
 impl<P> AppService<P>
 where
     P: PerformanceProvider + Send + Sync,
 {
-    /// Создать сервис над провайдером.
-    pub fn new(provider: Arc<P>) -> Self {
-        Self { provider }
-    }
-
     /// Прочитать authoritative состояние Performance Mode.
     ///
     /// Данные берутся только из ответов provider; внутренний кэш отсутствует.
@@ -126,15 +143,56 @@ where
             .provider
             .set_profile(profile)
             .await
-            .map_err(SetPerformanceError::Command)?;
-        let state =
-            self.performance_state()
-                .await
-                .map_err(|source| SetPerformanceError::ReadBack {
-                    result: result.clone(),
-                    source,
-                })?;
-        Ok(PerformanceCommandOutcome { result, state })
+            .map_err(CommandError::Command)?;
+        let state = self
+            .performance_state()
+            .await
+            .map_err(|source| CommandError::ReadBack {
+                result: result.clone(),
+                source,
+            })?;
+        Ok(CommandOutcome { result, state })
+    }
+}
+
+impl<P> AppService<P>
+where
+    P: BatteryProvider + Send + Sync,
+{
+    /// Прочитать authoritative Battery Charge Limit.
+    ///
+    /// Данные берутся только из `BatteryProvider::charge_limit`; кэш отсутствует.
+    pub async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
+        self.provider.charge_limit().await
+    }
+
+    /// Установить лимит зарядки.
+    ///
+    /// 1. Вызывает `BatteryProvider::set_charge_limit(percent)` без нормализации
+    ///    (диапазон/шаг проверяет сам provider).
+    /// 2. После успешного provider-вызова перечитывает authoritative лимит.
+    /// 3. Возвращает исходный `ApplyResult` и `ChargeLimit` из read-back.
+    ///
+    /// Ошибка мутации — `SetChargeLimitError::Command`; ошибка read-back после
+    /// успешной мутации — `SetChargeLimitError::ReadBack` с сохранённым
+    /// `ApplyResult`.
+    pub async fn set_charge_limit(
+        &self,
+        percent: u8,
+    ) -> Result<ChargeLimitCommandOutcome, SetChargeLimitError> {
+        let result = self
+            .provider
+            .set_charge_limit(percent)
+            .await
+            .map_err(CommandError::Command)?;
+        let state = self
+            .charge_limit()
+            .await
+            .map_err(|source| CommandError::ReadBack {
+                result: result.clone(),
+                source,
+            })?;
+        Ok(CommandOutcome { result, state })
     }
 }
 
@@ -145,14 +203,16 @@ mod tests {
 
     use async_trait::async_trait;
     use orbis_core::action::ApplyResult;
+    use orbis_core::battery::ChargeLimit;
     use orbis_core::identity::BackendIdentity;
+    use orbis_core::newtypes::Percent;
     use orbis_core::profile::PerformanceProfile;
     use orbis_providers::error::{ProviderError, ValidationResult};
     use orbis_providers::mock::{MockErrorMode, MockProvider};
-    use orbis_providers::traits::{PerformanceProvider, Provider, ProviderHealth};
+    use orbis_providers::traits::{BatteryProvider, PerformanceProvider, Provider, ProviderHealth};
     use orbis_test_support::devices::build_state_arc;
 
-    use super::{AppService, PerformanceState, SetPerformanceError};
+    use super::{AppService, ChargeLimitCommandOutcome, CommandError, PerformanceState};
 
     fn service() -> (Arc<MockProvider>, AppService<MockProvider>) {
         let state = build_state_arc("zephyrus-full").expect("profile exists");
@@ -160,6 +220,10 @@ mod tests {
         let svc = AppService::new(provider.clone());
         (provider, svc)
     }
+
+    // -----------------------------------------------------------------------
+    // Performance
+    // -----------------------------------------------------------------------
 
     #[tokio::test]
     async fn performance_state_zephyrus() {
@@ -227,7 +291,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             err,
-            SetPerformanceError::Command(ProviderError::BackendUnavailable(_))
+            CommandError::Command(ProviderError::BackendUnavailable(_))
         ));
 
         // После снятия ошибки исходный профиль прежний (мутация не применялась).
@@ -249,7 +313,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             err,
-            SetPerformanceError::Command(ProviderError::PermissionDenied(_))
+            CommandError::Command(ProviderError::PermissionDenied(_))
         ));
 
         state.write().await.error_mode = MockErrorMode::None;
@@ -271,11 +335,111 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Scripted provider: команда выполняется, но следующий read-back падает.
+    // Battery Charge Limit
     // -----------------------------------------------------------------------
 
-    /// Тестовый провайдер: `set_profile` всегда успешен и применяет профиль;
-    /// `current_profile` может быть принудительно переведён в ошибку.
+    #[tokio::test]
+    async fn initial_charge_limit() {
+        let (_provider, svc) = service();
+        let cl = svc.charge_limit().await.unwrap();
+        assert_eq!(cl.percent, Some(Percent::new(80).unwrap()));
+        assert!(cl.enabled);
+        assert_eq!(cl.min, Percent::new(40).unwrap());
+        assert_eq!(cl.max, Percent::new(100).unwrap());
+    }
+
+    #[tokio::test]
+    async fn charge_limit_80_to_40() {
+        let (_provider, svc) = service();
+        let outcome: ChargeLimitCommandOutcome = svc.set_charge_limit(40).await.unwrap();
+        assert!(outcome.result.is_applied());
+        assert_eq!(outcome.state.percent, Some(Percent::new(40).unwrap()));
+        // Остальные поля не повреждены.
+        assert!(outcome.state.enabled);
+        assert_eq!(outcome.state.min, Percent::new(40).unwrap());
+        assert_eq!(outcome.state.max, Percent::new(100).unwrap());
+    }
+
+    #[tokio::test]
+    async fn charge_limit_40_to_100() {
+        let (_provider, svc) = service();
+        svc.set_charge_limit(40).await.unwrap();
+        let outcome = svc.set_charge_limit(100).await.unwrap();
+        assert_eq!(outcome.state.percent, Some(Percent::new(100).unwrap()));
+    }
+
+    #[tokio::test]
+    async fn repeated_charge_limit_is_idempotent() {
+        let (_provider, svc) = service();
+        let first = svc.set_charge_limit(100).await.unwrap();
+        let second = svc.set_charge_limit(100).await.unwrap();
+        assert!(second.result.is_applied());
+        assert_eq!(second.state.percent, Some(Percent::new(100).unwrap()));
+        assert_eq!(second.state, first.state);
+    }
+
+    #[tokio::test]
+    async fn value_83_follows_provider_semantics() {
+        let (_provider, svc) = service();
+        // Фактическая семантика MockProvider: проверяется только диапазон
+        // 40..=100 (шаг 5 провайдер не проверяет), поэтому 83 принимается.
+        // AppService не нормализует и не округляет значение.
+        let outcome = svc.set_charge_limit(83).await.unwrap();
+        assert!(outcome.result.is_applied());
+        assert_eq!(outcome.state.percent, Some(Percent::new(83).unwrap()));
+    }
+
+    #[tokio::test]
+    async fn charge_backend_down_returns_command_error_without_mutation() {
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let provider = Arc::new(MockProvider::new(state.clone()));
+        let svc = AppService::new(provider.clone());
+
+        state.write().await.error_mode = MockErrorMode::BackendDown;
+        let err = svc.set_charge_limit(60).await.unwrap_err();
+        assert!(matches!(
+            err,
+            CommandError::Command(ProviderError::BackendUnavailable(_))
+        ));
+
+        state.write().await.error_mode = MockErrorMode::None;
+        let cl = svc.charge_limit().await.unwrap();
+        assert_eq!(cl.percent, Some(Percent::new(80).unwrap()));
+    }
+
+    #[tokio::test]
+    async fn charge_permission_denied_returns_command_error() {
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let provider = Arc::new(MockProvider::new(state.clone()));
+        let svc = AppService::new(provider.clone());
+
+        state.write().await.error_mode = MockErrorMode::PermissionDenied;
+        let err = svc.set_charge_limit(60).await.unwrap_err();
+        assert!(matches!(
+            err,
+            CommandError::Command(ProviderError::PermissionDenied(_))
+        ));
+
+        state.write().await.error_mode = MockErrorMode::None;
+        let cl = svc.charge_limit().await.unwrap();
+        assert_eq!(cl.percent, Some(Percent::new(80).unwrap()));
+    }
+
+    #[tokio::test]
+    async fn charge_snapshot_is_readback_not_cached() {
+        let (provider, svc) = service();
+        // Прямое изменение provider через trait (вне AppService).
+        provider.set_charge_limit(60).await.unwrap();
+        let cl = svc.charge_limit().await.unwrap();
+        assert_eq!(cl.percent, Some(Percent::new(60).unwrap()));
+    }
+
+    // -----------------------------------------------------------------------
+    // Scripted providers: команда выполняется, но следующий read-back падает.
+    // -----------------------------------------------------------------------
+
+    /// Тестовый провайдер Performance: `set_profile` всегда успешен и применяет
+    /// профиль; `current_profile` может быть принудительно переведён в ошибку.
     struct ScriptedProvider {
         current: tokio::sync::RwLock<PerformanceProfile>,
         fail_reads: AtomicBool,
@@ -362,11 +526,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn readback_error_preserves_apply_result() {
+    async fn performance_readback_error_preserves_apply_result() {
         let provider = Arc::new(ScriptedProvider::new());
         let svc = AppService::new(provider.clone());
 
-        // Мутация успешна, но последующий authoritative read-back падает.
         provider.fail_reads.store(true, Ordering::SeqCst);
         let err = svc
             .set_performance(PerformanceProfile::Silent)
@@ -374,7 +537,102 @@ mod tests {
             .unwrap_err();
 
         match err {
-            SetPerformanceError::ReadBack { result, source } => {
+            CommandError::ReadBack { result, source } => {
+                assert!(result.is_applied());
+                assert!(matches!(source, ProviderError::BackendUnavailable(_)));
+            }
+            other => panic!("ожидался ReadBack, получен: {other:?}"),
+        }
+
+        assert_eq!(*provider.current.read().await, PerformanceProfile::Silent);
+    }
+
+    /// Тестовый провайдер Battery: `set_charge_limit` всегда успешен и применяет
+    /// значение; `charge_limit` может быть принудительно переведён в ошибку.
+    struct ScriptedBatteryProvider {
+        limit: tokio::sync::RwLock<u8>,
+        fail_reads: AtomicBool,
+    }
+
+    impl ScriptedBatteryProvider {
+        fn new() -> Self {
+            Self {
+                limit: tokio::sync::RwLock::new(80),
+                fail_reads: AtomicBool::new(false),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Provider for ScriptedBatteryProvider {
+        fn id(&self) -> &'static str {
+            "scripted-battery"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-battery")
+        }
+
+        fn timeout(&self) -> std::time::Duration {
+            std::time::Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted-battery: {feature} недоступен")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<orbis_core::diagnostics::DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl BatteryProvider for ScriptedBatteryProvider {
+        async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
+            if self.fail_reads.load(Ordering::SeqCst) {
+                return Err(ProviderError::BackendUnavailable(
+                    "scripted battery read failure".into(),
+                ));
+            }
+            let p = *self.limit.read().await;
+            Ok(ChargeLimit::new(
+                true,
+                Some(Percent::new(p).expect("range")),
+                Percent::new(40).expect("const"),
+                Percent::new(100).expect("const"),
+                1,
+            )
+            .expect("valid"))
+        }
+
+        async fn set_charge_limit(&self, percent: u8) -> Result<ApplyResult, ProviderError> {
+            *self.limit.write().await = percent;
+            Ok(ApplyResult::Applied)
+        }
+
+        async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
+            Ok(ApplyResult::Applied)
+        }
+
+        fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
+            ValidationResult::Valid
+        }
+    }
+
+    #[tokio::test]
+    async fn battery_readback_error_preserves_apply_result() {
+        let provider = Arc::new(ScriptedBatteryProvider::new());
+        let svc = AppService::new(provider.clone());
+
+        provider.fail_reads.store(true, Ordering::SeqCst);
+        let err = svc.set_charge_limit(40).await.unwrap_err();
+
+        match err {
+            CommandError::ReadBack { result, source } => {
                 assert!(result.is_applied());
                 assert!(matches!(source, ProviderError::BackendUnavailable(_)));
             }
@@ -382,6 +640,6 @@ mod tests {
         }
 
         // Команда действительно применилась, несмотря на неудачный read-back.
-        assert_eq!(*provider.current.read().await, PerformanceProfile::Silent);
+        assert_eq!(*provider.limit.read().await, 40);
     }
 }
