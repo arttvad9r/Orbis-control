@@ -9,13 +9,24 @@
 //! детерминированно через `slint::platform` + SoftwareRenderer (масштаб 100%,
 //! без окна, без новых зависимостей).
 
+// UiAction::Perf больше не конструируется в production: Performance Mode идёт
+// через worker. Контроллер пока используется для GPU/Battery (синхронно).
+#[allow(dead_code)]
 mod controller;
 
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
+use orbis_application::{AppService, CommandError, PerformanceCommandOutcome};
+use orbis_core::action::ApplyResult;
+use orbis_core::profile::PerformanceProfile;
+use orbis_providers::mock::MockProvider;
+use orbis_test_support::devices::build_state_arc;
+use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
 use slint::{LogicalSize, PhysicalSize, Rgb8Pixel, WindowSize};
+use tokio::sync::mpsc::UnboundedSender;
 
 slint::include_modules!();
 
@@ -130,22 +141,115 @@ fn from_slint(state: &UiState) -> controller::UiState {
 }
 
 /// Создать окно, установить состояние и подключить обработчики.
-fn build_app(state: &controller::UiState) -> Result<AppWindow, slint::PlatformError> {
+fn build_app(
+    state: &controller::UiState,
+    perf_tx: Option<UnboundedSender<WorkerCommand>>,
+) -> Result<AppWindow, slint::PlatformError> {
     let app = AppWindow::new()?;
     app.set_ui_state(to_slint(state));
-    wire_callbacks(&app);
+    wire_callbacks(&app, perf_tx);
     Ok(app)
 }
 
-/// Локальные изменения состояния (только память, без аппаратных вызовов).
-fn wire_callbacks(app: &AppWindow) {
+/// UI-boundary: преобразование UI-индекса карточки в доменный профиль.
+///
+/// 0 -> Silent, 1 -> Balanced, 2 -> Turbo; любое другое значение -> None.
+fn performance_profile_from_index(index: i32) -> Option<PerformanceProfile> {
+    match index {
+        0 => Some(PerformanceProfile::Silent),
+        1 => Some(PerformanceProfile::Balanced),
+        2 => Some(PerformanceProfile::Turbo),
+        _ => None,
+    }
+}
+
+/// UI-boundary: индекс выбранной карточки из доменного профиля.
+fn perf_selected_index(profile: PerformanceProfile) -> i32 {
+    match profile {
+        PerformanceProfile::Silent => 0,
+        PerformanceProfile::Balanced => 1,
+        PerformanceProfile::Turbo => 2,
+    }
+}
+
+/// UI-boundary: существующая performance availability mask из списка доступных
+/// профилей. Маска строится по значениям enum, порядок списка не важен.
+fn performance_available_mask(available: &[PerformanceProfile]) -> i32 {
+    let mut mask = 0;
+    for p in available {
+        mask |= 1 << perf_selected_index(*p);
+    }
+    mask
+}
+
+/// Применить authoritative Performance-результат к UI-состоянию.
+///
+/// Обновляются только Performance-поля (selected и маска доступности);
+/// GPU/Battery/pending/error поля сохраняются без изменений.
+fn apply_performance_outcome(state: &mut controller::UiState, outcome: &PerformanceCommandOutcome) {
+    state.perf_selected = perf_selected_index(outcome.state.current);
+    state.available_perf_mask = performance_available_mask(&outcome.state.available);
+}
+
+/// Применить событие worker-а к UI-состоянию.
+///
+/// Ok -> authoritative state; Err (Command/ReadBack) -> UiState не изменяется,
+/// ошибка сохраняется в диагностическом журнале (UI-отображение ошибок — отдельный
+/// микрошаг).
+fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) {
+    match event {
+        WorkerEvent::Performance(Ok(outcome)) => {
+            apply_performance_outcome(state, &outcome);
+            match &outcome.result {
+                ApplyResult::Applied => {
+                    tracing::debug!("performance: профиль применён");
+                }
+                r => {
+                    tracing::warn!("performance: результат не Applied: {r:?}");
+                }
+            }
+        }
+        WorkerEvent::Performance(Err(CommandError::Command(e))) => {
+            tracing::warn!("performance: команда не выполнена: {e:?}");
+        }
+        WorkerEvent::Performance(Err(CommandError::ReadBack { result, source })) => {
+            tracing::warn!(
+                "performance: команда выполнена ({result:?}), но read-back не удался: {source:?}"
+            );
+        }
+    }
+}
+
+/// Обработчик события worker-а в UI event loop (через upgrade_in_event_loop).
+fn handle_worker_event(app: &AppWindow, event: WorkerEvent) {
+    let mut s = from_slint(&app.get_ui_state());
+    apply_performance_event(&mut s, event);
+    app.set_ui_state(to_slint(&s));
+}
+
+/// Регистрация Slint callbacks.
+///
+/// Performance: отправляет типизированную команду в worker (async результат
+/// вернётся через event sink); controller::apply(UiAction::Perf) НЕ вызывается.
+/// GPU/Battery: читают самый свежий ui-state из AppWindow и используют
+/// существующий controller::apply (синхронно).
+fn wire_callbacks(app: &AppWindow, perf_tx: Option<UnboundedSender<WorkerCommand>>) {
     {
-        let weak = app.as_weak();
+        let perf_tx = perf_tx;
         app.on_perf_clicked(move |i| {
-            if let Some(app) = weak.upgrade() {
-                let mut s = from_slint(&app.get_ui_state());
-                controller::apply(&mut s, controller::UiAction::Perf(i));
-                app.set_ui_state(to_slint(&s));
+            let Some(profile) = performance_profile_from_index(i) else {
+                tracing::warn!("perf-clicked с неизвестным индексом: {i}");
+                return;
+            };
+            match &perf_tx {
+                Some(tx) => {
+                    if let Err(e) = tx.send(WorkerCommand::SetPerformance(profile)) {
+                        tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
+                    }
+                }
+                None => {
+                    tracing::warn!("perf-clicked вне интерактивного режима (worker отсутствует)");
+                }
             }
         });
     }
@@ -238,7 +342,8 @@ fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<
     }
     slint::platform::set_platform(Box::new(SoftwarePlatform { adapter })).expect("platform once");
 
-    let app = build_app(state)?;
+    // Offscreen path: runtime/worker не создаются; Performance callback no-op.
+    let app = build_app(state, None)?;
     app.window()
         .set_size(LogicalSize::new(425.0, height as f32));
     app.show()?;
@@ -266,10 +371,165 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Интерактивный запуск через штатный winit-бэкенд (без set_platform).
-    let app = build_app(&state)?;
+    // Один явный многопоточный runtime для worker-задачи.
+    let runtime = tokio::runtime::Runtime::new()?;
+
+    // Mock provider и application service (только интерактивный путь).
+    let mock_state = build_state_arc("zephyrus-full")
+        .ok_or_else(|| anyhow::anyhow!("mock profile 'zephyrus-full' отсутствует"))?;
+    let provider = Arc::new(MockProvider::new(mock_state));
+    let service = AppService::new(provider);
+    let (perf_tx, perf_rx) = orbis_ui::worker::command_channel();
+
+    let app = build_app(&state, Some(perf_tx.clone()))?;
     app.window()
         .set_size(LogicalSize::new(425.0, window_height(&state)));
+
+    // Event sink: результат worker-а возвращается в UI event loop через
+    // Weak<AppWindow>::upgrade_in_event_loop (безопасно при уничтоженном окне).
+    let weak = app.as_weak();
+    let event_sink = move |event: WorkerEvent| {
+        let weak = weak.clone();
+        if let Err(e) = weak.upgrade_in_event_loop(move |app| {
+            handle_worker_event(&app, event);
+        }) {
+            tracing::warn!("не удалось вернуть событие worker-а в event loop: {e:?}");
+        }
+    };
+    runtime.spawn(run_worker(service, perf_rx, event_sink));
+
     app.show()?;
     slint::run_event_loop()?;
+
+    // Завершение: освобождаем клоны sender (в callbacks), локальный sender и
+    // runtime. Weak в worker-е не удерживает окно живым; после drop(app) sender
+    // закрыт -> worker завершается.
+    drop(app);
+    drop(perf_tx);
+    drop(runtime);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_state() -> controller::UiState {
+        controller::UiState::from_mock_profile("zephyrus-full")
+    }
+
+    #[test]
+    fn performance_index_mapping() {
+        assert_eq!(
+            performance_profile_from_index(0),
+            Some(PerformanceProfile::Silent)
+        );
+        assert_eq!(
+            performance_profile_from_index(1),
+            Some(PerformanceProfile::Balanced)
+        );
+        assert_eq!(
+            performance_profile_from_index(2),
+            Some(PerformanceProfile::Turbo)
+        );
+        assert_eq!(performance_profile_from_index(-1), None);
+        assert_eq!(performance_profile_from_index(7), None);
+    }
+
+    #[test]
+    fn performance_available_mask_ignores_order() {
+        let full = vec![
+            PerformanceProfile::Silent,
+            PerformanceProfile::Balanced,
+            PerformanceProfile::Turbo,
+        ];
+        let shuffled = vec![
+            PerformanceProfile::Turbo,
+            PerformanceProfile::Silent,
+            PerformanceProfile::Balanced,
+        ];
+        assert_eq!(performance_available_mask(&full), 0b111);
+        assert_eq!(performance_available_mask(&shuffled), 0b111);
+        assert_eq!(
+            performance_available_mask(&[PerformanceProfile::Turbo, PerformanceProfile::Silent]),
+            0b101
+        );
+    }
+
+    #[test]
+    fn authoritative_performance_result_updates_ui() {
+        let mut s = base_state();
+        assert_eq!(s.perf_selected, 1); // Balanced из mock
+
+        let outcome = PerformanceCommandOutcome {
+            result: ApplyResult::Applied,
+            state: orbis_application::PerformanceState {
+                current: PerformanceProfile::Silent,
+                available: vec![
+                    PerformanceProfile::Silent,
+                    PerformanceProfile::Balanced,
+                    PerformanceProfile::Turbo,
+                ],
+            },
+        };
+        apply_performance_event(&mut s, WorkerEvent::Performance(Ok(outcome)));
+
+        assert_eq!(s.perf_selected, 0); // из authoritative state
+        assert_eq!(s.available_perf_mask, 0b111);
+    }
+
+    #[test]
+    fn performance_result_preserves_other_sections() {
+        let mut s = base_state();
+        // задаём отличимые не-Performance поля
+        s.gpu_selected = 3;
+        s.gpu_ultimate_pending = true;
+        s.gpu_section_error = true;
+        s.charge_limit = 60;
+        s.cpu_temp = 99;
+
+        let outcome = PerformanceCommandOutcome {
+            result: ApplyResult::Applied,
+            state: orbis_application::PerformanceState {
+                current: PerformanceProfile::Turbo,
+                available: vec![PerformanceProfile::Turbo],
+            },
+        };
+        apply_performance_event(&mut s, WorkerEvent::Performance(Ok(outcome)));
+
+        assert_eq!(s.perf_selected, 2);
+        assert_eq!(s.available_perf_mask, 0b100);
+        assert_eq!(s.gpu_selected, 3);
+        assert!(s.gpu_ultimate_pending);
+        assert!(s.gpu_section_error);
+        assert_eq!(s.charge_limit, 60);
+        assert_eq!(s.cpu_temp, 99);
+    }
+
+    #[test]
+    fn performance_command_error_does_not_mutate_ui() {
+        let mut s = base_state();
+        let before = s.clone();
+        apply_performance_event(
+            &mut s,
+            WorkerEvent::Performance(Err(CommandError::Command(
+                orbis_providers::error::ProviderError::Unsupported("x".into()),
+            ))),
+        );
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn performance_readback_error_does_not_mutate_ui() {
+        let mut s = base_state();
+        let before = s.clone();
+        apply_performance_event(
+            &mut s,
+            WorkerEvent::Performance(Err(CommandError::ReadBack {
+                result: ApplyResult::Applied,
+                source: orbis_providers::error::ProviderError::Timeout("t".into()),
+            })),
+        );
+        assert_eq!(s, before);
+    }
 }

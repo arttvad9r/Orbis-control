@@ -28,7 +28,12 @@ orbis-application = { path = "../orbis-application", version = "0.1.0" }
 # Прямая зависимость на provider traits для worker; default-features=false,
 # чтобы не добавлять новых причин включения mock в production (mock уже идёт
 # транзитивно через orbis-sessiond на текущем этапе).
-orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false }
+orbis-providers = {
+    path = "../orbis-providers",
+    version = "0.1.0",
+    default-features = false,
+    features = ["mock"],
+}
 orbis-sessiond = { workspace = true }
 orbis-test-support = { workspace = true }
 image = { workspace = true }
@@ -38,8 +43,6 @@ slint-build = "1"
 
 [dev-dependencies]
 tempfile = { workspace = true }
-# MockProvider для unit-тестов worker (тестовая сборка включает feature mock).
-orbis-providers = { path = "../orbis-providers", version = "0.1.0", features = ["mock"] }
 
 [features]
 mock = ["orbis-sessiond/mock"]
