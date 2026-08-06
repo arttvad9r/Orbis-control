@@ -17,11 +17,12 @@
 
 use std::sync::Arc;
 
-use orbis_core::action::ApplyResult;
+use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::battery::ChargeLimit;
+use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
-use orbis_providers::traits::{BatteryProvider, PerformanceProvider};
+use orbis_providers::traits::{BatteryProvider, GpuProvider, PerformanceProvider};
 
 /// Authoritative состояние Performance Mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,23 +197,106 @@ where
     }
 }
 
+/// Authoritative состояние GPU Mode.
+///
+/// Собирается только через существующий `GpuProvider` (несколько независимых
+/// async reads); отдельные поля не объединяются в упрощённый enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GpuState {
+    /// Запрошенный режим (`GpuProvider::requested_mode`).
+    pub requested: GpuMode,
+    /// Applied физический MUX (`GpuProvider::mux_state`).
+    pub mux: GpuMuxState,
+    /// Applied доступ приложений к dGPU (`GpuProvider::access_policy`).
+    pub access_policy: GpuAccessPolicy,
+    /// Applied power state dGPU (`GpuProvider::power_state`).
+    pub power_state: GpuPowerState,
+    /// Требование для запрошенного режима (`GpuProvider::requirement_for`).
+    pub requirement: ActionRequirement,
+}
+
+/// Результат команды GPU Mode (alias общего `CommandOutcome`).
+pub type GpuCommandOutcome = CommandOutcome<GpuState>;
+
+/// Ошибка команды GPU Mode (alias общего `CommandError`).
+pub type SetGpuModeError = CommandError;
+
+impl<P> AppService<P>
+where
+    P: GpuProvider + Send + Sync,
+{
+    /// Прочитать authoritative GPU-состояние.
+    ///
+    /// Поля читаются через отдельные provider методы; внутренний кэш отсутствует.
+    /// Примечание: составной snapshot неатомарен (см. известные ограничения).
+    pub async fn gpu_state(&self) -> Result<GpuState, ProviderError> {
+        let requested = self.provider.requested_mode().await?;
+        let mux = self.provider.mux_state().await?;
+        let access_policy = self.provider.access_policy().await?;
+        let power_state = self.provider.power_state().await?;
+        let requirement = self.provider.requirement_for(requested);
+        Ok(GpuState {
+            requested,
+            mux,
+            access_policy,
+            power_state,
+            requirement,
+        })
+    }
+
+    /// Установить GPU Mode.
+    ///
+    /// 1. Вызывает `GpuProvider::set_mode(mode, confirmed)` без преобразования
+    ///    флага `confirmed` и без собственной валидации режима.
+    /// 2. После успешного provider-вызова перечитывает authoritative GPU state.
+    /// 3. Возвращает исходный `ApplyResult` и `GpuState` из read-back.
+    ///
+    /// Ошибка мутации — `SetGpuModeError::Command`; ошибка read-back после
+    /// успешной мутации — `SetGpuModeError::ReadBack` с сохранённым
+    /// `ApplyResult`.
+    pub async fn set_gpu_mode(
+        &self,
+        mode: GpuMode,
+        confirmed: bool,
+    ) -> Result<GpuCommandOutcome, SetGpuModeError> {
+        let result = self
+            .provider
+            .set_mode(mode, confirmed)
+            .await
+            .map_err(CommandError::Command)?;
+        let state = self
+            .gpu_state()
+            .await
+            .map_err(|source| CommandError::ReadBack {
+                result: result.clone(),
+                source,
+            })?;
+        Ok(CommandOutcome { result, state })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use async_trait::async_trait;
-    use orbis_core::action::ApplyResult;
+    use orbis_core::action::{ActionRequirement, ApplyResult};
     use orbis_core::battery::ChargeLimit;
+    use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
     use orbis_core::identity::BackendIdentity;
     use orbis_core::newtypes::Percent;
     use orbis_core::profile::PerformanceProfile;
     use orbis_providers::error::{ProviderError, ValidationResult};
     use orbis_providers::mock::{MockErrorMode, MockProvider};
-    use orbis_providers::traits::{BatteryProvider, PerformanceProvider, Provider, ProviderHealth};
+    use orbis_providers::traits::{
+        BatteryProvider, GpuProvider, PerformanceProvider, Provider, ProviderHealth,
+    };
     use orbis_test_support::devices::build_state_arc;
 
-    use super::{AppService, ChargeLimitCommandOutcome, CommandError, PerformanceState};
+    use super::{
+        AppService, ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome, PerformanceState,
+    };
 
     fn service() -> (Arc<MockProvider>, AppService<MockProvider>) {
         let state = build_state_arc("zephyrus-full").expect("profile exists");
@@ -641,5 +725,280 @@ mod tests {
 
         // Команда действительно применилась, несмотря на неудачный read-back.
         assert_eq!(*provider.limit.read().await, 40);
+    }
+
+    // -----------------------------------------------------------------------
+    // GPU Mode
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn initial_gpu_state_zephyrus() {
+        let (_provider, svc) = service();
+        let st = svc.gpu_state().await.unwrap();
+        assert_eq!(st.requested, GpuMode::Standard);
+        assert_eq!(st.mux, GpuMuxState::Integrated);
+        assert_eq!(st.access_policy, GpuAccessPolicy::Unblocked);
+        assert_eq!(st.power_state, GpuPowerState::Active);
+        assert_eq!(st.requirement, ActionRequirement::None);
+    }
+
+    #[tokio::test]
+    async fn applied_mode_optimized_readback() {
+        let (_provider, svc) = service();
+        let outcome: GpuCommandOutcome = svc.set_gpu_mode(GpuMode::Optimized, true).await.unwrap();
+        // MockProvider применяет Optimized немедленно.
+        assert!(outcome.result.is_applied());
+        assert_eq!(outcome.state.requested, GpuMode::Optimized);
+        assert_eq!(outcome.state.mux, GpuMuxState::Integrated);
+        assert_eq!(outcome.state.access_policy, GpuAccessPolicy::Blocked);
+        assert_eq!(outcome.state.power_state, GpuPowerState::Active);
+    }
+
+    #[tokio::test]
+    async fn standard_to_ultimate_pending_keeps_applied() {
+        let (_provider, svc) = service();
+        let outcome = svc.set_gpu_mode(GpuMode::Ultimate, true).await.unwrap();
+        assert!(matches!(
+            outcome.result,
+            ApplyResult::Pending {
+                requirement: ActionRequirement::Reboot
+            }
+        ));
+        assert_eq!(outcome.state.requested, GpuMode::Ultimate);
+        // applied state не меняется до перезагрузки
+        assert_eq!(outcome.state.mux, GpuMuxState::Integrated);
+        assert_eq!(outcome.state.access_policy, GpuAccessPolicy::Unblocked);
+        assert_eq!(outcome.state.power_state, GpuPowerState::Active);
+        assert_eq!(outcome.state.requirement, ActionRequirement::Reboot);
+    }
+
+    #[tokio::test]
+    async fn repeated_ultimate_is_idempotent() {
+        let (_provider, svc) = service();
+        let first = svc.set_gpu_mode(GpuMode::Ultimate, true).await.unwrap();
+        let second = svc.set_gpu_mode(GpuMode::Ultimate, true).await.unwrap();
+        assert!(matches!(second.result, ApplyResult::Pending { .. }));
+        assert_eq!(second.state.requested, GpuMode::Ultimate);
+        assert_eq!(second.state, first.state);
+    }
+
+    #[tokio::test]
+    async fn eco_keeps_applied_and_returns_logout_pending() {
+        let (_provider, svc) = service();
+        let outcome = svc.set_gpu_mode(GpuMode::Eco, true).await.unwrap();
+        // Фактическая семантика MockProvider: Eco -> Pending/Logout, applied не меняется.
+        assert!(matches!(
+            outcome.result,
+            ApplyResult::Pending {
+                requirement: ActionRequirement::Logout
+            }
+        ));
+        assert_eq!(outcome.state.requested, GpuMode::Eco);
+        assert_eq!(outcome.state.mux, GpuMuxState::Integrated);
+        assert_eq!(outcome.state.access_policy, GpuAccessPolicy::Unblocked);
+        assert_eq!(outcome.state.requirement, ActionRequirement::Logout);
+    }
+
+    #[tokio::test]
+    async fn gpu_backend_down_returns_command_error_without_mutation() {
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let provider = Arc::new(MockProvider::new(state.clone()));
+        let svc = AppService::new(provider.clone());
+
+        state.write().await.error_mode = MockErrorMode::BackendDown;
+        let err = svc.set_gpu_mode(GpuMode::Ultimate, true).await.unwrap_err();
+        assert!(matches!(
+            err,
+            CommandError::Command(ProviderError::BackendUnavailable(_))
+        ));
+
+        state.write().await.error_mode = MockErrorMode::None;
+        let st = svc.gpu_state().await.unwrap();
+        assert_eq!(st.requested, GpuMode::Standard);
+        assert_eq!(st.mux, GpuMuxState::Integrated);
+    }
+
+    #[tokio::test]
+    async fn gpu_permission_denied_returns_command_error() {
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let provider = Arc::new(MockProvider::new(state.clone()));
+        let svc = AppService::new(provider.clone());
+
+        state.write().await.error_mode = MockErrorMode::PermissionDenied;
+        let err = svc.set_gpu_mode(GpuMode::Ultimate, true).await.unwrap_err();
+        assert!(matches!(
+            err,
+            CommandError::Command(ProviderError::PermissionDenied(_))
+        ));
+
+        state.write().await.error_mode = MockErrorMode::None;
+        let st = svc.gpu_state().await.unwrap();
+        assert_eq!(st.requested, GpuMode::Standard);
+    }
+
+    #[tokio::test]
+    async fn gpu_snapshot_is_readback_not_cached() {
+        let (provider, svc) = service();
+        // Прямое изменение provider через trait (вне AppService).
+        provider.set_mode(GpuMode::Optimized, true).await.unwrap();
+        let st = svc.gpu_state().await.unwrap();
+        assert_eq!(st.requested, GpuMode::Optimized);
+        assert_eq!(st.access_policy, GpuAccessPolicy::Blocked);
+    }
+
+    // -----------------------------------------------------------------------
+    // Scripted GPU provider
+    // -----------------------------------------------------------------------
+
+    /// Тестовый GPU-провайдер: фиксирует полученные mode/confirmed, применяет
+    /// requested; чтение может быть принудительно переведено в ошибку.
+    struct ScriptedGpuProvider {
+        requested: tokio::sync::RwLock<GpuMode>,
+        mux: tokio::sync::RwLock<GpuMuxState>,
+        access: tokio::sync::RwLock<GpuAccessPolicy>,
+        power: tokio::sync::RwLock<GpuPowerState>,
+        fail_reads: AtomicBool,
+        last_mode: tokio::sync::RwLock<Option<GpuMode>>,
+        last_confirmed: tokio::sync::RwLock<Option<bool>>,
+    }
+
+    impl ScriptedGpuProvider {
+        fn new() -> Self {
+            Self {
+                requested: tokio::sync::RwLock::new(GpuMode::Standard),
+                mux: tokio::sync::RwLock::new(GpuMuxState::Integrated),
+                access: tokio::sync::RwLock::new(GpuAccessPolicy::Unblocked),
+                power: tokio::sync::RwLock::new(GpuPowerState::Active),
+                fail_reads: AtomicBool::new(false),
+                last_mode: tokio::sync::RwLock::new(None),
+                last_confirmed: tokio::sync::RwLock::new(None),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Provider for ScriptedGpuProvider {
+        fn id(&self) -> &'static str {
+            "scripted-gpu"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-gpu")
+        }
+
+        fn timeout(&self) -> std::time::Duration {
+            std::time::Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted-gpu: {feature} недоступен")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<orbis_core::diagnostics::DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl GpuProvider for ScriptedGpuProvider {
+        async fn requested_mode(&self) -> Result<GpuMode, ProviderError> {
+            if self.fail_reads.load(Ordering::SeqCst) {
+                return Err(ProviderError::BackendUnavailable(
+                    "scripted gpu read failure".into(),
+                ));
+            }
+            Ok(*self.requested.read().await)
+        }
+
+        async fn set_mode(
+            &self,
+            mode: GpuMode,
+            confirmed: bool,
+        ) -> Result<ApplyResult, ProviderError> {
+            *self.last_mode.write().await = Some(mode);
+            *self.last_confirmed.write().await = Some(confirmed);
+            *self.requested.write().await = mode;
+            Ok(ApplyResult::Applied)
+        }
+
+        async fn mux_state(&self) -> Result<GpuMuxState, ProviderError> {
+            if self.fail_reads.load(Ordering::SeqCst) {
+                return Err(ProviderError::BackendUnavailable(
+                    "scripted gpu read failure".into(),
+                ));
+            }
+            Ok(*self.mux.read().await)
+        }
+
+        async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError> {
+            if self.fail_reads.load(Ordering::SeqCst) {
+                return Err(ProviderError::BackendUnavailable(
+                    "scripted gpu read failure".into(),
+                ));
+            }
+            Ok(*self.access.read().await)
+        }
+
+        async fn power_state(&self) -> Result<GpuPowerState, ProviderError> {
+            if self.fail_reads.load(Ordering::SeqCst) {
+                return Err(ProviderError::BackendUnavailable(
+                    "scripted gpu read failure".into(),
+                ));
+            }
+            Ok(*self.power.read().await)
+        }
+
+        fn requirement_for(&self, _mode: GpuMode) -> ActionRequirement {
+            ActionRequirement::None
+        }
+
+        fn validate_mode(&self, _mode: GpuMode) -> ValidationResult {
+            ValidationResult::Valid
+        }
+    }
+
+    #[tokio::test]
+    async fn gpu_confirmed_flag_passed_unmodified() {
+        let provider = Arc::new(ScriptedGpuProvider::new());
+        let svc = AppService::new(provider.clone());
+
+        // false передаётся без изменения
+        svc.set_gpu_mode(GpuMode::Optimized, false).await.unwrap();
+        assert_eq!(*provider.last_mode.read().await, Some(GpuMode::Optimized));
+        assert_eq!(*provider.last_confirmed.read().await, Some(false));
+
+        // true передаётся без изменения
+        svc.set_gpu_mode(GpuMode::Eco, true).await.unwrap();
+        assert_eq!(*provider.last_mode.read().await, Some(GpuMode::Eco));
+        assert_eq!(*provider.last_confirmed.read().await, Some(true));
+    }
+
+    #[tokio::test]
+    async fn gpu_readback_error_preserves_apply_result() {
+        let provider = Arc::new(ScriptedGpuProvider::new());
+        let svc = AppService::new(provider.clone());
+
+        provider.fail_reads.store(true, Ordering::SeqCst);
+        let err = svc
+            .set_gpu_mode(GpuMode::Optimized, false)
+            .await
+            .unwrap_err();
+
+        match err {
+            CommandError::ReadBack { result, source } => {
+                assert!(result.is_applied());
+                assert!(matches!(source, ProviderError::BackendUnavailable(_)));
+            }
+            other => panic!("ожидался ReadBack, получен: {other:?}"),
+        }
+
+        // Команда применилась: mode/confirmed переданы правильно.
+        assert_eq!(*provider.last_mode.read().await, Some(GpuMode::Optimized));
+        assert_eq!(*provider.last_confirmed.read().await, Some(false));
+        assert_eq!(*provider.requested.read().await, GpuMode::Optimized);
     }
 }
