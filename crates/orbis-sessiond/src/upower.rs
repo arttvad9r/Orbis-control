@@ -88,7 +88,14 @@ impl ZbusUPowerChargeLimitSource {
 #[async_trait]
 impl UPowerChargeLimitSource for ZbusUPowerChargeLimitSource {
     async fn read_charge_limit(&self) -> Result<UPowerChargeLimitSnapshot, ProviderError> {
-        let proxy = UPowerDeviceProxy::new(&self.connection, self.object_path.clone())
+        // Явно отключаем property cache: каждый getter выполняет прямой
+        // отдельный D-Bus Get (без GetAll), строго последовательно, с
+        // коротким замыканием после первой ошибки.
+        let proxy = UPowerDeviceProxy::builder(&self.connection)
+            .path(self.object_path.clone())
+            .map_err(|e| ProviderError::Dbus(e.to_string()))?
+            .cache_properties(zbus::proxy::CacheProperties::No)
+            .build()
             .await
             .map_err(|e| ProviderError::Dbus(e.to_string()))?;
         let supported = proxy
