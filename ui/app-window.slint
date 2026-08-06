@@ -47,7 +47,7 @@ component TelemetryCell {
 
 export component AppWindow inherits Window {
     width: 425px;
-    height: 415px;
+    height: 381px;
     title: "Orbis Control";
     background: Palette.window-background;
 
@@ -71,86 +71,9 @@ export component AppWindow inherits Window {
     callback perf-clicked(int);
     callback gpu-clicked(int);
     callback charge-changed(float);
-    callback close-clicked();
-    callback minimize-clicked();
 
     VerticalLayout {
-        // ---- Верхняя панель ----
-        Rectangle {
-            height: 34px;
-            background: Palette.titlebar-background;
 
-            HorizontalLayout {
-                padding-left: 10px;
-                padding-right: 6px;
-                alignment: center;
-
-                Text {
-                    text: "Orbis Control";
-                    font-size: 13px;
-                    font-weight: 600;
-                    color: Palette.text-primary;
-                    vertical-alignment: center;
-                }
-
-                Rectangle { }
-
-                // свернуть
-                Rectangle {
-                    width: 28px;
-                    height: 28px;
-                    border-radius: 4px;
-                    background: min-touch.has-hover ? Palette.surface-hover : transparent;
-                    min-touch := TouchArea {
-                        width: parent.width;
-                        height: parent.height;
-                        clicked => { root.minimize-clicked(); }
-                    }
-                    Path {
-                        width: 12px;
-                        height: 12px;
-                        x: (parent.width - 12px) / 2;
-                        y: (parent.height - 12px) / 2;
-                        commands: "M 1 6 L 11 6";
-                        stroke: Palette.text-secondary;
-                        stroke-width: 2px;
-                        stroke-line-cap: round;
-                        viewbox-width: 12;
-                        viewbox-height: 12;
-                    }
-                }
-
-                // закрыть
-                Rectangle {
-                    width: 28px;
-                    height: 28px;
-                    border-radius: 4px;
-                    background: close-touch.has-hover ? Palette.error : transparent;
-                    close-touch := TouchArea {
-                        width: parent.width;
-                        height: parent.height;
-                        clicked => { root.close-clicked(); }
-                    }
-                    Path {
-                        width: 12px;
-                        height: 12px;
-                        x: (parent.width - 12px) / 2;
-                        y: (parent.height - 12px) / 2;
-                        commands: "M 1 1 L 11 11 M 11 1 L 1 11";
-                        stroke: close-touch.has-hover ? #FFFFFF : Palette.text-secondary;
-                        stroke-width: 2px;
-                        stroke-line-cap: round;
-                        viewbox-width: 12;
-                        viewbox-height: 12;
-                    }
-                }
-            }
-        }
-
-        Rectangle {
-            height: 1px;
-            background: Palette.border-default;
-        }
 
         // ---- Контент ----
         VerticalLayout {

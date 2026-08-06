@@ -73,10 +73,11 @@ fn state_for_scenario(name: &str) -> controller::UiState {
 
 /// Высота окна: в состоянии error добавляется баннер GPU-ошибки.
 fn window_height(state: &controller::UiState) -> f32 {
+    // высота клиентской области без внутреннего titlebar (34px удалены)
     if state.gpu_section_error {
-        440.0
+        406.0
     } else {
-        415.0
+        381.0
     }
 }
 
@@ -159,17 +160,6 @@ fn wire_callbacks(app: &AppWindow) {
                 let mut s = from_slint(&app.get_ui_state());
                 controller::apply(&mut s, controller::UiAction::Charge(v));
                 app.set_ui_state(to_slint(&s));
-            }
-        });
-    }
-    app.on_close_clicked(|| {
-        let _ = slint::quit_event_loop();
-    });
-    {
-        let weak = app.as_weak();
-        app.on_minimize_clicked(move || {
-            if let Some(app) = weak.upgrade() {
-                app.window().set_minimized(true);
             }
         });
     }
