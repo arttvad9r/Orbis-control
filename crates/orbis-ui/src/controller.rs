@@ -14,6 +14,8 @@ use orbis_core::profile::PerformanceProfile;
 pub struct UiState {
     /// Выбранный профиль производительности: 0=Silent, 1=Balanced, 2=Turbo.
     pub perf_selected: i32,
+    /// Битовая маска доступных профилей (bit0=Silent, bit1=Balanced, bit2=Turbo).
+    pub available_perf_mask: i32,
     /// Выбранный GPU-режим: 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized.
     pub gpu_selected: i32,
     /// Ultimate ожидает перезагрузки (pending reboot).
@@ -36,6 +38,16 @@ pub struct UiState {
     pub mock_profile: String,
 }
 
+/// Явное исчерпывающее сопоставление профиля с индексом кнопки
+/// (без wildcard-ветки, чтобы добавление новых режимов было заметным).
+fn perf_index(p: PerformanceProfile) -> i32 {
+    match p {
+        PerformanceProfile::Silent => 0,
+        PerformanceProfile::Balanced => 1,
+        PerformanceProfile::Turbo => 2,
+    }
+}
+
 impl UiState {
     /// Начальное состояние из mock-профиля `zephyrus-full`.
     ///
@@ -45,11 +57,11 @@ impl UiState {
         let state =
             orbis_test_support::devices::build_state(profile_name).expect("mock profile exists");
 
-        let perf_selected = match state.profile {
-            PerformanceProfile::Silent => 0,
-            PerformanceProfile::Balanced => 1,
-            PerformanceProfile::Turbo => 2,
-        };
+        let perf_selected = perf_index(state.profile);
+        let mut available_perf_mask = 0;
+        for p in &state.profiles {
+            available_perf_mask |= 1 << perf_index(*p);
+        }
 
         let gpu_selected = match state.gpu_mode {
             GpuMode::Eco => 0,
@@ -100,6 +112,7 @@ impl UiState {
 
         Self {
             perf_selected,
+            available_perf_mask,
             gpu_selected,
             gpu_ultimate_pending: false,
             gpu_ultimate_disabled: false,
@@ -132,7 +145,11 @@ pub enum UiAction {
 pub fn apply(state: &mut UiState, action: UiAction) {
     match action {
         UiAction::Perf(i) if (0..=2).contains(&i) => {
-            state.perf_selected = i;
+            // Только симуляция: меняем локальное UI-состояние; провайдеры и
+            // оборудование не вызываются (временный in-process срез).
+            if state.available_perf_mask & (1 << i) != 0 {
+                state.perf_selected = i;
+            }
         }
         UiAction::Gpu(i) if (0..=3).contains(&i) => {
             state.gpu_selected = i;
@@ -175,6 +192,89 @@ mod tests {
         assert_eq!(s.perf_selected, 2);
         apply(&mut s, UiAction::Perf(9)); // вне диапазона — игнор
         assert_eq!(s.perf_selected, 2);
+    }
+
+    #[test]
+    fn initial_zephyrus_is_balanced() {
+        let s = UiState::from_mock_profile("zephyrus-full");
+        assert_eq!(s.perf_selected, 1); // Balanced
+        assert_eq!(s.available_perf_mask, 0b111);
+    }
+
+    #[test]
+    fn balanced_to_silent() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Perf(0));
+        assert_eq!(s.perf_selected, 0);
+    }
+
+    #[test]
+    fn silent_to_turbo() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Perf(0));
+        apply(&mut s, UiAction::Perf(2));
+        assert_eq!(s.perf_selected, 2);
+    }
+
+    #[test]
+    fn turbo_to_balanced() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Perf(2));
+        apply(&mut s, UiAction::Perf(1));
+        assert_eq!(s.perf_selected, 1);
+    }
+
+    #[test]
+    fn repeated_selection_is_idempotent() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Perf(1));
+        let before = s.clone();
+        apply(&mut s, UiAction::Perf(1));
+        assert_eq!(s, before); // состояние не изменилось, ошибки нет
+        assert_eq!(s.perf_selected, 1);
+    }
+
+    #[test]
+    fn unsupported_profile_is_rejected() {
+        // non-asus: доступны только Balanced и Turbo (Silent отсутствует в маске).
+        let mut s = UiState::from_mock_profile("non-asus");
+        assert_eq!(s.available_perf_mask, 0b110);
+        let before = s.clone();
+        apply(&mut s, UiAction::Perf(0)); // Silent недоступен
+        assert_eq!(s, before);
+        assert_eq!(s.perf_selected, 1);
+    }
+
+    #[test]
+    fn profile_bit_mapping() {
+        // Silent = bit 0, Balanced = bit 1, Turbo = bit 2 (исчерпывающее сопоставление).
+        assert_eq!(perf_index(PerformanceProfile::Silent), 0);
+        assert_eq!(perf_index(PerformanceProfile::Balanced), 1);
+        assert_eq!(perf_index(PerformanceProfile::Turbo), 2);
+        assert_eq!(1 << perf_index(PerformanceProfile::Silent), 0b001);
+        assert_eq!(1 << perf_index(PerformanceProfile::Balanced), 0b010);
+        assert_eq!(1 << perf_index(PerformanceProfile::Turbo), 0b100);
+    }
+
+    #[test]
+    fn rust_to_slint_preserves_mask() {
+        // Конвертация Rust -> Slint сохраняет маску 0b111 для zephyrus-full.
+        let s = UiState::from_mock_profile("zephyrus-full");
+        let slint_state = crate::to_slint(&s);
+        assert_eq!(slint_state.available_perf_mask, 0b111);
+        assert_eq!(slint_state.perf_selected, 1); // Balanced
+    }
+
+    #[test]
+    fn disabled_by_mask_is_rejected() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.available_perf_mask = 0b001; // доступен только Silent
+        apply(&mut s, UiAction::Perf(0)); // разрешён
+        assert_eq!(s.perf_selected, 0);
+        let before = s.clone();
+        apply(&mut s, UiAction::Perf(1)); // Balanced недоступен -> без изменений
+        assert_eq!(s, before);
+        assert_eq!(s.perf_selected, 0);
     }
 
     #[test]

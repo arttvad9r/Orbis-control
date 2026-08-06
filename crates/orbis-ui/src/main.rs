@@ -88,6 +88,7 @@ fn window_height(state: &controller::UiState) -> f32 {
 fn to_slint(state: &controller::UiState) -> UiState {
     UiState {
         perf_selected: state.perf_selected,
+        available_perf_mask: state.available_perf_mask,
         gpu_selected: state.gpu_selected,
         gpu_ultimate_pending: state.gpu_ultimate_pending,
         gpu_ultimate_disabled: state.gpu_ultimate_disabled,
@@ -107,6 +108,7 @@ fn to_slint(state: &controller::UiState) -> UiState {
 fn from_slint(state: &UiState) -> controller::UiState {
     controller::UiState {
         perf_selected: state.perf_selected,
+        available_perf_mask: state.available_perf_mask,
         gpu_selected: state.gpu_selected,
         gpu_ultimate_pending: state.gpu_ultimate_pending,
         gpu_ultimate_disabled: state.gpu_ultimate_disabled,

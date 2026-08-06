@@ -9,6 +9,7 @@ import { Palette } from "themes/dark.slint";
 
 export struct UiState {
     perf-selected: int,             // 0=Silent, 1=Balanced, 2=Turbo
+    available-perf-mask: int,       // bit0=Silent, bit1=Balanced, bit2=Turbo
     gpu-selected: int,              // 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized
     gpu-ultimate-pending: bool,
     gpu-ultimate-disabled: bool,
@@ -53,6 +54,7 @@ export component AppWindow inherits Window {
 
     in-out property <UiState> ui-state: {
         perf-selected: 1,
+        available-perf-mask: 0,
         gpu-selected: 1,
         gpu-ultimate-pending: false,
         gpu-ultimate-disabled: false,
@@ -71,6 +73,13 @@ export component AppWindow inherits Window {
     callback perf-clicked(int);
     callback gpu-clicked(int);
     callback charge-changed(float);
+
+    // Проверка бита маски доступности арифметикой: в Slint 1.13 нет побитовых
+    // операторов (&), поэтому бит извлекается делением и Math.floor.
+    function bit-set(mask: int, bit: int) -> bool {
+        let shifted = Math.floor(mask / bit);
+        return shifted - 2 * Math.floor(shifted / 2) == 1;
+    }
 
     VerticalLayout {
 
@@ -95,6 +104,7 @@ export component AppWindow inherits Window {
                         accent: Palette.silent;
                         icon-kind: 0;
                         selected: root.ui-state.perf-selected == 0;
+                        disabled: !root.bit-set(root.ui-state.available-perf-mask, 1);
                         clicked => { root.perf-clicked(0); }
                     }
                     ModeCard {
@@ -103,6 +113,7 @@ export component AppWindow inherits Window {
                         accent: Palette.balanced;
                         icon-kind: 1;
                         selected: root.ui-state.perf-selected == 1;
+                        disabled: !root.bit-set(root.ui-state.available-perf-mask, 2);
                         clicked => { root.perf-clicked(1); }
                     }
                     ModeCard {
@@ -111,6 +122,7 @@ export component AppWindow inherits Window {
                         accent: Palette.turbo;
                         icon-kind: 2;
                         selected: root.ui-state.perf-selected == 2;
+                        disabled: !root.bit-set(root.ui-state.available-perf-mask, 4);
                         clicked => { root.perf-clicked(2); }
                     }
                 }
