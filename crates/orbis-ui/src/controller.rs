@@ -3,7 +3,7 @@
 //! Источник данных — mock-профиль `zephyrus-full` из `orbis-test-support`
 //! (публичный API). После загрузки UI работает полностью in-process:
 //! кнопки меняют только локальное состояние интерфейса, никаких аппаратных
-//! вызовов, D-Bus, sysfs и sessiond здесь нет.
+//! вызовов, системных интерфейсов и фоновых демонов здесь нет.
 
 use orbis_core::fan::FanId;
 use orbis_core::gpu::GpuMode;
@@ -18,7 +18,10 @@ pub struct UiState {
     pub available_perf_mask: i32,
     /// Выбранный GPU-режим: 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized.
     pub gpu_selected: i32,
-    /// Ultimate ожидает перезагрузки (pending reboot).
+    /// Битовая маска доступных GPU-режимов (bit0=Eco, bit1=Standard,
+    /// bit2=Ultimate, bit3=Optimized).
+    pub available_gpu_mask: i32,
+    /// Ultimate ожидает применения после перезагрузки (pending state).
     pub gpu_ultimate_pending: bool,
     /// Ultimate недоступен (например, MUX unavailable).
     pub gpu_ultimate_disabled: bool,
@@ -36,6 +39,17 @@ pub struct UiState {
     /// Служебная информация.
     pub version: String,
     pub mock_profile: String,
+}
+
+/// Явное исчерпывающее сопоставление GPU-режима с индексом кнопки
+/// (без wildcard-ветки, чтобы добавление новых режимов было заметным).
+fn gpu_index(m: GpuMode) -> i32 {
+    match m {
+        GpuMode::Eco => 0,
+        GpuMode::Standard => 1,
+        GpuMode::Ultimate => 2,
+        GpuMode::Optimized => 3,
+    }
 }
 
 /// Явное исчерпывающее сопоставление профиля с индексом кнопки
@@ -63,12 +77,14 @@ impl UiState {
             available_perf_mask |= 1 << perf_index(*p);
         }
 
-        let gpu_selected = match state.gpu_mode {
-            GpuMode::Eco => 0,
-            GpuMode::Standard => 1,
-            GpuMode::Ultimate => 2,
-            GpuMode::Optimized => 3,
-        };
+        let gpu_selected = gpu_index(state.gpu_mode);
+
+        // Доступность GPU-режимов из mock-состояния: Standard доступен всегда
+        // (гибрид), Eco/Ultimate/Optimized — только при наличии физического MUX.
+        let mut available_gpu_mask = 0b0010; // Standard
+        if state.mux != orbis_core::gpu::GpuMuxState::Unknown {
+            available_gpu_mask |= 0b1101; // Eco | Ultimate | Optimized
+        }
 
         let charge_limit = state
             .charge_limit
@@ -114,6 +130,7 @@ impl UiState {
             perf_selected,
             available_perf_mask,
             gpu_selected,
+            available_gpu_mask,
             gpu_ultimate_pending: false,
             gpu_ultimate_disabled: false,
             gpu_section_error: false,
@@ -152,10 +169,16 @@ pub fn apply(state: &mut UiState, action: UiAction) {
             }
         }
         UiAction::Gpu(i) if (0..=3).contains(&i) => {
-            state.gpu_selected = i;
-            // Ultimate после нажатия показывает pending reboot;
-            // выбор другого режима снимает pending.
-            state.gpu_ultimate_pending = i == 2 && !state.gpu_ultimate_disabled;
+            // Только симуляция: меняем локальное запрошенное состояние; MUX,
+            // доступ приложений и power state не изменяются, провайдеры не
+            // вызываются (временный in-process срез).
+            let available = state.available_gpu_mask & (1 << i) != 0;
+            let not_disabled_ultimate = !(i == 2 && state.gpu_ultimate_disabled);
+            if available && not_disabled_ultimate {
+                state.gpu_selected = i;
+                // Ultimate ожидает применения (pending); applied-режим не меняется.
+                state.gpu_ultimate_pending = i == 2;
+            }
         }
         UiAction::Charge(v) => {
             let raw = v.round() as i32;
@@ -290,12 +313,112 @@ mod tests {
     }
 
     #[test]
-    fn ultimate_disabled_stays_off_pending() {
+    fn ultimate_disabled_is_rejected() {
         let mut s = UiState::from_mock_profile("zephyrus-full");
         s.gpu_ultimate_disabled = true;
+        let before = s.clone();
+        apply(&mut s, UiAction::Gpu(2));
+        assert_eq!(s, before); // disabled Ultimate не меняет состояние
+        assert_eq!(s.gpu_selected, 1);
+        assert!(!s.gpu_ultimate_pending);
+    }
+
+    #[test]
+    fn initial_gpu_zephyrus_is_standard() {
+        let s = UiState::from_mock_profile("zephyrus-full");
+        assert_eq!(s.gpu_selected, 1); // Standard из mock-состояния
+        assert_eq!(s.available_gpu_mask, 0b1111);
+    }
+
+    #[test]
+    fn standard_to_eco() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Gpu(0));
+        assert_eq!(s.gpu_selected, 0);
+        assert!(!s.gpu_ultimate_pending);
+    }
+
+    #[test]
+    fn eco_to_standard() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Gpu(0));
+        apply(&mut s, UiAction::Gpu(1));
+        assert_eq!(s.gpu_selected, 1);
+        assert!(!s.gpu_ultimate_pending);
+    }
+
+    #[test]
+    fn standard_to_optimized() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Gpu(3));
+        assert_eq!(s.gpu_selected, 3);
+        assert!(!s.gpu_ultimate_pending);
+    }
+
+    #[test]
+    fn repeated_gpu_selection_is_idempotent() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Gpu(1));
+        let before = s.clone();
+        apply(&mut s, UiAction::Gpu(1));
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn repeated_ultimate_selection_is_idempotent() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
         apply(&mut s, UiAction::Gpu(2));
         assert_eq!(s.gpu_selected, 2);
-        assert!(!s.gpu_ultimate_pending);
+        assert!(s.gpu_ultimate_pending);
+        let before = s.clone();
+        apply(&mut s, UiAction::Gpu(2));
+        assert_eq!(s, before); // не создаёт новый pending state
+    }
+
+    #[test]
+    fn unsupported_gpu_mode_is_rejected() {
+        // non-asus: MUX отсутствует -> маска 0b0010 (только Standard)
+        let mut s = UiState::from_mock_profile("non-asus");
+        assert_eq!(s.available_gpu_mask, 0b0010);
+        let before = s.clone();
+        apply(&mut s, UiAction::Gpu(0)); // Eco недоступен
+        apply(&mut s, UiAction::Gpu(2)); // Ultimate недоступен
+        apply(&mut s, UiAction::Gpu(3)); // Optimized недоступен
+        assert_eq!(s, before);
+        assert_eq!(s.gpu_selected, 1);
+    }
+
+    #[test]
+    fn gpu_error_banner_preserved_after_rejected_action() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.gpu_section_error = true;
+        s.available_gpu_mask = 0b0010; // только Standard
+        let before = s.clone();
+        apply(&mut s, UiAction::Gpu(0)); // отклонено
+        assert_eq!(s, before);
+        assert!(s.gpu_section_error); // баннер не исчезает
+    }
+
+    #[test]
+    fn gpu_bit_mapping() {
+        assert_eq!(gpu_index(GpuMode::Eco), 0);
+        assert_eq!(gpu_index(GpuMode::Standard), 1);
+        assert_eq!(gpu_index(GpuMode::Ultimate), 2);
+        assert_eq!(gpu_index(GpuMode::Optimized), 3);
+        assert_eq!(1 << gpu_index(GpuMode::Eco), 0b0001);
+        assert_eq!(1 << gpu_index(GpuMode::Standard), 0b0010);
+        assert_eq!(1 << gpu_index(GpuMode::Ultimate), 0b0100);
+        assert_eq!(1 << gpu_index(GpuMode::Optimized), 0b1000);
+    }
+
+    #[test]
+    fn rust_to_slint_preserves_gpu_state() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        apply(&mut s, UiAction::Gpu(2)); // Ultimate pending
+        let slint_state = crate::to_slint(&s);
+        assert_eq!(slint_state.gpu_selected, 2);
+        assert_eq!(slint_state.available_gpu_mask, 0b1111);
+        assert!(slint_state.gpu_ultimate_pending);
     }
 
     #[test]

@@ -11,6 +11,7 @@ export struct UiState {
     perf-selected: int,             // 0=Silent, 1=Balanced, 2=Turbo
     available-perf-mask: int,       // bit0=Silent, bit1=Balanced, bit2=Turbo
     gpu-selected: int,              // 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized
+    available-gpu-mask: int,        // bit0=Eco, bit1=Standard, bit2=Ultimate, bit3=Optimized              // 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized
     gpu-ultimate-pending: bool,
     gpu-ultimate-disabled: bool,
     gpu-section-error: bool,
@@ -56,6 +57,7 @@ export component AppWindow inherits Window {
         perf-selected: 1,
         available-perf-mask: 0,
         gpu-selected: 1,
+        available-gpu-mask: 0,
         gpu-ultimate-pending: false,
         gpu-ultimate-disabled: false,
         gpu-section-error: false,
@@ -166,6 +168,7 @@ export component AppWindow inherits Window {
                         accent: Palette.eco;
                         icon-kind: 0;
                         selected: root.ui-state.gpu-selected == 0;
+                        disabled: !root.bit-set(root.ui-state.available-gpu-mask, 1);
                         clicked => { root.gpu-clicked(0); }
                     }
                     ModeCard {
@@ -174,6 +177,7 @@ export component AppWindow inherits Window {
                         accent: Palette.standard;
                         icon-kind: 1;
                         selected: root.ui-state.gpu-selected == 1;
+                        disabled: !root.bit-set(root.ui-state.available-gpu-mask, 2);
                         clicked => { root.gpu-clicked(1); }
                     }
                     ModeCard {
@@ -183,7 +187,7 @@ export component AppWindow inherits Window {
                         icon-kind: 2;
                         selected: root.ui-state.gpu-selected == 2;
                         pending: root.ui-state.gpu-ultimate-pending;
-                        disabled: root.ui-state.gpu-ultimate-disabled;
+                        disabled: root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4);
                         subtitle: root.ui-state.gpu-ultimate-disabled ? "MUX unavailable" : "";
                         clicked => { root.gpu-clicked(2); }
                     }
@@ -193,6 +197,7 @@ export component AppWindow inherits Window {
                         accent: Palette.optimized;
                         icon-kind: 1;
                         selected: root.ui-state.gpu-selected == 3;
+                        disabled: !root.bit-set(root.ui-state.available-gpu-mask, 8);
                         clicked => { root.gpu-clicked(3); }
                     }
                 }
