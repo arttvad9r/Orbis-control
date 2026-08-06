@@ -217,6 +217,11 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
                 "performance: команда выполнена ({result:?}), но read-back не удался: {source:?}"
             );
         }
+        // Временная совместимость: production UI пока отправляет только
+        // Performance-команды, а публичный WorkerEvent уже содержит GPU.
+        WorkerEvent::Gpu(_) => {
+            tracing::debug!("GPU worker event ignored until GPU UI wiring is added");
+        }
     }
 }
 
