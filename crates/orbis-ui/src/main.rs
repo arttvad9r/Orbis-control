@@ -9,9 +9,9 @@
 //! детерминированно через `slint::platform` + SoftwareRenderer (масштаб 100%,
 //! без окна, без новых зависимостей).
 
-// UiAction::Perf и UiAction::Gpu больше не конструируются в production:
-// Performance и GPU Mode идут через worker. Контроллер пока используется для
-// Battery Charge Limit (синхронно).
+// UiAction::Perf, UiAction::Gpu и UiAction::Charge больше не конструируются в
+// production: Performance, GPU Mode и Battery Charge Limit идут через worker.
+// Контроллер сохраняется как boundary/model helper для legacy unit tests.
 #[allow(dead_code)]
 mod controller;
 
@@ -20,7 +20,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use orbis_application::{
-    AppService, CommandError, GpuCommandOutcome, PerformanceCommandOutcome, SetGpuModeError,
+    AppService, ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome,
+    PerformanceCommandOutcome, SetChargeLimitError, SetGpuModeError,
 };
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::gpu::GpuMode;
@@ -211,6 +212,22 @@ fn gpu_selected_index(mode: GpuMode) -> i32 {
     }
 }
 
+/// UI-boundary: преобразование Slint slider value в доменный `u8` percent.
+///
+/// Callback приходит как float. Допускаются только конечные целые значения в
+/// диапазоне 40..=100 (шаг 5 — политика Slint slider, здесь не проверяется;
+/// 83 допустимо на Rust boundary). NaN/infinity/дробные/вне диапазона -> None.
+fn charge_limit_from_ui(value: f32) -> Option<u8> {
+    if !value.is_finite() || value.fract() != 0.0 {
+        return None;
+    }
+    if !(40.0..=100.0).contains(&value) {
+        return None;
+    }
+    // Значение целое и в диапазоне: преобразование в u8 безопасно.
+    u8::try_from(value as i64).ok()
+}
+
 /// Применить authoritative Performance-результат к UI-состоянию.
 ///
 /// Обновляются только Performance-поля (selected и маска доступности);
@@ -284,12 +301,62 @@ fn apply_gpu_result(
     }
 }
 
+/// Применить authoritative Battery outcome к UI-состоянию.
+///
+/// Обновляется только `charge_limit` (из `outcome.state.percent`, если он
+/// присутствует); Performance/GPU и остальные поля сохраняются. При
+/// `percent == None` прежнее UI-значение сохраняется, пишется warning.
+fn apply_charge_limit_outcome(
+    state: &mut controller::UiState,
+    outcome: &ChargeLimitCommandOutcome,
+) {
+    match outcome.state.percent {
+        Some(percent) => {
+            state.charge_limit = i32::from(percent.get());
+            tracing::debug!("battery: лимит применён: percent={}", percent.get());
+        }
+        None => {
+            tracing::warn!(
+                "battery: authoritative percent отсутствует (None); UI сохраняет прежнее значение"
+            );
+        }
+    }
+    if !matches!(outcome.result, ApplyResult::Applied) {
+        tracing::warn!("battery: результат не Applied: {:?}", outcome.result);
+    }
+}
+
+/// Применить полный Battery-результат worker-а к UI-состоянию.
+///
+/// Ok -> authoritative percent применяется (независимо от варианта ApplyResult);
+/// Command error -> UiState полностью сохраняется, точный ProviderError в
+/// tracing; ReadBack error -> mutation могла выполниться, но authoritative
+/// read-back отсутствует: UiState полностью сохраняется.
+fn apply_charge_limit_result(
+    state: &mut controller::UiState,
+    result: Result<ChargeLimitCommandOutcome, SetChargeLimitError>,
+) {
+    match result {
+        Ok(outcome) => apply_charge_limit_outcome(state, &outcome),
+        Err(CommandError::Command(e)) => {
+            tracing::warn!("battery: команда не выполнена: {e:?}");
+        }
+        Err(CommandError::ReadBack { result, source }) => {
+            tracing::warn!(
+                "battery: команда выполнена ({result:?}), но read-back не удался: {source:?}"
+            );
+        }
+    }
+}
+
 /// Применить событие worker-а к UI-состоянию.
 ///
 /// Performance: Ok -> authoritative state; Err (Command/ReadBack) -> UiState не
 /// изменяется, ошибка сохраняется в диагностическом журнале.
 /// GPU: Ok -> authoritative GPU state; Err -> error banner + tracing, selected
 /// не меняется (authoritative state отсутствует).
+/// Battery: Ok -> authoritative percent применяется; Err -> tracing, UiState не
+/// меняется.
 fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) {
     match event {
         WorkerEvent::Performance(Ok(outcome)) => {
@@ -314,10 +381,8 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         WorkerEvent::Gpu(result) => {
             apply_gpu_result(state, result);
         }
-        // Временная совместимость: production UI пока отправляет только
-        // Performance/GPU-команды, а публичный WorkerEvent уже содержит Battery.
-        WorkerEvent::ChargeLimit(_) => {
-            tracing::debug!("Battery worker event ignored until Battery UI wiring is added");
+        WorkerEvent::ChargeLimit(result) => {
+            apply_charge_limit_result(state, result);
         }
     }
 }
@@ -331,11 +396,10 @@ fn handle_worker_event(app: &AppWindow, event: WorkerEvent) {
 
 /// Регистрация Slint callbacks.
 ///
-/// Performance и GPU Mode: отправляют типизированные команды в общий worker
-/// (async результаты вернутся через event sink); controller::apply(UiAction::Perf)
-/// и UiAction::Gpu НЕ вызываются.
-/// Battery: читает самый свежий ui-state из AppWindow и использует
-/// существующий controller::apply(UiAction::Charge) (синхронно).
+/// Performance, GPU Mode и Battery Charge Limit: отправляют типизированные
+/// команды в общий worker (async результаты вернутся через event sink);
+/// controller::apply для этих действий НЕ вызывается. UiState используется
+/// только как boundary/model helper, не как кэш между callbacks.
 fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerCommand>>) {
     {
         let worker_tx = worker_tx.clone();
@@ -379,12 +443,21 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
         });
     }
     {
-        let weak = app.as_weak();
+        let worker_tx = worker_tx.clone();
         app.on_charge_changed(move |v| {
-            if let Some(app) = weak.upgrade() {
-                let mut s = from_slint(&app.get_ui_state());
-                controller::apply(&mut s, controller::UiAction::Charge(v));
-                app.set_ui_state(to_slint(&s));
+            let Some(percent) = charge_limit_from_ui(v) else {
+                tracing::warn!("charge-changed с недопустимым значением: {v}");
+                return;
+            };
+            match &worker_tx {
+                Some(tx) => {
+                    if let Err(e) = tx.send(WorkerCommand::SetChargeLimit { percent }) {
+                        tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
+                    }
+                }
+                None => {
+                    tracing::warn!("charge-changed вне интерактивного режима (worker отсутствует)");
+                }
             }
         });
     }
@@ -528,10 +601,26 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbis_core::battery::ChargeLimit;
     use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
+    use orbis_core::newtypes::Percent;
 
     fn base_state() -> controller::UiState {
         controller::UiState::from_mock_profile("zephyrus-full")
+    }
+
+    fn charge_outcome(percent: Option<u8>) -> ChargeLimitCommandOutcome {
+        ChargeLimitCommandOutcome {
+            result: ApplyResult::Applied,
+            state: ChargeLimit::new(
+                true,
+                percent.map(|p| Percent::new(p).expect("range")),
+                Percent::new(40).expect("const"),
+                Percent::new(100).expect("const"),
+                1,
+            )
+            .expect("valid"),
+        }
     }
 
     #[test]
@@ -796,5 +885,88 @@ mod tests {
 
         assert!(!s.gpu_section_error);
         assert_eq!(s.gpu_selected, 1); // Standard из authoritative state
+    }
+
+    #[test]
+    fn charge_limit_ui_mapping() {
+        assert_eq!(charge_limit_from_ui(40.0), Some(40));
+        assert_eq!(charge_limit_from_ui(80.0), Some(80));
+        assert_eq!(charge_limit_from_ui(100.0), Some(100));
+        assert_eq!(charge_limit_from_ui(83.0), Some(83));
+        assert_eq!(charge_limit_from_ui(-1.0), None);
+        assert_eq!(charge_limit_from_ui(39.0), None);
+        assert_eq!(charge_limit_from_ui(101.0), None);
+        assert_eq!(charge_limit_from_ui(f32::NAN), None);
+        assert_eq!(charge_limit_from_ui(f32::INFINITY), None);
+        assert_eq!(charge_limit_from_ui(80.5), None); // дробное не усекается
+    }
+
+    #[test]
+    fn authoritative_charge_limit_updates_ui() {
+        let mut s = base_state();
+        // отличимые Performance/GPU поля
+        s.perf_selected = 0;
+        s.gpu_selected = 3;
+        s.gpu_ultimate_pending = true;
+        s.gpu_section_error = true;
+
+        apply_charge_limit_result(&mut s, Ok(charge_outcome(Some(40))));
+
+        assert_eq!(s.charge_limit, 40);
+        assert_eq!(s.perf_selected, 0);
+        assert_eq!(s.gpu_selected, 3);
+        assert!(s.gpu_ultimate_pending);
+        assert!(s.gpu_section_error);
+    }
+
+    #[test]
+    fn authoritative_charge_value_is_not_sent_value() {
+        let mut s = base_state();
+        // "отправлено" одно значение, но authoritative read-back вернул 45:
+        // helper применяет outcome.state.percent, не входное значение.
+        apply_charge_limit_result(&mut s, Ok(charge_outcome(Some(45))));
+        assert_eq!(s.charge_limit, 45);
+    }
+
+    #[test]
+    fn charge_limit_none_preserves_ui() {
+        let mut s = base_state();
+        let before = s.clone();
+
+        apply_charge_limit_result(&mut s, Ok(charge_outcome(None)));
+
+        // percent None: прежнее значение сохраняется, остальные поля не тронуты.
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn charge_limit_command_error_does_not_mutate_ui() {
+        let mut s = base_state();
+        let before = s.clone();
+
+        apply_charge_limit_result(
+            &mut s,
+            Err(CommandError::Command(
+                orbis_providers::error::ProviderError::Unsupported("x".into()),
+            )),
+        );
+
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn charge_limit_readback_error_does_not_mutate_ui() {
+        let mut s = base_state();
+        let before = s.clone();
+
+        apply_charge_limit_result(
+            &mut s,
+            Err(CommandError::ReadBack {
+                result: ApplyResult::Applied,
+                source: orbis_providers::error::ProviderError::Timeout("t".into()),
+            }),
+        );
+
+        assert_eq!(s, before);
     }
 }

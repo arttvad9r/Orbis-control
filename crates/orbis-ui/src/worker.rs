@@ -5,7 +5,8 @@
 //!
 //! - worker владеет `AppService<P>` и command receiver;
 //! - команды обрабатываются строго по порядку (одна за другой, общий FIFO для
-//!   всех типов команд);
+//!   всех типов команд); соседние queued `SetChargeLimit` coalesce до последнего
+//!   значения группы (одна группа -> одно событие);
 //! - полный результат `AppService` передаётся внешнему event sink без
 //!   преобразований (ни строк, ни UI-типов, ни banner-текстов);
 //! - worker не знает о UI-типах и свойствах окна (подключение event sink к
@@ -24,6 +25,7 @@ use orbis_application::{
 use orbis_core::gpu::GpuMode;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::traits::{BatteryProvider, GpuProvider, PerformanceProvider};
+use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 /// Типизированная команда worker-а (Performance Mode / GPU Mode / Battery).
@@ -82,7 +84,13 @@ pub fn command_channel() -> (
 ///
 /// - `service` — владеемый `AppService<P>`;
 /// - `receiver` — команды в порядке получения;
-/// - `emit` — event sink, вызывается ровно один раз на каждую команду.
+/// - `emit` — event sink, вызывается ровно один раз на каждую выполненную
+///   команду или coalesced Battery-группу.
+///
+/// Queue coalescing Battery-команд: несколько подряд стоящих в очереди
+/// `SetChargeLimit` объединяются — выполняется только последний percent
+/// соседней группы; одна группа создаёт один `WorkerEvent::ChargeLimit`.
+/// Performance/GPU-команда является границей группы (не объединяется).
 ///
 /// Invariants: одновременно выполняется не более одной команды; следующая
 /// команда начинается только после завершения предыдущей (включая её
@@ -96,7 +104,19 @@ pub async fn run_worker<P, F>(
     P: PerformanceProvider + GpuProvider + BatteryProvider + Send + Sync + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
-    while let Some(command) = receiver.recv().await {
+    // Команда, дочитанная при drain соседней Battery-группы (граница группы),
+    // чтобы не потерять её при coalescing.
+    let mut deferred_command: Option<WorkerCommand> = None;
+
+    loop {
+        let command = match deferred_command.take() {
+            Some(cmd) => cmd,
+            None => match receiver.recv().await {
+                Some(cmd) => cmd,
+                None => return, // канал закрыт и deferred пуст — штатное завершение
+            },
+        };
+
         let event = match command {
             WorkerCommand::SetPerformance(profile) => {
                 WorkerEvent::Performance(service.set_performance(profile).await)
@@ -105,7 +125,25 @@ pub async fn run_worker<P, F>(
                 WorkerEvent::Gpu(service.set_gpu_mode(mode, confirmed).await)
             }
             WorkerCommand::SetChargeLimit { percent } => {
-                WorkerEvent::ChargeLimit(service.set_charge_limit(percent).await)
+                // Coalescing соседних Battery-команд: выполняется только
+                // последний percent соседней группы.
+                let mut latest_percent = percent;
+                loop {
+                    match receiver.try_recv() {
+                        Ok(WorkerCommand::SetChargeLimit { percent: next }) => {
+                            latest_percent = next;
+                        }
+                        Ok(other) => {
+                            // Граница группы (Performance/GPU): сохранить
+                            // команду для следующей итерации.
+                            deferred_command = Some(other);
+                            break;
+                        }
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => break,
+                    }
+                }
+                WorkerEvent::ChargeLimit(service.set_charge_limit(latest_percent).await)
             }
         };
         emit(event);
@@ -890,6 +928,166 @@ mod tests {
             .expect("charge limit unchanged");
         assert_eq!(after, before);
         assert_ne!(after.percent.map(|p| p.get()), Some(40));
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    // -----------------------------------------------------------------------
+    // Coalescing worker-тесты
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn consecutive_charge_commands_coalesce_to_latest() {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let app_service = AppService::new(provider.clone());
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // Соседняя группа Battery-команд до запуска worker: порядок канала
+        // фиксирован, coalescing выполняется внутри worker.
+        tx.send(WorkerCommand::SetChargeLimit { percent: 40 })
+            .expect("send1");
+        tx.send(WorkerCommand::SetChargeLimit { percent: 45 })
+            .expect("send2");
+        tx.send(WorkerCommand::SetChargeLimit { percent: 50 })
+            .expect("send3");
+
+        let worker = tokio::spawn(async move {
+            run_worker(app_service, rx, move |event| {
+                let _ = result_tx.send(event);
+            })
+            .await;
+        });
+
+        let event = result_rx.recv().await.expect("event");
+        match event {
+            WorkerEvent::ChargeLimit(Ok(outcome)) => {
+                assert_eq!(outcome.result, ApplyResult::Applied);
+                assert_eq!(outcome.state.percent.map(|p| p.get()), Some(50));
+            }
+            other => panic!("ожидался Ok(ChargeLimit), получено: {other:?}"),
+        }
+
+        // Закрыть sender: worker завершается, дополнительных событий нет.
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+        match result_rx.try_recv() {
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {}
+            other => panic!("ожидалось отсутствие дополнительных событий, получено: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn charge_coalescing_preserves_non_charge_boundary() {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let app_service = AppService::new(provider.clone());
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        tx.send(WorkerCommand::SetChargeLimit { percent: 40 })
+            .expect("send1");
+        tx.send(WorkerCommand::SetChargeLimit { percent: 45 })
+            .expect("send2");
+        tx.send(WorkerCommand::SetGpuMode {
+            mode: GpuMode::Optimized,
+            confirmed: false,
+        })
+        .expect("send3");
+        tx.send(WorkerCommand::SetChargeLimit { percent: 50 })
+            .expect("send4");
+        tx.send(WorkerCommand::SetChargeLimit { percent: 55 })
+            .expect("send5");
+
+        let worker = tokio::spawn(async move {
+            run_worker(app_service, rx, move |event| {
+                let _ = result_tx.send(event);
+            })
+            .await;
+        });
+
+        let first = result_rx.recv().await.expect("event1");
+        let second = result_rx.recv().await.expect("event2");
+        let third = result_rx.recv().await.expect("event3");
+        match (first, second, third) {
+            (
+                WorkerEvent::ChargeLimit(Ok(c1)),
+                WorkerEvent::Gpu(Ok(g)),
+                WorkerEvent::ChargeLimit(Ok(c2)),
+            ) => {
+                assert_eq!(c1.state.percent.map(|p| p.get()), Some(45));
+                assert_eq!(g.state.requested, GpuMode::Optimized);
+                assert_eq!(c2.state.percent.map(|p| p.get()), Some(55));
+            }
+            other => panic!("ожидался порядок Charge(Gpu(Charge), получено: {other:?}"),
+        }
+
+        // Финальное authoritative provider state через публичные traits.
+        assert_eq!(provider.requested_mode().await.unwrap(), GpuMode::Optimized);
+        assert_eq!(
+            provider
+                .charge_limit()
+                .await
+                .unwrap()
+                .percent
+                .map(|p| p.get()),
+            Some(55)
+        );
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn charge_coalescing_preserves_performance_boundary() {
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        tx.send(WorkerCommand::SetChargeLimit { percent: 40 })
+            .expect("send1");
+        tx.send(WorkerCommand::SetPerformance(PerformanceProfile::Silent))
+            .expect("send2");
+        tx.send(WorkerCommand::SetChargeLimit { percent: 45 })
+            .expect("send3");
+
+        let worker = tokio::spawn(async move {
+            run_worker(service(), rx, move |event| {
+                let _ = result_tx.send(event);
+            })
+            .await;
+        });
+
+        let first = result_rx.recv().await.expect("event1");
+        let second = result_rx.recv().await.expect("event2");
+        let third = result_rx.recv().await.expect("event3");
+        match (first, second, third) {
+            (
+                WorkerEvent::ChargeLimit(Ok(c1)),
+                WorkerEvent::Performance(Ok(p)),
+                WorkerEvent::ChargeLimit(Ok(c2)),
+            ) => {
+                assert_eq!(c1.state.percent.map(|p| p.get()), Some(40));
+                assert_eq!(p.state.current, PerformanceProfile::Silent);
+                assert_eq!(c2.state.percent.map(|p| p.get()), Some(45));
+            }
+            other => panic!("ожидался порядок Charge(Perf(Charge), получено: {other:?}"),
+        }
 
         drop(tx);
         tokio::time::timeout(std::time::Duration::from_secs(5), worker)
