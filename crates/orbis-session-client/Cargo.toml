@@ -17,3 +17,5 @@ orbis-session-protocol = { path = "../orbis-session-protocol", version = "0.1.0"
 
 [dev-dependencies]
 tokio = { workspace = true }
+zbus = { workspace = true, features = ["p2p"] }
+orbis-sessiond = { path = "../orbis-sessiond", version = "0.1.0" }
