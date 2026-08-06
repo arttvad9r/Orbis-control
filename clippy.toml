@@ -1,0 +1,3 @@
+# Clippy: запрещаем unsafe в crates верхнего уровня через #![forbid(unsafe_code)]
+# в самих crates; здесь — общие лимиты сложности.
+cyclomatic-complexity-threshold = 25

@@ -1,0 +1,37 @@
+[package]
+name = "orbis-sessiond"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Orbis Control: пользовательский демон (mock-first) и D-Bus API"
+
+[[bin]]
+name = "orbis-sessiond"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+zbus = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+orbis-core = { workspace = true }
+orbis-config = { workspace = true }
+orbis-capabilities = { workspace = true }
+orbis-providers = { workspace = true }
+orbis-test-support = { workspace = true }
+
+[features]
+mock = ["orbis-providers/mock"]
+default = ["mock"]
+
+[dev-dependencies]
+tempfile = { workspace = true }

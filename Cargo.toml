@@ -1,0 +1,67 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/orbis-core",
+    "crates/orbis-config",
+    "crates/orbis-capabilities",
+    "crates/orbis-providers",
+    "crates/orbis-sessiond",
+    "crates/orbis-ui",
+    "crates/orbis-cli",
+    "crates/orbis-test-support",
+]
+# orbis-hardwared намеренно НЕ включён в Этапе 2 (см. ADR 0002).
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/orbis-control/orbis-control"
+authors = ["Orbis Control contributors"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+anyhow = "1"
+async-trait = "0.1"
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "signal",
+    "process",
+] }
+zbus = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+tempfile = "3"
+proptest = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+slint = { version = "1", features = [
+    "std",
+    "backend-winit-wayland",
+    "backend-winit-x11",
+    "renderer-winit-software",
+    "software-renderer-systemfonts",
+    "image-default-formats",
+] }
+
+orbis-core = { path = "crates/orbis-core", version = "0.1.0" }
+orbis-config = { path = "crates/orbis-config", version = "0.1.0" }
+orbis-capabilities = { path = "crates/orbis-capabilities", version = "0.1.0" }
+orbis-providers = { path = "crates/orbis-providers", version = "0.1.0" }
+orbis-sessiond = { path = "crates/orbis-sessiond", version = "0.1.0" }
+orbis-ui = { path = "crates/orbis-ui", version = "0.1.0" }
+orbis-cli = { path = "crates/orbis-cli", version = "0.1.0" }
+orbis-test-support = { path = "crates/orbis-test-support", version = "0.1.0" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

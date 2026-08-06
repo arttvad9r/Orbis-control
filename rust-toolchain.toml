@@ -1,0 +1,6 @@
+# Минимально поддерживаемая версия Rust.
+# edition 2024 требует Rust 1.85+.
+[toolchain]
+channel = "1.85"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

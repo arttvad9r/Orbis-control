@@ -1,0 +1,20 @@
+[package]
+name = "orbis-test-support"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Orbis Control: mock-профили устройств и тестовые утилиты"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+orbis-core = { workspace = true }
+orbis-capabilities = { workspace = true }
+orbis-providers = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

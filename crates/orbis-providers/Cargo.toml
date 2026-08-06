@@ -1,0 +1,26 @@
+[package]
+name = "orbis-providers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Orbis Control: trait-ы провайдеров и mock-реализации"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+orbis-core = { workspace = true }
+orbis-capabilities = { workspace = true }
+
+[features]
+# mock включён по умолчанию ТОЛЬКО на Этапе 2 (mock-first).
+# При добавлении реальных провайдеров (Этап 3+) feature становится
+# не-default, чтобы production-сборка не могла имитировать hardware writes.
+default = ["mock"]
+mock = []

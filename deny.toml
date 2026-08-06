@@ -1,0 +1,41 @@
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "BSD-2-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "GPL-3.0",
+    "GPL-3.0-or-later",
+]
+private = { ignore = true }
+
+[bans]
+version = 2
+multiple-versions = true
+skip = [
+    # zbus 5 притягивает старые версии serde/инфраструктуры; допустимо на Этапе 2
+    "serde",
+    "tracing",
+]
+skip-tree = [
+    { name = "zbus", version = "5" },
+]
+
+[sources]
+version = 2
+unknown-registry = "deny"
+unknown-git = "deny"
