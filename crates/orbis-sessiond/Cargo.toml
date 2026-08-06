@@ -36,3 +36,4 @@ default = ["mock"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
+zbus = { workspace = true, features = ["p2p"] }
