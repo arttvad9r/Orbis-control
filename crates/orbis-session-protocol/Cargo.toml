@@ -1,0 +1,13 @@
+[package]
+name = "orbis-session-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Orbis Control: нейтральный read-only D-Bus protocol контракт session"
+
+[dependencies]
+serde = { workspace = true }
+zbus = { workspace = true }
