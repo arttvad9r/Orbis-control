@@ -224,6 +224,17 @@ pub struct MockProvider {
     state: Arc<RwLock<MockState>>,
 }
 
+/// Преобразовать режим ошибки в ProviderError (вспомогательная функция).
+fn mock_error(mode: MockErrorMode) -> ProviderError {
+    match mode {
+        MockErrorMode::None => unreachable!("нет ошибки"),
+        MockErrorMode::BackendDown => MockStateError::BackendDown.to_provider(),
+        MockErrorMode::PermissionDenied => MockStateError::PermissionDenied.to_provider(),
+        MockErrorMode::Unsupported => MockStateError::Unsupported.to_provider(),
+        MockErrorMode::Timeout => MockStateError::Timeout.to_provider(),
+    }
+}
+
 impl MockProvider {
     /// Создать провайдер над состоянием.
     pub fn new(state: Arc<RwLock<MockState>>) -> Self {
@@ -249,21 +260,16 @@ impl MockProvider {
         f: impl FnOnce(&mut MockState) -> Result<T, MockStateError>,
     ) -> Result<T, ProviderError> {
         self.delay().await;
+        // Ошибка проверяется ДО мутации: при ошибке состояние не изменяется.
+        let err_mode = self.state.read().await.error_mode;
+        if err_mode != MockErrorMode::None {
+            return Err(mock_error(err_mode));
+        }
         let mut guard = self.state.write().await;
         guard.ops += 1;
         let result = f(&mut guard);
-        let err_mode = guard.error_mode;
         drop(guard);
-        match err_mode {
-            MockErrorMode::None => result.map_err(|e| e.to_provider()),
-            mode => Err(match mode {
-                MockErrorMode::None => unreachable!(),
-                MockErrorMode::BackendDown => MockStateError::BackendDown.to_provider(),
-                MockErrorMode::PermissionDenied => MockStateError::PermissionDenied.to_provider(),
-                MockErrorMode::Unsupported => MockStateError::Unsupported.to_provider(),
-                MockErrorMode::Timeout => MockStateError::Timeout.to_provider(),
-            }),
-        }
+        result.map_err(|e| e.to_provider())
     }
 
     /// Прочитать состояние с учётом ошибок.
@@ -522,35 +528,40 @@ impl GpuProvider for MockProvider {
         self.validate_mode(mode).into_result()?;
         self.mutate(|s| {
             let req = Self::requirement_static(mode);
+            // Запрошенный режим обновляется всегда.
             s.gpu_mode = mode;
-            match mode {
-                GpuMode::Eco => {
-                    s.access_policy = GpuAccessPolicy::Blocked;
-                    s.mux = GpuMuxState::Integrated;
+            if req != ActionRequirement::None {
+                // Pending (Ultimate/Reboot, Eco/Logout): applied state (MUX,
+                // доступ приложений, power) не меняется до отдельного события
+                // применения/перезагрузки.
+                if mode == GpuMode::Ultimate {
+                    let already_pending = s.pending_action.as_ref().map(|a| a.target.as_str())
+                        == Some("gpu_mux: ultimate");
+                    if !already_pending {
+                        s.pending_action = Some(PendingAction {
+                            id: "mock-mux".into(),
+                            target: "gpu_mux: ultimate".into(),
+                            requirement: ActionRequirement::Reboot,
+                            cancelable: true,
+                            created_by: "mock".into(),
+                        });
+                    }
                 }
-                GpuMode::Standard => {
-                    s.access_policy = GpuAccessPolicy::Unblocked;
-                    s.mux = GpuMuxState::Integrated;
-                }
-                GpuMode::Ultimate => {
-                    s.mux = GpuMuxState::Discrete;
-                    s.pending_action = Some(PendingAction {
-                        id: "mock-mux".into(),
-                        target: "gpu_mux: ultimate".into(),
-                        requirement: ActionRequirement::Reboot,
-                        cancelable: true,
-                        created_by: "mock".into(),
-                    });
-                }
-                GpuMode::Optimized => {
-                    s.access_policy = GpuAccessPolicy::Blocked;
-                    s.mux = GpuMuxState::Integrated;
-                }
-            }
-            if req == ActionRequirement::None {
-                Ok(ApplyResult::Applied)
-            } else {
                 Ok(ApplyResult::Pending { requirement: req })
+            } else {
+                // Немедленное применение: меняем applied state.
+                match mode {
+                    GpuMode::Standard => {
+                        s.access_policy = GpuAccessPolicy::Unblocked;
+                        s.mux = GpuMuxState::Integrated;
+                    }
+                    GpuMode::Optimized => {
+                        s.access_policy = GpuAccessPolicy::Blocked;
+                        s.mux = GpuMuxState::Integrated;
+                    }
+                    _ => {}
+                }
+                Ok(ApplyResult::Applied)
             }
         })
         .await
@@ -772,7 +783,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ultimate_creates_pending() {
+    async fn initial_gpu_applied_state() {
+        let (state, _provider) = setup();
+        let s = state.read().await;
+        assert_eq!(s.gpu_mode, GpuMode::Standard);
+        assert_eq!(s.mux, GpuMuxState::Integrated);
+        assert_eq!(s.access_policy, GpuAccessPolicy::Unblocked);
+        assert_eq!(s.gpu_power_state, GpuPowerState::Active);
+        assert!(s.pending_action.is_none());
+    }
+
+    #[tokio::test]
+    async fn ultimate_pending_keeps_applied_state() {
         let (state, provider) = setup();
         let res = crate::traits::GpuProvider::set_mode(&provider, GpuMode::Ultimate, true)
             .await
@@ -783,8 +805,83 @@ mod tests {
                 requirement: ActionRequirement::Reboot
             }
         ));
-        assert!(state.read().await.pending_action.is_some());
-        assert_eq!(state.read().await.mux, GpuMuxState::Discrete);
+        let s = state.read().await;
+        assert_eq!(s.gpu_mode, GpuMode::Ultimate); // requested
+        assert!(s.pending_action.is_some());
+        assert_eq!(s.mux, GpuMuxState::Integrated); // applied не изменился
+        assert_eq!(s.access_policy, GpuAccessPolicy::Unblocked);
+        assert_eq!(s.gpu_power_state, GpuPowerState::Active);
+    }
+
+    #[tokio::test]
+    async fn repeated_ultimate_is_idempotent() {
+        let (state, provider) = setup();
+        crate::traits::GpuProvider::set_mode(&provider, GpuMode::Ultimate, true)
+            .await
+            .unwrap();
+        let (id_before, mux_before, access_before) = {
+            let s = state.read().await;
+            let pa = s.pending_action.as_ref().expect("pending");
+            (pa.id.clone(), s.mux, s.access_policy)
+        };
+        let res = crate::traits::GpuProvider::set_mode(&provider, GpuMode::Ultimate, true)
+            .await
+            .unwrap();
+        assert!(matches!(res, ApplyResult::Pending { .. }));
+        let s = state.read().await;
+        assert_eq!(s.mux, mux_before);
+        assert_eq!(s.access_policy, access_before);
+        assert_eq!(s.gpu_power_state, GpuPowerState::Active);
+        let pa = s.pending_action.as_ref().expect("pending");
+        assert_eq!(pa.id, id_before); // OperationId не меняется
+    }
+
+    #[tokio::test]
+    async fn provider_error_preserves_all_state() {
+        let (state, provider) = setup();
+        state.write().await.error_mode = MockErrorMode::BackendDown;
+        let before = state.read().await.clone();
+        let res = crate::traits::GpuProvider::set_mode(&provider, GpuMode::Ultimate, true).await;
+        assert!(res.is_err());
+        let after = state.read().await;
+        assert_eq!(after.gpu_mode, before.gpu_mode);
+        assert_eq!(after.mux, before.mux);
+        assert_eq!(after.access_policy, before.access_policy);
+        assert_eq!(after.gpu_power_state, before.gpu_power_state);
+        assert_eq!(after.pending_action, before.pending_action);
+    }
+
+    #[tokio::test]
+    async fn applied_mode_still_changes_state() {
+        let (state, provider) = setup();
+        let res = crate::traits::GpuProvider::set_mode(&provider, GpuMode::Optimized, true)
+            .await
+            .unwrap();
+        assert!(matches!(res, ApplyResult::Applied));
+        let s = state.read().await;
+        assert_eq!(s.gpu_mode, GpuMode::Optimized);
+        assert_eq!(s.access_policy, GpuAccessPolicy::Blocked);
+        assert_eq!(s.mux, GpuMuxState::Integrated);
+    }
+
+    #[tokio::test]
+    async fn requested_and_applied_independently_readable() {
+        let (_state, provider) = setup();
+        crate::traits::GpuProvider::set_mode(&provider, GpuMode::Ultimate, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            crate::traits::GpuProvider::requested_mode(&provider)
+                .await
+                .unwrap(),
+            GpuMode::Ultimate
+        );
+        assert_eq!(
+            crate::traits::GpuProvider::mux_state(&provider)
+                .await
+                .unwrap(),
+            GpuMuxState::Integrated
+        );
     }
 
     #[tokio::test]
