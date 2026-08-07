@@ -11,7 +11,8 @@
 //! - composition helper (`composition`) полного read-only пути: готовая UPower
 //!   Connection → source → provider → session server;
 //! - real D-Bus bootstrap helper (`bootstrap`), открывающий system/session bus
-//!   и передающий connections в composition layer;
+//!   и передающий connections в composition layer, включая UPower battery
+//!   discovery;
 //! - read-only discovery системной батареи через UPower (`discovery`).
 //!
 //! Запуск демона и lifecycle наполняются отдельными микрошагами.
