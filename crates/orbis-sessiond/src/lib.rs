@@ -13,9 +13,11 @@
 //! - real D-Bus bootstrap helper (`bootstrap`), открывающий system/session bus
 //!   и передающий connections в composition layer, включая UPower battery
 //!   discovery;
-//! - read-only discovery системной батареи через UPower (`discovery`).
+//! - read-only discovery системной батареи через UPower (`discovery`);
+//! - production lifecycle helper (`runtime`), запускающий discovered bootstrap
+//!   и удерживающий D-Bus service живым до shutdown signal.
 //!
-//! Запуск демона и lifecycle наполняются отдельными микрошагами.
+//! Запуск демона (main) наполняется отдельными микрошагами.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -23,6 +25,7 @@
 pub mod bootstrap;
 pub mod composition;
 pub mod discovery;
+pub mod runtime;
 pub mod server;
 pub mod service;
 pub mod upower;
