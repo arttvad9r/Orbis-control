@@ -15,8 +15,7 @@
 //!   discovery;
 //! - read-only discovery системной батареи через UPower (`discovery`);
 //! - production lifecycle helper (`runtime`), запускающий discovered bootstrap
-//!   и удерживающий D-Bus service живым до shutdown signal;
-//! - daemon-side product policy для charge-limit bounds (`config`).
+//!   и удерживающий D-Bus service живым до shutdown signal.
 //!
 //! Запуск демона (main) наполняется отдельными микрошагами.
 
@@ -25,7 +24,6 @@
 
 pub mod bootstrap;
 pub mod composition;
-pub mod config;
 pub mod discovery;
 pub mod runtime;
 pub mod server;
