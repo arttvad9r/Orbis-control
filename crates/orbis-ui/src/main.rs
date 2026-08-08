@@ -602,6 +602,7 @@ fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use orbis_core::battery::ChargeLimit;
+    use orbis_core::battery::ChargeLimitBounds;
     use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
     use orbis_core::newtypes::Percent;
 
@@ -615,9 +616,14 @@ mod tests {
             state: ChargeLimit::new(
                 true,
                 percent.map(|p| Percent::new(p).expect("range")),
-                Percent::new(40).expect("const"),
-                Percent::new(100).expect("const"),
-                1,
+                Some(
+                    ChargeLimitBounds::new(
+                        Percent::new(40).expect("const"),
+                        Percent::new(100).expect("const"),
+                        1,
+                    )
+                    .expect("valid"),
+                ),
             )
             .expect("valid"),
         }

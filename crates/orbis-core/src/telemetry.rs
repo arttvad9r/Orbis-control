@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::battery::ChargeLimit;
+use crate::battery::{ChargeLimit, ChargeLimitBounds};
 use crate::display::DisplayMode;
 use crate::fan::FanId;
 use crate::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
@@ -128,9 +128,14 @@ impl HardwareSnapshot {
             charge_limit: ChargeLimit::new(
                 false,
                 None,
-                Percent::new(40).expect("const"),
-                Percent::new(100).expect("const"),
-                1,
+                Some(
+                    ChargeLimitBounds::new(
+                        Percent::new(40).expect("const"),
+                        Percent::new(100).expect("const"),
+                        1,
+                    )
+                    .expect("valid"),
+                ),
             )
             .expect("valid"),
             display: DisplayMode::default(),
@@ -149,7 +154,7 @@ mod tests {
         let s = HardwareSnapshot::empty(PerformanceProfile::Balanced);
         assert_eq!(s.profile, PerformanceProfile::Balanced);
         assert!(s.warnings.is_empty());
-        assert_eq!(s.charge_limit.min.get(), 40);
+        assert_eq!(s.charge_limit.bounds.unwrap().min.get(), 40);
     }
 
     #[test]

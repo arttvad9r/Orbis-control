@@ -159,6 +159,7 @@ mod tests {
     use orbis_application::{AppService, CommandError};
     use orbis_core::action::{ActionRequirement, ApplyResult};
     use orbis_core::battery::ChargeLimit;
+    use orbis_core::battery::ChargeLimitBounds;
     use orbis_core::diagnostics::DiagnosticEntry;
     use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
     use orbis_core::identity::BackendIdentity;
@@ -476,9 +477,14 @@ mod tests {
             Ok(ChargeLimit::new(
                 true,
                 Some(Percent::new(80).expect("const")),
-                Percent::new(40).expect("const"),
-                Percent::new(100).expect("const"),
-                1,
+                Some(
+                    ChargeLimitBounds::new(
+                        Percent::new(40).expect("const"),
+                        Percent::new(100).expect("const"),
+                        1,
+                    )
+                    .expect("valid"),
+                ),
             )
             .expect("valid"))
         }
@@ -769,9 +775,10 @@ mod tests {
                 assert_eq!(outcome.result, ApplyResult::Applied);
                 assert_eq!(outcome.state.percent.map(|p| p.get()), Some(40));
                 assert!(outcome.state.enabled);
-                assert_eq!(outcome.state.min.get(), 40);
-                assert_eq!(outcome.state.max.get(), 100);
-                assert_eq!(outcome.state.step, 1);
+                let b = outcome.state.bounds.expect("mock bounds");
+                assert_eq!(b.min.get(), 40);
+                assert_eq!(b.max.get(), 100);
+                assert_eq!(b.step, 1);
             }
             other => panic!("ожидался Ok(ChargeLimit), получено: {other:?}"),
         }

@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 
 use orbis_core::action::{ActionRequirement, ApplyResult, PendingAction};
 use orbis_core::automation::{AutomationAction, AutomationRule, AutomationTrigger};
-use orbis_core::battery::ChargeLimit;
+use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::display::DisplayMode;
 use orbis_core::fan::{FanCurve, FanId};
@@ -144,9 +144,14 @@ impl MockState {
             charge_limit: ChargeLimit::new(
                 true,
                 Some(Percent::new(80).expect("const")),
-                Percent::new(40).expect("const"),
-                Percent::new(100).expect("const"),
-                1,
+                Some(
+                    ChargeLimitBounds::new(
+                        Percent::new(40).expect("const"),
+                        Percent::new(100).expect("const"),
+                        1,
+                    )
+                    .expect("valid"),
+                ),
             )
             .expect("valid"),
             fan_curves,
@@ -487,9 +492,7 @@ impl BatteryProvider for MockProvider {
             s.charge_limit = ChargeLimit::new(
                 true,
                 Some(Percent::new(percent).expect("range")),
-                s.charge_limit.min,
-                s.charge_limit.max,
-                s.charge_limit.step,
+                s.charge_limit.bounds,
             )
             .expect("valid");
             Ok(ApplyResult::Applied)
@@ -499,7 +502,7 @@ impl BatteryProvider for MockProvider {
 
     async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
         self.mutate(|s| {
-            s.charge_limit.percent = Some(s.charge_limit.max);
+            s.charge_limit.percent = Some(s.charge_limit.bounds.expect("mock bounds").max);
             Ok(ApplyResult::Applied)
         })
         .await

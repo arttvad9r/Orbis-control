@@ -19,6 +19,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
 use orbis_core::battery::ChargeLimit;
+use orbis_core::battery::ChargeLimitBounds;
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::Percent;
@@ -129,9 +130,14 @@ fn limit(enabled: bool, percent: Option<u8>, min: u8, max: u8, step: u8) -> Char
     ChargeLimit::new(
         enabled,
         percent.map(|p| Percent::new(p).expect("range")),
-        Percent::new(min).expect("range"),
-        Percent::new(max).expect("range"),
-        step,
+        Some(
+            ChargeLimitBounds::new(
+                Percent::new(min).expect("range"),
+                Percent::new(max).expect("range"),
+                step,
+            )
+            .expect("valid"),
+        ),
     )
     .expect("valid")
 }
@@ -182,9 +188,10 @@ async fn full_provider_path_reads_charge_limit() {
 
         assert!(limit.enabled);
         assert_eq!(limit.percent.map(|p| p.get()), Some(80));
-        assert_eq!(limit.min.get(), 40);
-        assert_eq!(limit.max.get(), 100);
-        assert_eq!(limit.step, 5);
+        let b = limit.bounds.expect("known bounds");
+        assert_eq!(b.min.get(), 40);
+        assert_eq!(b.max.get(), 100);
+        assert_eq!(b.step, 5);
         assert_eq!(server.reads(), 1);
     })
     .await
@@ -205,9 +212,10 @@ async fn full_provider_path_preserves_disabled_known_threshold() {
 
         assert!(!limit.enabled);
         assert_eq!(limit.percent.map(|p| p.get()), Some(80));
-        assert_eq!(limit.min.get(), 40);
-        assert_eq!(limit.max.get(), 100);
-        assert_eq!(limit.step, 5);
+        let b = limit.bounds.expect("known bounds");
+        assert_eq!(b.min.get(), 40);
+        assert_eq!(b.max.get(), 100);
+        assert_eq!(b.step, 5);
         assert_eq!(server.reads(), 1);
     })
     .await
@@ -228,9 +236,10 @@ async fn full_provider_path_preserves_missing_threshold() {
 
         assert!(!limit.enabled);
         assert_eq!(limit.percent, None);
-        assert_eq!(limit.min.get(), 40);
-        assert_eq!(limit.max.get(), 100);
-        assert_eq!(limit.step, 5);
+        let b = limit.bounds.expect("known bounds");
+        assert_eq!(b.min.get(), 40);
+        assert_eq!(b.max.get(), 100);
+        assert_eq!(b.step, 5);
         assert_eq!(server.reads(), 1);
     })
     .await

@@ -16,6 +16,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
 use orbis_core::battery::ChargeLimit;
+use orbis_core::battery::ChargeLimitBounds;
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::Percent;
@@ -121,9 +122,14 @@ fn limit(enabled: bool, percent: Option<u8>, min: u8, max: u8, step: u8) -> Char
     ChargeLimit::new(
         enabled,
         percent.map(|p| Percent::new(p).expect("range")),
-        Percent::new(min).expect("range"),
-        Percent::new(max).expect("range"),
-        step,
+        Some(
+            ChargeLimitBounds::new(
+                Percent::new(min).expect("range"),
+                Percent::new(max).expect("range"),
+                step,
+            )
+            .expect("valid"),
+        ),
     )
     .expect("valid")
 }

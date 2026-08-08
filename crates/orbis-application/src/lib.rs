@@ -282,7 +282,7 @@ mod tests {
 
     use async_trait::async_trait;
     use orbis_core::action::{ActionRequirement, ApplyResult};
-    use orbis_core::battery::ChargeLimit;
+    use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
     use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
     use orbis_core::identity::BackendIdentity;
     use orbis_core::newtypes::Percent;
@@ -428,8 +428,8 @@ mod tests {
         let cl = svc.charge_limit().await.unwrap();
         assert_eq!(cl.percent, Some(Percent::new(80).unwrap()));
         assert!(cl.enabled);
-        assert_eq!(cl.min, Percent::new(40).unwrap());
-        assert_eq!(cl.max, Percent::new(100).unwrap());
+        assert_eq!(cl.bounds.unwrap().min, Percent::new(40).unwrap());
+        assert_eq!(cl.bounds.unwrap().max, Percent::new(100).unwrap());
     }
 
     #[tokio::test]
@@ -440,8 +440,11 @@ mod tests {
         assert_eq!(outcome.state.percent, Some(Percent::new(40).unwrap()));
         // Остальные поля не повреждены.
         assert!(outcome.state.enabled);
-        assert_eq!(outcome.state.min, Percent::new(40).unwrap());
-        assert_eq!(outcome.state.max, Percent::new(100).unwrap());
+        assert_eq!(outcome.state.bounds.unwrap().min, Percent::new(40).unwrap());
+        assert_eq!(
+            outcome.state.bounds.unwrap().max,
+            Percent::new(100).unwrap()
+        );
     }
 
     #[tokio::test]
@@ -686,9 +689,14 @@ mod tests {
             Ok(ChargeLimit::new(
                 true,
                 Some(Percent::new(p).expect("range")),
-                Percent::new(40).expect("const"),
-                Percent::new(100).expect("const"),
-                1,
+                Some(
+                    ChargeLimitBounds::new(
+                        Percent::new(40).expect("const"),
+                        Percent::new(100).expect("const"),
+                        1,
+                    )
+                    .expect("valid"),
+                ),
             )
             .expect("valid"))
         }

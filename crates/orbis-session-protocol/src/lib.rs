@@ -45,16 +45,18 @@ pub struct ChargeLimitInfo {
     pub percent_present: bool,
     /// Текущий процент; при `percent_present == false` равен 0.
     pub percent: u8,
-    /// Нижняя поддерживаемая граница (значение backend).
+    /// Известны ли hardware/backend constraints (min/max/step).
+    pub bounds_present: bool,
+    /// Нижняя поддерживаемая граница; при `bounds_present == false` равен 0.
     pub min_percent: u8,
-    /// Верхняя поддерживаемая граница (значение backend).
+    /// Верхняя поддерживаемая граница; при `bounds_present == false` равен 0.
     pub max_percent: u8,
-    /// Минимальный объявленный шаг backend.
+    /// Минимальный объявленный шаг backend; при `bounds_present == false` равен 0.
     pub step_percent: u8,
 }
 
 impl ChargeLimitInfo {
-    /// Создать DTO с достоверным текущим значением процента.
+    /// Создать DTO с достоверным текущим значением процента и известными bounds.
     ///
     /// Диапазон/шаг не валидируются здесь: проверка согласованности
     /// min/max/step выполняется на границе конкретного backend/domain
@@ -70,13 +72,28 @@ impl ChargeLimitInfo {
             enabled,
             percent_present: true,
             percent,
+            bounds_present: true,
             min_percent,
             max_percent,
             step_percent,
         }
     }
 
-    /// Создать DTO без достоверного значения процента.
+    /// Создать DTO с достоверным текущим значением процента и неизвестными
+    /// bounds (`bounds_present = false`, min/max/step = 0).
+    pub const fn with_percent_unknown_bounds(enabled: bool, percent: u8) -> Self {
+        Self {
+            enabled,
+            percent_present: true,
+            percent,
+            bounds_present: false,
+            min_percent: 0,
+            max_percent: 0,
+            step_percent: 0,
+        }
+    }
+
+    /// Создать DTO без достоверного значения процента и с известными bounds.
     ///
     /// Устанавливает `percent_present = false` и `percent = 0`.
     pub const fn without_percent(
@@ -89,9 +106,26 @@ impl ChargeLimitInfo {
             enabled,
             percent_present: false,
             percent: 0,
+            bounds_present: true,
             min_percent,
             max_percent,
             step_percent,
+        }
+    }
+
+    /// Создать DTO без достоверного значения процента и с неизвестными bounds.
+    ///
+    /// Устанавливает `percent_present = false`, `percent = 0`,
+    /// `bounds_present = false`, min/max/step = 0.
+    pub const fn without_percent_unknown_bounds(enabled: bool) -> Self {
+        Self {
+            enabled,
+            percent_present: false,
+            percent: 0,
+            bounds_present: false,
+            min_percent: 0,
+            max_percent: 0,
+            step_percent: 0,
         }
     }
 
@@ -139,9 +173,23 @@ mod tests {
         assert!(info.percent_present);
         assert_eq!(info.percent, 80);
         assert_eq!(info.percent(), Some(80));
+        assert!(info.bounds_present);
         assert_eq!(info.min_percent, 40);
         assert_eq!(info.max_percent, 100);
         assert_eq!(info.step_percent, 5);
+    }
+
+    #[test]
+    fn charge_limit_with_percent_unknown_bounds() {
+        let info = ChargeLimitInfo::with_percent_unknown_bounds(true, 80);
+        assert!(info.enabled);
+        assert!(info.percent_present);
+        assert_eq!(info.percent, 80);
+        assert_eq!(info.percent(), Some(80));
+        assert!(!info.bounds_present);
+        assert_eq!(info.min_percent, 0);
+        assert_eq!(info.max_percent, 0);
+        assert_eq!(info.step_percent, 0);
     }
 
     #[test]
@@ -151,15 +199,29 @@ mod tests {
         assert!(!info.percent_present);
         assert_eq!(info.percent, 0);
         assert_eq!(info.percent(), None);
+        assert!(info.bounds_present);
         assert_eq!(info.min_percent, 40);
         assert_eq!(info.max_percent, 100);
         assert_eq!(info.step_percent, 5);
     }
 
     #[test]
+    fn charge_limit_without_percent_unknown_bounds() {
+        let info = ChargeLimitInfo::without_percent_unknown_bounds(false);
+        assert!(!info.enabled);
+        assert!(!info.percent_present);
+        assert_eq!(info.percent, 0);
+        assert_eq!(info.percent(), None);
+        assert!(!info.bounds_present);
+        assert_eq!(info.min_percent, 0);
+        assert_eq!(info.max_percent, 0);
+        assert_eq!(info.step_percent, 0);
+    }
+
+    #[test]
     fn charge_limit_dbus_signature_is_stable() {
-        // bool(bool)u8 u8 u8 u8 -> "(bbyyyy)"
-        let expected: zbus::zvariant::Signature = "(bbyyyy)".try_into().expect("valid signature");
+        // bool(bool)u8 bool u8 u8 u8 -> "(bbybyyy)"
+        let expected: zbus::zvariant::Signature = "(bbybyyy)".try_into().expect("valid signature");
         assert_eq!(*ChargeLimitInfo::SIGNATURE, expected);
     }
 

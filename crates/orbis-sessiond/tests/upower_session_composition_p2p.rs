@@ -184,9 +184,11 @@ async fn composition_serves_upower_charge_limit() {
         assert!(info.percent_present);
         assert_eq!(info.percent, 80);
         assert_eq!(info.percent(), Some(80));
-        assert_eq!(info.min_percent, 40);
-        assert_eq!(info.max_percent, 100);
-        assert_eq!(info.step_percent, 5);
+        // UPower не сообщает hardware bounds: на wire bounds отсутствуют.
+        assert!(!info.bounds_present);
+        assert_eq!(info.min_percent, 0);
+        assert_eq!(info.max_percent, 0);
+        assert_eq!(info.step_percent, 0);
 
         let calls = state.lock().unwrap().calls.clone();
         assert_eq!(

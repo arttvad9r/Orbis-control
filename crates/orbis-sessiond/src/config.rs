@@ -79,9 +79,14 @@ mod tests {
         let limit = ChargeLimit::new(
             true,
             Some(Percent::new(80).expect("range")),
-            Percent::new(bounds.min_percent).expect("range"),
-            Percent::new(bounds.max_percent).expect("range"),
-            bounds.step_percent,
+            Some(
+                orbis_core::battery::ChargeLimitBounds::new(
+                    Percent::new(bounds.min_percent).expect("range"),
+                    Percent::new(bounds.max_percent).expect("range"),
+                    bounds.step_percent,
+                )
+                .expect("valid bounds"),
+            ),
         )
         .expect("valid domain charge limit");
         assert_eq!(limit.percent.map(|p| p.get()), Some(80));

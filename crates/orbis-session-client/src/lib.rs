@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
-use orbis_core::battery::ChargeLimit;
+use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::Percent;
@@ -95,12 +95,14 @@ pub fn charge_limit_from_wire(info: ChargeLimitInfo) -> Result<ChargeLimit, Prov
         )));
     }
 
-    let min = Percent::new(info.min_percent).map_err(|e| {
-        ProviderError::Internal(format!("session protocol: невалидный min_percent: {e}"))
-    })?;
-    let max = Percent::new(info.max_percent).map_err(|e| {
-        ProviderError::Internal(format!("session protocol: невалидный max_percent: {e}"))
-    })?;
+    if !info.bounds_present
+        && (info.min_percent != 0 || info.max_percent != 0 || info.step_percent != 0)
+    {
+        return Err(ProviderError::Internal(
+            "session protocol: bounds_present=false, но min/max/step ненулевые (нарушен canonical invariant)"
+                .to_string(),
+        ));
+    }
 
     let percent = if info.percent_present {
         Some(Percent::new(info.percent).map_err(|e| {
@@ -110,7 +112,30 @@ pub fn charge_limit_from_wire(info: ChargeLimitInfo) -> Result<ChargeLimit, Prov
         None
     };
 
-    ChargeLimit::new(info.enabled, percent, min, max, info.step_percent).map_err(|e| {
+    let bounds = if info.bounds_present {
+        Some(
+            ChargeLimitBounds::new(
+                Percent::new(info.min_percent).map_err(|e| {
+                    ProviderError::Internal(format!(
+                        "session protocol: невалидный min_percent: {e}"
+                    ))
+                })?,
+                Percent::new(info.max_percent).map_err(|e| {
+                    ProviderError::Internal(format!(
+                        "session protocol: невалидный max_percent: {e}"
+                    ))
+                })?,
+                info.step_percent,
+            )
+            .map_err(|e| {
+                ProviderError::Internal(format!("session protocol: невалидные bounds: {e}"))
+            })?,
+        )
+    } else {
+        None
+    };
+
+    ChargeLimit::new(info.enabled, percent, bounds).map_err(|e| {
         ProviderError::Internal(format!(
             "session protocol: несогласованный wire payload: {e}"
         ))
@@ -253,9 +278,10 @@ mod tests {
         let limit = charge_limit_from_wire(info).expect("valid");
         assert!(limit.enabled);
         assert_eq!(limit.percent.map(|p| p.get()), Some(80));
-        assert_eq!(limit.min.get(), 40);
-        assert_eq!(limit.max.get(), 100);
-        assert_eq!(limit.step, 5);
+        let b = limit.bounds.expect("known bounds");
+        assert_eq!(b.min.get(), 40);
+        assert_eq!(b.max.get(), 100);
+        assert_eq!(b.step, 5);
     }
 
     #[test]
@@ -264,9 +290,10 @@ mod tests {
         let limit = charge_limit_from_wire(info).expect("valid");
         assert!(!limit.enabled);
         assert_eq!(limit.percent, None);
-        assert_eq!(limit.min.get(), 40);
-        assert_eq!(limit.max.get(), 100);
-        assert_eq!(limit.step, 5);
+        let b = limit.bounds.expect("known bounds");
+        assert_eq!(b.min.get(), 40);
+        assert_eq!(b.max.get(), 100);
+        assert_eq!(b.step, 5);
     }
 
     #[test]
@@ -275,6 +302,7 @@ mod tests {
             enabled: false,
             percent_present: true,
             percent: 80,
+            bounds_present: true,
             min_percent: 40,
             max_percent: 100,
             step_percent: 5,
@@ -291,6 +319,7 @@ mod tests {
             enabled: true,
             percent_present: false,
             percent: 80,
+            bounds_present: true,
             min_percent: 40,
             max_percent: 100,
             step_percent: 5,
@@ -417,5 +446,39 @@ mod tests {
     fn generic_zbus_error_maps_to_dbus() {
         let err = zbus_error_to_provider(zbus::Error::Failure("transport".into()));
         assert!(matches!(err, ProviderError::Dbus(_)));
+    }
+
+    #[test]
+    fn maps_wire_unknown_bounds_to_domain() {
+        // current percent допустим при bounds=None.
+        let info = ChargeLimitInfo::with_percent_unknown_bounds(true, 80);
+        let limit = charge_limit_from_wire(info).expect("valid");
+        assert!(limit.enabled);
+        assert_eq!(limit.percent.map(|p| p.get()), Some(80));
+        assert!(limit.bounds.is_none());
+    }
+
+    #[test]
+    fn rejects_noncanonical_absent_bounds() {
+        // bounds_present=false с ненулевыми min/max/step нарушает canonical form.
+        let info = ChargeLimitInfo {
+            enabled: true,
+            percent_present: true,
+            percent: 80,
+            bounds_present: false,
+            min_percent: 40,
+            max_percent: 0,
+            step_percent: 0,
+        };
+        let err = charge_limit_from_wire(info).expect_err("noncanonical absent bounds");
+        assert!(matches!(err, ProviderError::Internal(_)));
+    }
+
+    #[test]
+    fn unknown_bounds_roundtrip_preserves_none() {
+        let info = ChargeLimitInfo::with_percent_unknown_bounds(true, 60);
+        let limit = charge_limit_from_wire(info).expect("valid");
+        assert_eq!(limit.percent.map(|p| p.get()), Some(60));
+        assert!(limit.bounds.is_none());
     }
 }

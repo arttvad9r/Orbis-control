@@ -202,23 +202,19 @@ where
             ))
         })?;
 
-        let min = Percent::new(self.bounds.min_percent)
-            .map_err(|e| ProviderError::Internal(format!("UPower: невалидный min_percent: {e}")))?;
-        let max = Percent::new(self.bounds.max_percent)
-            .map_err(|e| ProviderError::Internal(format!("UPower: невалидный max_percent: {e}")))?;
+        // UPower не сообщает hardware min/max/step: bounds остаются
+        // неизвестными. Injected bounds (product/fallback policy) не
+        // используются как hardware constraints.
+        let _ = self.bounds;
 
         ChargeLimit::new(
             snapshot.enabled,
             Some(Percent::new(percent_u8).map_err(|e| {
                 ProviderError::Internal(format!("UPower: невалидный threshold: {e}"))
             })?),
-            min,
-            max,
-            self.bounds.step_percent,
+            None,
         )
-        .map_err(|e| {
-            ProviderError::Internal(format!("UPower: threshold не согласован с bounds: {e}"))
-        })
+        .map_err(|e| ProviderError::Internal(format!("UPower: threshold невалиден: {e}")))
     }
 
     async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {
@@ -303,9 +299,8 @@ mod tests {
         let limit = p.charge_limit().await.expect("charge limit");
         assert!(limit.enabled);
         assert_eq!(limit.percent.map(|x| x.get()), Some(80));
-        assert_eq!(limit.min.get(), 40);
-        assert_eq!(limit.max.get(), 100);
-        assert_eq!(limit.step, 5);
+        // UPower не сообщает hardware min/max/step: bounds неизвестны.
+        assert!(limit.bounds.is_none());
         assert_eq!(p.source.reads(), 1);
     }
 
@@ -320,8 +315,8 @@ mod tests {
         assert!(!limit.enabled);
         // Выключенная функция не отменяет известный порог.
         assert_eq!(limit.percent.map(|x| x.get()), Some(80));
-        assert_eq!(limit.min.get(), 40);
-        assert_eq!(limit.max.get(), 100);
+        // UPower не сообщает hardware min/max/step: bounds неизвестны.
+        assert!(limit.bounds.is_none());
     }
 
     #[tokio::test]
@@ -348,16 +343,15 @@ mod tests {
             ProviderError::Internal(_)
         ));
 
-        // 0: domain constructor ChargeLimit::new отвергает (0 < min).
+        // 0: при неизвестных bounds (None) допустимый current percent.
         let p_zero = provider(ScriptedOutcome::Snapshot(UPowerChargeLimitSnapshot {
             supported: true,
             enabled: true,
             end_threshold: 0,
         }));
-        assert!(matches!(
-            p_zero.charge_limit().await.expect_err("0 rejected"),
-            ProviderError::Internal(_)
-        ));
+        let limit = p_zero.charge_limit().await.expect("0 accepted");
+        assert_eq!(limit.percent.map(|x| x.get()), Some(0));
+        assert!(limit.bounds.is_none());
     }
 
     #[tokio::test]

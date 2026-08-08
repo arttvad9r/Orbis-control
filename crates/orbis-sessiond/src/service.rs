@@ -44,20 +44,24 @@ impl SessionService {
 /// применяется; при `percent == None` wire payload канонизируется
 /// (`percent_present = false`, `percent = 0`).
 pub fn charge_limit_to_wire(value: ChargeLimit) -> ChargeLimitInfo {
-    match value.percent {
-        Some(percent) => ChargeLimitInfo::with_percent(
+    match (value.percent, value.bounds) {
+        (Some(percent), Some(bounds)) => ChargeLimitInfo::with_percent(
             value.enabled,
             percent.get(),
-            value.min.get(),
-            value.max.get(),
-            value.step,
+            bounds.min.get(),
+            bounds.max.get(),
+            bounds.step,
         ),
-        None => ChargeLimitInfo::without_percent(
+        (Some(percent), None) => {
+            ChargeLimitInfo::with_percent_unknown_bounds(value.enabled, percent.get())
+        }
+        (None, Some(bounds)) => ChargeLimitInfo::without_percent(
             value.enabled,
-            value.min.get(),
-            value.max.get(),
-            value.step,
+            bounds.min.get(),
+            bounds.max.get(),
+            bounds.step,
         ),
+        (None, None) => ChargeLimitInfo::without_percent_unknown_bounds(value.enabled),
     }
 }
 
@@ -85,13 +89,14 @@ fn provider_error_to_dbus(error: ProviderError) -> zbus::fdo::Error {
 /// без impl в protocol crate (за пределами scope). Кортеж из шести полей имеет
 /// ту же D-Bus signature `(bbyyyy)`, что и `ChargeLimitInfo`, поэтому client
 /// proxy остаётся без изменений.
-type ChargeLimitTuple = (bool, bool, u8, u8, u8, u8);
+type ChargeLimitTuple = (bool, bool, u8, bool, u8, u8, u8);
 
 fn charge_limit_info_to_tuple(info: ChargeLimitInfo) -> ChargeLimitTuple {
     (
         info.enabled,
         info.percent_present,
         info.percent,
+        info.bounds_present,
         info.min_percent,
         info.max_percent,
         info.step_percent,
@@ -130,6 +135,7 @@ mod tests {
     use zbus::object_server::Interface;
 
     use super::*;
+    use orbis_core::battery::ChargeLimitBounds;
 
     /// Заранее заданный исход scripted provider.
     #[derive(Debug, Clone, Copy)]
@@ -227,9 +233,14 @@ mod tests {
         ChargeLimit::new(
             enabled,
             percent.map(|p| Percent::new(p).expect("range")),
-            Percent::new(min).expect("range"),
-            Percent::new(max).expect("range"),
-            step,
+            Some(
+                ChargeLimitBounds::new(
+                    Percent::new(min).expect("range"),
+                    Percent::new(max).expect("range"),
+                    step,
+                )
+                .expect("valid"),
+            ),
         )
         .expect("valid")
     }
@@ -333,8 +344,8 @@ mod tests {
         let (svc, provider) = service(vec![ScriptedRead::Limit(limit(true, Some(60), 40, 100, 5))]);
         // Прямой вызов async property getter (без ObjectServer).
         let wire = svc.charge_limit().await.expect("property");
-        // (enabled, percent_present, percent, min, max, step)
-        assert_eq!(wire, (true, true, 60, 40, 100, 5));
+        // (enabled, percent_present, percent, bounds_present, min, max, step)
+        assert_eq!(wire, (true, true, 60, true, 40, 100, 5));
         assert_eq!(provider.reads(), 1);
     }
 
