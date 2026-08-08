@@ -47,13 +47,18 @@ in
       wantedBy = [ "graphical-session.target" ];
       partOf = [ "graphical-session.target" ];
       serviceConfig = {
-        Type = "simple";
+        # Daemon сам захватывает имя: Type=dbus + BusName — корректный
+        # readiness condition для systemd.
+        Type = "dbus";
+        BusName = "io.github.orbiscontrol.Session";
         ExecStart = lib.escapeShellArgs (
           [ "${cfg.package}/bin/orbis-sessiond" ]
           ++ lib.optional (cfg.mockDevice != null) [ "--mock-device" cfg.mockDevice ]
           ++ lib.optional cfg.readOnlyEmpty [ "--read-only-empty" ]
         );
+        # Не агрессивный restart loop; systemd шлёт SIGTERM, runtime его обрабатывает.
         Restart = "on-failure";
+        RestartSec = "2s";
       };
     };
   };

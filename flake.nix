@@ -7,7 +7,11 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+    {
+      # NixOS module (system-independent): services.orbis-control
+      nixosModules.orbis-control = import ./packaging/nix/module.nix;
+    }
+    // flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
         lib = nixpkgs.lib;
