@@ -21,10 +21,20 @@ pub enum RuntimeError {
 /// - возвращённая session Connection остаётся в scope helper и не
 ///   освобождается до завершения ожидания (без `mem::forget`, spawn,
 ///   detached tasks, retry/reconnect);
-/// - ожидание shutdown через `tokio::signal::ctrl_c()`;
+/// - ожидание первого из shutdown signals: SIGINT или SIGTERM
+///   (`tokio::signal::unix` + `tokio::select!`), корректно для systemd --user;
+/// - после первого signal функция завершается `Ok(())`;
 /// - reconnect/restart policy принадлежит внешнему supervisor/systemd.
 pub async fn run_discovered_sessiond() -> Result<(), RuntimeError> {
     let _session_connection = crate::bootstrap::connect_discovered_upower_session_server().await?;
-    tokio::signal::ctrl_c().await?;
+
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+
+    tokio::select! {
+        _ = sigint.recv() => {}
+        _ = sigterm.recv() => {}
+    }
+
     Ok(())
 }
