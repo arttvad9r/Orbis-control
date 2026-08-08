@@ -118,35 +118,21 @@ impl UPowerChargeLimitSource for ZbusUPowerChargeLimitSource {
     }
 }
 
-/// Границы charge limit из внешней конфигурации.
-///
-/// UPower не предоставляет универсальные min/max/step: bounds передаются
-/// провайдеру явно (позднее из capability/backend configuration).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ChargeLimitBounds {
-    /// Нижняя поддерживаемая граница.
-    pub min_percent: u8,
-    /// Верхняя поддерживаемая граница.
-    pub max_percent: u8,
-    /// Минимальный объявленный шаг backend.
-    pub step_percent: u8,
-}
-
 /// Read-only Battery Charge Limit provider над UPower.
 ///
-/// `S` — source (реальный zbus или scripted в тестах); источник и bounds
-/// передаются в конструкторе, который не выполняет I/O.
+/// `S` — source (реальный zbus или scripted в тестах); источник передаётся в
+/// конструкторе, который не выполняет I/O.
 pub struct UPowerChargeLimitProvider<S> {
     source: S,
-    bounds: ChargeLimitBounds,
 }
 
 impl<S> UPowerChargeLimitProvider<S> {
-    /// Создать provider над source с внешними bounds.
+    /// Создать provider над source.
     ///
-    /// Не открывает D-Bus connection и не выполняет I/O.
-    pub fn new(source: S, bounds: ChargeLimitBounds) -> Self {
-        Self { source, bounds }
+    /// Не открывает D-Bus connection и не выполняет I/O; UPower не сообщает
+    /// hardware min/max/step, поэтому provider не принимает injected bounds.
+    pub fn new(source: S) -> Self {
+        Self { source }
     }
 }
 
@@ -201,11 +187,6 @@ where
                 snapshot.end_threshold
             ))
         })?;
-
-        // UPower не сообщает hardware min/max/step: bounds остаются
-        // неизвестными. Injected bounds (product/fallback policy) не
-        // используются как hardware constraints.
-        let _ = self.bounds;
 
         ChargeLimit::new(
             snapshot.enabled,
@@ -277,16 +258,8 @@ mod tests {
         }
     }
 
-    fn bounds() -> ChargeLimitBounds {
-        ChargeLimitBounds {
-            min_percent: 40,
-            max_percent: 100,
-            step_percent: 5,
-        }
-    }
-
     fn provider(outcome: ScriptedOutcome) -> UPowerChargeLimitProvider<ScriptedSource> {
-        UPowerChargeLimitProvider::new(ScriptedSource::new(outcome), bounds())
+        UPowerChargeLimitProvider::new(ScriptedSource::new(outcome))
     }
 
     #[tokio::test]

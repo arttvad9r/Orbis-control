@@ -6,11 +6,11 @@ use std::sync::Arc;
 use orbis_providers::traits::BatteryProvider;
 
 use crate::server::build_session_server;
-use crate::upower::{ChargeLimitBounds, UPowerChargeLimitProvider, ZbusUPowerChargeLimitSource};
+use crate::upower::{UPowerChargeLimitProvider, ZbusUPowerChargeLimitSource};
 
 /// Построить read-only session server поверх готовой UPower Connection.
 ///
-/// - caller передаёт готовую UPower `Connection`, battery object path, bounds и
+/// - caller передаёт готовую UPower `Connection`, battery object path и
 ///   transport-configured session `Builder`;
 /// - helper соединяет существующие production source/provider/server без
 ///   дублирования; не открывает system/session bus и не выбирает transport;
@@ -22,10 +22,9 @@ pub async fn build_upower_session_server(
     session_builder: zbus::connection::Builder<'_>,
     upower_connection: zbus::Connection,
     battery_object_path: zbus::zvariant::OwnedObjectPath,
-    bounds: ChargeLimitBounds,
 ) -> zbus::Result<zbus::Connection> {
     let source = ZbusUPowerChargeLimitSource::new(upower_connection, battery_object_path);
-    let provider = UPowerChargeLimitProvider::new(source, bounds);
+    let provider = UPowerChargeLimitProvider::new(source);
     let battery: Arc<dyn BatteryProvider> = Arc::new(provider);
     build_session_server(session_builder, battery).await
 }

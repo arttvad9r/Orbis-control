@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use orbis_session_protocol::Session1Proxy;
 use orbis_sessiond::composition::build_upower_session_server;
-use orbis_sessiond::upower::ChargeLimitBounds;
 use zbus::connection::Builder;
 use zbus::proxy::CacheProperties;
 
@@ -96,15 +95,6 @@ impl FakeUPowerDevice {
     }
 }
 
-/// Test-only bounds.
-fn bounds() -> ChargeLimitBounds {
-    ChargeLimitBounds {
-        min_percent: 40,
-        max_percent: 100,
-        step_percent: 5,
-    }
-}
-
 /// Поднять две независимые P2P пары (UPower + session) и полный composition.
 ///
 /// Возвращает четыре Connection; proxy создаётся тестом из session client
@@ -152,7 +142,6 @@ async fn connect_composition(
             session_server_builder,
             upower_client_conn.clone(),
             object_path,
-            bounds(),
         ),
         session_client_builder.build(),
     )?;
