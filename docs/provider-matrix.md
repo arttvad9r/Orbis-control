@@ -186,7 +186,23 @@ backend/provider need not own all GPU concepts.
 
 Не будить dGPU ради телеметрии; устаревшее значение помечать как `Sleeping`/stale.
 
-### 5.4 Остальные GPU concepts (отдельно, не объединять)
+### 5.4 Session1 read-only transport для GPU capabilities
+
+**IMPLEMENTED / LIVE-VALIDATED**
+
+- Session1 exposes независимые read-only properties: `GpuPower`, `GpuMux`,
+  `GpuAccess` (wire signature `y`);
+- transport path:
+  - power → `SupergfxdGpuPowerProvider` → `GpuPowerState`;
+  - mux → `ArmouryGpuProvider` → `GpuMuxState`;
+  - access → `ArmouryGpuProvider` → `GpuAccessPolicy`;
+- client-side providers: `SessionGpuPowerProvider`, `SessionGpuMuxProvider`,
+  `SessionGpuAccessProvider` (НЕ legacy `GpuProvider`);
+- semantics: domain `Unknown` → semantic wire value; missing capability →
+  D-Bus `NotSupported`; provider/read error → D-Bus error; unknown wire value на
+  client → `Internal`.
+
+### 5.5 Остальные GPU concepts (отдельно, не объединять)
 
 - physical MUX: **PROVEN mapping + provider LIVE-VALIDATED** (kernel ASUS
   Armoury, `ArmouryGpuProvider`);

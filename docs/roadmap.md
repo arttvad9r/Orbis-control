@@ -143,23 +143,29 @@ selection на реальном hardware.
    COMPLETED** (ADR 0005: split capability traits; `GpuPowerProvider` и
    `AppService::gpu_power_state()` реализованы; `SupergfxdGpuPowerProvider`
    больше не реализует fake full GPU contract; live validation still PASS);
-   **MUX/access evidence completion + provider implementation COMPLETED /
-   LIVE-VALIDATED** (`ArmouryGpuProvider` → `GpuMuxProvider` +
-   `GpuAccessProvider`, PROVEN mapping из kernel 7.1.7 `asus-armoury.c`;
-   live ignored test PASS; `AppService::gpu_mux_state()` /
-   `gpu_access_policy()`).
+    **MUX/access evidence completion + provider implementation COMPLETED /
+    LIVE-VALIDATED** (`ArmouryGpuProvider` → `GpuMuxProvider` +
+    `GpuAccessProvider`, PROVEN mapping из kernel 7.1.7 `asus-armoury.c`;
+    live ignored test PASS; `AppService::gpu_mux_state()` /
+    `gpu_access_policy()`); **read-only Session1 GPU exposure COMPLETED /
+    LIVE-VALIDATED** (Session1 `GpuPower`/`GpuMux`/`GpuAccess`, wire `y`;
+    production composition power → `SupergfxdGpuPowerProvider`, mux/access →
+    `ArmouryGpuProvider`; client providers `SessionGpuPowerProvider` /
+    `SessionGpuMuxProvider` / `SessionGpuAccessProvider`; live smoke PASS;
+    ChargeLimit regression sanity PASS).
 3. fan/other proven ASUS reads — pending.
 4. telemetry только по доказанным источникам — pending.
 
 Следующий active substep в GPU-направлении:
 
-**read-only Session1 exposure для уже доказанных independent GPU concepts**
-(power / MUX / access) — публиковать proven concepts независимо через Session1
-по модели ADR 0004/0005; без product GpuMode mapping и без mutation.
+**GUI read-only integration proven GPU capabilities** (power / MUX / access
+независимо от product `GpuMode`) — подключить Session1 GPU properties к
+GUI/worker через session-client capability providers; без product GpuMode
+mapping и без mutation.
 
 Pending остаётся: pending/action provider (отдельно: текущий `ActionRequirement`
 относится к product requested mode и НЕ должен автоматически использоваться
-для supergfxd `PendingUserAction`); real GUI GPU integration; mutation.
+для supergfxd `PendingUserAction`); mutation.
 
 **Definition of done:**
 

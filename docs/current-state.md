@@ -217,12 +217,31 @@ choices на этой машине во время validation и не выдаё
   (pending/disabled/error) реализованы.
 - Mock tests сохраняют applied state при pending Ultimate/Eco.
 - Production GUI GPU всё ещё использует `MockProvider`.
-- Session1/session-client GPU path не реализован.
 - `AppService::gpu_state()` legacy aggregate остаётся fail-fast
   (requested→mux→access→power). Это limitation legacy aggregate; он больше не
   является единственным API для partially available concepts — real power
   доступен через независимый `gpu_power_state()`.
 - Production GPU mutations отсутствуют.
+
+### Session1 GPU transport (read-only)
+
+**IMPLEMENTED / LIVE-VALIDATED**
+
+- Session1 exposes независимые read-only properties:
+  `GpuPower`, `GpuMux`, `GpuAccess` (wire signature `y`);
+- production composition:
+  - power → `SupergfxdGpuPowerProvider`;
+  - mux/access → `ArmouryGpuProvider`;
+  - никаких mega-GpuProvider / GpuMode mappings;
+- session client providers: `SessionGpuPowerProvider`,
+  `SessionGpuMuxProvider`, `SessionGpuAccessProvider` (НЕ legacy `GpuProvider`);
+- semantics: domain `Unknown` передаётся как semantic wire value; missing
+  capability → D-Bus `NotSupported`; provider/read error → D-Bus error; unknown
+  wire value на client → `Internal`;
+- live: `Power wire=1` → Suspended (supergfxd raw=1); `Mux wire=0` → Integrated
+  (backend raw=1); `Access wire=0` → Unblocked (backend raw=0);
+  `ChargeLimit` regression sanity PASS;
+- никаких writes.
 
 ### MUX / access production providers
 
