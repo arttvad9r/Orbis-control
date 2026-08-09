@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use orbis_application::{
     AppService, ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome,
-    PerformanceCommandOutcome, SetChargeLimitError, SetGpuModeError,
+    PerformanceCommandOutcome, PerformanceState, SetChargeLimitError, SetGpuModeError,
 };
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::battery::ChargeLimit;
@@ -31,7 +31,8 @@ use orbis_providers::error::ProviderError;
 use orbis_providers::mock::MockProvider;
 use orbis_session_client::{
     SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
-    SessionGpuPowerProvider, ZbusSessionChargeLimitSource, ZbusSessionGpuSource,
+    SessionGpuPowerProvider, SessionPerformanceProvider, ZbusSessionChargeLimitSource,
+    ZbusSessionGpuSource, ZbusSessionPerformanceSource,
 };
 use orbis_test_support::devices::build_state_arc;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker};
@@ -93,13 +94,14 @@ fn state_for_scenario(name: &str) -> controller::UiState {
     s
 }
 
-/// Высота окна: в состоянии error добавляется баннер GPU-ошибки.
+/// Высота окна: в состоянии error добавляется баннер GPU-ошибки; в
+/// Performance-секции статус-строка Loading/Unavailable (+30px).
 fn window_height(state: &controller::UiState) -> f32 {
     // высота клиентской области без внутреннего titlebar (34px удалены)
     if state.gpu_section_error {
-        406.0
+        436.0
     } else {
-        381.0
+        411.0
     }
 }
 
@@ -111,6 +113,12 @@ fn to_slint(state: &controller::UiState) -> UiState {
     UiState {
         perf_selected: state.perf_selected,
         available_perf_mask: state.available_perf_mask,
+        perf_state: match state.perf_state {
+            controller::PerformanceHwState::Loading => PerformanceHwState::Loading,
+            controller::PerformanceHwState::Ready => PerformanceHwState::Ready,
+            controller::PerformanceHwState::Unavailable => PerformanceHwState::Unavailable,
+        },
+        perf_writable: state.perf_writable,
         gpu_selected: state.gpu_selected,
         available_gpu_mask: state.available_gpu_mask,
         gpu_ultimate_pending: state.gpu_ultimate_pending,
@@ -157,6 +165,12 @@ fn from_slint(state: &UiState) -> controller::UiState {
     controller::UiState {
         perf_selected: state.perf_selected,
         available_perf_mask: state.available_perf_mask,
+        perf_state: match state.perf_state {
+            PerformanceHwState::Loading => controller::PerformanceHwState::Loading,
+            PerformanceHwState::Ready => controller::PerformanceHwState::Ready,
+            PerformanceHwState::Unavailable => controller::PerformanceHwState::Unavailable,
+        },
+        perf_writable: state.perf_writable,
         gpu_selected: state.gpu_selected,
         available_gpu_mask: state.available_gpu_mask,
         gpu_ultimate_pending: state.gpu_ultimate_pending,
@@ -442,6 +456,33 @@ fn apply_charge_limit_refresh(
     }
 }
 
+/// Применить результат read-only Performance Mode refresh.
+///
+/// Ok(state) → Ready + authoritative current/available (selected + маска из
+/// state, не из mock fixture). Err → Unavailable (без mock fallback; fake
+/// current не показывается).
+fn apply_performance_refresh(
+    state: &mut controller::UiState,
+    result: Result<PerformanceState, ProviderError>,
+) {
+    match result {
+        Ok(s) => {
+            state.perf_state = controller::PerformanceHwState::Ready;
+            state.perf_selected = perf_selected_index(s.current);
+            state.available_perf_mask = performance_available_mask(&s.available);
+            tracing::debug!(
+                "performance: refresh OK, current={:?}, available={:?}",
+                s.current,
+                s.available
+            );
+        }
+        Err(e) => {
+            state.perf_state = controller::PerformanceHwState::Unavailable;
+            tracing::warn!("performance: refresh недоступен: {e:?}");
+        }
+    }
+}
+
 /// Применить результат read-only GPU capability refresh.
 ///
 /// Ok(value) → Ready + semantic value (domain `Unknown` — валидный Ready).
@@ -568,6 +609,9 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         }
         WorkerEvent::GpuAccessRefresh(result) => {
             apply_gpu_access_refresh(state, result);
+        }
+        WorkerEvent::PerformanceRefresh(result) => {
+            apply_performance_refresh(state, result);
         }
     }
 }
@@ -784,6 +828,17 @@ fn main() -> anyhow::Result<()> {
     // выглядеть рабочим. Это независимо от charge_limit_enabled (hardware state).
     state.charge_limit_writable = false;
 
+    // Честный initial Performance state: fixture-профиль уже дал mock current
+    // (Balanced), но в интерактивном запуске он НЕ должен быть видим как
+    // authoritative hardware state до первого provider read. Маскируем как
+    // Loading; первый RefreshPerformance переведёт в Ready/Unavailable.
+    state.perf_state = controller::PerformanceHwState::Loading;
+
+    // Production Performance backend — read-only session client
+    // (SessionPerformanceProvider возвращает Unsupported для set_profile):
+    // mutation control не должен выглядеть рабочим; кнопки read-only.
+    state.perf_writable = false;
+
     // Mock provider и application service для Performance/GPU (только
     // интерактивный путь). Battery production больше через MockProvider не читается.
     let mock_state = build_state_arc("zephyrus-full")
@@ -810,7 +865,13 @@ fn main() -> anyhow::Result<()> {
         ZbusSessionGpuSource::new(session_connection.clone()),
     )));
     let gpu_access_service = AppService::new(Arc::new(SessionGpuAccessProvider::new(
-        ZbusSessionGpuSource::new(session_connection),
+        ZbusSessionGpuSource::new(session_connection.clone()),
+    )));
+
+    // Read-only Performance Mode через тот же session connection
+    // (отдельный real read service; НЕ main MockProvider).
+    let performance_service = AppService::new(Arc::new(SessionPerformanceProvider::new(
+        ZbusSessionPerformanceSource::new(session_connection),
     )));
 
     let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();
@@ -836,6 +897,7 @@ fn main() -> anyhow::Result<()> {
         gpu_power_service,
         gpu_mux_service,
         gpu_access_service,
+        performance_service,
         worker_rx,
         event_sink,
     ));
@@ -851,6 +913,12 @@ fn main() -> anyhow::Result<()> {
     // Ошибка одного concept не блокирует остальные; без polling.
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshGpuCapabilities) {
         tracing::warn!("worker закрыт, initial gpu capabilities refresh не отправлен: {e:?}");
+    }
+
+    // Ровно один initial authoritative Performance refresh. Ошибка provider
+    // (включая отсутствие orbis-sessiond) не превращается в mock data.
+    if let Err(e) = worker_tx.send(WorkerCommand::RefreshPerformance) {
+        tracing::warn!("worker закрыт, initial performance refresh не отправлен: {e:?}");
     }
 
     app.show()?;
@@ -1350,5 +1418,88 @@ mod tests {
         assert_eq!(s.gpu_power, controller::GpuHwState::Loading);
         assert_eq!(s.gpu_mux, controller::GpuHwState::Loading);
         assert_eq!(s.gpu_access, controller::GpuHwState::Loading);
+    }
+
+    // -----------------------------------------------------------------------
+    // Read-only Performance Mode refresh semantics
+    // -----------------------------------------------------------------------
+
+    fn perf_state(
+        current: PerformanceProfile,
+        available: &[PerformanceProfile],
+    ) -> PerformanceState {
+        PerformanceState {
+            current,
+            available: available.to_vec(),
+        }
+    }
+
+    #[test]
+    fn perf_refresh_success_sets_ready_and_authoritative_state() {
+        let mut s = base_state();
+        // mock fixture: Balanced; production маскирует как Loading до read.
+        s.perf_state = controller::PerformanceHwState::Loading;
+
+        apply_performance_refresh(
+            &mut s,
+            Ok(perf_state(
+                PerformanceProfile::Silent,
+                &[
+                    PerformanceProfile::Silent,
+                    PerformanceProfile::Balanced,
+                    PerformanceProfile::Turbo,
+                ],
+            )),
+        );
+
+        assert_eq!(s.perf_state, controller::PerformanceHwState::Ready);
+        assert_eq!(s.perf_selected, 0); // Silent из authoritative state
+        assert_eq!(s.available_perf_mask, 0b111);
+    }
+
+    #[test]
+    fn perf_refresh_error_is_unavailable_without_mock_fallback() {
+        let mut s = base_state();
+        s.perf_state = controller::PerformanceHwState::Loading;
+        s.perf_selected = 1; // mock Balanced из from_mock_profile
+
+        apply_performance_refresh(
+            &mut s,
+            Err(orbis_providers::error::ProviderError::BackendUnavailable(
+                "sessiond missing".into(),
+            )),
+        );
+
+        assert_eq!(s.perf_state, controller::PerformanceHwState::Unavailable);
+        // fake/mock current не остаётся выделенным как authoritative: карточки
+        // disabled при Unavailable; значение сохраняется, но не показывается.
+        assert_eq!(s.perf_selected, 1);
+    }
+
+    #[test]
+    fn perf_refresh_available_partial_mask() {
+        let mut s = base_state();
+        s.perf_state = controller::PerformanceHwState::Loading;
+
+        apply_performance_refresh(
+            &mut s,
+            Ok(perf_state(
+                PerformanceProfile::Turbo,
+                &[PerformanceProfile::Turbo],
+            )),
+        );
+
+        assert_eq!(s.perf_state, controller::PerformanceHwState::Ready);
+        assert_eq!(s.perf_selected, 2);
+        assert_eq!(s.available_perf_mask, 0b100);
+    }
+
+    #[test]
+    fn perf_hw_state_default_ready_writable_in_mock() {
+        // mock/offscreen: Ready + writable (fake interactive semantics);
+        // production main() отдельно выставляет Loading + writable=false.
+        let s = base_state();
+        assert_eq!(s.perf_state, controller::PerformanceHwState::Ready);
+        assert!(s.perf_writable);
     }
 }

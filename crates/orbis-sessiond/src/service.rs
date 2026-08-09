@@ -9,23 +9,26 @@ use std::sync::Arc;
 
 use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
+use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
-    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
+    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
 };
-use orbis_session_protocol::{ChargeLimitInfo, gpu_access, gpu_mux, gpu_power};
+use orbis_session_protocol::{ChargeLimitInfo, gpu_access, gpu_mux, gpu_power, performance};
 
 /// Read-only service object session интерфейса.
 ///
 /// Владеет независимыми capability providers: battery + опциональные GPU
-/// capabilities (power / MUX / access). Провайдеры передаются извне.
-/// Конструктор не выполняет I/O, не читает состояние, не открывает D-Bus и не
-/// создаёт runtime; кэш/last error/mutable state отсутствуют.
+/// capabilities (power / MUX / access) + опциональный Performance Mode.
+/// Провайдеры передаются извне. Конструктор не выполняет I/O, не читает
+/// состояние, не открывает D-Bus и не создаёт runtime; кэш/last error/mutable
+/// state отсутствуют.
 pub struct SessionService {
     battery: Arc<dyn BatteryProvider>,
     gpu_power: Option<Arc<dyn GpuPowerProvider>>,
     gpu_mux: Option<Arc<dyn GpuMuxProvider>>,
     gpu_access: Option<Arc<dyn GpuAccessProvider>>,
+    performance: Option<Arc<dyn PerformanceProvider>>,
 }
 
 impl SessionService {
@@ -36,6 +39,7 @@ impl SessionService {
             gpu_power: None,
             gpu_mux: None,
             gpu_access: None,
+            performance: None,
         }
     }
 
@@ -54,6 +58,12 @@ impl SessionService {
     /// Добавить read-only GPU access capability provider.
     pub fn with_gpu_access(mut self, provider: Arc<dyn GpuAccessProvider>) -> Self {
         self.gpu_access = Some(provider);
+        self
+    }
+
+    /// Добавить read-only Performance Mode capability provider.
+    pub fn with_performance(mut self, provider: Arc<dyn PerformanceProvider>) -> Self {
+        self.performance = Some(provider);
         self
     }
 
@@ -90,6 +100,18 @@ impl SessionService {
         })?;
         provider.access_policy().await
     }
+
+    /// Прочитать authoritative Performance Mode state (domain current + available).
+    pub async fn read_performance(
+        &self,
+    ) -> Result<(PerformanceProfile, Vec<PerformanceProfile>), ProviderError> {
+        let provider = self.performance.as_ref().ok_or_else(|| {
+            ProviderError::Unsupported("session: Performance capability недоступна".into())
+        })?;
+        let current = provider.current_profile().await?;
+        let available = provider.profiles().await?;
+        Ok((current, available))
+    }
 }
 
 /// Преобразовать domain `GpuPowerState` в canonical wire `u8`.
@@ -120,6 +142,29 @@ fn gpu_access_to_wire(value: GpuAccessPolicy) -> u8 {
         GpuAccessPolicy::Pending => gpu_access::PENDING,
         GpuAccessPolicy::Unknown => gpu_access::UNKNOWN,
     }
+}
+
+/// Преобразовать domain `PerformanceProfile` в canonical wire `u8`.
+fn performance_current_to_wire(value: PerformanceProfile) -> u8 {
+    match value {
+        PerformanceProfile::Silent => performance::SILENT,
+        PerformanceProfile::Balanced => performance::BALANCED,
+        PerformanceProfile::Turbo => performance::TURBO,
+    }
+}
+
+/// Преобразовать список доступных `PerformanceProfile` в canonical wire mask
+/// (bit0=Silent, bit1=Balanced, bit2=Turbo).
+fn performance_mask_to_wire(available: &[PerformanceProfile]) -> u8 {
+    let mut mask: u8 = 0;
+    for p in available {
+        mask |= match p {
+            PerformanceProfile::Silent => performance::SILENT_BIT,
+            PerformanceProfile::Balanced => performance::BALANCED_BIT,
+            PerformanceProfile::Turbo => performance::TURBO_BIT,
+        };
+    }
+    mask
 }
 
 /// Преобразовать domain `ChargeLimit` в canonical wire `ChargeLimitInfo`.
@@ -226,6 +271,20 @@ impl SessionService {
             .await
             .map_err(provider_error_to_dbus)?;
         Ok(gpu_access_to_wire(value))
+    }
+
+    /// Текущий Performance Mode (read-only property, wire signature `(yy)`:
+    /// current + available mask).
+    #[zbus(property)]
+    async fn performance(&self) -> zbus::fdo::Result<(u8, u8)> {
+        let (current, available) = self
+            .read_performance()
+            .await
+            .map_err(provider_error_to_dbus)?;
+        Ok((
+            performance_current_to_wire(current),
+            performance_mask_to_wire(&available),
+        ))
     }
 }
 
@@ -605,6 +664,118 @@ mod tests {
         ));
         assert!(matches!(
             svc.gpu_access().await,
+            Err(zbus::fdo::Error::NotSupported(_))
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Performance Mode capability routing
+    // -----------------------------------------------------------------------
+
+    struct ScriptedPerformance {
+        current: PerformanceProfile,
+        available: Vec<PerformanceProfile>,
+    }
+    impl Provider for ScriptedPerformance {
+        fn id(&self) -> &'static str {
+            "scripted-performance"
+        }
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-performance")
+        }
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted-performance: {feature} недоступен")
+        }
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+    #[async_trait]
+    impl PerformanceProvider for ScriptedPerformance {
+        async fn profiles(&self) -> Result<Vec<PerformanceProfile>, ProviderError> {
+            Ok(self.available.clone())
+        }
+        async fn current_profile(&self) -> Result<PerformanceProfile, ProviderError> {
+            Ok(self.current)
+        }
+        async fn set_profile(
+            &self,
+            _profile: PerformanceProfile,
+        ) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("read-only".into()))
+        }
+        async fn profile_on_ac(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+            Ok(None)
+        }
+        async fn profile_on_battery(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+            Ok(None)
+        }
+        fn validate_set_profile(&self, _profile: PerformanceProfile) -> ValidationResult {
+            ValidationResult::invalid("read-only")
+        }
+    }
+
+    fn performance_service() -> SessionService {
+        SessionService::new(Arc::new(ScriptedBatteryProvider::new(vec![
+            ScriptedRead::Limit(limit(true, Some(80), 40, 100, 5)),
+        ])))
+        .with_performance(Arc::new(ScriptedPerformance {
+            current: PerformanceProfile::Silent,
+            available: vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ],
+        }))
+    }
+
+    #[test]
+    fn maps_domain_performance_to_wire() {
+        assert_eq!(
+            performance_current_to_wire(PerformanceProfile::Silent),
+            performance::SILENT
+        );
+        assert_eq!(
+            performance_current_to_wire(PerformanceProfile::Balanced),
+            performance::BALANCED
+        );
+        assert_eq!(
+            performance_current_to_wire(PerformanceProfile::Turbo),
+            performance::TURBO
+        );
+        assert_eq!(
+            performance_mask_to_wire(&[
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ]),
+            0b111
+        );
+        assert_eq!(
+            performance_mask_to_wire(&[PerformanceProfile::Balanced]),
+            performance::BALANCED_BIT
+        );
+    }
+
+    #[tokio::test]
+    async fn performance_property_returns_wire_current_and_mask() {
+        let svc = performance_service();
+        assert_eq!(svc.performance().await.expect("property"), (0, 0b111));
+    }
+
+    #[tokio::test]
+    async fn missing_performance_capability_is_not_supported() {
+        let svc = SessionService::new(Arc::new(ScriptedBatteryProvider::new(vec![
+            ScriptedRead::Limit(limit(true, Some(80), 40, 100, 5)),
+        ])));
+        assert!(matches!(
+            svc.performance().await,
             Err(zbus::fdo::Error::NotSupported(_))
         ));
     }

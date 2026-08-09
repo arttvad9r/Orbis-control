@@ -21,11 +21,15 @@ use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::Percent;
+use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::{ProviderError, ValidationResult};
 use orbis_providers::traits::{
-    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, Provider, ProviderHealth,
+    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
+    Provider, ProviderHealth,
 };
-use orbis_session_protocol::{ChargeLimitInfo, Session1Proxy, gpu_access, gpu_mux, gpu_power};
+use orbis_session_protocol::{
+    ChargeLimitInfo, PerformanceInfo, Session1Proxy, gpu_access, gpu_mux, gpu_power, performance,
+};
 use zbus::proxy::CacheProperties;
 
 /// Testable источник wire DTO через session protocol.
@@ -504,6 +508,176 @@ where
     }
 }
 
+// ---------------------------------------------------------------------------
+// Read-only Performance Mode через Session1
+// ---------------------------------------------------------------------------
+
+/// Преобразовать wire `u8` в domain `PerformanceProfile`.
+///
+/// Strict decode: неизвестный wire value → `Internal` (remote service нарушил
+/// contract).
+pub fn performance_current_from_wire(raw: u8) -> Result<PerformanceProfile, ProviderError> {
+    match raw {
+        performance::SILENT => Ok(PerformanceProfile::Silent),
+        performance::BALANCED => Ok(PerformanceProfile::Balanced),
+        performance::TURBO => Ok(PerformanceProfile::Turbo),
+        other => Err(ProviderError::Internal(format!(
+            "session protocol: неизвестный performance current wire value {other}"
+        ))),
+    }
+}
+
+/// Преобразовать wire mask в список доступных `PerformanceProfile`.
+///
+/// Strict decode: установленный бит вне (bit0..=bit2) → `Internal`. Порядок
+/// результата фиксирован порядком enum (`PerformanceProfile::ALL`), так как
+/// маска не сохраняет порядок, отданный backend-ом; UI использует только set
+/// доступности.
+pub fn performance_mask_from_wire(mask: u8) -> Result<Vec<PerformanceProfile>, ProviderError> {
+    let allowed: u8 = performance::SILENT_BIT | performance::BALANCED_BIT | performance::TURBO_BIT;
+    if mask & !allowed != 0 {
+        return Err(ProviderError::Internal(format!(
+            "session protocol: performance available mask содержит неизвестные биты (raw={mask})"
+        )));
+    }
+    let mut out = Vec::new();
+    if mask & performance::SILENT_BIT != 0 {
+        out.push(PerformanceProfile::Silent);
+    }
+    if mask & performance::BALANCED_BIT != 0 {
+        out.push(PerformanceProfile::Balanced);
+    }
+    if mask & performance::TURBO_BIT != 0 {
+        out.push(PerformanceProfile::Turbo);
+    }
+    Ok(out)
+}
+
+/// Testable источник Performance wire DTO через session protocol.
+#[async_trait]
+pub trait SessionPerformanceSource: Send + Sync {
+    /// Прочитать authoritative `PerformanceInfo` (wire DTO, без domain
+    /// conversion); ошибка не превращается в default.
+    async fn read_performance(&self) -> Result<PerformanceInfo, ProviderError>;
+}
+
+/// Реальный zbus источник Performance через generated `Session1Proxy`.
+///
+/// Хранит переданную извне готовую `Connection`; I/O начинается только в
+/// `read_performance().await`.
+pub struct ZbusSessionPerformanceSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusSessionPerformanceSource {
+    /// Создать источник с готовой Connection.
+    ///
+    /// Конструктор не выполняет I/O, не открывает session/system bus, не
+    /// проверяет service, не создаёт proxy и runtime; cache отсутствует.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl SessionPerformanceSource for ZbusSessionPerformanceSource {
+    async fn read_performance(&self) -> Result<PerformanceInfo, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy.performance().await.map_err(zbus_error_to_provider)
+    }
+}
+
+/// Read-only Performance Mode provider над session protocol source.
+///
+/// `S` — source (реальный zbus или scripted в тестах); source передаётся в
+/// конструкторе, который не выполняет I/O. Mutation-методы возвращают
+/// `Unsupported`; `set_profile`/validate не читают source.
+pub struct SessionPerformanceProvider<S> {
+    source: S,
+}
+
+impl<S> SessionPerformanceProvider<S> {
+    /// Создать provider над source.
+    ///
+    /// Не выполняет D-Bus чтение и не открывает Connection.
+    pub fn new(source: S) -> Self {
+        Self { source }
+    }
+}
+
+impl<S> Provider for SessionPerformanceProvider<S>
+where
+    S: SessionPerformanceSource,
+{
+    fn id(&self) -> &'static str {
+        "session-performance"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("session-performance")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("session protocol read-only backend: функция '{feature}' недоступна")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.session-performance",
+            "read-only session protocol Performance Mode backend",
+        )]
+    }
+}
+
+#[async_trait]
+impl<S> PerformanceProvider for SessionPerformanceProvider<S>
+where
+    S: SessionPerformanceSource,
+{
+    async fn profiles(&self) -> Result<Vec<PerformanceProfile>, ProviderError> {
+        let info = self.source.read_performance().await?;
+        performance_mask_from_wire(info.available_mask)
+    }
+
+    async fn current_profile(&self) -> Result<PerformanceProfile, ProviderError> {
+        let info = self.source.read_performance().await?;
+        performance_current_from_wire(info.current)
+    }
+
+    async fn set_profile(
+        &self,
+        _profile: PerformanceProfile,
+    ) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "session protocol read-only: set_profile недоступна".into(),
+        ))
+    }
+
+    async fn profile_on_ac(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+        Ok(None)
+    }
+
+    async fn profile_on_battery(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+        Ok(None)
+    }
+
+    fn validate_set_profile(&self, _profile: PerformanceProfile) -> ValidationResult {
+        ValidationResult::invalid("session protocol read-only: запись profile не поддерживается")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -845,5 +1019,175 @@ mod tests {
             gpu_access_from_wire(99),
             Err(ProviderError::Internal(_))
         ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Performance wire decode
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn performance_current_wire_decode_maps_all_values() {
+        use orbis_session_protocol::performance;
+        assert_eq!(
+            performance_current_from_wire(performance::SILENT).unwrap(),
+            PerformanceProfile::Silent
+        );
+        assert_eq!(
+            performance_current_from_wire(performance::BALANCED).unwrap(),
+            PerformanceProfile::Balanced
+        );
+        assert_eq!(
+            performance_current_from_wire(performance::TURBO).unwrap(),
+            PerformanceProfile::Turbo
+        );
+    }
+
+    #[test]
+    fn performance_current_unknown_wire_is_internal_error() {
+        assert!(matches!(
+            performance_current_from_wire(7),
+            Err(ProviderError::Internal(_))
+        ));
+    }
+
+    #[test]
+    fn performance_mask_wire_decode_maps_all_values() {
+        use orbis_session_protocol::performance;
+        assert_eq!(
+            performance_mask_from_wire(0b111).unwrap(),
+            vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ]
+        );
+        assert_eq!(
+            performance_mask_from_wire(performance::BALANCED_BIT | performance::TURBO_BIT).unwrap(),
+            vec![PerformanceProfile::Balanced, PerformanceProfile::Turbo]
+        );
+        assert_eq!(
+            performance_mask_from_wire(0).unwrap(),
+            Vec::<PerformanceProfile>::new()
+        );
+    }
+
+    #[test]
+    fn performance_mask_unknown_bit_is_internal_error() {
+        assert!(matches!(
+            performance_mask_from_wire(0b1000),
+            Err(ProviderError::Internal(_))
+        ));
+        assert!(matches!(
+            performance_mask_from_wire(0b1111),
+            Err(ProviderError::Internal(_))
+        ));
+    }
+
+    /// Тестовый источник Performance: очередь заранее заданных wire DTO.
+    #[derive(Debug, Clone, Copy)]
+    enum ScriptedPerfRead {
+        Info(PerformanceInfo),
+        Dbus,
+    }
+
+    struct ScriptedPerfSource {
+        results: Mutex<VecDeque<ScriptedPerfRead>>,
+        reads: AtomicUsize,
+    }
+
+    impl ScriptedPerfSource {
+        fn new(reads: Vec<ScriptedPerfRead>) -> Self {
+            Self {
+                results: Mutex::new(reads.into()),
+                reads: AtomicUsize::new(0),
+            }
+        }
+
+        fn reads(&self) -> usize {
+            self.reads.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl SessionPerformanceSource for ScriptedPerfSource {
+        async fn read_performance(&self) -> Result<PerformanceInfo, ProviderError> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            match self
+                .results
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("scripted performance source: очередь результатов исчерпана")
+            {
+                ScriptedPerfRead::Info(info) => Ok(info),
+                ScriptedPerfRead::Dbus => Err(ProviderError::Dbus("scripted dbus error".into())),
+            }
+        }
+    }
+
+    fn perf_info(current: u8, mask: u8) -> PerformanceInfo {
+        PerformanceInfo {
+            current,
+            available_mask: mask,
+        }
+    }
+
+    #[tokio::test]
+    async fn performance_provider_reads_source_once() {
+        let source = ScriptedPerfSource::new(vec![ScriptedPerfRead::Info(perf_info(1, 0b111))]);
+        let provider = SessionPerformanceProvider::new(source);
+        assert_eq!(
+            provider.current_profile().await.expect("current"),
+            PerformanceProfile::Balanced
+        );
+        assert_eq!(provider.source.reads(), 1);
+    }
+
+    #[tokio::test]
+    async fn performance_provider_does_not_cache_wire_state() {
+        let source = ScriptedPerfSource::new(vec![
+            ScriptedPerfRead::Info(perf_info(performance::SILENT, 0b111)),
+            ScriptedPerfRead::Info(perf_info(performance::TURBO, 0b111)),
+        ]);
+        let provider = SessionPerformanceProvider::new(source);
+        let first = provider.current_profile().await.expect("read1");
+        let second = provider.current_profile().await.expect("read2");
+        assert_eq!(first, PerformanceProfile::Silent);
+        assert_eq!(second, PerformanceProfile::Turbo);
+        assert_eq!(provider.source.reads(), 2);
+    }
+
+    #[tokio::test]
+    async fn performance_provider_error_is_preserved() {
+        let source = ScriptedPerfSource::new(vec![ScriptedPerfRead::Dbus]);
+        let provider = SessionPerformanceProvider::new(source);
+        let err = provider.current_profile().await.expect_err("dbus error");
+        assert!(matches!(err, ProviderError::Dbus(_)));
+    }
+
+    #[tokio::test]
+    async fn performance_mutation_is_unsupported_without_source_access() {
+        let source = ScriptedPerfSource::new(vec![ScriptedPerfRead::Info(perf_info(1, 0b111))]);
+        let provider = SessionPerformanceProvider::new(source);
+        assert!(matches!(
+            provider
+                .set_profile(PerformanceProfile::Turbo)
+                .await
+                .expect_err("set unsupported"),
+            ProviderError::Unsupported(_)
+        ));
+        assert!(!matches!(
+            provider.validate_set_profile(PerformanceProfile::Turbo),
+            ValidationResult::Valid
+        ));
+        assert_eq!(provider.source.reads(), 0);
+    }
+
+    #[tokio::test]
+    async fn performance_ac_battery_profiles_are_none() {
+        let source = ScriptedPerfSource::new(vec![ScriptedPerfRead::Info(perf_info(1, 0b111))]);
+        let provider = SessionPerformanceProvider::new(source);
+        assert_eq!(provider.profile_on_ac().await.expect("ac"), None);
+        assert_eq!(provider.profile_on_battery().await.expect("battery"), None);
     }
 }

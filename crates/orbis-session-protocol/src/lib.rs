@@ -139,11 +139,36 @@ impl ChargeLimitInfo {
     }
 }
 
+/// Wire DTO Performance Mode state.
+///
+/// Компактный canonical wire: `current` — wire-значение текущего профиля
+/// (`performance::*`), `available_mask` — битовая маска доступных профилей
+/// (bit0=Silent, bit1=Balanced, bit2=Turbo). D-Bus не имеет нативного
+/// enum/битового set, поэтому значения зафиксированы явно и проверяются
+/// строго на client boundary.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    zbus::zvariant::Type,
+    zbus::zvariant::OwnedValue,
+)]
+pub struct PerformanceInfo {
+    /// Wire-значение текущего профиля (`performance::SILENT` и т.д.).
+    pub current: u8,
+    /// Битовая маска доступных профилей (bit0=Silent, bit1=Balanced, bit2=Turbo).
+    pub available_mask: u8,
+}
+
 /// Getter-only zbus proxy контракт интерфейса `Session1`.
 ///
 /// Контракт read-only: только чтение свойств `ChargeLimit`, `GpuPower`,
-/// `GpuMux` и `GpuAccess`; setter, mutation-методы и signals в этом микрошаге
-/// отсутствуют.
+/// `GpuMux`, `GpuAccess` и `Performance`; setter, mutation-методы и signals
+/// в этом микрошаге отсутствуют.
 #[zbus::proxy(
     interface = "io.github.orbiscontrol.Session1",
     default_service = "io.github.orbiscontrol.Session",
@@ -165,6 +190,10 @@ pub trait Session1 {
     /// Текущая dGPU access policy (read-only property).
     #[zbus(property)]
     fn gpu_access(&self) -> zbus::Result<u8>;
+
+    /// Текущий Performance Mode (current + available, read-only property).
+    #[zbus(property)]
+    fn performance(&self) -> zbus::Result<PerformanceInfo>;
 }
 
 /// Wire-значения `GpuPowerState` (domain enum в protocol crate).
@@ -201,6 +230,22 @@ pub mod gpu_access {
     pub const PENDING: u8 = 2;
     /// Semantic state неизвестно.
     pub const UNKNOWN: u8 = 3;
+}
+
+/// Wire-значения `PerformanceProfile` и маска доступности.
+pub mod performance {
+    /// Silent (quiet/low-power).
+    pub const SILENT: u8 = 0;
+    /// Balanced.
+    pub const BALANCED: u8 = 1;
+    /// Turbo (performance).
+    pub const TURBO: u8 = 2;
+    /// Бит маски: Silent доступен.
+    pub const SILENT_BIT: u8 = 1;
+    /// Бит маски: Balanced доступен.
+    pub const BALANCED_BIT: u8 = 1 << 1;
+    /// Бит маски: Turbo доступен.
+    pub const TURBO_BIT: u8 = 1 << 2;
 }
 
 #[cfg(test)]
@@ -300,5 +345,31 @@ mod tests {
         assert_eq!(gpu_access::BLOCKED, 1);
         assert_eq!(gpu_access::PENDING, 2);
         assert_eq!(gpu_access::UNKNOWN, 3);
+        // PerformanceProfile wire values (domain: Silent/Balanced/Turbo).
+        assert_eq!(performance::SILENT, 0);
+        assert_eq!(performance::BALANCED, 1);
+        assert_eq!(performance::TURBO, 2);
+        assert_eq!(performance::SILENT_BIT, 1);
+        assert_eq!(performance::BALANCED_BIT, 2);
+        assert_eq!(performance::TURBO_BIT, 4);
+    }
+
+    #[test]
+    fn performance_dbus_signature_is_stable() {
+        // u8 u8 -> "(yy)"
+        let expected: zbus::zvariant::Signature = "(yy)".try_into().expect("valid signature");
+        assert_eq!(*PerformanceInfo::SIGNATURE, expected);
+    }
+
+    #[test]
+    fn performance_serde_roundtrip() {
+        let info = PerformanceInfo {
+            current: performance::BALANCED,
+            available_mask: 0b111,
+        };
+        let ctx = zbus::zvariant::serialized::Context::new_dbus(zbus::zvariant::Endian::Little, 0);
+        let data = zbus::zvariant::to_bytes(ctx, &info).expect("serialize");
+        let (decoded, _): (PerformanceInfo, usize) = data.deserialize().expect("deserialize");
+        assert_eq!(decoded, info);
     }
 }

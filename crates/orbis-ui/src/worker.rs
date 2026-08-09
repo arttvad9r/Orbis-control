@@ -20,7 +20,7 @@
 
 use orbis_application::{
     AppService, ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome,
-    SetChargeLimitError, SetGpuModeError, SetPerformanceError,
+    PerformanceState, SetChargeLimitError, SetGpuModeError, SetPerformanceError,
 };
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
@@ -66,6 +66,12 @@ pub enum WorkerCommand {
     /// Каждый concept читается независимо: failure одного не блокирует
     /// остальные. Никакого aggregate `gpu_state()` / fake GpuMode.
     RefreshGpuCapabilities,
+    /// Authoritative read-only refresh Performance Mode (current + available).
+    ///
+    /// Выполняет `AppService::performance_state()` через отдельный real
+    /// Performance read service (не main MockProvider). Обычная ordered
+    /// команда/барьер: не coalesce-ится.
+    RefreshPerformance,
 }
 
 /// Событие результата команды.
@@ -92,6 +98,12 @@ pub enum WorkerEvent {
     GpuMuxRefresh(Result<GpuMuxState, ProviderError>),
     /// Результат authoritative read-only refresh dGPU access policy.
     GpuAccessRefresh(Result<GpuAccessPolicy, ProviderError>),
+    /// Результат authoritative read-only refresh Performance Mode.
+    ///
+    /// `Ok(PerformanceState)` — фактический authoritative current + available
+    /// из отдельного real Performance read service; `Err(ProviderError)` — read
+    /// недоступен (worker не подставляет mock/default).
+    PerformanceRefresh(Result<PerformanceState, ProviderError>),
 }
 
 /// Создать command channel для worker.
@@ -112,6 +124,8 @@ pub fn command_channel() -> (
 /// - `battery_service` — владеемый `AppService<B>` для Battery Charge Limit;
 /// - `gpu_power_service` / `gpu_mux_service` / `gpu_access_service` — независимые
 ///   read-only GPU capability services (по ADR 0005);
+/// - `performance_service` — отдельный real read-only Performance service
+///   (не main MockProvider); используется только для `RefreshPerformance`;
 /// - `receiver` — команды в порядке получения;
 /// - `emit` — event sink, вызывается ровно один раз на каждую выполненную
 ///   команду или coalesced Battery-группу.
@@ -127,12 +141,18 @@ pub fn command_channel() -> (
 /// команд; stale results внутри одного worker невозможны. GPU capability reads
 /// (power/mux/access) выполняются независимо: failure одного не блокирует
 /// остальные.
-pub async fn run_worker<M, B, P, X, A, F>(
+///
+/// Technical debt: `run_worker` принимает всё больше независимых сервисов.
+/// Сознательно НЕ рефакторим composition в этом шаге (отдельный
+/// technical-debt step); точечный allow фиксирует известный debt.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_worker<M, B, P, X, A, R, F>(
     main_service: AppService<M>,
     battery_service: AppService<B>,
     gpu_power_service: AppService<P>,
     gpu_mux_service: AppService<X>,
     gpu_access_service: AppService<A>,
+    performance_service: AppService<R>,
     mut receiver: UnboundedReceiver<WorkerCommand>,
     mut emit: F,
 ) where
@@ -141,6 +161,7 @@ pub async fn run_worker<M, B, P, X, A, F>(
     P: GpuPowerProvider + Send + Sync + 'static,
     X: GpuMuxProvider + Send + Sync + 'static,
     A: GpuAccessProvider + Send + Sync + 'static,
+    R: PerformanceProvider + Send + Sync + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
     // Команда, дочитанная при drain соседней Battery-группы (граница группы),
@@ -201,6 +222,11 @@ pub async fn run_worker<M, B, P, X, A, F>(
                 emit(WorkerEvent::GpuAccessRefresh(access));
                 continue;
             }
+            WorkerCommand::RefreshPerformance => {
+                // Authoritative read-only refresh через отдельный real
+                // Performance read service; worker не подставляет mock/default.
+                WorkerEvent::PerformanceRefresh(performance_service.performance_state().await)
+            }
         };
         emit(event);
     }
@@ -238,6 +264,7 @@ mod tests {
         AppService<MockProvider>,
         AppService<MockProvider>,
         AppService<MockProvider>,
+        AppService<MockProvider>,
     );
 
     fn services() -> Services {
@@ -249,13 +276,15 @@ mod tests {
         let battery_service = AppService::new(provider.clone());
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
-        let gpu_access_service = AppService::new(provider);
+        let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider);
         (
             main_service,
             battery_service,
             gpu_power_service,
             gpu_mux_service,
             gpu_access_service,
+            performance_service,
         )
     }
 
@@ -271,6 +300,7 @@ mod tests {
                 services().2,
                 services().3,
                 services().4,
+                services().5,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -310,6 +340,7 @@ mod tests {
                 services().2,
                 services().3,
                 services().4,
+                services().5,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -353,6 +384,7 @@ mod tests {
                 services().2,
                 services().3,
                 services().4,
+                services().5,
                 rx,
                 |_event| {},
             )
@@ -375,6 +407,7 @@ mod tests {
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
         let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
 
         // Ошибка до команды: мутация не должна примениться.
         state.write().await.error_mode = MockErrorMode::BackendDown;
@@ -389,6 +422,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -440,6 +474,7 @@ mod tests {
                 services().2,
                 services().3,
                 services().4,
+                services().5,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -664,6 +699,7 @@ mod tests {
                 services().2,
                 services().3,
                 services().4,
+                services().5,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -707,6 +743,7 @@ mod tests {
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
         let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
 
         // Начальное applied GPU state через публичный API до команды.
         let initial = main_service.gpu_state().await.expect("initial gpu state");
@@ -721,6 +758,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -775,6 +813,7 @@ mod tests {
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
         let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -797,6 +836,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -844,6 +884,7 @@ mod tests {
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
         let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
 
         // Начальное GPU state через публичный provider API до ошибки.
         let before = (
@@ -866,6 +907,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -917,6 +959,7 @@ mod tests {
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
         let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -928,6 +971,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -977,6 +1021,7 @@ mod tests {
                 services().2,
                 services().3,
                 services().4,
+                services().5,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1021,6 +1066,7 @@ mod tests {
                 services().2,
                 services().3,
                 services().4,
+                services().5,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1059,6 +1105,7 @@ mod tests {
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
         let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1083,6 +1130,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1142,6 +1190,7 @@ mod tests {
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
         let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
 
         // Начальный ChargeLimit через публичный provider API до ошибки.
         let before = provider.charge_limit().await.expect("initial charge limit");
@@ -1159,6 +1208,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1208,6 +1258,7 @@ mod tests {
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
         let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1228,6 +1279,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1268,6 +1320,7 @@ mod tests {
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
         let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1293,6 +1346,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1355,6 +1409,7 @@ mod tests {
                 services().2,
                 services().3,
                 services().4,
+                services().5,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1407,6 +1462,7 @@ mod tests {
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
         let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -1417,6 +1473,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1452,6 +1509,7 @@ mod tests {
         let gpu_power_service = AppService::new(provider.clone());
         let gpu_mux_service = AppService::new(provider.clone());
         let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
 
         // Ошибка backend: refresh должен вернуть ошибку, а не mock default.
         state.write().await.error_mode = MockErrorMode::BackendDown;
@@ -1466,6 +1524,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1512,6 +1571,7 @@ mod tests {
                 services().2,
                 services().3,
                 services().4,
+                services().5,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1771,6 +1831,40 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl PerformanceProvider for BatteryOnlyProvider {
+        async fn profiles(&self) -> Result<Vec<PerformanceProfile>, ProviderError> {
+            Ok(vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ])
+        }
+
+        async fn current_profile(&self) -> Result<PerformanceProfile, ProviderError> {
+            Ok(PerformanceProfile::Balanced)
+        }
+
+        async fn set_profile(
+            &self,
+            _profile: PerformanceProfile,
+        ) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("read-only".into()))
+        }
+
+        async fn profile_on_ac(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+            Ok(None)
+        }
+
+        async fn profile_on_battery(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+            Ok(None)
+        }
+
+        fn validate_set_profile(&self, _profile: PerformanceProfile) -> ValidationResult {
+            ValidationResult::invalid("read-only")
+        }
+    }
+
     #[tokio::test]
     async fn routes_commands_to_distinct_providers() {
         let (main_provider, perf_calls, gpu_calls) = MainOnlyProvider::new();
@@ -1780,7 +1874,8 @@ mod tests {
         let battery_service = AppService::new(battery_provider.clone());
         let gpu_power_service = AppService::new(battery_provider.clone());
         let gpu_mux_service = AppService::new(battery_provider.clone());
-        let gpu_access_service = AppService::new(battery_provider);
+        let gpu_access_service = AppService::new(battery_provider.clone());
+        let performance_service = AppService::new(battery_provider);
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1792,6 +1887,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1902,7 +1998,7 @@ mod tests {
         });
         // main/battery — MockProvider (для run_worker bound; в этом тесте не
         // используются); GPU capability сервисы — CapabilityProvider.
-        let (main_service, battery_service, _, _, _) = services();
+        let (main_service, battery_service, _, _, _, performance_service) = services();
         let gpu_power_service = AppService::new(cap.clone());
         let gpu_mux_service = AppService::new(cap.clone());
         let gpu_access_service = AppService::new(cap);
@@ -1917,6 +2013,7 @@ mod tests {
                 gpu_power_service,
                 gpu_mux_service,
                 gpu_access_service,
+                performance_service,
                 rx,
                 move |event| {
                     let _ = result_tx.send(event);
@@ -1945,6 +2042,160 @@ mod tests {
         assert!(saw_power_err, "power error не доставлен");
         assert!(saw_mux_ok, "mux Ok не доставлен");
         assert!(saw_access_ok, "access Ok не доставлен");
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    // -----------------------------------------------------------------------
+    // RefreshPerformance: отдельный real Performance read service
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn refresh_performance_reads_authoritative_state() {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        // Прямое изменение provider вне worker: refresh должен вернуть
+        // актуальное значение, а не предыдущее UI-состояние.
+        provider
+            .set_profile(PerformanceProfile::Turbo)
+            .await
+            .expect("set profile");
+
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
+        let gpu_power_service = AppService::new(provider.clone());
+        let gpu_mux_service = AppService::new(provider.clone());
+        let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider);
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker(
+                main_service,
+                battery_service,
+                gpu_power_service,
+                gpu_mux_service,
+                gpu_access_service,
+                performance_service,
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        tx.send(WorkerCommand::RefreshPerformance).expect("send");
+
+        let event = result_rx.recv().await.expect("event");
+        match event {
+            WorkerEvent::PerformanceRefresh(Ok(state)) => {
+                assert_eq!(state.current, PerformanceProfile::Turbo);
+                assert_eq!(state.available.len(), 3);
+            }
+            other => panic!("ожидался Ok(PerformanceRefresh), получено: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn refresh_performance_error_is_preserved() {
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let provider = Arc::new(MockProvider::new(state.clone()));
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
+        let gpu_power_service = AppService::new(provider.clone());
+        let gpu_mux_service = AppService::new(provider.clone());
+        let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider);
+
+        // Ошибка backend: refresh должен вернуть ошибку, а не mock default.
+        state.write().await.error_mode = MockErrorMode::BackendDown;
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker(
+                main_service,
+                battery_service,
+                gpu_power_service,
+                gpu_mux_service,
+                gpu_access_service,
+                performance_service,
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        tx.send(WorkerCommand::RefreshPerformance).expect("send");
+
+        let event = result_rx.recv().await.expect("event");
+        match event {
+            WorkerEvent::PerformanceRefresh(Err(ProviderError::BackendUnavailable(_))) => {}
+            other => panic!("ожидался Err(BackendUnavailable), получено: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn refresh_performance_does_not_mutate() {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
+        let gpu_power_service = AppService::new(provider.clone());
+        let gpu_mux_service = AppService::new(provider.clone());
+        let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker(
+                main_service,
+                battery_service,
+                gpu_power_service,
+                gpu_mux_service,
+                gpu_access_service,
+                performance_service,
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        tx.send(WorkerCommand::RefreshPerformance).expect("send");
+        let event = result_rx.recv().await.expect("event");
+        assert!(matches!(event, WorkerEvent::PerformanceRefresh(Ok(_))));
+
+        // Refresh — read-only: current profile не изменён.
+        assert_eq!(
+            provider.current_profile().await.unwrap(),
+            PerformanceProfile::Balanced
+        );
 
         drop(tx);
         tokio::time::timeout(std::time::Duration::from_secs(5), worker)

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use orbis_providers::traits::{
-    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
+    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
 };
 use orbis_session_protocol::{BUS_NAME, OBJECT_PATH};
 
@@ -36,6 +36,7 @@ pub async fn build_session_server(
     builder: zbus::connection::Builder<'_>,
     battery: Arc<dyn BatteryProvider>,
     gpu: GpuCapabilities,
+    performance: Option<Arc<dyn PerformanceProvider>>,
 ) -> zbus::Result<zbus::Connection> {
     let mut service = SessionService::new(battery);
     if let Some(p) = gpu.power {
@@ -46,6 +47,9 @@ pub async fn build_session_server(
     }
     if let Some(a) = gpu.access {
         service = service.with_gpu_access(a);
+    }
+    if let Some(p) = performance {
+        service = service.with_performance(p);
     }
     let builder = builder.name(BUS_NAME)?;
     let builder = builder.serve_at(OBJECT_PATH, service)?;

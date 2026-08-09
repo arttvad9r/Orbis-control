@@ -19,9 +19,17 @@ export enum GpuHwState {
     Unavailable,
 }
 
+export enum PerformanceHwState {
+    Loading,
+    Ready,
+    Unavailable,
+}
+
 export struct UiState {
     perf-selected: int,             // 0=Silent, 1=Balanced, 2=Turbo
     available-perf-mask: int,       // bit0=Silent, bit1=Balanced, bit2=Turbo
+    perf-state: PerformanceHwState,
+    perf-writable: bool,
     gpu-selected: int,              // 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized
     available-gpu-mask: int,        // bit0=Eco, bit1=Standard, bit2=Ultimate, bit3=Optimized
     gpu-ultimate-pending: bool,
@@ -98,6 +106,8 @@ export component AppWindow inherits Window {
     in-out property <UiState> ui-state: {
         perf-selected: 1,
         available-perf-mask: 0,
+        perf-state: PerformanceHwState.Loading,
+        perf-writable: false,
         gpu-selected: 1,
         available-gpu-mask: 0,
         gpu-ultimate-pending: false,
@@ -186,8 +196,12 @@ export component AppWindow inherits Window {
                         compact: false;
                         accent: Palette.silent;
                         icon-kind: 0;
-                        selected: root.ui-state.perf-selected == 0;
-                        disabled: !root.bit-set(root.ui-state.available-perf-mask, 1);
+                        // Текущий профиль выделен только при authoritative Ready;
+                        // при Loading/Unavailable никакая карточка не выглядит active.
+                        selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0;
+                        // Read-only в production (perf-writable=false); unavailable
+                        // профили не выглядят доступными.
+                        disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 1);
                         clicked => { root.perf-clicked(0); }
                     }
                     ModeCard {
@@ -195,8 +209,8 @@ export component AppWindow inherits Window {
                         compact: false;
                         accent: Palette.balanced;
                         icon-kind: 1;
-                        selected: root.ui-state.perf-selected == 1;
-                        disabled: !root.bit-set(root.ui-state.available-perf-mask, 2);
+                        selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1;
+                        disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 2);
                         clicked => { root.perf-clicked(1); }
                     }
                     ModeCard {
@@ -204,9 +218,52 @@ export component AppWindow inherits Window {
                         compact: false;
                         accent: Palette.turbo;
                         icon-kind: 2;
-                        selected: root.ui-state.perf-selected == 2;
-                        disabled: !root.bit-set(root.ui-state.available-perf-mask, 4);
+                        selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 2;
+                        disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 4);
                         clicked => { root.perf-clicked(2); }
+                    }
+                }
+                if (root.ui-state.perf-state == PerformanceHwState.Loading) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: "Loading performance state…";
+                            font-size: 12px;
+                            color: Palette.text-secondary;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if (root.ui-state.perf-state == PerformanceHwState.Unavailable) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Rectangle {
+                            width: 3px;
+                            height: 14px;
+                            border-radius: 1.5px;
+                            background: Palette.error;
+                            y: (parent.height - 14px) / 2;
+                        }
+                        Text {
+                            text: "Performance backend unavailable";
+                            font-size: 12px;
+                            color: Palette.text-primary;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }

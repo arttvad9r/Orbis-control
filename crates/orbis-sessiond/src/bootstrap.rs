@@ -7,6 +7,7 @@ use orbis_providers::error::ProviderError;
 
 use crate::armoury::{ArmouryGpuProvider, SysfsArmouryGpuSource};
 use crate::composition::build_upower_session_server;
+use crate::performance::{KernelPerformanceProvider, SysfsKernelPlatformProfileSource};
 use crate::server::GpuCapabilities;
 use crate::supergfxd::{SupergfxdGpuPowerProvider, ZbusSupergfxdGpuPowerSource};
 
@@ -42,6 +43,7 @@ pub async fn connect_upower_session_server(
         upower_connection,
         battery_object_path,
         GpuCapabilities::default(),
+        None,
     )
     .await
 }
@@ -83,8 +85,17 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
         access: Some(gpu_access),
     };
 
-    Ok(
-        build_upower_session_server(session_builder, upower_connection, battery_object_path, gpu)
-            .await?,
+    // Read-only Performance Mode provider: symbolic kernel platform_profile ABI.
+    let performance: Arc<dyn orbis_providers::traits::PerformanceProvider> = Arc::new(
+        KernelPerformanceProvider::new(SysfsKernelPlatformProfileSource::default()),
+    );
+
+    Ok(build_upower_session_server(
+        session_builder,
+        upower_connection,
+        battery_object_path,
+        gpu,
+        Some(performance),
     )
+    .await?)
 }

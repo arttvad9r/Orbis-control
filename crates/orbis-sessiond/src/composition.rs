@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use orbis_providers::traits::BatteryProvider;
+use orbis_providers::traits::{BatteryProvider, PerformanceProvider};
 
 use crate::server::{GpuCapabilities, build_session_server};
 use crate::upower::{UPowerChargeLimitProvider, ZbusUPowerChargeLimitSource};
@@ -17,6 +17,7 @@ use crate::upower::{UPowerChargeLimitProvider, ZbusUPowerChargeLimitSource};
 /// - UPower не читается во время construction — первое чтение происходит при
 ///   будущем session property Get;
 /// - `gpu` — дополнительные read-only GPU capabilities (могут быть пустыми);
+/// - `performance` — опциональный read-only Performance Mode provider;
 /// - возвращённую session Connection необходимо удерживать живой; переданная
 ///   UPower Connection удерживается provider внутри service graph.
 pub async fn build_upower_session_server(
@@ -24,9 +25,10 @@ pub async fn build_upower_session_server(
     upower_connection: zbus::Connection,
     battery_object_path: zbus::zvariant::OwnedObjectPath,
     gpu: GpuCapabilities,
+    performance: Option<Arc<dyn PerformanceProvider>>,
 ) -> zbus::Result<zbus::Connection> {
     let source = ZbusUPowerChargeLimitSource::new(upower_connection, battery_object_path);
     let provider = UPowerChargeLimitProvider::new(source);
     let battery: Arc<dyn BatteryProvider> = Arc::new(provider);
-    build_session_server(session_builder, battery, gpu).await
+    build_session_server(session_builder, battery, gpu, performance).await
 }

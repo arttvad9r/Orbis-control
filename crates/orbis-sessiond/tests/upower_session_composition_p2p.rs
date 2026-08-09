@@ -143,6 +143,7 @@ async fn connect_composition(
             upower_client_conn.clone(),
             object_path,
             Default::default(),
+            None,
         ),
         session_client_builder.build(),
     )?;

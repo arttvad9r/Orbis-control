@@ -42,6 +42,22 @@ pub enum GpuHwState {
     Unavailable,
 }
 
+/// Состояние готовности read-only Performance Mode.
+///
+/// `Ready` означает получен authoritative current + available. `Unavailable` —
+/// только backend/read error. Отделено от `perf_writable` (write-capability):
+/// read-only session backend в production не позволяет запись.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PerformanceHwState {
+    /// Первый authoritative read ещё не выполнен.
+    #[default]
+    Loading,
+    /// Authoritative read успешен (current + available известны).
+    Ready,
+    /// Backend/read недоступен.
+    Unavailable,
+}
+
 /// Отображаемое состояние главного окна.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiState {
@@ -49,6 +65,13 @@ pub struct UiState {
     pub perf_selected: i32,
     /// Битовая маска доступных профилей (bit0=Silent, bit1=Balanced, bit2=Turbo).
     pub available_perf_mask: i32,
+    /// Состояние готовности read-only Performance Mode.
+    pub perf_state: PerformanceHwState,
+    /// Можно ли применять Performance profile (write-capability).
+    ///
+    /// Отдельно от `perf_state`: read-only session backend при Ready всё равно
+    /// не позволяет запись; mock/offscreen могут сохранять writable behavior.
+    pub perf_writable: bool,
     /// Выбранный GPU-режим: 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized.
     pub gpu_selected: i32,
     /// Битовая маска доступных GPU-режимов (bit0=Eco, bit1=Standard,
@@ -184,6 +207,11 @@ impl UiState {
         Self {
             perf_selected,
             available_perf_mask,
+            // mock/offscreen: готово сразу и writable (fake interactive
+            // semantics); production interactive выставляет Loading + writable=false
+            // отдельно в main().
+            perf_state: PerformanceHwState::Ready,
+            perf_writable: true,
             gpu_selected,
             available_gpu_mask,
             gpu_ultimate_pending: false,
