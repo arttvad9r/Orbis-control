@@ -125,11 +125,6 @@ released, процесс отсутствует.
 
 ### Gaps
 
-- **Packaging (runtime)**: packaged GUI при live запуске потребовал ручной
-  `LD_LIBRARY_PATH` для runtime/dlopen библиотек (Wayland/xkbcommon/fontconfig/
-  mesa/EGL-related). Точная root cause не выяснялась — требуется отдельный
-  packaging audit; следующий milestone: packaged GUI запускается напрямую без
-  ручного LD_LIBRARY_PATH.
 - **Diagnostics**: GUI не инициализирует tracing subscriber; существующие
   `tracing::warn!` не попадают в полезный runtime log.
 - Performance/GPU production backends остаются mock (см. ниже).
@@ -206,6 +201,18 @@ automation engine и остальные feature APIs из историческо
   `Restart=on-failure`, `RestartSec=2s`;
 - controlled `nixos-rebuild test` PASS;
 - persistent host enablement не выполнялось в рамках validation.
+
+GUI runtime dependencies (dlopen) упакованы декларативно:
+
+- `orbis-control` обёрнут стандартным Nix `makeWrapper`;
+- wrapper добавляет минимальный declarative `LD_LIBRARY_PATH` для
+  runtime/dlopen библиотек: wayland, libxkbcommon, fontconfig, libglvnd;
+- эти библиотеки находятся в Nix closure пакета;
+- EGL предоставляется через vendor-neutral `libglvnd` (не hard-coded Mesa);
+- обёрнут только `orbis-control`; `orbis-sessiond` и `orbisctl` не обёрнуты;
+- direct packaged startup `env -u LD_LIBRARY_PATH result/bin/orbis-control`
+  PASS live: GUI отрисовался, loader errors отсутствуют, Battery без daemon
+  корректно показал Unavailable, Performance/GPU UI сохранён.
 
 Module options `mockDevice` и `readOnlyEmpty` сейчас формируют CLI arguments,
 которые production `orbis-sessiond` binary не разбирает. Они не должны

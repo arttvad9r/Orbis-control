@@ -52,57 +52,64 @@ Performance+GPU+Battery; split-дизайн устранил это требов
 
 ## Milestone 2 — Packaging runtime correctness
 
-**Status: NEXT.**
+**Status: COMPLETED / LIVE-VALIDATED** (2026-08-09).
 
 **Goal:** packaged GUI должен запускаться напрямую без ручного
 `LD_LIBRARY_PATH`.
 
 **Why:** `nix build .#orbis-control` PASS, но при live запуске packaged GUI
-потребовал ручной LD_LIBRARY_PATH для runtime/dlopen библиотек (Wayland/
-xkbcommon/fontconfig/mesa/EGL-related). Точная root cause не выяснялась —
-нужен отдельный packaging audit.
+требовал ручной LD_LIBRARY_PATH: runtime/dlopen библиотеки загружаются через
+dlopen/libloading и не были обычными DT_NEEDED/RUNPATH dependencies.
 
 **Entry conditions:**
 
 - текущий GUI/session composition code green (Milestone 1);
 - отсутствие несвязанных изменений.
 
-**Definition of done:**
+**Definition of done (выполнен):**
 
 - `nix build .#orbis-control` PASS;
 - direct packaged `result/bin/orbis-control` startup;
 - без ручного LD_LIBRARY_PATH;
-- runtime/dlopen зависимости предоставляются декларативно (wrapper/RUNPATH/
-  propagated buildInputs по итогам audit);
+- runtime/dlopen зависимости предоставляются декларативно (wrapper);
 - live GUI startup повторно подтверждён (packaged GUI открывает окно без
-  ручного окружения).
+  ручного окружения);
+- `nix flake check` PASS, 273 Rust tests PASS;
+- loader errors отсутствуют; Battery без daemon корректно показал Unavailable;
+  Performance/GPU UI сохранён.
 
-**Risks/dependencies:** dlopen-зависимости winit (wayland/xkbcommon) и
-rendering (fontconfig/EGL/mesa) не попадают в closure пакета; требуется
-аккуратный fix без ослабления sandbox/reproducibility.
+**Result/notes:** исправление — стандартный Nix `makeWrapper` с минимальным
+declarative `LD_LIBRARY_PATH` для подтверждённого runtime set: wayland,
+libxkbcommon, fontconfig, libglvnd. EGL предоставляется через vendor-neutral
+`libglvnd` (Mesa driver не hard-coded). Обёрнут только `orbis-control`;
+`orbis-sessiond` и `orbisctl` не обёрнуты. Runtime libraries находятся в Nix
+closure.
 
 ## Milestone 3 — GUI diagnostics / tracing initialization
 
-**Status: NEXT (после packaging cleanup).**
+**Status: NEXT.**
 
 **Goal:** инициализировать tracing subscriber в GUI, чтобы существующие
 `tracing::warn!`/`debug!` попадали в полезный runtime log.
 
 **Why:** сейчас GUI tracing не инициализирован; диагностические события
 (включая `battery: refresh недоступен`) молча теряются — это затрудняет
-операционную диагностику.
+операционную диагностику (например, отсутствие sessiond требует visual-only
+evidence).
 
 **Entry conditions:** packaging runtime correctness закрыт (Milestone 2).
 
 **Definition of done:**
 
-- GUI инициализирует tracing (например, через `RUST_LOG`/EnvFilter);
-- startup/refresh/command warn-события видны в runtime log;
-- существующие debug-логи не спамят по умолчанию.
+- production GUI инициализирует tracing subscriber;
+- semantics `RUST_LOG`/EnvFilter определены;
+- существующие `tracing::warn!` реально появляются в stderr/log;
+- отсутствие sessiond можно диагностировать без visual-only evidence;
+- duplicate/global subscriber initialization корректно обрабатывается;
+- packaged GUI live validation подтверждает diagnostics.
 
 **Risks/dependencies:** минимальное изменение в `orbis-ui`; не должно менять UI
 semantics.
-backend presence и фактической readable capability.
 
 ## Milestone 4 — Real read-only ASUS providers
 
