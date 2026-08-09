@@ -15,3 +15,9 @@ path = "src/main.rs"
 [dependencies]
 orbis-core = { workspace = true }
 orbis-providers = { workspace = true }
+zbus = { workspace = true }
+zbus_polkit = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

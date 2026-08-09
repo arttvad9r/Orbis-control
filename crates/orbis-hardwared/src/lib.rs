@@ -15,6 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
@@ -78,8 +79,11 @@ pub struct PlatformProfileWriter<S: ProfileIo> {
 }
 
 impl PlatformProfileWriter<StdProfileIo> {
-    /// Создать writer над реальным `std::fs` с явными путями (tests: temp).
-    pub fn new(profile_path: PathBuf, choices_path: PathBuf) -> Self {
+    /// Создать writer над реальным `std::fs` с явными путями (test-only).
+    ///
+    /// Production public API использует только [`PlatformProfileWriter::default`]
+    /// с фиксированными kernel paths; произвольные пути недоступны извне crate.
+    pub(crate) fn new(profile_path: PathBuf, choices_path: PathBuf) -> Self {
         Self::with_io(StdProfileIo, profile_path, choices_path)
     }
 }
@@ -95,8 +99,11 @@ impl Default for PlatformProfileWriter<StdProfileIo> {
 }
 
 impl<S: ProfileIo> PlatformProfileWriter<S> {
-    /// Создать writer над инъектируемым IO (тесты: fake backend).
-    pub fn with_io(io: S, profile_path: PathBuf, choices_path: PathBuf) -> Self {
+    /// Создать writer над инъектируемым IO (test-only; fake backend).
+    ///
+    /// Произвольные пути/IO недоступны извне crate: production использует
+    /// только [`PlatformProfileWriter::default`] с фиксированными paths.
+    pub(crate) fn with_io(io: S, profile_path: PathBuf, choices_path: PathBuf) -> Self {
         Self {
             io,
             profile_path,
@@ -153,6 +160,223 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
         }
 
         Ok(ApplyResult::Applied)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// D-Bus service boundary (system bus)
+// ---------------------------------------------------------------------------
+
+/// Стабильный D-Bus name system service.
+pub const DBUS_NAME: &str = "io.github.orbiscontrol.Hardware";
+/// Стабильный object path system service.
+pub const DBUS_OBJECT_PATH: &str = "/io/github/orbiscontrol/Hardware";
+/// Имя интерфейса D-Bus (версия интерфейса как `1`).
+pub const DBUS_INTERFACE_NAME: &str = "io.github.orbiscontrol.Hardware1";
+/// Polkit action id для Performance mutation.
+pub const POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-performance-profile";
+
+/// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
+pub mod wire {
+    /// Silent.
+    pub const SILENT: u8 = 0;
+    /// Balanced.
+    pub const BALANCED: u8 = 1;
+    /// Turbo.
+    pub const TURBO: u8 = 2;
+}
+
+/// Strict wire decode (0/1/2); неизвестное значение → `InvalidRequest`.
+pub fn profile_from_wire(raw: u8) -> Result<PerformanceProfile, ProviderError> {
+    match raw {
+        wire::SILENT => Ok(PerformanceProfile::Silent),
+        wire::BALANCED => Ok(PerformanceProfile::Balanced),
+        wire::TURBO => Ok(PerformanceProfile::Turbo),
+        other => Err(ProviderError::InvalidRequest(format!(
+            "hardwared: неизвестный performance wire value {other}"
+        ))),
+    }
+}
+
+/// Wire encode подтверждённого профиля.
+pub fn profile_to_wire(profile: PerformanceProfile) -> u8 {
+    match profile {
+        PerformanceProfile::Silent => wire::SILENT,
+        PerformanceProfile::Balanced => wire::BALANCED,
+        PerformanceProfile::Turbo => wire::TURBO,
+    }
+}
+
+/// Ошибка авторизации.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthorizeError {
+    /// Не авторизован (deny/challenge/cancel) — клиенту `AccessDenied`.
+    Denied(String),
+    /// Ошибка проверки авторизации (polkit/transport) — клиенту `Failed`.
+    Failed(String),
+}
+
+/// Узкая абстракция авторизации.
+///
+/// Production реализация — [`PolkitAuthorizer`]; тесты — fake authorizer.
+/// Не доверяет UID/PID/profile из payload клиента: идентичность берётся из
+/// unique sender входящего D-Bus message.
+#[async_trait]
+pub trait Authorizer: Send + Sync {
+    /// Разрешить ли caller (unique sender name на system bus) операцию.
+    async fn authorize(&self, sender: &str) -> Result<(), AuthorizeError>;
+}
+
+/// Production polkit authorizer.
+///
+/// - Subject: `system-bus-name` с unique sender из входящего D-Bus message;
+/// - action: [`POLKIT_ACTION`];
+/// - `AllowUserInteraction=false` (пустые флаги);
+/// - разрешение только при `is_authorized=true`; challenge/deny/cancel → Denied.
+pub struct PolkitAuthorizer {
+    connection: zbus::Connection,
+    action: &'static str,
+}
+
+impl PolkitAuthorizer {
+    /// Создать authorizer над готовой system-bus Connection.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self {
+            connection,
+            action: POLKIT_ACTION,
+        }
+    }
+}
+
+#[async_trait]
+impl Authorizer for PolkitAuthorizer {
+    async fn authorize(&self, sender: &str) -> Result<(), AuthorizeError> {
+        let proxy = zbus_polkit::policykit1::AuthorityProxy::new(&self.connection)
+            .await
+            .map_err(|e| AuthorizeError::Failed(format!("polkit proxy: {e}")))?;
+
+        let mut subject_details = std::collections::HashMap::new();
+        let name_value = zbus::zvariant::Value::from(sender.to_string());
+        subject_details.insert(
+            "name".to_string(),
+            zbus::zvariant::OwnedValue::try_from(name_value)
+                .map_err(|e| AuthorizeError::Failed(format!("polkit subject: {e}")))?,
+        );
+        let subject = zbus_polkit::policykit1::Subject {
+            subject_kind: "system-bus-name".to_string(),
+            subject_details,
+        };
+
+        let result = proxy
+            .check_authorization(
+                &subject,
+                self.action,
+                &std::collections::HashMap::new(),
+                // AllowUserInteraction=false: пустые флаги (Default = empty).
+                Default::default(),
+                "",
+            )
+            .await
+            .map_err(|e| AuthorizeError::Failed(format!("polkit check: {e}")))?;
+
+        if result.is_authorized {
+            Ok(())
+        } else {
+            Err(AuthorizeError::Denied(
+                "polkit: операция не авторизована".into(),
+            ))
+        }
+    }
+}
+
+/// Преобразовать `ProviderError` в D-Bus `fdo::Error` (детерминированный mapping).
+fn provider_error_to_dbus(error: ProviderError) -> zbus::fdo::Error {
+    match error {
+        ProviderError::Unsupported(msg) => zbus::fdo::Error::NotSupported(msg),
+        ProviderError::PermissionDenied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        ProviderError::InvalidRequest(msg) => zbus::fdo::Error::InvalidArgs(msg),
+        ProviderError::BackendUnavailable(msg) => zbus::fdo::Error::Failed(msg),
+        ProviderError::Timeout(msg) => zbus::fdo::Error::Failed(msg),
+        ProviderError::Io(e) => zbus::fdo::Error::Failed(e.to_string()),
+        ProviderError::Dbus(msg) => zbus::fdo::Error::Failed(msg),
+        ProviderError::Internal(msg) => zbus::fdo::Error::Failed(msg),
+    }
+}
+
+/// Порядок обработки `SetPerformanceProfile` (не зависит от zbus macro;
+/// тестируемо с fake authorizer + fake writer):
+///
+/// 1. strict wire decode;
+/// 2. authorization (zero backend reads/writes при отказе);
+/// 3. writer `set_performance_profile` (ровно одна mutation + read-back);
+/// 4. success → подтверждённый profile wire;
+/// 5. error → соответствующий D-Bus error.
+pub async fn handle_set_performance_profile<A, S>(
+    authorizer: &A,
+    writer: &PlatformProfileWriter<S>,
+    raw: u8,
+    sender: &str,
+) -> zbus::fdo::Result<u8>
+where
+    A: Authorizer + ?Sized,
+    S: ProfileIo,
+{
+    // 1. strict wire decode — до любой авторизации/backend I/O.
+    let profile = profile_from_wire(raw).map_err(provider_error_to_dbus)?;
+
+    // 2. authorization — writer НЕ вызывается при отказе.
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+
+    // 3. ровно одна backend mutation + authoritative read-back.
+    let result = writer
+        .set_performance_profile(profile)
+        .map_err(provider_error_to_dbus)?;
+
+    // 4. success только при подтверждённом Applied.
+    match result {
+        ApplyResult::Applied => Ok(profile_to_wire(profile)),
+        other => Err(zbus::fdo::Error::Failed(format!(
+            "hardwared: операция не подтверждена: {other:?}"
+        ))),
+    }
+}
+
+/// Service object интерфейса `io.github.orbiscontrol.Hardware1`.
+///
+/// Не generic: writer — production с фиксированными kernel paths; authorizer —
+/// trait object (production — polkit, тесты — fake).
+pub struct HardwareService {
+    authorizer: Box<dyn Authorizer>,
+    writer: PlatformProfileWriter<StdProfileIo>,
+}
+
+impl HardwareService {
+    /// Создать service object над авторизатором (writer — фиксированные paths).
+    pub fn new(authorizer: Box<dyn Authorizer>) -> Self {
+        Self {
+            authorizer,
+            writer: PlatformProfileWriter::default(),
+        }
+    }
+}
+
+#[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
+impl HardwareService {
+    /// Установить Performance profile (wire enum `y`; возвращает подтверждённый
+    /// profile после writer read-back).
+    async fn set_performance_profile(
+        &self,
+        raw: u8,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<u8> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        handle_set_performance_profile(self.authorizer.as_ref(), &self.writer, raw, &sender).await
     }
 }
 
@@ -353,5 +577,166 @@ mod tests {
         assert!(matches!(err, ProviderError::Unsupported(_)));
         // Второй вызов не выполнял write (свежая валидация).
         assert_eq!(w.io.writes(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // D-Bus boundary: wire decode, authorization order, error mapping
+    // -----------------------------------------------------------------------
+
+    #[derive(Clone, Copy)]
+    enum AuthOutcome {
+        Ok,
+        Denied,
+        Failed,
+    }
+
+    struct FakeAuthorizer {
+        outcome: Mutex<AuthOutcome>,
+        calls: AtomicUsize,
+        last_sender: Mutex<Option<String>>,
+    }
+
+    impl FakeAuthorizer {
+        fn new(outcome: AuthOutcome) -> Self {
+            Self {
+                outcome: Mutex::new(outcome),
+                calls: AtomicUsize::new(0),
+                last_sender: Mutex::new(None),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+
+        fn last_sender(&self) -> Option<String> {
+            self.last_sender.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl Authorizer for FakeAuthorizer {
+        async fn authorize(&self, sender: &str) -> Result<(), AuthorizeError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_sender.lock().unwrap() = Some(sender.to_string());
+            match *self.outcome.lock().unwrap() {
+                AuthOutcome::Ok => Ok(()),
+                AuthOutcome::Denied => Err(AuthorizeError::Denied("denied".into())),
+                AuthOutcome::Failed => Err(AuthorizeError::Failed("polkit down".into())),
+            }
+        }
+    }
+
+    #[test]
+    fn wire_decode_strict() {
+        assert_eq!(
+            profile_from_wire(wire::SILENT).unwrap(),
+            PerformanceProfile::Silent
+        );
+        assert_eq!(
+            profile_from_wire(wire::BALANCED).unwrap(),
+            PerformanceProfile::Balanced
+        );
+        assert_eq!(
+            profile_from_wire(wire::TURBO).unwrap(),
+            PerformanceProfile::Turbo
+        );
+        assert!(matches!(
+            profile_from_wire(5),
+            Err(ProviderError::InvalidRequest(_))
+        ));
+    }
+
+    #[test]
+    fn wire_roundtrip() {
+        for p in PerformanceProfile::ALL {
+            assert_eq!(profile_from_wire(profile_to_wire(p)).unwrap(), p);
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_wire_is_invalid_args_with_zero_calls() {
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        let w = writer(io);
+        let auth = FakeAuthorizer::new(AuthOutcome::Ok);
+        let err = handle_set_performance_profile(&auth, &w, 99, ":1.1")
+            .await
+            .expect_err("unknown wire");
+        assert!(matches!(err, zbus::fdo::Error::InvalidArgs(_)));
+        assert_eq!(w.io.writes(), 0);
+        assert_eq!(auth.calls(), 0, "decode выполняется до авторизации");
+    }
+
+    #[tokio::test]
+    async fn authorization_denied_zero_writer_calls() {
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        let w = writer(io);
+        let auth = FakeAuthorizer::new(AuthOutcome::Denied);
+        let err = handle_set_performance_profile(&auth, &w, wire::SILENT, ":1.42")
+            .await
+            .expect_err("denied");
+        assert!(matches!(err, zbus::fdo::Error::AccessDenied(_)));
+        assert_eq!(w.io.writes(), 0);
+        assert_eq!(auth.last_sender(), Some(":1.42".to_string()));
+    }
+
+    #[tokio::test]
+    async fn authorization_failed_zero_writer_calls() {
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        let w = writer(io);
+        let auth = FakeAuthorizer::new(AuthOutcome::Failed);
+        let err = handle_set_performance_profile(&auth, &w, wire::BALANCED, ":1.7")
+            .await
+            .expect_err("polkit down");
+        assert!(matches!(err, zbus::fdo::Error::Failed(_)));
+        assert_eq!(w.io.writes(), 0);
+    }
+
+    #[tokio::test]
+    async fn authorized_calls_writer_once_and_returns_confirmed() {
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        let w = writer(io);
+        let auth = FakeAuthorizer::new(AuthOutcome::Ok);
+        let confirmed = handle_set_performance_profile(&auth, &w, wire::SILENT, ":1.42")
+            .await
+            .expect("authorized");
+        assert_eq!(confirmed, wire::SILENT);
+        assert_eq!(w.io.writes(), 1);
+        assert_eq!(w.io.profile(), "quiet\n");
+    }
+
+    #[tokio::test]
+    async fn writer_error_maps_to_dbus_error() {
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        io.set_write_error(std::io::Error::other("simulated io failure"));
+        let w = writer(io);
+        let auth = FakeAuthorizer::new(AuthOutcome::Ok);
+        let err = handle_set_performance_profile(&auth, &w, wire::BALANCED, ":1.42")
+            .await
+            .expect_err("writer io error");
+        assert!(matches!(err, zbus::fdo::Error::Failed(_)));
+    }
+
+    #[tokio::test]
+    async fn writer_read_back_mismatch_is_error_not_success() {
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        io.set_override_read_back("performance"); // backend вернул другое
+        let w = writer(io);
+        let auth = FakeAuthorizer::new(AuthOutcome::Ok);
+        let err = handle_set_performance_profile(&auth, &w, wire::SILENT, ":1.42")
+            .await
+            .expect_err("read-back mismatch");
+        assert!(matches!(err, zbus::fdo::Error::Failed(_)));
+    }
+
+    #[test]
+    fn dbus_names_are_stable() {
+        assert_eq!(DBUS_NAME, "io.github.orbiscontrol.Hardware");
+        assert_eq!(DBUS_OBJECT_PATH, "/io/github/orbiscontrol/Hardware");
+        assert_eq!(DBUS_INTERFACE_NAME, "io.github.orbiscontrol.Hardware1");
+        assert_eq!(
+            POLKIT_ACTION,
+            "io.github.orbiscontrol.hardware.set-performance-profile"
+        );
     }
 }

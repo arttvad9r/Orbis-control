@@ -42,6 +42,7 @@ tokio = { version = "1", features = [
     "process",
 ] }
 zbus = "5"
+zbus_polkit = "5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
