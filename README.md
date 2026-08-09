@@ -8,19 +8,22 @@ hardware I/O.
 ## Текущий статус
 
 Проект находится в ранней development стадии (`0.1.0`). Реализованы domain,
-provider и application boundaries, Slint mock UI и первый real read-only
-production vertical slice для Battery Charge Limit:
+provider и application boundaries, Slint mock UI и первый **read-only MVP**:
+production GUI реально показывает Battery Charge Limit, Performance Mode и
+GPU Power/MUX/Access через session path:
 
 ```text
-UPower → orbis-sessiond → session D-Bus → orbis-session-client
+UPower / kernel platform_profile / supergfxd / ASUS Armoury sysfs
+→ orbis-sessiond → session D-Bus → orbis-session-client → GUI
 ```
 
-Этот slice протестирован и live-validated как Nix-installed systemd user
-service с `Type=dbus` и clean SIGTERM shutdown. Production GUI подключён к
-этому пути через `orbis-session-client` для Battery Charge Limit и
-live-validated (daemon absent → Unavailable без mock fallback; daemon present →
-Ready со значением, совпадающим с authoritative D-Bus baseline). Performance/
-GPU в GUI пока используют `MockProvider`. Hardware mutations не реализованы.
+Путь протестирован и live-validated как Nix-installed systemd user service с
+`Type=dbus` и clean SIGTERM shutdown (daemon absent → честный Unavailable без
+mock fallback; daemon present → Ready со значениями, совпадающими с
+authoritative backends). Все mutation controls в production read-only/disabled
+(Battery slider, Performance cards, GPU Eco/Standard/Ultimate/Optimized);
+product GPU mode пока mock-only внутри legacy code. Hardware mutations не
+реализованы.
 
 Точный статус по областям: [`docs/current-state.md`](docs/current-state.md).
 
@@ -29,8 +32,8 @@ GPU в GUI пока используют `MockProvider`. Hardware mutations не
 ```text
 Slint UI → sequential worker → AppService → provider traits
                                       |
-                                      +→ MockProvider (Performance/GPU)
-                                      +→ session client → sessiond → UPower (Battery)
+                                      +→ session client → sessiond → UPower / kernel / supergfxd / Armoury (real reads)
+                                      +→ MockProvider (product GpuMode / legacy / offscreen-mock)
 ```
 
 - Backend state обновляется только из authoritative reads/read-back.

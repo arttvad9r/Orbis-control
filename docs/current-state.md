@@ -1,7 +1,7 @@
 # Current State
 
 > Роль: **CURRENT STATUS**. Operational baseline для текущей реализации после
-> завершения первого real read-only production vertical slice.
+> завершения первого read-only MVP.
 
 Статусы:
 
@@ -15,18 +15,62 @@
 
 ## Summary
 
-Первый production vertical slice реализован для read-only Battery Charge Limit:
+Первый **read-only MVP** завершён и live-validated: production GUI реально
+показывает Battery Charge Limit, Performance Mode, GPU Power, GPU MUX и GPU
+Access через session path:
 
 ```text
-UPower → orbis-sessiond → Session1 D-Bus → orbis-session-client
+UPower / kernel platform_profile / supergfxd / ASUS Armoury sysfs
+→ orbis-sessiond → Session1 D-Bus → orbis-session-client → worker → GUI
 ```
 
-Daemon vertical slice протестирован и live-validated как Nix-installed systemd
-user service. Production GUI **подключён** к этому пути через
-`orbis-session-client` и **LIVE-VALIDATED** (Scenario A: daemon absent →
-Unavailable без mock fallback; Scenario B: daemon present → Ready со значением,
-совпадающим с authoritative D-Bus baseline). Production hardware mutations
-отсутствуют.
+- все real sections имеют честные `Loading` / `Ready` / `Unavailable`;
+- mock fallback отсутствует; sessiond absent → честный `Unavailable`;
+- все mutation controls в production read-only/disabled (Battery slider,
+  Performance cards, GPU Eco/Standard/Ultimate/Optimized);
+- никаких hardware writes.
+
+## Read-only MVP
+
+**COMPLETED / LIVE-VALIDATED** (2026-08-09).
+
+Production GUI реально показывает (без mock fallback, initial refresh only):
+
+- **Battery Charge Limit** — UPower → sessiond → Session1
+  (`SessionChargeLimitProvider`);
+- **Performance current + available** — kernel `platform_profile` /
+  `platform_profile_choices` → sessiond → Session1
+  (`SessionPerformanceProvider`);
+- **GPU Power** — supergfxd `Power()` (`SessionGpuPowerProvider`);
+- **GPU MUX + Access** — kernel ASUS Armoury firmware-attributes
+  (`SessionGpuMuxProvider` / `SessionGpuAccessProvider`).
+
+UI semantics: `Loading` / `Ready(value)` / `Unavailable`; backend error → честный
+`Unavailable` (без симуляции успеха); sessiond absent → все real sections
+Unavailable, GUI остаётся usable.
+
+Все mutation controls в production read-only/disabled:
+
+- Battery slider (`charge_limit_writable=false`);
+- Performance cards (`perf_writable=false`);
+- GPU Eco/Standard/Ultimate/Optimized (`gpu_mode_writable=false`,
+  `gpu_mode_state=Unavailable`).
+
+GPU product mode:
+
+- всё ещё mock-only внутри legacy code (MockProvider обслуживает worker path и
+  offscreen/mock тесты);
+- production controls disabled; fake selected state скрыт;
+- строка `GPU mode control unavailable`.
+
+Live MVP validation (packaged GUI + packaged sessiond):
+
+- Battery = `80%`; Performance = `Balanced`; GPU Power = `Active`;
+  MUX = `Integrated`; Access = `Unblocked`;
+- значения совпали с raw backends (UPower percent, kernel
+  `platform_profile=balanced`, supergfxd `Power()=0`, sysfs `gpu_mux_mode=1`,
+  `dgpu_disable=0`);
+- GUI/logs без неожиданных ошибок; никаких hardware writes.
 
 ## Major areas
 
@@ -38,7 +82,7 @@ Unavailable без mock fallback; Scenario B: daemon present → Ready со зн
 | Provider contracts | IMPLEMENTED | Traits и error model существуют |
 | Broad provider implementation | MOCK-ONLY | `MockProvider` покрывает UI/application scenarios |
 | Application layer | IMPLEMENTED | Performance/GPU/Battery commands + authoritative read-back |
-| UI | PARTIAL | Slint main window + sequential worker; interactive Battery — real session client (LIVE-VALIDATED); GPU hardware status (Power/MUX/Access) — real session client (LIVE-VALIDATED); Performance и product GpuMode — mock |
+| UI | PARTIAL | Slint main window + sequential worker; Battery, Performance, GPU hardware status (Power/MUX/Access) — real session client (LIVE-VALIDATED); product GpuMode — mock-only в legacy, production controls disabled |
 | Session protocol | IMPLEMENTED | Getter-only `Session1.ChargeLimit`, `(bbybyyy)` |
 | Session client | IMPLEMENTED | Fresh D-Bus Get, validation, read-only `BatteryProvider` |
 | sessiond | LIVE-VALIDATED | Discovery, UPower read, server, runtime, signals, Nix user service |
@@ -52,12 +96,15 @@ Unavailable без mock fallback; Scenario B: daemon present → Ready со зн
 
 Production GUI composition (split worker, один sequential loop):
 
-- Performance/GPU → `MockProvider` (`main_service`);
+- legacy Performance/GPU product mode → `MockProvider` (`main_service`);
 - Battery → `SessionChargeLimitProvider` через
   `ZbusSessionChargeLimitSource` (`battery_service`);
-- `run_worker` принимает независимые сервисы: main (Performance + legacy GPU),
-  battery и три GPU capability-сервиса (power/mux/access); один provider не
-  обязан реализовывать все traits;
+- Performance read → `SessionPerformanceProvider` (`performance_service`);
+- GPU hardware status → три независимых session-client capability providers
+  (`gpu_power`/`gpu_mux`/`gpu_access` services);
+- `run_worker` принимает независимые сервисы: main (Performance legacy + GPU
+  product), battery, три GPU capability-сервиса и performance read-сервис; один
+  provider не обязан реализовывать все traits;
 - FIFO/barriers/Battery adjacent coalescing сохранены.
 
 UI Battery state semantics:
@@ -164,17 +211,19 @@ choices на этой машине во время validation и не выдаё
 
 ### Performance application/UI vertical slice
 
-**PARTIAL / MOCK-ONLY в production GUI**
+**READ PATH IMPLEMENTED / LIVE-VALIDATED; mutation MOCK-ONLY**
 
 - Domain types, `PerformanceProvider`, application read/set/read-back path,
   sequential worker и UI cards реализованы.
 - Mock scenarios и tests покрывают state transitions/errors.
 - General capability fixture содержит dated evidence наличия platform profiles
   на FA707NV.
-- Production GUI всё ещё использует `MockProvider` для Performance.
-- Provider пока не exposed через `Session1`/session client.
-- Real Performance mutation отсутствует.
-- UI не читает real current profile и не применяет profile к hardware.
+- Production read path: `KernelPerformanceProvider` → Session1 → session client
+  (`SessionPerformanceProvider`) → worker → GUI; current + available совпадают
+  с raw kernel `platform_profile(_choices)`; без mock fallback.
+- Production controls read-only/disabled (`perf_writable=false`);
+  fake/mock current не показывается до authoritative read.
+- Real Performance mutation отсутствует (`set_profile` → Unsupported).
 
 ## GPU Mode
 
@@ -243,11 +292,14 @@ blocker, но дальнейшее бесконечное расширение `
 
 ### Product GpuMode GUI path
 
-**PARTIAL / MOCK-ONLY в production GUI**
+**MOCK-ONLY внутри legacy code; production controls DISABLED**
 
 - Product Eco/Standard/Ultimate/Optimized backend mapping — **NOT PROVEN**;
-  production GUI использует `MockProvider` для product GpuMode (requested mode
-  cards).
+  production GUI не показывает fake selected state и не разрешает mutation:
+  `gpu_mode_state=Unavailable`, `gpu_mode_writable=false`, строка
+  `GPU mode control unavailable`.
+- Legacy `MockProvider` по-прежнему обслуживает worker path (`SetGpuMode`) и
+  offscreen/mock тесты, но production click-защита не отправляет `SetGpuMode`.
 - Domain разделяет requested mode, physical MUX, access policy и power state.
 - `GpuProvider`, application state/read-back, worker и UI states
   (pending/disabled/error) реализованы.

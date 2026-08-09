@@ -119,7 +119,7 @@ evidence).
 
 ## Milestone 4 — Real read-only ASUS providers
 
-**Status: NEXT.**
+**Status: ACTIVE — read-only MVP COMPLETED / LIVE-VALIDATED; fan/telemetry pending.**
 
 **Goal:** добавить доказанные read-only providers для приоритетных user-visible
 areas: Performance, GPU concepts, fan/telemetry и доступные ASUS properties.
@@ -135,49 +135,40 @@ selection на реальном hardware.
 1. Performance read-only provider — READ-ONLY AUDIT + минимальный production
    Performance provider — **COMPLETED / LIVE-VALIDATED**
    (`KernelPerformanceProvider`, symbolic kernel `platform_profile` ABI; live
-   ignored integration test PASS).
-2. GPU concepts read-only providers — **ACTIVE**; GPU runtime power sub-concept
-   **COMPLETED / LIVE-VALIDATED**
-   (`SupergfxdGpuPowerProvider` → `GpuPowerProvider`, PROVEN supergfxd `Power()`
-   enum; live ignored test PASS); **GPU partial-state / domain / API decision
-   COMPLETED** (ADR 0005: split capability traits; `GpuPowerProvider` и
-   `AppService::gpu_power_state()` реализованы; `SupergfxdGpuPowerProvider`
-   больше не реализует fake full GPU contract; live validation still PASS);
-    **MUX/access evidence completion + provider implementation COMPLETED /
-    LIVE-VALIDATED** (`ArmouryGpuProvider` → `GpuMuxProvider` +
-    `GpuAccessProvider`, PROVEN mapping из kernel 7.1.7 `asus-armoury.c`;
-    live ignored test PASS; `AppService::gpu_mux_state()` /
-    `gpu_access_policy()`); **read-only Session1 GPU exposure COMPLETED /
-    LIVE-VALIDATED** (Session1 `GpuPower`/`GpuMux`/`GpuAccess`, wire `y`;
-    production composition power → `SupergfxdGpuPowerProvider`, mux/access →
-    `ArmouryGpuProvider`; client providers `SessionGpuPowerProvider` /
-    `SessionGpuMuxProvider` / `SessionGpuAccessProvider`; live smoke PASS;
-    ChargeLimit regression sanity PASS); **GUI read-only GPU integration
-    COMPLETED / LIVE-VALIDATED** (production GUI отображает Power/MUX/Access
-    через session-client capability providers из одной session connection;
-    без mock fallback; initial refresh only; UI semantics
-    Loading/Ready(value)/Unavailable, domain Unknown → Ready(Unknown);
-    Scenario A daemon absent → три Unavailable, GUI жив; Scenario B packaged
-    sessiond → Power=Active, MUX=Integrated, Access=Unblocked — совпало с raw
-    supergfxd Power=0, sysfs mux=1, dgpu_disable=0; product
-    Eco/Standard/Ultimate/Optimized path остаётся MOCK-ONLY; никаких writes).
+   ignored integration test PASS); **Performance Session1 + GUI integration
+   COMPLETED / LIVE-VALIDATED** (expose `KernelPerformanceProvider` через
+   Session1/session-client → worker → GUI; current + available совпадают с raw
+   kernel; без mock fallback; initial refresh only; controls read-only;
+   Scenario A daemon absent → Unavailable; Scenario B packaged sessiond →
+   Balanced/{Silent,Balanced,Turbo} — совпало с raw; никаких writes).
+2. GPU concepts read-only providers — **COMPLETED / LIVE-VALIDATED** (GPU
+   runtime power sub-concept, ADR 0005 split traits, MUX/access evidence +
+   `ArmouryGpuProvider`, read-only Session1 GPU exposure, GUI read-only GPU
+   integration: production GUI отображает Power/MUX/Access через
+   session-client capability providers из одной session connection; без mock
+   fallback; Scenario A daemon absent → три Unavailable; Scenario B packaged
+   sessiond → Power=Active, MUX=Integrated, Access=Unblocked — совпало с raw
+   supergfxd Power=0, sysfs mux=1, dgpu_disable=0; product
+   Eco/Standard/Ultimate/Optimized path остаётся MOCK-ONLY в legacy, production
+   controls disabled; никаких writes).
 3. fan/other proven ASUS reads — pending.
 4. telemetry только по доказанным источникам — pending.
 
-Следующий ACTIVE substep (Milestone 4):
+Следующий ACTIVE substep (после read-only MVP):
 
-**Performance read-only Session1 + GUI integration** — expose
-`KernelPerformanceProvider` (уже live-validated: symbolic kernel
-`platform_profile` ABI) через Session1/session-client и подключить к GUI/worker,
-по аналогии с live-validated GPU capability path. Без mutation.
+**Controlled mutation — начать с Performance** (Milestone 5 foundations):
+доказать безопасный write path для первого узкого операции с
+capability/range/privilege evidence; остальные направления — отдельно:
+Battery mutation, GPU product policy/mutation, fan/telemetry (substeps 3–4),
+UX/polish (Milestone 7).
 
-Milestone 4 целиком **НЕ закрывается**: fan/telemetry (substeps 3–4) и product
-GPU policy/mutation остаются pending.
+Milestone 4 целиком **НЕ закрывается**: fan/telemetry (substeps 3–4) остаются
+pending; product GPU policy/mutation — pending.
 
 Technical note: worker composition теперь имеет несколько independent services
-(main, battery, gpu_power, gpu_mux, gpu_access); это не blocker, но дальнейшее
-бесконечное расширение `run_worker` может потребовать отдельного composition
-refactor.
+(main, battery, gpu_power, gpu_mux, gpu_access, performance); это не blocker,
+но дальнейшее бесконечное расширение `run_worker` может потребовать отдельного
+composition refactor.
 
 Pending остаётся: pending/action provider (отдельно: текущий `ActionRequirement`
 относится к product requested mode и НЕ должен автоматически использоваться
@@ -194,6 +185,26 @@ Pending остаётся: pending/action provider (отдельно: текущ�
 
 **Risks/dependencies:** backend version differences, raw enum ambiguity,
 несогласованные system services и incomplete hardware evidence.
+
+## Read-only MVP (достигнут)
+
+**COMPLETED / LIVE-VALIDATED** (2026-08-09).
+
+Production GUI реально показывает Battery Charge Limit, Performance
+(current + available), GPU Power/MUX/Access через session path; все real
+sections имеют честные Loading/Ready/Unavailable; без mock fallback; sessiond
+absent → честный Unavailable. Все mutation controls в production
+read-only/disabled. Это **не** означает завершённость Orbis в целом.
+
+Следующие крупные направления остаются отдельными (привязка к milestones):
+
+1. **Controlled mutation — начать с Performance** (Milestone 5);
+2. **Battery mutation** (Milestone 5; write-операция с доказанными bounds/owner);
+3. **GPU product policy/mutation** (Milestone 5; product GpuMode backend
+   mapping всё ещё NOT PROVEN);
+4. **fan/telemetry** (Milestone 4, substeps 3–4; только по доказанным
+   источникам);
+5. **UX/polish** (Milestone 7 — error/status UX, CLI diagnostics).
 
 ## Milestone 5 — Controlled mutation foundations
 
