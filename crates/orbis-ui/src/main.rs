@@ -95,13 +95,13 @@ fn state_for_scenario(name: &str) -> controller::UiState {
 }
 
 /// Высота окна: в состоянии error добавляется баннер GPU-ошибки; в
-/// Performance-секции статус-строка Loading/Unavailable (+30px).
+/// Performance- и GPU-секциях статус-строки Loading/Unavailable (+30px каждая).
 fn window_height(state: &controller::UiState) -> f32 {
     // высота клиентской области без внутреннего titlebar (34px удалены)
     if state.gpu_section_error {
-        436.0
+        466.0
     } else {
-        411.0
+        441.0
     }
 }
 
@@ -124,6 +124,12 @@ fn to_slint(state: &controller::UiState) -> UiState {
         gpu_ultimate_pending: state.gpu_ultimate_pending,
         gpu_ultimate_disabled: state.gpu_ultimate_disabled,
         gpu_section_error: state.gpu_section_error,
+        gpu_mode_state: match state.gpu_mode_state {
+            controller::GpuModeHwState::Loading => GpuModeHwState::Loading,
+            controller::GpuModeHwState::Ready => GpuModeHwState::Ready,
+            controller::GpuModeHwState::Unavailable => GpuModeHwState::Unavailable,
+        },
+        gpu_mode_writable: state.gpu_mode_writable,
         charge_limit: state.charge_limit,
         charge_limit_enabled: state.charge_limit_enabled,
         charge_limit_writable: state.charge_limit_writable,
@@ -176,6 +182,12 @@ fn from_slint(state: &UiState) -> controller::UiState {
         gpu_ultimate_pending: state.gpu_ultimate_pending,
         gpu_ultimate_disabled: state.gpu_ultimate_disabled,
         gpu_section_error: state.gpu_section_error,
+        gpu_mode_state: match state.gpu_mode_state {
+            GpuModeHwState::Loading => controller::GpuModeHwState::Loading,
+            GpuModeHwState::Ready => controller::GpuModeHwState::Ready,
+            GpuModeHwState::Unavailable => controller::GpuModeHwState::Unavailable,
+        },
+        gpu_mode_writable: state.gpu_mode_writable,
         charge_limit: state.charge_limit,
         charge_limit_enabled: state.charge_limit_enabled,
         charge_limit_writable: state.charge_limit_writable,
@@ -253,6 +265,36 @@ fn performance_available_mask(available: &[PerformanceProfile]) -> i32 {
         mask |= 1 << perf_selected_index(*p);
     }
     mask
+}
+
+/// Разрешён ли клик по product GPU Mode карточке (приводит ли он к
+/// `SetGpuMode` в worker).
+///
+/// Production: `gpu_mode_state != Ready` или `!gpu_mode_writable` → false:
+/// клик не должен приводить к mutation, даже если legacy MockProvider
+/// продолжает обслуживать worker path. Mock/offscreen — true.
+fn gpu_mode_click_allowed(state: &controller::UiState) -> bool {
+    state.gpu_mode_writable && state.gpu_mode_state == controller::GpuModeHwState::Ready
+}
+
+/// Выделена ли product GPU Mode карточка как authoritative selected.
+///
+/// Только при `GpuModeHwState::Ready` (production Unavailable → никакой mode
+/// не выглядит selected). Rust-спецификация slint binding `selected`.
+#[cfg(test)]
+fn gpu_mode_card_selected(state: &controller::UiState, index: i32) -> bool {
+    state.gpu_mode_state == controller::GpuModeHwState::Ready && state.gpu_selected == index
+}
+
+/// Доступна ли product GPU Mode карточка (не disabled).
+///
+/// Rust-спецификация slint binding `disabled`: клик разрешён только при Ready
+/// + writable + наличие бита в маске (`mask_bit` = 1, 2, 4, 8).
+#[cfg(test)]
+fn gpu_mode_card_disabled(state: &controller::UiState, _index: i32, mask_bit: i32) -> bool {
+    state.gpu_mode_state != controller::GpuModeHwState::Ready
+        || !state.gpu_mode_writable
+        || state.available_gpu_mask & mask_bit == 0
 }
 
 /// UI-boundary: преобразование UI-индекса карточки GPU в доменный режим.
@@ -630,6 +672,7 @@ fn handle_worker_event(app: &AppWindow, event: WorkerEvent) {
 /// controller::apply для этих действий НЕ вызывается. UiState используется
 /// только как boundary/model helper, не как кэш между callbacks.
 fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerCommand>>) {
+    let app_weak = app.as_weak();
     {
         let worker_tx = worker_tx.clone();
         app.on_perf_clicked(move |i| {
@@ -656,6 +699,18 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 tracing::warn!("gpu-clicked с неизвестным индексом: {i}");
                 return;
             };
+            // Production guard: клик по product GPU Mode карточке не должен
+            // приводить к SetGpuMode, даже если кнопка не disabled (защита в
+            // глубину поверх Slint disabled binding).
+            if let Some(app) = app_weak.upgrade() {
+                let s = from_slint(&app.get_ui_state());
+                if !gpu_mode_click_allowed(&s) {
+                    tracing::warn!(
+                        "gpu-clicked игнорирован: product GPU mode недоступен/read-only"
+                    );
+                    return;
+                }
+            }
             // Безопасная политика для текущего UI: обычный клик не является
             // подтверждением потенциально чувствительной операции.
             let confirmed = false;
@@ -838,6 +893,13 @@ fn main() -> anyhow::Result<()> {
     // (SessionPerformanceProvider возвращает Unsupported для set_profile):
     // mutation control не должен выглядеть рабочим; кнопки read-only.
     state.perf_writable = false;
+
+    // Production product GPU Mode: реального backend нет (read-only hardware
+    // status Power/MUX/Access идёт через независимые capability providers).
+    // Не показывать mock-selected как authoritative и не разрешать mutation,
+    // даже если legacy MockProvider продолжает обслуживать worker path.
+    state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
+    state.gpu_mode_writable = false;
 
     // Mock provider и application service для Performance/GPU (только
     // интерактивный путь). Battery production больше через MockProvider не читается.
@@ -1501,5 +1563,85 @@ mod tests {
         let s = base_state();
         assert_eq!(s.perf_state, controller::PerformanceHwState::Ready);
         assert!(s.perf_writable);
+    }
+
+    // -----------------------------------------------------------------------
+    // Production product GPU Mode: disabled, не selected, click не мутирует
+    // -----------------------------------------------------------------------
+
+    fn production_gpu_mode_state() -> controller::UiState {
+        let mut s = base_state();
+        s.gpu_mode_state = controller::GpuModeHwState::Unavailable;
+        s.gpu_mode_writable = false;
+        s
+    }
+
+    #[test]
+    fn production_gpu_mode_is_disabled_and_not_selected() {
+        let s = production_gpu_mode_state();
+        // Все 4 карточки (Eco/Standard/Ultimate/Optimized) в production
+        // disabled (клик не приведёт к SetGpuMode) и ни одна не selected
+        // (никакой mode не выглядит authoritative).
+        for idx in 0..4 {
+            let mask_bit = 1 << idx;
+            assert!(
+                gpu_mode_card_disabled(&s, idx, mask_bit),
+                "карточка {idx} должна быть disabled в production"
+            );
+            assert!(
+                !gpu_mode_card_selected(&s, idx),
+                "карточка {idx} не должна быть selected в production"
+            );
+        }
+    }
+
+    #[test]
+    fn production_gpu_mode_mock_selected_is_hidden() {
+        let mut s = base_state();
+        // fixture: gpu_selected = 1 (Standard) из MockProvider; production
+        // должен скрыть его как fake/не-authoritative.
+        assert_eq!(s.gpu_selected, 1);
+        s.gpu_mode_state = controller::GpuModeHwState::Unavailable;
+        s.gpu_mode_writable = false;
+        assert!(!gpu_mode_card_selected(&s, 1));
+    }
+
+    #[test]
+    fn gpu_click_allowed_production_is_false() {
+        let s = production_gpu_mode_state();
+        assert!(!gpu_mode_click_allowed(&s));
+    }
+
+    #[test]
+    fn gpu_click_allowed_mock_is_true() {
+        let s = base_state();
+        assert!(gpu_mode_click_allowed(&s));
+    }
+
+    #[test]
+    fn mock_gpu_mode_stays_interactive() {
+        // mock/offscreen: Standard (1) selected; остальные по маске 0b1111
+        // доступны (не disabled из-за mock semantics).
+        let s = base_state();
+        assert_eq!(s.gpu_mode_state, controller::GpuModeHwState::Ready);
+        assert!(s.gpu_mode_writable);
+        assert!(gpu_mode_card_selected(&s, 1));
+        for idx in 0..4 {
+            assert!(
+                !gpu_mode_card_disabled(&s, idx, 1 << idx),
+                "карточка {idx} должна быть доступна в mock (маска 0b1111)"
+            );
+        }
+    }
+
+    #[test]
+    fn production_gpu_mode_setup_preserves_hardware_status() {
+        // Production-сетап (Unavailable + writable=false) не трогает real
+        // read-only GPU hardware status (Power/MUX/Access остаются Loading до
+        // authoritative refresh).
+        let s = production_gpu_mode_state();
+        assert_eq!(s.gpu_power, controller::GpuHwState::Loading);
+        assert_eq!(s.gpu_mux, controller::GpuHwState::Loading);
+        assert_eq!(s.gpu_access, controller::GpuHwState::Loading);
     }
 }

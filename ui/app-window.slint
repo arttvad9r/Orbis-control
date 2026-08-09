@@ -25,6 +25,12 @@ export enum PerformanceHwState {
     Unavailable,
 }
 
+export enum GpuModeHwState {
+    Loading,
+    Ready,
+    Unavailable,
+}
+
 export struct UiState {
     perf-selected: int,             // 0=Silent, 1=Balanced, 2=Turbo
     available-perf-mask: int,       // bit0=Silent, bit1=Balanced, bit2=Turbo
@@ -35,6 +41,8 @@ export struct UiState {
     gpu-ultimate-pending: bool,
     gpu-ultimate-disabled: bool,
     gpu-section-error: bool,
+    gpu-mode-state: GpuModeHwState,
+    gpu-mode-writable: bool,
     charge-limit: int,
     charge-limit-enabled: bool,
     charge-limit-writable: bool,
@@ -113,6 +121,8 @@ export component AppWindow inherits Window {
         gpu-ultimate-pending: false,
         gpu-ultimate-disabled: false,
         gpu-section-error: false,
+        gpu-mode-state: GpuModeHwState.Loading,
+        gpu-mode-writable: false,
         charge-limit: 80,
         charge-limit-enabled: false,
         charge-limit-writable: false,
@@ -305,8 +315,12 @@ export component AppWindow inherits Window {
                         compact: true;
                         accent: Palette.eco;
                         icon-kind: 0;
-                        selected: root.ui-state.gpu-selected == 0;
-                        disabled: !root.bit-set(root.ui-state.available-gpu-mask, 1);
+                        // Authoritative selected показывается только при Ready
+                        // (production: Unavailable -> никакой mode не выбран).
+                        selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0;
+                        // Клик недоступен вне Ready; production writable=false
+                        // блокирует mutation даже при mock legacy worker path.
+                        disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1);
                         clicked => { root.gpu-clicked(0); }
                     }
                     ModeCard {
@@ -314,8 +328,8 @@ export component AppWindow inherits Window {
                         compact: true;
                         accent: Palette.standard;
                         icon-kind: 1;
-                        selected: root.ui-state.gpu-selected == 1;
-                        disabled: !root.bit-set(root.ui-state.available-gpu-mask, 2);
+                        selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1;
+                        disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2);
                         clicked => { root.gpu-clicked(1); }
                     }
                     ModeCard {
@@ -323,9 +337,9 @@ export component AppWindow inherits Window {
                         compact: true;
                         accent: Palette.ultimate;
                         icon-kind: 2;
-                        selected: root.ui-state.gpu-selected == 2;
+                        selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2;
                         pending: root.ui-state.gpu-ultimate-pending;
-                        disabled: root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4);
+                        disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4);
                         subtitle: root.ui-state.gpu-ultimate-disabled ? "MUX unavailable" : "";
                         clicked => { root.gpu-clicked(2); }
                     }
@@ -334,9 +348,45 @@ export component AppWindow inherits Window {
                         compact: true;
                         accent: Palette.optimized;
                         icon-kind: 1;
-                        selected: root.ui-state.gpu-selected == 3;
-                        disabled: !root.bit-set(root.ui-state.available-gpu-mask, 8);
+                        selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3;
+                        disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 8);
                         clicked => { root.gpu-clicked(3); }
+                    }
+                }
+                if (root.ui-state.gpu-mode-state == GpuModeHwState.Loading) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: "Loading GPU mode…";
+                            font-size: 12px;
+                            color: Palette.text-secondary;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if (root.ui-state.gpu-mode-state == GpuModeHwState.Unavailable) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: "GPU mode control unavailable";
+                            font-size: 12px;
+                            color: Palette.text-primary;
+                            vertical-alignment: center;
+                        }
                     }
                 }
                 // Read-only GPU hardware status (не интерактивно; независимо от product buttons).

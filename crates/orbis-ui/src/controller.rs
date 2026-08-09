@@ -58,6 +58,24 @@ pub enum PerformanceHwState {
     Unavailable,
 }
 
+/// Состояние product GPU Mode (Eco/Standard/Ultimate/Optimized).
+///
+/// `Ready` — есть authoritative product mode (пока mock/offscreen path).
+/// `Unavailable` — управление product mode недоступно (production: реального
+/// backend нет, только read-only hardware status Power/MUX/Access).
+/// Отделено от `gpu_mode_writable` (write-capability): production запрещает и
+/// показ authoritative selected, и изменение.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GpuModeHwState {
+    /// Authoritative product mode ещё не получен.
+    #[default]
+    Loading,
+    /// Authoritative product mode доступен (mock/offscreen).
+    Ready,
+    /// Управление product mode недоступно (production).
+    Unavailable,
+}
+
 /// Отображаемое состояние главного окна.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiState {
@@ -83,6 +101,13 @@ pub struct UiState {
     pub gpu_ultimate_disabled: bool,
     /// Ошибка backend в GPU-секции (остальное окно остаётся рабочим).
     pub gpu_section_error: bool,
+    /// Состояние product GPU Mode (Eco/Standard/Ultimate/Optimized).
+    pub gpu_mode_state: GpuModeHwState,
+    /// Можно ли менять product GPU Mode (write-capability).
+    ///
+    /// Отдельно от `gpu_mode_state`: production запрещает mutation, даже если
+    /// legacy MockProvider продолжает обслуживать worker path.
+    pub gpu_mode_writable: bool,
     /// Лимит зарядки, % (authoritative value; не показывать при state != Ready).
     pub charge_limit: i32,
     /// Функция Battery Charge Limit доступна (из mock-состояния).
@@ -217,6 +242,11 @@ impl UiState {
             gpu_ultimate_pending: false,
             gpu_ultimate_disabled: false,
             gpu_section_error: false,
+            // mock/offscreen: product GPU mode готов и writable (fake interactive
+            // semantics); production interactive выставляет Unavailable + writable=false
+            // отдельно в main().
+            gpu_mode_state: GpuModeHwState::Ready,
+            gpu_mode_writable: true,
             charge_limit,
             charge_limit_enabled,
             // mock/offscreen/tests могут применять лимит (fake interactive semantics);
