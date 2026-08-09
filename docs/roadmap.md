@@ -198,7 +198,9 @@ read-only/disabled. Это **не** означает завершённость 
 
 Следующие крупные направления остаются отдельными (привязка к milestones):
 
-1. **Controlled mutation — начать с Performance** (Milestone 5);
+1. **Controlled mutation — начать с Performance** (Milestone 5; архитектура
+   принята: [ADR 0006](adr/0006-privileged-performance-write.md) — kernel
+   `platform_profile` через узкий `orbis-hardwared`, polkit, read-back);
 2. **Battery mutation** (Milestone 5; write-операция с доказанными bounds/owner);
 3. **GPU product policy/mutation** (Milestone 5; product GpuMode backend
    mapping всё ещё NOT PROVEN);
@@ -212,6 +214,11 @@ read-only/disabled. Это **не** означает завершённость 
 доказанными capability, range/semantics и privilege boundary.
 
 **Why:** read support не доказывает безопасность записи.
+
+**Architecture:** принята в [ADR 0006](adr/0006-privileged-performance-write.md)
+(Performance profile через kernel `platform_profile` + узкий `orbis-hardwared`;
+GUI/sessiond unprivileged; polkit action; validate → один write → read-back →
+success только при совпадении).
 
 **Entry conditions:**
 

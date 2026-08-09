@@ -184,7 +184,10 @@ production Battery mutations возвращают `Unsupported`.
   собственную privilege boundary.
 - `orbis-hardwared`: не реализован и не входит в workspace. Его введение требует
   отдельного ADR с конкретной операцией, capability proof, allowlist, validation,
-  authorization и sandboxing.
+  authorization и sandboxing. Первый доказанный use case — Performance profile
+  write (`/sys/firmware/acpi/platform_profile`), см.
+  [ADR 0006](adr/0006-privileged-performance-write.md); hardwared НЕ является
+  generic sysfs writer, каждая новая privileged capability добавляется отдельно.
 
 ## 8. GPU semantics
 
@@ -250,5 +253,7 @@ asusd/sysfs writes.
   read-only session contract.
 - [ADR 0005](adr/0005-split-gpu-provider-capabilities.md) — split GPU provider
   capabilities по hardware concepts.
+- [ADR 0006](adr/0006-privileged-performance-write.md) — привилегированный
+  write path Performance profile (первая controlled mutation).
 - [`research-report.md`](research-report.md) и hardware fixtures — dated evidence,
   не current implementation status.
