@@ -142,22 +142,24 @@ selection на реальном hardware.
    enum; live ignored test PASS); **GPU partial-state / domain / API decision
    COMPLETED** (ADR 0005: split capability traits; `GpuPowerProvider` и
    `AppService::gpu_power_state()` реализованы; `SupergfxdGpuPowerProvider`
-   больше не реализует fake full GPU contract; live validation still PASS).
-   MUX/access НЕ completed.
+   больше не реализует fake full GPU contract; live validation still PASS);
+   **MUX/access evidence completion + provider implementation COMPLETED /
+   LIVE-VALIDATED** (`ArmouryGpuProvider` → `GpuMuxProvider` +
+   `GpuAccessProvider`, PROVEN mapping из kernel 7.1.7 `asus-armoury.c`;
+   live ignored test PASS; `AppService::gpu_mux_state()` /
+   `gpu_access_policy()`).
 3. fan/other proven ASUS reads — pending.
 4. telemetry только по доказанным источникам — pending.
 
 Следующий active substep в GPU-направлении:
 
-**MUX/access evidence completion** (evidence-first):
+**read-only Session1 exposure для уже доказанных independent GPU concepts**
+(power / MUX / access) — публиковать proven concepts независимо через Session1
+по модели ADR 0004/0005; без product GpuMode mapping и без mutation.
 
-1. найти authoritative semantics для `gpu_mux_mode` / `dgpu_disable`;
-2. решить exact mapping в существующие `GpuMuxState` / `GpuAccessPolicy`;
-3. только после PROVEN mapping вводить independent capability trait/provider;
-4. никаких product `GpuMode` mappings из этого автоматически не выводить.
-
-Pending остаётся: MUX provider; access provider; pending/action provider;
-Session1 exposure; real GUI GPU integration; mutation.
+Pending остаётся: pending/action provider (отдельно: текущий `ActionRequirement`
+относится к product requested mode и НЕ должен автоматически использоваться
+для supergfxd `PendingUserAction`); real GUI GPU integration; mutation.
 
 **Definition of done:**
 

@@ -224,15 +224,24 @@ choices на этой машине во время validation и не выдаё
   доступен через независимый `gpu_power_state()`.
 - Production GPU mutations отсутствуют.
 
-### MUX / access
+### MUX / access production providers
 
-**NOT IMPLEMENTED / semantic mapping incomplete**
+**IMPLEMENTED / LIVE-VALIDATED**
 
-- asusd/kernel `gpu_mux_mode` raw 0/1 observed;
-- `dgpu_disable` raw 0/1 observed;
-- live/historical evidence mutually consistent с предполагаемой semantics;
-- authoritative numeric enum mapping пока не proven;
-- не маппить в Integrated/Discrete/Blocked без дальнейшего evidence.
+- `ArmouryGpuProvider` + `SysfsArmouryGpuSource`;
+- backend: read-only kernel ASUS Armoury firmware-attributes
+  `/sys/class/firmware-attributes/asus-armoury/attributes/{gpu_mux_mode,dgpu_disable}/current_value`;
+- implements `GpuMuxProvider` + `GpuAccessProvider` (+ `Provider`), НЕ legacy
+  `GpuProvider`;
+- independent AppService getters: `gpu_mux_state()`, `gpu_access_policy()`;
+- PROVEN mapping из kernel 7.1.7 `asus-armoury.c`:
+  `gpu_mux_mode`: 0→`Discrete`, 1→`Integrated`;
+  `dgpu_disable`: 0→`Unblocked`, 1→`Blocked`;
+- live: `mux raw=1` → `Integrated`; `dgpu_disable raw=0` → `Unblocked`;
+- каждый вызов — authoritative fresh read; собственного cache нет;
+- semantics: present future raw → domain `Unknown`; attribute NotFound →
+  `ProviderError::Unsupported`; malformed/empty → `Internal`; прочие I/O → `Io`;
+- никаких writes/queued/pending reads.
 
 ### Product GpuMode
 

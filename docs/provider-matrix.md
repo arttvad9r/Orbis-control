@@ -137,21 +137,32 @@ production UPower provider возвращает `bounds=None`. Историче�
 
 | Приоритет | Backend | Интерфейс | Действия |
 |---|---|---|---|
-| 1 | asusd | `AsusArmoury/gpu_mux_mode` (CurrentValue, PossibleValues, QueuedGpuValue, ApplyQueuedGpuValue) | read/queue/apply |
-| 2 | kernel ABI | asus-nb-wmi `gpu_mux_mode` | read/queue (hardwared) |
+| 1 | kernel ASUS Armoury | firmware-attributes `gpu_mux_mode/current_value` | read — **current implemented** |
+| 2 | asusd | `AsusArmoury/gpu_mux_mode` (CurrentValue, PossibleValues, QueuedGpuValue, ApplyQueuedGpuValue) | read/queue/apply |
 | 3 | supergfxd | `org.supergfxctl.Daemon` Mode/SetMode | legacy fallback |
 
-Статус на эталоне: **SupportedWithRequirement (Reboot)** — `possible_values=[0,1]`, current=0.
+Current implemented production read concept: kernel ASUS Armoury
+firmware-attributes → `GpuMuxProvider` → `ArmouryGpuProvider` →
+`GpuMuxState` → **LIVE-VALIDATED** (via `AppService::gpu_mux_state()`).
+Mapping PROVEN из kernel 7.1.7 `asus-armoury.c`: 0→Discrete, 1→Integrated.
+
+Статус на эталоне: **SupportedWithRequirement (Reboot)** — `possible_values=[0,1]`, current=1 (live).
 
 ### 5.2 GpuAccessProvider (доступ приложений)
 
 | Приоритет | Backend | Интерфейс | Действия |
 |---|---|---|---|
-| 1 | Cardwire (экспериментальный) | `org.opengamingcollective.cardwire.Gpu` set_block/block, `Mode` | block/unblock; Wayland-only |
-| 2 | asusd | `AsusArmoury/dgpu_disable` | аппаратное отключение (Eco) |
-| 3 | supergfxd | `SetMode(integrated)` | legacy |
+| 1 | kernel ASUS Armoury | firmware-attributes `dgpu_disable/current_value` | read — **current implemented** |
+| 2 | Cardwire (экспериментальный) | `org.opengamingcollective.cardwire.Gpu` set_block/block, `Mode` | block/unblock; Wayland-only |
+| 3 | asusd | `AsusArmoury/dgpu_disable` | аппаратное отключение (Eco) |
+| 4 | supergfxd | `SetMode(integrated)` | legacy |
 
-Статус на эталоне: Cardwire отсутствует (BackendMissing); `dgpu_disable` available `[0,1]`.
+Current implemented production read concept: kernel ASUS Armoury
+firmware-attributes → `GpuAccessProvider` → `ArmouryGpuProvider` →
+`GpuAccessPolicy` → **LIVE-VALIDATED** (via `AppService::gpu_access_policy()`).
+Mapping PROVEN из kernel 7.1.7 `asus-armoury.c`: 0→Unblocked, 1→Blocked.
+
+Статус на эталоне: Cardwire отсутствует (BackendMissing); `dgpu_disable` available `[0,1]`, current=0 (live).
 
 ### 5.3 GpuPowerStateProvider (фактический power state)
 
@@ -175,15 +186,21 @@ backend/provider need not own all GPU concepts.
 
 Не будить dGPU ради телеметрии; устаревшее значение помечать как `Sleeping`/stale.
 
-### 5.4 Незакрытые GPU concepts (отдельно, не объединять)
+### 5.4 Остальные GPU concepts (отдельно, не объединять)
 
-- physical MUX: evidence/mapping pending (raw 0/1 observed, authoritative enum
-  не proven);
-- dGPU access/disable (`dgpu_disable`): evidence/mapping pending;
+- physical MUX: **PROVEN mapping + provider LIVE-VALIDATED** (kernel ASUS
+  Armoury, `ArmouryGpuProvider`);
+- dGPU access/disable (`dgpu_disable`): **PROVEN mapping + provider
+  LIVE-VALIDATED** (kernel ASUS Armoury, `ArmouryGpuProvider`);
 - product `GpuMode` (Eco/Standard/Ultimate/Optimized): no proven backend
   mapping;
 - supergfxd pending/user-action enums proven как evidence, но provider ещё не
   реализован.
+
+Provider ownership (ADR 0005): `ArmouryGpuProvider` owns MUX + access
+capabilities только; `SupergfxdGpuPowerProvider` owns runtime power только;
+product mode policy — отдельный future provider. One backend/provider need not
+own all GPU concepts.
 
 ---
 
