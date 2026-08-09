@@ -202,6 +202,12 @@ backend/provider need not own all GPU concepts.
   D-Bus `NotSupported`; provider/read error → D-Bus error; unknown wire value на
   client → `Internal`.
 
+Полный read path до GUI — **IMPLEMENTED / LIVE-VALIDATED**: production GUI
+отображает Power/MUX/Access через session-client capability providers
+(`SessionGpuPowerProvider` / `SessionGpuMuxProvider` / `SessionGpuAccessProvider`
+из одной session connection/runtime); без mock fallback; initial refresh only.
+Product `GpuMode` (Eco/Standard/Ultimate/Optimized) остаётся MOCK-ONLY.
+
 ### 5.5 Остальные GPU concepts (отдельно, не объединять)
 
 - physical MUX: **PROVEN mapping + provider LIVE-VALIDATED** (kernel ASUS

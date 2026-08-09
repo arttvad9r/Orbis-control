@@ -152,16 +152,32 @@ selection на реальном hardware.
     production composition power → `SupergfxdGpuPowerProvider`, mux/access →
     `ArmouryGpuProvider`; client providers `SessionGpuPowerProvider` /
     `SessionGpuMuxProvider` / `SessionGpuAccessProvider`; live smoke PASS;
-    ChargeLimit regression sanity PASS).
+    ChargeLimit regression sanity PASS); **GUI read-only GPU integration
+    COMPLETED / LIVE-VALIDATED** (production GUI отображает Power/MUX/Access
+    через session-client capability providers из одной session connection;
+    без mock fallback; initial refresh only; UI semantics
+    Loading/Ready(value)/Unavailable, domain Unknown → Ready(Unknown);
+    Scenario A daemon absent → три Unavailable, GUI жив; Scenario B packaged
+    sessiond → Power=Active, MUX=Integrated, Access=Unblocked — совпало с raw
+    supergfxd Power=0, sysfs mux=1, dgpu_disable=0; product
+    Eco/Standard/Ultimate/Optimized path остаётся MOCK-ONLY; никаких writes).
 3. fan/other proven ASUS reads — pending.
 4. telemetry только по доказанным источникам — pending.
 
-Следующий active substep в GPU-направлении:
+Следующий ACTIVE substep (Milestone 4):
 
-**GUI read-only integration proven GPU capabilities** (power / MUX / access
-независимо от product `GpuMode`) — подключить Session1 GPU properties к
-GUI/worker через session-client capability providers; без product GpuMode
-mapping и без mutation.
+**Performance read-only Session1 + GUI integration** — expose
+`KernelPerformanceProvider` (уже live-validated: symbolic kernel
+`platform_profile` ABI) через Session1/session-client и подключить к GUI/worker,
+по аналогии с live-validated GPU capability path. Без mutation.
+
+Milestone 4 целиком **НЕ закрывается**: fan/telemetry (substeps 3–4) и product
+GPU policy/mutation остаются pending.
+
+Technical note: worker composition теперь имеет несколько independent services
+(main, battery, gpu_power, gpu_mux, gpu_access); это не blocker, но дальнейшее
+бесконечное расширение `run_worker` может потребовать отдельного composition
+refactor.
 
 Pending остаётся: pending/action provider (отдельно: текущий `ActionRequirement`
 относится к product requested mode и НЕ должен автоматически использоваться

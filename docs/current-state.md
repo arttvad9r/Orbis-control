@@ -38,7 +38,7 @@ Unavailable без mock fallback; Scenario B: daemon present → Ready со зн
 | Provider contracts | IMPLEMENTED | Traits и error model существуют |
 | Broad provider implementation | MOCK-ONLY | `MockProvider` покрывает UI/application scenarios |
 | Application layer | IMPLEMENTED | Performance/GPU/Battery commands + authoritative read-back |
-| UI | PARTIAL | Slint main window + sequential worker; interactive Battery — real session client (LIVE-VALIDATED), Performance/GPU — mock |
+| UI | PARTIAL | Slint main window + sequential worker; interactive Battery — real session client (LIVE-VALIDATED); GPU hardware status (Power/MUX/Access) — real session client (LIVE-VALIDATED); Performance и product GpuMode — mock |
 | Session protocol | IMPLEMENTED | Getter-only `Session1.ChargeLimit`, `(bbybyyy)` |
 | Session client | IMPLEMENTED | Fresh D-Bus Get, validation, read-only `BatteryProvider` |
 | sessiond | LIVE-VALIDATED | Discovery, UPower read, server, runtime, signals, Nix user service |
@@ -55,8 +55,9 @@ Production GUI composition (split worker, один sequential loop):
 - Performance/GPU → `MockProvider` (`main_service`);
 - Battery → `SessionChargeLimitProvider` через
   `ZbusSessionChargeLimitSource` (`battery_service`);
-- `run_worker<M, B, F>` принимает независимые `main_service` и
-  `battery_service`; один provider не обязан реализовывать все три traits;
+- `run_worker` принимает независимые сервисы: main (Performance + legacy GPU),
+  battery и три GPU capability-сервиса (power/mux/access); один provider не
+  обязан реализовывать все traits;
 - FIFO/barriers/Battery adjacent coalescing сохранены.
 
 UI Battery state semantics:
@@ -205,22 +206,56 @@ choices на этой машине во время validation и не выдаё
 - power-only provider regression-tested (PowerOnlyProvider без legacy
   `GpuProvider`);
 - legacy `GpuProvider` не изменён;
-- worker/production GUI GPU mode path пока остаётся на legacy `GpuProvider` /
-  `MockProvider`.
+- worker/production GUI product GpuMode path (requested mode cards) остаётся на
+  legacy `GpuProvider` / `MockProvider`; read-only hardware status (Power/MUX/
+  Access) использует независимые session-client capability providers (см. ниже).
 
-### GPU application/UI vertical slice
+### GPU hardware GUI slice (read-only)
+
+**IMPLEMENTED / LIVE-VALIDATED**
+
+- Production GUI отображает read-only GPU hardware states независимо через
+  Session1/session-client: Power, MUX, Access.
+- Production composition (одна существующая session connection/runtime):
+  - power → `SessionGpuPowerProvider`;
+  - mux → `SessionGpuMuxProvider`;
+  - access → `SessionGpuAccessProvider`;
+- без mock fallback; initial refresh only, без polling;
+- UI semantics: `Loading` / `Ready(value)` / `Unavailable`; domain `Unknown`
+  остаётся `Ready(Unknown)`, а не `Unavailable`;
+- backend error → `Unavailable` честно (без симуляции успеха);
+- каждый capability читается независимо: failure одного не блокирует остальные.
+
+Live validation (2026-08-09, packaged GUI + packaged sessiond):
+
+- Scenario A (sessiond absent): GUI жив; Power/MUX/Access = `Unavailable`;
+  остальной UI работает (Battery/Performance/GPU cards отображаются); WARN в
+  логе: `gpu-power/gpu-mux/gpu-access: refresh недоступен: ServiceUnknown`;
+- Scenario B (packaged sessiond): Power = `Active`, MUX = `Integrated`,
+  Access = `Unblocked`; совпало с raw backend: supergfxd `Power()=0`,
+  sysfs `gpu_mux_mode=1`, sysfs `dgpu_disable=0`;
+- никаких GPU writes/mutation.
+
+Technical note (worker composition): `run_worker` теперь принимает несколько
+independent services (main, battery, gpu_power, gpu_mux, gpu_access). Это не
+blocker, но дальнейшее бесконечное расширение `run_worker` может потребовать
+отдельного composition refactor.
+
+### Product GpuMode GUI path
 
 **PARTIAL / MOCK-ONLY в production GUI**
 
+- Product Eco/Standard/Ultimate/Optimized backend mapping — **NOT PROVEN**;
+  production GUI использует `MockProvider` для product GpuMode (requested mode
+  cards).
 - Domain разделяет requested mode, physical MUX, access policy и power state.
 - `GpuProvider`, application state/read-back, worker и UI states
   (pending/disabled/error) реализованы.
 - Mock tests сохраняют applied state при pending Ultimate/Eco.
-- Production GUI GPU всё ещё использует `MockProvider`.
 - `AppService::gpu_state()` legacy aggregate остаётся fail-fast
   (requested→mux→access→power). Это limitation legacy aggregate; он больше не
-  является единственным API для partially available concepts — real power
-  доступен через независимый `gpu_power_state()`.
+  является единственным API для partially available concepts — real hardware
+  states доступны через независимые GPU capability сервисы.
 - Production GPU mutations отсутствуют.
 
 ### Session1 GPU transport (read-only)
