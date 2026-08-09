@@ -90,7 +90,10 @@ in
         RestrictAddressFamilies = [ "AF_UNIX" ];
         MemoryDenyWriteExecute = true;
         AmbientCapabilities = [ ];
-        CapabilityBoundingSet = [ ];
+        # Пустая строка (НЕ пустой список): NixOS отбрасывает пустые списки,
+        # а systemd интерпретирует `CapabilityBoundingSet=` (без значения) как
+        # сброс bounding set в пустое множество.
+        CapabilityBoundingSet = "";
         # /sys read-only, на write открыт ТОЛЬКО platform_profile;
         # platform_profile_choices остаётся read-only.
         ReadOnlyPaths = [ "/sys" ];
@@ -98,11 +101,15 @@ in
       };
     };
 
-    # D-Bus system policy (root own + send_destination; авторизация — polkit).
-    environment.etc."dbus-1/system.d/io.github.orbiscontrol.Hardware.conf".source =
-      "${cfg.package}/etc/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf";
+    # Пакет попадает в system.path: dbus-daemon читает
+    # system-path/share/dbus-1/system.d (см. system.conf).
+    systemd.packages = [ cfg.package ];
+
+    # D-Bus system policy (root own + send_destination; авторизация — polkit)
+    # устанавливается из share/dbus-1/system.d пакета через system.path.
 
     # Polkit action (единственная: SetPerformanceProfile; active local user).
+    # /etc/polkit-1 — обычный каталог (не symlink), environment.etc работает.
     environment.etc."polkit-1/actions/io.github.orbiscontrol.hardware.policy".source =
       "${cfg.package}/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy";
   };

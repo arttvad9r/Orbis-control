@@ -70,9 +70,11 @@ rustPlatform.buildRustPackage {
       }"
 
     # D-Bus system policy: только root own + send_destination к hardwared
-    # (авторизация операции — polkit внутри hardwared).
+    # (авторизация операции — polkit внутри hardwared). Кладём в
+    # share/dbus-1/system.d: NixOS dbus-daemon читает includedir
+    # system-path/share/dbus-1/system.d (см. system.conf).
     install -Dm644 ${./dbus/io.github.orbiscontrol.Hardware.conf} \
-      $out/etc/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf
+      $out/share/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf
 
     # Polkit action: единственная capability — SetPerformanceProfile.
     install -Dm644 ${./polkit/io.github.orbiscontrol.hardware.policy} \
