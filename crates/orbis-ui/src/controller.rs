@@ -9,6 +9,23 @@ use orbis_core::fan::FanId;
 use orbis_core::gpu::GpuMode;
 use orbis_core::profile::PerformanceProfile;
 
+/// Состояние готовности/доступности Battery Charge Limit.
+///
+/// Отделено от `charge_limit_enabled` (фактический hardware/backend state):
+/// `Enabled` может быть и при Unavailable (недоступен backend), и не является
+/// признаком known/unknown значения.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChargeLimitState {
+    /// Первый authoritative read ещё не выполнен (initial interactive state).
+    #[default]
+    Loading,
+    /// Authoritative read успешен и процент известен.
+    Ready,
+    /// Backend/read недоступен; значение не должно показываться как
+    /// authoritative hardware state.
+    Unavailable,
+}
+
 /// Отображаемое состояние главного окна.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiState {
@@ -27,10 +44,12 @@ pub struct UiState {
     pub gpu_ultimate_disabled: bool,
     /// Ошибка backend в GPU-секции (остальное окно остаётся рабочим).
     pub gpu_section_error: bool,
-    /// Лимит зарядки, %.
+    /// Лимит зарядки, % (authoritative value; не показывать при state != Ready).
     pub charge_limit: i32,
     /// Функция Battery Charge Limit доступна (из mock-состояния).
     pub charge_limit_enabled: bool,
+    /// Состояние готовности/доступности Battery Charge Limit.
+    pub charge_limit_state: ChargeLimitState,
     /// Телеметрия.
     pub cpu_temp: i32,
     pub gpu_temp: i32,
@@ -139,6 +158,8 @@ impl UiState {
             gpu_section_error: false,
             charge_limit,
             charge_limit_enabled,
+            // fixture-профиль: первое значение готово сразу (offscreen/tests).
+            charge_limit_state: ChargeLimitState::Ready,
             cpu_temp,
             gpu_temp,
             cpu_fan_rpm,
@@ -216,6 +237,15 @@ mod tests {
         assert!(s.gpu_fan_rpm > 0);
         assert_eq!(s.power_ac_mw, 28_000);
         assert_eq!(s.mock_profile, "zephyrus-full");
+    }
+
+    #[test]
+    fn initial_state_battery_is_ready() {
+        // fixture-профиль: значение готово сразу (offscreen/tests).
+        let s = UiState::from_mock_profile("zephyrus-full");
+        assert_eq!(s.charge_limit_state, ChargeLimitState::Ready);
+        assert_eq!(s.charge_limit, 80);
+        assert!(s.charge_limit_enabled);
     }
 
     #[test]

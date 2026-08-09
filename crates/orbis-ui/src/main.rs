@@ -24,8 +24,10 @@ use orbis_application::{
     PerformanceCommandOutcome, SetChargeLimitError, SetGpuModeError,
 };
 use orbis_core::action::{ActionRequirement, ApplyResult};
+use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::GpuMode;
 use orbis_core::profile::PerformanceProfile;
+use orbis_providers::error::ProviderError;
 use orbis_providers::mock::MockProvider;
 use orbis_test_support::devices::build_state_arc;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker};
@@ -112,6 +114,11 @@ fn to_slint(state: &controller::UiState) -> UiState {
         gpu_section_error: state.gpu_section_error,
         charge_limit: state.charge_limit,
         charge_limit_enabled: state.charge_limit_enabled,
+        charge_limit_state: match state.charge_limit_state {
+            controller::ChargeLimitState::Loading => ChargeLimitState::Loading,
+            controller::ChargeLimitState::Ready => ChargeLimitState::Ready,
+            controller::ChargeLimitState::Unavailable => ChargeLimitState::Unavailable,
+        },
         cpu_temp: state.cpu_temp,
         gpu_temp: state.gpu_temp,
         cpu_fan_rpm: state.cpu_fan_rpm,
@@ -134,6 +141,11 @@ fn from_slint(state: &UiState) -> controller::UiState {
         gpu_section_error: state.gpu_section_error,
         charge_limit: state.charge_limit,
         charge_limit_enabled: state.charge_limit_enabled,
+        charge_limit_state: match state.charge_limit_state {
+            ChargeLimitState::Loading => controller::ChargeLimitState::Loading,
+            ChargeLimitState::Ready => controller::ChargeLimitState::Ready,
+            ChargeLimitState::Unavailable => controller::ChargeLimitState::Unavailable,
+        },
         cpu_temp: state.cpu_temp,
         gpu_temp: state.gpu_temp,
         cpu_fan_rpm: state.cpu_fan_rpm,
@@ -349,6 +361,45 @@ fn apply_charge_limit_result(
     }
 }
 
+/// Применить результат authoritative read-only refresh к UI-состоянию.
+///
+/// Ok + percent=Some(value): status=Ready, charge_limit=фактический percent,
+/// charge_limit_enabled=фактический enabled.
+/// Ok + percent=None: status=Unavailable (не подставлять fixture/default).
+/// Err(ProviderError): status=Unavailable, точная ошибка в tracing.
+///
+/// Во всех случаях не выдавать числовое значение как authoritative, пока
+/// status != Ready.
+fn apply_charge_limit_refresh(
+    state: &mut controller::UiState,
+    result: Result<ChargeLimit, ProviderError>,
+) {
+    match result {
+        Ok(limit) => match limit.percent {
+            Some(percent) => {
+                state.charge_limit = i32::from(percent.get());
+                state.charge_limit_enabled = limit.enabled;
+                state.charge_limit_state = controller::ChargeLimitState::Ready;
+                tracing::debug!(
+                    "battery: refresh OK, percent={}, enabled={}",
+                    percent.get(),
+                    limit.enabled
+                );
+            }
+            None => {
+                state.charge_limit_state = controller::ChargeLimitState::Unavailable;
+                tracing::warn!(
+                    "battery: refresh OK, но authoritative percent отсутствует (None); не подставляю fixture/default"
+                );
+            }
+        },
+        Err(e) => {
+            state.charge_limit_state = controller::ChargeLimitState::Unavailable;
+            tracing::warn!("battery: refresh недоступен: {e:?}");
+        }
+    }
+}
+
 /// Применить событие worker-а к UI-состоянию.
 ///
 /// Performance: Ok -> authoritative state; Err (Command/ReadBack) -> UiState не
@@ -383,6 +434,9 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         }
         WorkerEvent::ChargeLimit(result) => {
             apply_charge_limit_result(state, result);
+        }
+        WorkerEvent::ChargeLimitRefresh(result) => {
+            apply_charge_limit_refresh(state, result);
         }
     }
 }
@@ -552,7 +606,7 @@ fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<
 
 fn main() -> anyhow::Result<()> {
     let args = parse_args();
-    let state = state_for_scenario(&args.ui_state);
+    let mut state = state_for_scenario(&args.ui_state);
 
     if let Some(path) = args.screenshot {
         return render_screenshot(&state, &path);
@@ -561,6 +615,12 @@ fn main() -> anyhow::Result<()> {
     // Интерактивный запуск через штатный winit-бэкенд (без set_platform).
     // Один явный многопоточный runtime для worker-задачи.
     let runtime = tokio::runtime::Runtime::new()?;
+
+    // Честный initial Battery state: fixture-профиль уже дал числовое значение
+    // 80 из mock, но в интерактивном запуске оно НЕ должно быть видимо как
+    // authoritative hardware state до первого provider read. Маскируем как
+    // Loading; первый RefreshChargeLimit (ниже) переведёт в Ready/Unavailable.
+    state.charge_limit_state = controller::ChargeLimitState::Loading;
 
     // Mock provider и application service (только интерактивный путь).
     let mock_state = build_state_arc("zephyrus-full")
@@ -585,6 +645,13 @@ fn main() -> anyhow::Result<()> {
         }
     };
     runtime.spawn(run_worker(service, worker_rx, event_sink));
+
+    // Ровно один authoritative initial Battery read при старте, без действия
+    // пользователя и без polling. Ошибка provider (включая отсутствие
+    // orbis-sessiond на будущем session backend) не превращается в mock data.
+    if let Err(e) = worker_tx.send(WorkerCommand::RefreshChargeLimit) {
+        tracing::warn!("worker закрыт, initial battery refresh не отправлен: {e:?}");
+    }
 
     app.show()?;
     slint::run_event_loop()?;
@@ -974,5 +1041,70 @@ mod tests {
         );
 
         assert_eq!(s, before);
+    }
+
+    #[test]
+    fn refresh_success_sets_ready_and_value() {
+        let mut s = base_state();
+        // Интерактивный startup маскирует Battery как Loading до read.
+        s.charge_limit_state = controller::ChargeLimitState::Loading;
+
+        apply_charge_limit_refresh(
+            &mut s,
+            Ok(ChargeLimit::new(
+                true,
+                Some(Percent::new(60).expect("range")),
+                None, // unknown bounds допустимы
+            )
+            .expect("valid")),
+        );
+
+        assert_eq!(s.charge_limit_state, controller::ChargeLimitState::Ready);
+        assert_eq!(s.charge_limit, 60);
+        assert!(s.charge_limit_enabled);
+    }
+
+    #[test]
+    fn refresh_percent_none_is_unavailable_without_fixture() {
+        let mut s = base_state();
+        // Даже если numeric backing содержит fixture 80, при percent=None оно
+        // НЕ должно стать authoritative.
+        s.charge_limit_state = controller::ChargeLimitState::Loading;
+        s.charge_limit = 80; // fixture/default из from_mock_profile
+
+        apply_charge_limit_refresh(
+            &mut s,
+            Ok(ChargeLimit::new(false, None, None).expect("valid")),
+        );
+
+        assert_eq!(
+            s.charge_limit_state,
+            controller::ChargeLimitState::Unavailable
+        );
+        // fixture-значение не перезаписывается как authoritative и не
+        // показывается: UI при Unavailable скрывает slider.
+        assert_eq!(s.charge_limit, 80);
+    }
+
+    #[test]
+    fn refresh_error_is_unavailable_without_fixture() {
+        let mut s = base_state();
+        s.charge_limit_state = controller::ChargeLimitState::Loading;
+        s.charge_limit = 80; // fixture/default из from_mock_profile
+
+        apply_charge_limit_refresh(
+            &mut s,
+            Err(orbis_providers::error::ProviderError::BackendUnavailable(
+                "sessiond missing".into(),
+            )),
+        );
+
+        assert_eq!(
+            s.charge_limit_state,
+            controller::ChargeLimitState::Unavailable
+        );
+        assert_eq!(s.charge_limit, 80);
+        // Уже существовавший Ready value не помечается как authoritative при
+        // Unavailable — slider скрыт.
     }
 }

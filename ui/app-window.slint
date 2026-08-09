@@ -7,6 +7,12 @@ import { SectionHeader } from "components/section-header.slint";
 import { ValueSlider } from "components/value-slider.slint";
 import { Palette } from "themes/dark.slint";
 
+export enum ChargeLimitState {
+    Loading,
+    Ready,
+    Unavailable,
+}
+
 export struct UiState {
     perf-selected: int,             // 0=Silent, 1=Balanced, 2=Turbo
     available-perf-mask: int,       // bit0=Silent, bit1=Balanced, bit2=Turbo
@@ -17,6 +23,7 @@ export struct UiState {
     gpu-section-error: bool,
     charge-limit: int,
     charge-limit-enabled: bool,
+    charge-limit-state: ChargeLimitState,
     cpu-temp: int,
     gpu-temp: int,
     cpu-fan-rpm: int,
@@ -64,6 +71,7 @@ export component AppWindow inherits Window {
         gpu-section-error: false,
         charge-limit: 80,
         charge-limit-enabled: false,
+        charge-limit-state: ChargeLimitState.Loading,
         cpu-temp: 0,
         gpu-temp: 0,
         cpu-fan-rpm: 0,
@@ -209,7 +217,7 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 spacing: 4px;
                 SectionHeader { title: "Battery Charge Limit"; }
-                ValueSlider {
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : ValueSlider {
                     min: 40;
                     max: 100;
                     step: 5;
@@ -217,6 +225,50 @@ export component AppWindow inherits Window {
                     disabled: !root.ui-state.charge-limit-enabled;
                     changed(v) => {
                         root.charge-changed(v);
+                    }
+                }
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Loading) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: "Loading battery state…";
+                            font-size: 12px;
+                            color: Palette.text-secondary;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Unavailable) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        // вертикальный индикатор слева (как GPU error banner)
+                        Rectangle {
+                            width: 3px;
+                            height: 14px;
+                            border-radius: 1.5px;
+                            background: Palette.error;
+                            y: (parent.height - 14px) / 2;
+                        }
+                        Text {
+                            text: "Battery backend unavailable";
+                            font-size: 12px;
+                            color: Palette.text-primary;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }

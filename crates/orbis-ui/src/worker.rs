@@ -24,6 +24,7 @@ use orbis_application::{
 };
 use orbis_core::gpu::GpuMode;
 use orbis_core::profile::PerformanceProfile;
+use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{BatteryProvider, GpuProvider, PerformanceProvider};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -51,6 +52,12 @@ pub enum WorkerCommand {
         /// Целевой процент лимита зарядки.
         percent: u8,
     },
+    /// Authoritative read-only refresh Battery Charge Limit.
+    ///
+    /// Выполняет `AppService::charge_limit()` (новый provider read, без
+    /// mutation). Обычная ordered команда/барьер: не coalesce-ится и не
+    /// участвует в adjacent `SetChargeLimit` coalescing.
+    RefreshChargeLimit,
 }
 
 /// Событие результата команды.
@@ -66,6 +73,11 @@ pub enum WorkerEvent {
     Gpu(Result<GpuCommandOutcome, SetGpuModeError>),
     /// Полный результат команды Battery Charge Limit.
     ChargeLimit(Result<ChargeLimitCommandOutcome, SetChargeLimitError>),
+    /// Результат authoritative read-only refresh Battery Charge Limit.
+    ///
+    /// `Ok(ChargeLimit)` — фактическое authoritative значение provider;
+    /// `Err(ProviderError)` — read недоступен (worker не подставляет mock/default).
+    ChargeLimitRefresh(Result<orbis_core::battery::ChargeLimit, ProviderError>),
 }
 
 /// Создать command channel для worker.
@@ -134,7 +146,7 @@ pub async fn run_worker<P, F>(
                             latest_percent = next;
                         }
                         Ok(other) => {
-                            // Граница группы (Performance/GPU): сохранить
+                            // Граница группы (Performance/GPU/Refresh): сохранить
                             // команду для следующей итерации.
                             deferred_command = Some(other);
                             break;
@@ -144,6 +156,12 @@ pub async fn run_worker<P, F>(
                     }
                 }
                 WorkerEvent::ChargeLimit(service.set_charge_limit(latest_percent).await)
+            }
+            WorkerCommand::RefreshChargeLimit => {
+                // Authoritative read-only refresh: обычная ordered команда,
+                // не coalesce-ится и является границей для соседних
+                // SetChargeLimit-групп.
+                WorkerEvent::ChargeLimitRefresh(service.charge_limit().await)
             }
         };
         emit(event);
@@ -1094,6 +1112,132 @@ mod tests {
                 assert_eq!(c2.state.percent.map(|p| p.get()), Some(45));
             }
             other => panic!("ожидался порядок Charge(Perf(Charge), получено: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    // -----------------------------------------------------------------------
+    // RefreshChargeLimit worker-тесты
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn refresh_charge_limit_reads_authoritative_state() {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        // Прямое изменение provider вне worker: refresh должен вернуть
+        // актуальное значение, а не предыдущее UI-состояние.
+        provider
+            .set_charge_limit(60)
+            .await
+            .expect("set charge limit");
+
+        let app_service = AppService::new(provider.clone());
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker(app_service, rx, move |event| {
+                let _ = result_tx.send(event);
+            })
+            .await;
+        });
+
+        tx.send(WorkerCommand::RefreshChargeLimit).expect("send");
+
+        let event = result_rx.recv().await.expect("event");
+        match event {
+            WorkerEvent::ChargeLimitRefresh(Ok(limit)) => {
+                assert_eq!(limit.percent.map(|p| p.get()), Some(60));
+                assert!(limit.enabled);
+            }
+            other => panic!("ожидался Ok(ChargeLimitRefresh), получено: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn refresh_charge_limit_error_is_preserved() {
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let provider = Arc::new(MockProvider::new(state.clone()));
+        let app_service = AppService::new(provider.clone());
+
+        // Ошибка backend: refresh должен вернуть ошибку, а не mock default.
+        state.write().await.error_mode = MockErrorMode::BackendDown;
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker(app_service, rx, move |event| {
+                let _ = result_tx.send(event);
+            })
+            .await;
+        });
+
+        tx.send(WorkerCommand::RefreshChargeLimit).expect("send");
+
+        let event = result_rx.recv().await.expect("event");
+        match event {
+            WorkerEvent::ChargeLimitRefresh(Err(ProviderError::BackendUnavailable(_))) => {}
+            other => panic!("ожидался Err(BackendUnavailable), получено: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn refresh_charge_limit_is_barrier_not_coalesced() {
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // SetChargeLimit(40), SetChargeLimit(45) — одна adjacent группа -> 45;
+        // RefreshChargeLimit — обычная ordered команда/барьер;
+        // SetChargeLimit(50) — новая группа -> 50.
+        tx.send(WorkerCommand::SetChargeLimit { percent: 40 })
+            .expect("send1");
+        tx.send(WorkerCommand::SetChargeLimit { percent: 45 })
+            .expect("send2");
+        tx.send(WorkerCommand::RefreshChargeLimit).expect("send3");
+        tx.send(WorkerCommand::SetChargeLimit { percent: 50 })
+            .expect("send4");
+
+        let worker = tokio::spawn(async move {
+            run_worker(service(), rx, move |event| {
+                let _ = result_tx.send(event);
+            })
+            .await;
+        });
+
+        let first = result_rx.recv().await.expect("event1");
+        let second = result_rx.recv().await.expect("event2");
+        let third = result_rx.recv().await.expect("event3");
+        match (first, second, third) {
+            (
+                WorkerEvent::ChargeLimit(Ok(c1)),
+                WorkerEvent::ChargeLimitRefresh(Ok(_)),
+                WorkerEvent::ChargeLimit(Ok(c2)),
+            ) => {
+                // Первая adjacent группа coalesce-ится до 45 (last-wins).
+                assert_eq!(c1.state.percent.map(|p| p.get()), Some(45));
+                // После Refresh-барьера новая группа выполняется отдельно.
+                assert_eq!(c2.state.percent.map(|p| p.get()), Some(50));
+            }
+            other => panic!("ожидался порядок Charge(Refresh(Charge), получено: {other:?}"),
         }
 
         drop(tx);
