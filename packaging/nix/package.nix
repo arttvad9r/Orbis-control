@@ -1,9 +1,11 @@
 { lib
 , rustPlatform
 , pkg-config
+, makeWrapper
 , fontconfig
 , freetype
 , libGL
+, libglvnd
 , libxkbcommon
 , wayland
 , wayland-protocols
@@ -29,6 +31,7 @@ rustPlatform.buildRustPackage {
 
   nativeBuildInputs = [
     pkg-config
+    makeWrapper
   ];
 
   buildInputs = [
@@ -46,6 +49,26 @@ rustPlatform.buildRustPackage {
     pango
     gdk-pixbuf
   ];
+
+  # GUI (orbis-control) использует winit/glutin, которые загружают системные
+  # библиотеки через dlopen (libwayland-client/cursor/egl, libxkbcommon,
+  # libfontconfig, libEGL), поэтому они не видны в DT_NEEDED и не попадают в
+  # RUNPATH пакета. Без wrapper packaged GUI падал при старте с
+  # "The wayland library could not be loaded".
+  #
+  # Обёртка добавляет минимальный доказанный runtime library path только для
+  # GUI. sessiond/ctl не требуют этих dlopen-зависимостей и не оборачиваются.
+  postInstall = ''
+    wrapProgram $out/bin/orbis-control \
+      --prefix LD_LIBRARY_PATH : "${
+        lib.makeLibraryPath [
+          wayland
+          libxkbcommon
+          fontconfig
+          libglvnd
+        ]
+      }"
+  '';
 
   # Запускаем полный набор проверок как часть пакета (как в CI).
   doCheck = true;
