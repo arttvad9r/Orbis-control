@@ -4,11 +4,10 @@
 , fontconfig
 , freetype
 , libGL
-, xkbcommon
+, libxkbcommon
 , wayland
 , wayland-protocols
 , dbus
-, dbus-daemon
 , openssl
 , systemd
 , glib
@@ -36,11 +35,10 @@ rustPlatform.buildRustPackage {
     fontconfig
     freetype
     libGL
-    xkbcommon
+    libxkbcommon
     wayland
     wayland-protocols
     dbus
-    dbus-daemon
     openssl
     systemd
     glib

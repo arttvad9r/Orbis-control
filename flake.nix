@@ -37,10 +37,12 @@
             rustc
             rustfmt
             clippy
+            # Language servers для editor/OpenCode LSP интеграции
+            rust-analyzer
+            slint-lsp
             pkg-config
-            # D-Bus для integration-тестов (временная шина)
+            # D-Bus для integration-тестов (временная шина); dbus-daemon входит в pkgs.dbus
             dbus
-            dbus-daemon
             # Инструменты проверки
             cargo-deny
             cargo-audit
@@ -57,7 +59,7 @@
         checks.default = pkgs.stdenv.mkDerivation {
           name = "orbis-control-flake-check";
           src = self;
-          buildInputs = with pkgs; [ cargo rustc rustfmt clippy pkg-config dbus dbus-daemon ];
+          buildInputs = with pkgs; [ cargo rustc rustfmt clippy pkg-config dbus ];
           nativeBuildInputs = [ pkgs.makeWrapper ];
           buildPhase = ''
             export CARGO_HOME=$TMPDIR/cargo

@@ -1,8 +1,6 @@
 # Build
 /target
 **/*.rs.bk
-Cargo.lock
-!packaging/appimage/**/Cargo.lock
 
 # Local config/state/cache (XDG)
 .config/orbis-control/
