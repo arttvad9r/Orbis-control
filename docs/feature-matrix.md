@@ -1,5 +1,10 @@
 # Feature Matrix — Orbis Control
 
+> Роль: **HISTORICAL SNAPSHOT / FEASIBILITY**, а не implementation status.
+> Символы ниже означают оценку достижимости Linux-интерфейсами на 2026-08-06;
+> они не утверждают, что функция реализована в текущем Orbis Control. Текущий
+> статус смотрите в [`current-state.md`](current-state.md).
+>
 > Дата: 2026-08-06 (обновлено после ревью Этапа 0). Источники:
 > `docs/research-report.md`, живой D-Bus introspection на ASUS TUF Gaming A17 FA707NV
 > (ядро 7.1.6, asusd 6.3.8), исходники asusctl 6.3.11, G-Helper e439349f,

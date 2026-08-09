@@ -1,349 +1,224 @@
 # Architecture — Orbis Control
 
-> Дата: 2026-08-06. Статус: черновик Этапа 1 (спецификация), подлежит согласованию
-> перед Этапом 2. Связанные решения: `docs/adr/0001-rust-and-slint.md`,
-> `docs/adr/0002-daemon-boundaries.md`, `docs/adr/0003-gpu-provider-strategy.md`.
+> Роль: **CURRENT DESIGN**. Документ описывает архитектурный контракт текущего
+> репозитория. Фактическая готовность функций приведена в
+> [`current-state.md`](current-state.md), а будущий порядок работ — в
+> [`roadmap.md`](roadmap.md).
 
-## 1. Обзор
+## 1. Архитектурные принципы
 
-Трёхуровневая архитектура:
+- GUI работает от обычного пользователя и не выполняет direct hardware I/O.
+- Системные детали скрыты за provider/service boundaries.
+- Архитектура capability-driven: поддержка доказывается probe/read, а не
+  предполагается по модели ноутбука, имени файла или наличию D-Bus object.
+- Read-only capability не выдаётся за write capability.
+- Значения после команд считаются подтверждёнными только после authoritative
+  read-back.
+- Неизвестные hardware-ограничения остаются неизвестными.
+- `orbis-hardwared` не является частью production architecture: он будет
+  рассмотрен только после доказанной необходимости узкой privileged operation
+  (ADR 0002).
 
-```
-┌─────────────────────────────┐
-│  orbis-ui (Slint GUI)       │  user session, НЕ root, нет HW I/O
-└──────────────┬──────────────┘
-               │ session bus D-Bus (io.github.orbiscontrol.Session)
-┌──────────────▼──────────────┐
-│  orbis-sessiond (user daemon)│  владеет состоянием, провайдеры, автоматизация
-└──────┬───────────────┬──────┘
-       │ system D-Bus  │ sysfs/hwmon (read)
-┌──────▼───────┐ ┌─────▼──────────────────────────┐
-│ asusd, UPower │ │ kernel ABI, hwmon, leds,      │
-│ supergfxd,    │ │ backlight, DRM, powercap      │
-│ cardwire, fwupd│ │ (read; write — только через   │
-│ ppd, logind   │ │  узкий orbis-hardwared, если  │
-└──────────────┘ │  нужен root)                   │
-                 └────────────────────────────────┘
-```
-
-Правила:
-
-- GUI общается **только** с `orbis-sessiond` (session bus), никогда напрямую с
-  аппаратными сервисами.
-- `orbis-sessiond` — непривилегированный пользовательский демон; работает без GUI.
-- `orbis-hardwared` — опциональный root-помощник, добавляется только когда функция
-  не покрыта asusd/системными сервисами и требует узкой привилегированной операции.
-- CLI (`orbisctl`) использует те же модели данных и D-Bus API, что GUI.
-
-## 2. Workspace и crates
-
-```
-crates/
-├── orbis-core/           платформенно-независимая модель (без D-Bus/Slint/sysfs)
-├── orbis-config/         TOML-конфиг, миграции, атомарная запись, импорт/экспорт JSON
-├── orbis-capabilities/   capability-модель, probe-движок, статусы, матрица
-├── orbis-providers/      trait-ы провайдеров + реализации (asusd, kernel, UPower, ...)
-├── orbis-sessiond/       пользовательский демон: состояние, политики, D-Bus API
-├── orbis-ui/             Slint GUI (только представление)
-├── orbis-cli/            orbisctl (те же модели/API)
-├── orbis-hardwared/      опциональный root-helper (allowlist, polkit, sandbox)
-└── orbis-test-support/   mock-провайдеры, фикстуры, snapshot-инструменты
-```
-
-Зависимости направления: `ui → sessiond(API) → providers → core/config/capabilities`.
-`hardwared` — отдельно, общается с sessiond по системе D-Bus с polkit.
-
-## 3. Модель данных (orbis-core)
-
-Типы (все `Serialize + Deserialize` для D-Bus/JSON, `Clone + Debug + PartialEq`):
-
-- `PerformanceProfile { Silent, Balanced, Turbo, Custom(String) }`
-- `GpuMode { Eco, Standard, Ultimate, Optimized }`
-- `GpuMuxState { Integrated, Discrete, Unknown }`
-- `GpuAccessPolicy { Unblocked, Blocked, Pending, Unknown }` (Cardwire)
-- `PowerSource { Ac, Battery, UsbCPdLowPower, Unknown }`
-- `ChargeLimit { Enabled(u8), Disabled, Unsupported }` (min/max/step отдельно)
-- `FanId { Cpu, Gpu, Mid, System, Other(String) }`
-- `FanCurvePoint { temp: f32, pwm: u16 }` (или процент)
-- `FanCurve { fan: FanId, points: Vec<FanCurvePoint> }`
-- `PowerLimits { spl, sppt, fppt, cpu_temp_limit, gpu_dynamic_boost, gpu_temp_target, ... }`
-  — каждое поле с `PowerLimitValue { value, min, max, step, default, unit }`
-- `DisplayMode { current_refresh_hz, modes: Vec<RefreshMode>, overdrive: Option<bool>, hdr: Option<HdrState> }`
-- `LightingMode { Off, Static, Breathing, Strobing, ColorCycle, Rainbow, Custom(String) }`
-- `DeviceCapabilities` — матрица функций → `CapabilityStatus`
-- `CapabilityStatus` — enum из §7 задания + метаданные (причина, сообщение, действие,
-  backend, endpoint, требование reboot/logout, риск, время проверки)
-- `ProviderStatus { Healthy, Degraded, Unavailable }`
-- `ActionRequirement { None, Logout, Reboot, Confirmation, Experimental }`
-- `ApplyResult { Applied, Pending(ActionRequirement), Failed { reason } , RolledBack { reason } }`
-- `PendingAction { id, target, requirement, created_at, cancelable }`
-- `Warning { severity, code, message, details }`
-- `DiagnosticEntry { key, value, severity, source }`
-- `AutomationRule { id, trigger, action, priority, cooldown }`
-- `HardwareSnapshot { cpu_temp, gpu_temp, fan_rpms, battery, power, gpu_power_state, ts }`
-
-## 4. Capability-модель (orbis-capabilities)
-
-Статусы: `Supported, SupportedWithRequirement, ReadOnly, TemporarilyUnavailable,
-Unsupported, BackendMissing, PermissionDenied, Experimental, Conflicted, Unknown`.
-
-Для каждого статуса хранится: техническая причина; короткое сообщение для UI;
-рекомендуемое действие; backend; путь/D-Bus endpoint; требование reboot/logout;
-уровень риска; время последней успешной проверки.
-
-Пример (из реального introspection FA707NV):
+## 2. Фактические слои и зависимости
 
 ```text
-GPU Ultimate:
-status: SupportedWithRequirement
-provider: asusd / xyz.ljones.AsusArmoury (/xyz/ljones/asus_armoury/gpu_mux_mode)
-requirement: Reboot
-reason: Hardware MUX value is latched by firmware
+Slint callbacks / UI state
+        |
+        v
+orbis-ui sequential async worker
+        |
+        v
+orbis-application::AppService<P>
+        |
+        v
+orbis-providers traits
+        |
+        +------------------------------+
+        |                              |
+        v                              v
+MockProvider                    orbis-session-client
+(текущий GUI backend)           (read-only BatteryProvider)
+                                       |
+                                       v
+                         session D-Bus Session1
+                                       |
+                                       v
+                              orbis-sessiond
+                                       |
+                                       v
+                         system D-Bus / UPower
 ```
 
-Правила:
+Текущий интерактивный GUI использует `MockProvider`. Реальный read-only путь
+`orbis-session-client → sessiond → UPower` реализован и проверен отдельно, но
+ещё не подключён к GUI. Поэтому схема показывает существующие компоненты и
+направление интеграции, а не заявляет завершённый GUI production path.
 
-- Неизвестная функция → `Unknown`, не `Unsupported`.
-- `Unsupported` только после достаточной проверки (probe + попытка чтения).
-- Причина недоступности не прячется в лог — видна в tooltip/подзаголовке/диагностике.
-- Полностью неприменимые секции скрываются (главное окно остаётся компактным).
+### Crate boundaries
 
-## 5. Провайдеры (orbis-providers)
+| Crate | Ответственность |
+|---|---|
+| `orbis-core` | Domain types, invariants и backend-neutral semantics |
+| `orbis-config` | TOML/XDG configuration, versioning и atomic storage |
+| `orbis-capabilities` | Capability model, fixture loading и report assembly |
+| `orbis-providers` | Provider traits, errors и broad `MockProvider` |
+| `orbis-application` | Async use cases и обязательный authoritative read-back |
+| `orbis-session-protocol` | Нейтральный getter-only D-Bus wire contract |
+| `orbis-session-client` | GUI-side read-only Battery provider над Session1 |
+| `orbis-sessiond` | User daemon, UPower adapter, discovery, server и lifecycle |
+| `orbis-ui` | Slint presentation, UI mapping и sequential worker |
+| `orbis-cli` | Зарезервированный CLI crate; текущий binary — stub |
+| `orbis-test-support` | Deterministic mock device states |
 
-Базовый контракт (все провайдеры):
+`orbis-session-protocol`, client и daemon разделены намеренно. Application layer
+не зависит от daemon или D-Bus transport. `orbis-hardwared` присутствует только
+как directory placeholder и не входит в workspace.
+
+## 3. UI и application boundary
+
+Slint callbacks не блокируют event loop аппаратной или D-Bus работой. Они
+отправляют typed commands в один Tokio worker. Worker:
+
+- выполняет команды последовательно;
+- сохраняет FIFO между Performance, GPU и Battery;
+- coalesce-ит только соседние queued Battery commands (last-wins в группе);
+- не clamp-ит значения и не подменяет provider validation;
+- возвращает typed result в UI через `Weak<AppWindow>::upgrade_in_event_loop`.
+
+`AppService<P>` не хранит backend state. После успешной mutation-команды он
+перечитывает provider и возвращает `ApplyResult` вместе с authoritative state.
+Ошибка команды и ошибка read-back различаются. UI обновляет backend-derived
+состояние только из результата worker/application path; optimistic hardware
+state не допускается.
+
+## 4. Provider и capability model
+
+Provider traits определяют backend-neutral контракты для Performance, Battery,
+GPU, Fans, power limits, display, lighting, telemetry и других областей. Наличие
+trait или domain type не означает существование production provider.
+
+На текущем этапе:
+
+- `MockProvider` реализует широкий набор traits для UI и tests;
+- `UPowerChargeLimitProvider` — реальный read-only Battery provider внутри
+  `orbis-sessiond`;
+- `SessionChargeLimitProvider` — read-only Battery provider над session D-Bus;
+- runtime capability discovery общего назначения ещё не реализован;
+  `orbis-capabilities` в основном собирает reports и читает dated fixtures.
+
+Backend-specific enum values, ranges и object presence не должны протекать в UI
+как доказанная semantics. Probe обязан различать `Unknown`, `ReadOnly`,
+`Unsupported`, `PermissionDenied` и временную недоступность.
+
+## 5. Battery Charge Limit
+
+Domain model:
 
 ```rust
-#[async_trait]
-pub trait Provider: Send + Sync {
-    fn id(&self) -> &'static str;
-    fn backend_id(&self) -> &'static str;
-    fn backend_version(&self) -> Option<String>;
-    fn risk(&self) -> RiskLevel; // Safe | Confirmation | Dangerous | Experimental
-    fn timeout(&self) -> Duration;
-
-    async fn probe(&self) -> Result<CapabilityReport, ProviderError>;
-    fn capabilities(&self) -> &CapabilityMatrix;
-    async fn read_state(&self) -> Result<ProviderState, ProviderError>;
-    async fn health(&self) -> ProviderHealth;
-    fn diagnostics(&self) -> Vec<DiagnosticEntry>;
-    fn explain_unsupported(&self, feature: FeatureId) -> String; // человекочитаемое
+ChargeLimit {
+    enabled: bool,
+    percent: Option<Percent>,
+    bounds: Option<ChargeLimitBounds>,
 }
 ```
 
-Отдельные trait-ы: `PerformanceProvider`, `FanProvider`, `PowerLimitProvider`,
-`BatteryProvider`, `GpuProvider` (декомпозирован на `MuxProvider`,
-`GpuAccessProvider`, `GpuPowerStateProvider`), `DisplayProvider`,
-`LightingProvider`, `AnimeProvider`, `SlashProvider`, `HotkeyProvider`,
-`TelemetryProvider`, `FirmwareUpdateProvider`.
+`ChargeLimitBounds` содержит `min`, `max` и ненулевой `step`. Семантика:
 
-Проверка поддержки записи (не верить существованию файла):
+- `percent = None` — backend не сообщил достоверный current threshold;
+- `bounds = Some(...)` — конкретный backend действительно сообщил constraints;
+- `bounds = None` — hardware/backend constraints неизвестны;
+- unknown bounds не являются ошибкой и не запрещают показать известный current;
+- значения не clamp-ятся и не округляются в domain/application boundary.
 
-1. существование; 2. тип; 3. доступность чтения; 4. доступность записи;
-5. допустимый диапазон; 6. read-back; 7. стабильность значения;
-8. соответствие DMI/устройству; 9. отсутствие конфликтующего владельца.
+UI presentation policy 40/100/5 и mock bounds не являются hardware facts. Их
+нельзя записывать в wire/domain state как constraints UPower или устройства.
 
-Ранжирование провайдеров: registry `Vec<Box<dyn Provider>>` с приоритетом; при
-probe выбирается первый Healthy. При его падении — следующий (fallback с пометкой
-technical debt, если это CLI-обёртка).
+Session wire DTO имеет D-Bus signature `(bbybyyy)`:
 
-## 6. orbis-sessiond
-
-### 6.1 Обязанности
-
-- владение текущим состоянием приложения;
-- агрегация данных провайдеров;
-- применение автоматических политик (AutomationEngine);
-- подписка на UPower и D-Bus сигналы;
-- отслеживание подключения/отключения дисплеев;
-- pending actions (MUX и т.п.);
-- таймауты и повторы;
-- единый session D-Bus API для GUI/CLI;
-- предотвращение конфликта двух экземпляров (single-instance через name ownership);
-- работа без открытого GUI;
-- корректное завершение при logout (systemd user unit, `KillMode=control-group`,
-  ловит `SIGTERM`, снимает свой D-Bus name, сохраняет состояние).
-
-### 6.2 D-Bus API (session bus)
-
-Имя: `io.github.orbiscontrol.Session`
-Объект: `/io/github/orbiscontrol/Session`
-Интерфейс: `io.github.orbiscontrol.Session1` (версионирование API в имени; при
-ломающих изменениях — `Session2` и т.д.; XML-описания в `data/dbus-1/`).
-
-Методы (типизированные, через zbus):
-
-```
-GetCapabilities()         -> a{sv}           // capability matrix
-GetStatus()               -> a{sv}           // профиль, GPU, лимит, дисплей, освещение
-GetTelemetry()            -> a{sv}           // HardwareSnapshot
-GetDiagnostics()          -> a{sv}           // для окна Diagnostics
-SetPerformanceProfile(u)  -> (u, s)          // ApplyResult + human message
-SetGpuMode(u, b)          -> (u, s)          // Optimized-флаг подтверждения
-SetChargeLimit(u)         -> (u, s)
-GetFanCurves(u)           -> a(s(yyyyyyyy)(yyyyyyyy)b)
-SetFanCurve(u, v)         -> (u, s)
-SetFanCurvesEnabled(u, b) -> (u, s)
-SetPowerLimit(s, i)       -> (u, s)
-SetDisplayMode(u)         -> (u, s)
-SetLightingMode(v)        -> (u, s)
-SetAnimeMode(v)           -> (u, s)
-SetSlashMode(v)           -> (u, s)
-GetPendingActions()       -> a{sv}
-CancelPendingAction(s)    -> (u, s)
-ApplyConfig(v)            -> (u, s)          // применение конфига
-ReProbe()                 -> (u, s)
-Quit(b)                   -> ()              // b = завершить и демон
+```text
+enabled, percent_present, percent,
+bounds_present, min, max, step
 ```
 
-Сигналы:
+При отсутствующих данных payload canonical: отсутствующий percent кодируется
+нулём; отсутствующие bounds — `bounds_present=false` и `min/max/step=0`.
+Client валидирует D-Bus DTO как untrusted input и отклоняет noncanonical values.
 
-```
-StateChanged(a{sv})
-TelemetryUpdated(a{sv})          // coalesced, не чаще 1 Гц
-CapabilityChanged(a{sv})
-PendingActionChanged(a{sv})
-Warning(a{sv})
-```
+## 6. Реализованный sessiond path
 
-Свойства времени: все операции с таймаутами; повторные команды отменяют
-устаревшие (cancellation tokens); ползунки — debounce; события питания/дисплея —
-coalescing.
+`orbis-sessiond` — непривилегированный user daemon. Реализованный путь:
 
-### 6.3 Внутренняя структура
+1. открыть system-bus connection к UPower;
+2. выполнить read-only `EnumerateDevices`;
+3. выбрать ровно одну system battery (`Type=Battery`, `PowerSupply=true`);
+4. собрать UPower source/provider и Session1 service;
+5. открыть session-bus server, занять
+   `io.github.orbiscontrol.Session` и экспортировать
+   `/io/github/orbiscontrol/Session`;
+6. обслуживать getter `ChargeLimit` до SIGINT/SIGTERM;
+7. освободить connection/name при штатном завершении.
 
-```
-SessionDaemon
-├── State (Arc<RwLock<AppState>>)         // пользовательское намерение + подтверждённое HW
-├── ProviderRegistry
-├── AutomationEngine                       // правила, приоритеты, cooldown
-├── PendingActionStore
-├── UPowerSubscription
-├── DisplayMonitor
-├── LogindSubscription (PrepareForSleep)
-└── DbusApi
-```
+UPower и session-client proxies используют `CacheProperties::No`: каждый
+authoritative read выполняет новый property Get. Fresh-read semantics проверены
+последовательными отличающимися значениями. UPower сообщает current threshold и
+enabled/support flags, но не hardware min/max/step, поэтому provider возвращает
+`bounds=None`.
 
-Политика владения: если обнаружены и asusd (или ppd) и наша автоматизация — выбор
-владельца `platform_profile` подтверждается пользователем (диалог), конфликт
-отображается в Diagnostics.
+NixOS module создаёт systemd user service с `Type=dbus`,
+`BusName=io.github.orbiscontrol.Session`, Nix-store `ExecStart`,
+`Restart=on-failure` и `PartOf/WantedBy=graphical-session.target`. `Type=dbus`
+считает daemon ready только после захвата имени. Mutation API в Session1 нет;
+production Battery mutations возвращают `Unsupported`.
 
-## 7. orbis-ui
+## 7. Privilege boundary
 
-- Никакого аппаратного I/O, никакого `sudo`, никакого парсинга shell-вывода.
-- Отображает состояние от sessiond; шлёт типизированные команды.
-- Показывает pending/success/warning/failure.
-- Оптимистичное обновление — только для безопасных обратимых настроек (например,
-  яркость), при этом после подтверждения backend состояние синхронизируется.
-- Для GPU MUX, power limits, undervolting и fan curves — ожидание подтверждения backend.
-- Стек: Slint, отдельные `.slint`-компоненты (см. `docs/ui-reference.md`),
-  дизайн-токены в `ui/themes/`, иконки — единый свободный набор (Lucide/Tabler).
+- `orbis-ui`: user process, без direct D-Bus к system hardware services и без
+  sysfs writes.
+- `orbis-sessiond`: user daemon; может читать system services через их публичные
+  D-Bus APIs, но не получает root.
+- System services (`UPower`, в будущем доказанные ASUS backends) сохраняют свою
+  собственную privilege boundary.
+- `orbis-hardwared`: не реализован и не входит в workspace. Его введение требует
+  отдельного ADR с конкретной операцией, capability proof, allowlist, validation,
+  authorization и sandboxing.
 
-## 8. orbis-hardwared (опциональный)
+## 8. GPU semantics
 
-Добавляется только при доказанной необходимости (см. ADR 0002). Требования:
+Нельзя объединять в один флаг или enum-derived hardware fact:
 
-- минимальный API; никакой передачи произвольных путей/команд; allowlist атрибутов;
-- диапазоны на стороне демона; read-back; Polkit-проверка;
-- журналирование аппаратных изменений; защита от symlink/path traversal;
-- `ProtectSystem=strict`, `PrivateTmp=true`, `NoNewPrivileges=true`,
-  минимальные capabilities, seccomp/systemd sandboxing;
-- отдельный threat model (`docs/threat-model.md`).
+- physical MUX state;
+- dGPU availability/access policy;
+- фактический dGPU power state;
+- requested mode и pending/reboot/logout requirement.
 
-Пример (когда понадобится): запись `charge_control_end_threshold` на системах без
-asusd, где sysfs-файл доступен только root. Не создаётся «на всякий случай».
+Четыре UI-кнопки — product abstraction. `Ultimate` не считается applied, пока
+MUX state не подтверждён после необходимого reboot. `Eco`/block не равен
+physical MUX. Raw numeric enum semantics конкретного ASUS backend остаётся
+UNKNOWN без versioned evidence и mapping tests (ADR 0003).
 
-## 9. orbis-cli
+## 9. Writes
 
-```
-orbisctl status | capabilities | diagnostics [--json] | profile get|set <...>
-orbisctl gpu get|set <eco|standard|ultimate|optimized>
-orbisctl battery get-limit|set-limit <percent>
-orbisctl fan list | curve get
-orbisctl config validate
-orbisctl providers
-orbisctl version
-orbisctl hardware-test --allow-writes   // отдельный интерактивный режим, НЕ в CI
-orbisctl --safe-mode / orbis-sessiond --read-only  // safe mode
-```
+Наличие read path, writable property в introspection или mode `0644` не доказывает
+безопасную запись. Каждый production write path вводится отдельно и требует:
 
-CLI использует тот же D-Bus API и модели данных, что GUI. `anyhow` — только на
-верхнем уровне CLI/launcher; внутри — `thiserror`.
+1. capability proof на конкретном backend/device class;
+2. подтверждённой semantics, units, range и step;
+3. validation до I/O;
+4. безопасной privilege boundary;
+5. точного error mapping;
+6. authoritative read-back;
+7. честного `Unsupported` при отсутствии доказательств;
+8. tests для short-circuit, error classes и state transitions.
 
-## 10. Конфигурация (orbis-config)
+Текущий read-only session backend не является предварительным одобрением
+asusd/sysfs writes.
 
-- TOML пользовательский конфиг; JSON только для экспорта/импорта/совместимости.
-- `config_version`, миграции с автоматическим бэкапом перед миграцией.
-- Атомарная запись: temp file + rename.
-- Раздельное хранение: (а) пользовательское намерение; (б) последнее подтверждённое
-  аппаратное состояние; (в) pending state; (г) backend-specific metadata.
-- Импорт: валидация schema, preview, список изменений; неизвестные команды/hotkeys
-  отключены; hardware-specific значения на другой модели не применяются;
-  fan curves перепроверяются.
-- Не сохранять unsupported значения как применённые.
+## 10. Accepted decisions and evidence
 
-## 11. Асинхронность и производительность
-
-- Tokio runtime; все D-Bus/sysfs/внешние операции — async с таймаутами.
-- Отмена устаревших запросов при повторном изменении; debounce ползунков;
-  coalescing событий питания/дисплея.
-- Polling: fast telemetry 1 s (только при открытом окне — подписка); slow
-  capabilities 30–60 s или event-driven; static probe — при старте/resume/
-  restart провайдера/ручном re-probe.
-- Целевые метрики (после стабилизации): daemon CPU < 0.2 %, RAM < 20 MiB;
-  GUI RAM < 80 MiB; cold start < 1.5 s; UI response < 100 ms.
-
-## 12. Обработка ошибок и rollback
-
-- Запрещены «Something went wrong» без деталей; всегда: что пошло не так, backend,
-  состояние системы, что делать.
-- Последовательность для обратимых операций: прочитать исходное состояние →
-  валидировать → применить → прочитать новое → при частичной ошибке попытаться
-  вернуть исходное → записать результат → success только после подтверждения.
-- Rollback физического MUX — без самостоятельного выдумывания firmware-семантики
-  (только RestoreDefault/через backend).
-
-## 13. Безопасность (кратко)
-
-Подробно — `docs/threat-model.md`. Ключевые границы:
-
-- GUI/sessiond: user session, никаких привилегий.
-- hardwared: root, polkit, allowlist, sandbox.
-- D-Bus policy: sessiond виден только пользователю; hardwared методы — polkit.
-- Диагностический экспорт обезличивается.
-- Никакой телеметрии и рекламы.
-
-## 14. Тестирование
-
-- unit tests + `proptest` (кривые, диапазоны);
-- mock D-Bus services (`orbis-test-support`);
-- snapshot-тесты capability-модели;
-- screenshot-тесты GUI (slint-viewer/рендер в CI);
-- hardware-in-the-loop — только отдельно от CI, интерактивно
-  (`orbisctl hardware-test --allow-writes`);
-- матрица CI: latest stable, MSRV, Fedora/Ubuntu/Arch контейнеры,
-  Wayland-headless где возможно.
-
-## 15. Пакетирование (кратко)
-
-PKGBUILD, Fedora spec, Debian packaging, AppImage; `.desktop`, AppStream, SVG icon;
-systemd user unit; D-Bus activation; polkit policy (при наличии hardwared);
-uninstall-документация. Установка не отключает чужие сервисы, не меняет grub,
-не ставит модули ядра, не добавляет пользователя в широкие группы.
-
-## 16. Совместимость и NixOS
-
-Целевые дистрибутивы: **NixOS** (официальная платформа разработки и аппаратной
-проверки), Fedora, Arch Linux, Ubuntu LTS, Debian, openSUSE. NixOS добавляется к
-перечисленным, а не заменяет их; приложение не привязывается только к NixOS.
-
-NixOS-интеграция (`packaging/nix/`):
-
-- `flake.nix` + `flake.lock` — dev shell (Rust toolchain, cargo, rustfmt, clippy,
-  pkg-config, зависимости Slint для Wayland/X11, D-Bus инструменты для тестов),
-  `nix build`, `nix run`, `nix flake check`;
-- `package.nix` — сборка workspace;
-- `module.nix` — NixOS-модуль (на Этапе 2 **не включает реальные аппаратные
-  операции**; только сервис/опции, безопасные для системы).
-
-Запуск mock-приложения на NixOS — без изменения системной конфигурации
-(`nix run .#orbis-control -- --mock-device zephyrus-full`).
+- [ADR 0001](adr/0001-rust-and-slint.md) — Rust + Slint.
+- [ADR 0002](adr/0002-daemon-boundaries.md) — GUI/sessiond privilege boundary.
+- [ADR 0003](adr/0003-gpu-provider-strategy.md) — независимые GPU concepts.
+- [ADR 0004](adr/0004-authoritative-read-only-session.md) — authoritative
+  read-only session contract.
+- [`research-report.md`](research-report.md) и hardware fixtures — dated evidence,
+  не current implementation status.

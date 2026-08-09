@@ -1,44 +1,85 @@
 # Orbis Control
 
-Лёгкое системное приложение для ноутбуков ASUS на Linux: компактный интерфейс в
-стиле G-Helper для управления производительностью, GPU, экраном, подсветкой,
-батареей, вентиляторами и автоматизацией — нативно, без Electron.
+Orbis Control — нативное Rust + Slint приложение для управления и наблюдения за
+возможностями ASUS-ноутбуков на Linux. Проект Wayland-first; X11 поддерживается
+как compatibility mode. GUI не запускается от root и не выполняет direct
+hardware I/O.
 
-> Статус: **Этап 0/1 завершён (исследование и спецификация)**. Кода ещё нет.
-> См. `docs/`.
+## Текущий статус
 
-## Компоненты
+Проект находится в ранней development стадии (`0.1.0`). Реализованы domain,
+provider и application boundaries, Slint mock UI и первый real read-only
+production vertical slice для Battery Charge Limit:
 
-| Компонент | Назначение | Статус |
-|---|---|---|
-| `orbis-control` | GUI (Slint) | не начат (Этап 2) |
-| `orbis-sessiond` | пользовательский демон | не начат (Этап 3+) |
-| `orbisctl` | диагностический CLI | не начат |
-| `orbis-hardwared` | опциональный root-helper | не создаётся до доказанной необходимости (ADR 0002) |
+```text
+UPower → orbis-sessiond → session D-Bus → orbis-session-client
+```
 
-## Совместимость
+Этот slice протестирован и live-validated как Nix-installed systemd user
+service с `Type=dbus` и clean SIGTERM shutdown. Интерактивный GUI пока использует
+`MockProvider`; production session client к UI ещё не подключён. Hardware
+mutations не реализованы.
 
-Целевые дистрибутивы: Fedora, Arch Linux, Ubuntu LTS, Debian, openSUSE.
-Основная платформа — Wayland; X11 — режим совместимости.
-Поддерживаются ноутбуки ASUS с интерфейсами `asusd`/`asus-armoury`/kernel ABI
-(см. `docs/hardware-support.md` — будет создан на Этапе 2).
+Точный статус по областям: [`docs/current-state.md`](docs/current-state.md).
+
+## Архитектура
+
+```text
+Slint UI → sequential worker → AppService → provider traits
+                                      |
+                                      +→ mock (текущий UI)
+                                      +→ session client → sessiond → UPower
+```
+
+- Backend state обновляется только из authoritative reads/read-back.
+- Architecture capability-driven: unknown не подменяется unsupported или
+  product defaults.
+- `orbis-sessiond` — user daemon.
+- `orbis-hardwared` не входит в workspace и не вводится без доказанной
+  privileged hardware operation.
+
+Подробнее: [`docs/architecture.md`](docs/architecture.md).
+
+## Workspace
+
+Основные crates: `orbis-core`, `orbis-config`, `orbis-capabilities`,
+`orbis-providers`, `orbis-application`, `orbis-session-protocol`,
+`orbis-session-client`, `orbis-sessiond`, `orbis-ui`, `orbis-cli` и
+`orbis-test-support`.
+
+## Development
+
+Dev environment:
+
+```bash
+nix develop
+```
+
+Основные проверки:
+
+```bash
+cargo fmt --all -- --check
+cargo check --workspace
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+git diff --check
+```
+
+Nix:
+
+```bash
+nix flake check
+nix build .#orbis-control
+```
 
 ## Документация
 
-- `docs/research-report.md` — исследование upstream-проектов (commit hashes, лицензии, API)
-- `docs/feature-matrix.md` — таблица функций G-Helper и их Linux-реализаций
-- `docs/provider-matrix.md` — провайдеры и backend-интерфейсы
-- `docs/ui-reference.md`, `docs/ui-measurements.json` — UI-спецификация по G-Helper
-- `docs/architecture.md` — архитектура
-- `docs/threat-model.md` — модель угроз
-- `docs/adr/` — записи архитектурных решений
+Начните с [`docs/README.md`](docs/README.md): там определены source-of-truth
+hierarchy и роли current/historical документов. План развития —
+[`docs/roadmap.md`](docs/roadmap.md).
 
 ## Лицензия
 
-GPL-3.0-or-later. Третьесторонние компоненты и происхождение идей — в
-`THIRD_PARTY_NOTICES.md`.
+GPL-3.0-or-later.
 
-## Дисклеймер
-
-Orbis Control — независимый проект, не связан с ASUSTeK Computer Inc. Название,
-логотипы ASUS/ROG/TUF и G-Helper не используются в основном имени/иконке/application ID.
+Orbis Control — независимый проект, не связанный с ASUSTeK Computer Inc.

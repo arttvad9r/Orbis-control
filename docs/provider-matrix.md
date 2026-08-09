@@ -1,5 +1,10 @@
 # Provider Matrix — Orbis Control
 
+> Роль: **CURRENT PROVIDER STRATEGY + DATED HARDWARE EVIDENCE**, не список
+> реализованных providers. Фактическая готовность — в
+> [`current-state.md`](current-state.md). Статусы FA707NV ниже относятся к probe
+> 2026-08-06 и не доказывают безопасные writes.
+>
 > Дата: 2026-08-06 (обновлено после ревью Этапа 0). Связывает функции
 > (`docs/feature-matrix.md`) с провайдерами, backend-интерфейсами и статусами.
 > Полный контракт trait-ов — в `docs/architecture.md`.
@@ -10,9 +15,12 @@
 
 1. Бизнес-логика не привязывается к конкретному проекту — используется ранжируемый
    список провайдеров на каждую функцию.
-2. Провайдер обязан: `probe()`, `capabilities()`, `read_state()`, write-методы,
-   `validate_request()`, `health()`, `diagnostics()`, timeout, человекочитаемое
-   объяснение отсутствия поддержки, идентификатор/версию backend, классификацию риска.
+2. Target production provider должен иметь capability evidence, typed reads,
+   domain-specific write/validation только при доказанной поддержке, `health()`,
+   `diagnostics()`, timeout, человекочитаемую причину недоступности и backend
+   identity. В текущем коде эти обязанности разделены между `Provider`,
+   domain-specific traits и capability pipeline; общий `probe()/read_state()`
+   contract из Stage 0 как единый trait не реализован.
 3. Наличие файла/объекта ≠ поддержка записи. Проверяется: существование, тип,
    чтение, запись, диапазон, read-back, стабильность, соответствие DMI,
    отсутствие конфликтующего владельца.
@@ -103,7 +111,10 @@ CPU, 8×(temp,pwm) GPU, enabled.
 | 3 | kernel ABI | `/sys/class/power_supply/BAT*/charge_control_end_threshold` | лимит зарядки (fallback) |
 | 4 | kernel ABI | power_supply sysfs | raw-показания (fallback) |
 
-Статус на эталоне: **Supported** (UPower BAT1 A32-K55; заряд-лимит 80 через asusd и sysfs).
+Статус dated evidence на эталоне: current threshold 80 читался через UPower,
+asusd Platform и sysfs. Hardware min/max/step probe не доказал; текущий
+production UPower provider возвращает `bounds=None`. Исторический range 40–100
+в `expected-capabilities.json` не является production hardware constraint.
 
 ---
 
@@ -241,7 +252,8 @@ CPU, 8×(temp,pwm) GPU, enabled.
 
 ## 13. Требования к провайдерам (чеклист качества)
 
-Для каждого провайдера в коде обязательны:
+Перед признанием production provider зрелым требуются (это target checklist, а
+не утверждение о текущей реализации):
 
 - [ ] `probe()` — безопасный read-only discovery
 - [ ] `capabilities()` — полный capability-статус (§7 задания)

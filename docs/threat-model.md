@@ -1,5 +1,9 @@
 # Threat Model — Orbis Control
 
+> Роль: **CURRENT/FUTURE SECURITY DESIGN**. Меры ниже являются обязательным
+> design baseline, но не все перечисленные компоненты и mitigations реализованы.
+> Фактический статус — в [`current-state.md`](current-state.md).
+>
 > Дата: 2026-08-06. Статус: черновик Этапа 1.
 > Методология: STRIDE по компонентам; отдельные модели для user-space (GUI,
 > sessiond) и root-границы (hardwared). Обновляется при добавлении функций.
