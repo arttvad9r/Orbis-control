@@ -3539,6 +3539,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbis-hardwared"
+version = "0.1.0"
+dependencies = [
+ "orbis-core",
+ "orbis-providers",
+]
+
+[[package]]
 name = "orbis-providers"
 version = "0.1.0"
 dependencies = [

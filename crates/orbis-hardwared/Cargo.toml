@@ -1,0 +1,17 @@
+[package]
+name = "orbis-hardwared"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Orbis Control: привилегированный hardware helper (foundation)"
+
+[[bin]]
+name = "orbis-hardwared"
+path = "src/main.rs"
+
+[dependencies]
+orbis-core = { workspace = true }
+orbis-providers = { workspace = true }

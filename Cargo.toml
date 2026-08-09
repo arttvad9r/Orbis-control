@@ -12,8 +12,11 @@ members = [
     "crates/orbis-ui",
     "crates/orbis-cli",
     "crates/orbis-test-support",
+    "crates/orbis-hardwared",
 ]
-# orbis-hardwared намеренно НЕ включён в Этапе 2 (см. ADR 0002).
+# orbis-hardwared включён после ADR 0006 (первая доказанная privileged
+# capability — Performance profile write); каждая новая capability добавляется
+# отдельно по evidence.
 
 [workspace.package]
 version = "0.1.0"
