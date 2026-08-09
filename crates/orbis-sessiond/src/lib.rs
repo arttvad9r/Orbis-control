@@ -25,6 +25,7 @@
 pub mod bootstrap;
 pub mod composition;
 pub mod discovery;
+pub mod performance;
 pub mod runtime;
 pub mod server;
 pub mod service;
