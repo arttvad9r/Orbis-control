@@ -20,7 +20,10 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.orbis-control;
+      # Самодостаточный default: собираем пакет через consumer nixpkgs,
+      # без требования overlay/pkgs.orbis-control.
+      default = pkgs.callPackage ./package.nix { };
+      defaultText = lib.literalExpression "pkgs.callPackage ./package.nix { }";
       description = "Orbis Control package to use.";
     };
 
