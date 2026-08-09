@@ -1,9 +1,14 @@
 //! Real D-Bus bootstrap: открывает system/session connections и передаёт их
 //! в существующий composition layer.
 
+use std::sync::Arc;
+
 use orbis_providers::error::ProviderError;
 
+use crate::armoury::{ArmouryGpuProvider, SysfsArmouryGpuSource};
 use crate::composition::build_upower_session_server;
+use crate::server::GpuCapabilities;
+use crate::supergfxd::{SupergfxdGpuPowerProvider, ZbusSupergfxdGpuPowerSource};
 
 /// Ошибка bootstrap: сохраняет класс ошибки отдельно для D-Bus startup и
 /// для battery discovery/provider.
@@ -32,7 +37,13 @@ pub async fn connect_upower_session_server(
 ) -> zbus::Result<zbus::Connection> {
     let upower_connection = zbus::Connection::system().await?;
     let session_builder = zbus::connection::Builder::session()?;
-    build_upower_session_server(session_builder, upower_connection, battery_object_path).await
+    build_upower_session_server(
+        session_builder,
+        upower_connection,
+        battery_object_path,
+        GpuCapabilities::default(),
+    )
+    .await
 }
 
 /// Открыть connections, обнаружить системную батарею и собрать session server.
@@ -54,8 +65,26 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
     let battery_object_path =
         crate::discovery::discover_battery_object_path(&upower_connection).await?;
     let session_builder = zbus::connection::Builder::session()?;
+
+    // Read-only GPU capabilities:
+    // - power → supergfxd (переиспользуем ту же system connection);
+    // - mux/access → kernel ASUS Armoury firmware-attributes (sysfs).
+    let gpu_power: Arc<dyn orbis_providers::traits::GpuPowerProvider> = Arc::new(
+        SupergfxdGpuPowerProvider::new(ZbusSupergfxdGpuPowerSource::new(upower_connection.clone())),
+    );
+    let gpu_mux: Arc<dyn orbis_providers::traits::GpuMuxProvider> =
+        Arc::new(ArmouryGpuProvider::new(SysfsArmouryGpuSource::default()));
+    let gpu_access: Arc<dyn orbis_providers::traits::GpuAccessProvider> =
+        Arc::new(ArmouryGpuProvider::new(SysfsArmouryGpuSource::default()));
+
+    let gpu = GpuCapabilities {
+        power: Some(gpu_power),
+        mux: Some(gpu_mux),
+        access: Some(gpu_access),
+    };
+
     Ok(
-        build_upower_session_server(session_builder, upower_connection, battery_object_path)
+        build_upower_session_server(session_builder, upower_connection, battery_object_path, gpu)
             .await?,
     )
 }

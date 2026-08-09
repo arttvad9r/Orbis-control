@@ -2,17 +2,30 @@
 
 use std::sync::Arc;
 
-use orbis_providers::traits::BatteryProvider;
+use orbis_providers::traits::{
+    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
+};
 use orbis_session_protocol::{BUS_NAME, OBJECT_PATH};
 
 use crate::service::SessionService;
+
+/// Дополнительные read-only GPU capabilities для session server.
+#[derive(Default)]
+pub struct GpuCapabilities {
+    /// Read-only dGPU runtime power provider.
+    pub power: Option<Arc<dyn GpuPowerProvider>>,
+    /// Read-only physical MUX provider.
+    pub mux: Option<Arc<dyn GpuMuxProvider>>,
+    /// Read-only dGPU access policy provider.
+    pub access: Option<Arc<dyn GpuAccessProvider>>,
+}
 
 /// Построить session D-Bus server поверх подготовленного `Builder`.
 ///
 /// - caller предоставляет transport-configured Builder (session/system/P2P),
 ///   helper не выбирает transport и не открывает bus самостоятельно;
-/// - helper создаёт `SessionService` из переданного provider (provider не
-///   читается до первого D-Bus property call);
+/// - helper создаёт `SessionService` из переданных providers (providers не
+///   читаются до первого D-Bus property call);
 /// - helper регистрирует protocol bus name (`BUS_NAME`) и object path
 ///   (`OBJECT_PATH`);
 /// - ошибки `Builder::name`/`serve_at`/`build` передаются вызывающему коду как
@@ -22,8 +35,18 @@ use crate::service::SessionService;
 pub async fn build_session_server(
     builder: zbus::connection::Builder<'_>,
     battery: Arc<dyn BatteryProvider>,
+    gpu: GpuCapabilities,
 ) -> zbus::Result<zbus::Connection> {
-    let service = SessionService::new(battery);
+    let mut service = SessionService::new(battery);
+    if let Some(p) = gpu.power {
+        service = service.with_gpu_power(p);
+    }
+    if let Some(m) = gpu.mux {
+        service = service.with_gpu_mux(m);
+    }
+    if let Some(a) = gpu.access {
+        service = service.with_gpu_access(a);
+    }
     let builder = builder.name(BUS_NAME)?;
     let builder = builder.serve_at(OBJECT_PATH, service)?;
     builder.build().await

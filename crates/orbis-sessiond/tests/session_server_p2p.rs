@@ -145,7 +145,7 @@ async fn connect_via_helper(
     let server_builder = Builder::unix_stream(server_stream).server(guid)?.p2p();
     let client_builder = Builder::unix_stream(client_stream).p2p();
     let (server_conn, client_conn) = tokio::try_join!(
-        build_session_server(server_builder, provider),
+        build_session_server(server_builder, provider, Default::default()),
         client_builder.build()
     )?;
     Ok((server_conn, client_conn))

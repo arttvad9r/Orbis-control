@@ -18,11 +18,14 @@ use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
 use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
 use orbis_core::diagnostics::DiagnosticEntry;
+use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::Percent;
 use orbis_providers::error::{ProviderError, ValidationResult};
-use orbis_providers::traits::{BatteryProvider, Provider, ProviderHealth};
-use orbis_session_protocol::{ChargeLimitInfo, Session1Proxy};
+use orbis_providers::traits::{
+    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, Provider, ProviderHealth,
+};
+use orbis_session_protocol::{ChargeLimitInfo, Session1Proxy, gpu_access, gpu_mux, gpu_power};
 use zbus::proxy::CacheProperties;
 
 /// Testable источник wire DTO через session protocol.
@@ -218,6 +221,286 @@ where
         ValidationResult::invalid(
             "session protocol read-only: запись charge limit не поддерживается",
         )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Read-only GPU capabilities (power / MUX / access) через Session1
+// ---------------------------------------------------------------------------
+
+/// Преобразовать wire `u8` в domain `GpuPowerState`.
+///
+/// Strict decode: неизвестный wire value → `Internal` (remote service нарушил
+/// contract). Semantic `Unknown` передаётся как допустимое wire значение.
+pub fn gpu_power_from_wire(raw: u8) -> Result<GpuPowerState, ProviderError> {
+    match raw {
+        gpu_power::ACTIVE => Ok(GpuPowerState::Active),
+        gpu_power::SUSPENDED => Ok(GpuPowerState::Suspended),
+        gpu_power::OFF => Ok(GpuPowerState::Off),
+        gpu_power::STALE => Ok(GpuPowerState::Stale),
+        gpu_power::UNKNOWN => Ok(GpuPowerState::Unknown),
+        other => Err(ProviderError::Internal(format!(
+            "session protocol: неизвестный gpu_power wire value {other}"
+        ))),
+    }
+}
+
+/// Преобразовать wire `u8` в domain `GpuMuxState`.
+pub fn gpu_mux_from_wire(raw: u8) -> Result<GpuMuxState, ProviderError> {
+    match raw {
+        gpu_mux::INTEGRATED => Ok(GpuMuxState::Integrated),
+        gpu_mux::DISCRETE => Ok(GpuMuxState::Discrete),
+        gpu_mux::UNKNOWN => Ok(GpuMuxState::Unknown),
+        other => Err(ProviderError::Internal(format!(
+            "session protocol: неизвестный gpu_mux wire value {other}"
+        ))),
+    }
+}
+
+/// Преобразовать wire `u8` в domain `GpuAccessPolicy`.
+pub fn gpu_access_from_wire(raw: u8) -> Result<GpuAccessPolicy, ProviderError> {
+    match raw {
+        gpu_access::UNBLOCKED => Ok(GpuAccessPolicy::Unblocked),
+        gpu_access::BLOCKED => Ok(GpuAccessPolicy::Blocked),
+        gpu_access::PENDING => Ok(GpuAccessPolicy::Pending),
+        gpu_access::UNKNOWN => Ok(GpuAccessPolicy::Unknown),
+        other => Err(ProviderError::Internal(format!(
+            "session protocol: неизвестный gpu_access wire value {other}"
+        ))),
+    }
+}
+
+/// Testable источник raw GPU power wire value через session protocol.
+#[async_trait]
+pub trait SessionGpuPowerSource: Send + Sync {
+    /// Прочитать authoritative wire `gpu_power` (u8).
+    async fn read_gpu_power(&self) -> Result<u8, ProviderError>;
+}
+
+/// Testable источник raw GPU MUX wire value через session protocol.
+#[async_trait]
+pub trait SessionGpuMuxSource: Send + Sync {
+    /// Прочитать authoritative wire `gpu_mux` (u8).
+    async fn read_gpu_mux(&self) -> Result<u8, ProviderError>;
+}
+
+/// Testable источник raw GPU access wire value через session protocol.
+#[async_trait]
+pub trait SessionGpuAccessSource: Send + Sync {
+    /// Прочитать authoritative wire `gpu_access` (u8).
+    async fn read_gpu_access(&self) -> Result<u8, ProviderError>;
+}
+
+/// Реальный zbus источник для всех трёх GPU capability wire reads.
+pub struct ZbusSessionGpuSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusSessionGpuSource {
+    /// Создать источник с готовой Connection.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl SessionGpuPowerSource for ZbusSessionGpuSource {
+    async fn read_gpu_power(&self) -> Result<u8, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy.gpu_power().await.map_err(zbus_error_to_provider)
+    }
+}
+
+#[async_trait]
+impl SessionGpuMuxSource for ZbusSessionGpuSource {
+    async fn read_gpu_mux(&self) -> Result<u8, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy.gpu_mux().await.map_err(zbus_error_to_provider)
+    }
+}
+
+#[async_trait]
+impl SessionGpuAccessSource for ZbusSessionGpuSource {
+    async fn read_gpu_access(&self) -> Result<u8, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy.gpu_access().await.map_err(zbus_error_to_provider)
+    }
+}
+
+/// Read-only GPU power provider над session protocol source.
+pub struct SessionGpuPowerProvider<S> {
+    source: S,
+}
+
+impl<S> SessionGpuPowerProvider<S> {
+    /// Создать provider над source.
+    pub fn new(source: S) -> Self {
+        Self { source }
+    }
+}
+
+impl<S> Provider for SessionGpuPowerProvider<S>
+where
+    S: SessionGpuPowerSource,
+{
+    fn id(&self) -> &'static str {
+        "session-gpu-power"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("session-gpu-power")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("session protocol read-only backend: функция '{feature}' недоступна")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.session-gpu-power",
+            "read-only session protocol GPU power backend",
+        )]
+    }
+}
+
+#[async_trait]
+impl<S> GpuPowerProvider for SessionGpuPowerProvider<S>
+where
+    S: SessionGpuPowerSource,
+{
+    async fn power_state(&self) -> Result<GpuPowerState, ProviderError> {
+        let raw = self.source.read_gpu_power().await?;
+        gpu_power_from_wire(raw)
+    }
+}
+
+/// Read-only GPU MUX provider над session protocol source.
+pub struct SessionGpuMuxProvider<S> {
+    source: S,
+}
+
+impl<S> SessionGpuMuxProvider<S> {
+    /// Создать provider над source.
+    pub fn new(source: S) -> Self {
+        Self { source }
+    }
+}
+
+impl<S> Provider for SessionGpuMuxProvider<S>
+where
+    S: SessionGpuMuxSource,
+{
+    fn id(&self) -> &'static str {
+        "session-gpu-mux"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("session-gpu-mux")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("session protocol read-only backend: функция '{feature}' недоступна")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.session-gpu-mux",
+            "read-only session protocol GPU MUX backend",
+        )]
+    }
+}
+
+#[async_trait]
+impl<S> GpuMuxProvider for SessionGpuMuxProvider<S>
+where
+    S: SessionGpuMuxSource,
+{
+    async fn mux_state(&self) -> Result<GpuMuxState, ProviderError> {
+        let raw = self.source.read_gpu_mux().await?;
+        gpu_mux_from_wire(raw)
+    }
+}
+
+/// Read-only GPU access provider над session protocol source.
+pub struct SessionGpuAccessProvider<S> {
+    source: S,
+}
+
+impl<S> SessionGpuAccessProvider<S> {
+    /// Создать provider над source.
+    pub fn new(source: S) -> Self {
+        Self { source }
+    }
+}
+
+impl<S> Provider for SessionGpuAccessProvider<S>
+where
+    S: SessionGpuAccessSource,
+{
+    fn id(&self) -> &'static str {
+        "session-gpu-access"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("session-gpu-access")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("session protocol read-only backend: функция '{feature}' недоступна")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.session-gpu-access",
+            "read-only session protocol GPU access backend",
+        )]
+    }
+}
+
+#[async_trait]
+impl<S> GpuAccessProvider for SessionGpuAccessProvider<S>
+where
+    S: SessionGpuAccessSource,
+{
+    async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError> {
+        let raw = self.source.read_gpu_access().await?;
+        gpu_access_from_wire(raw)
     }
 }
 
@@ -480,5 +763,87 @@ mod tests {
         let limit = charge_limit_from_wire(info).expect("valid");
         assert_eq!(limit.percent.map(|p| p.get()), Some(60));
         assert!(limit.bounds.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // GPU capability wire decode
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gpu_power_wire_decode_maps_all_values() {
+        assert_eq!(
+            gpu_power_from_wire(gpu_power::ACTIVE).unwrap(),
+            GpuPowerState::Active
+        );
+        assert_eq!(
+            gpu_power_from_wire(gpu_power::SUSPENDED).unwrap(),
+            GpuPowerState::Suspended
+        );
+        assert_eq!(
+            gpu_power_from_wire(gpu_power::OFF).unwrap(),
+            GpuPowerState::Off
+        );
+        assert_eq!(
+            gpu_power_from_wire(gpu_power::STALE).unwrap(),
+            GpuPowerState::Stale
+        );
+        assert_eq!(
+            gpu_power_from_wire(gpu_power::UNKNOWN).unwrap(),
+            GpuPowerState::Unknown
+        );
+    }
+
+    #[test]
+    fn gpu_mux_wire_decode_maps_all_values() {
+        use orbis_session_protocol::gpu_mux;
+        assert_eq!(
+            gpu_mux_from_wire(gpu_mux::INTEGRATED).unwrap(),
+            GpuMuxState::Integrated
+        );
+        assert_eq!(
+            gpu_mux_from_wire(gpu_mux::DISCRETE).unwrap(),
+            GpuMuxState::Discrete
+        );
+        assert_eq!(
+            gpu_mux_from_wire(gpu_mux::UNKNOWN).unwrap(),
+            GpuMuxState::Unknown
+        );
+    }
+
+    #[test]
+    fn gpu_access_wire_decode_maps_all_values() {
+        use orbis_session_protocol::gpu_access;
+        assert_eq!(
+            gpu_access_from_wire(gpu_access::UNBLOCKED).unwrap(),
+            GpuAccessPolicy::Unblocked
+        );
+        assert_eq!(
+            gpu_access_from_wire(gpu_access::BLOCKED).unwrap(),
+            GpuAccessPolicy::Blocked
+        );
+        assert_eq!(
+            gpu_access_from_wire(gpu_access::PENDING).unwrap(),
+            GpuAccessPolicy::Pending
+        );
+        assert_eq!(
+            gpu_access_from_wire(gpu_access::UNKNOWN).unwrap(),
+            GpuAccessPolicy::Unknown
+        );
+    }
+
+    #[test]
+    fn gpu_wire_unknown_value_is_internal_error() {
+        assert!(matches!(
+            gpu_power_from_wire(99),
+            Err(ProviderError::Internal(_))
+        ));
+        assert!(matches!(
+            gpu_mux_from_wire(99),
+            Err(ProviderError::Internal(_))
+        ));
+        assert!(matches!(
+            gpu_access_from_wire(99),
+            Err(ProviderError::Internal(_))
+        ));
     }
 }

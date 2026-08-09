@@ -141,8 +141,9 @@ impl ChargeLimitInfo {
 
 /// Getter-only zbus proxy контракт интерфейса `Session1`.
 ///
-/// Контракт read-only: только чтение свойства `ChargeLimit`; setter,
-/// mutation-методы и signals в этом микрошаге отсутствуют.
+/// Контракт read-only: только чтение свойств `ChargeLimit`, `GpuPower`,
+/// `GpuMux` и `GpuAccess`; setter, mutation-методы и signals в этом микрошаге
+/// отсутствуют.
 #[zbus::proxy(
     interface = "io.github.orbiscontrol.Session1",
     default_service = "io.github.orbiscontrol.Session",
@@ -152,6 +153,54 @@ pub trait Session1 {
     /// Текущий Battery Charge Limit (read-only property).
     #[zbus(property)]
     fn charge_limit(&self) -> zbus::Result<ChargeLimitInfo>;
+
+    /// Текущий dGPU runtime power state (read-only property).
+    #[zbus(property)]
+    fn gpu_power(&self) -> zbus::Result<u8>;
+
+    /// Текущее физическое MUX состояние (read-only property).
+    #[zbus(property)]
+    fn gpu_mux(&self) -> zbus::Result<u8>;
+
+    /// Текущая dGPU access policy (read-only property).
+    #[zbus(property)]
+    fn gpu_access(&self) -> zbus::Result<u8>;
+}
+
+/// Wire-значения `GpuPowerState` (domain enum в protocol crate).
+pub mod gpu_power {
+    /// dGPU активна (D0).
+    pub const ACTIVE: u8 = 0;
+    /// Низкопотребляющее состояние (D3cold и т.п.).
+    pub const SUSPENDED: u8 = 1;
+    /// Выключена/не обнаруживается.
+    pub const OFF: u8 = 2;
+    /// Последнее известное значение устарело.
+    pub const STALE: u8 = 3;
+    /// Semantic state неизвестно.
+    pub const UNKNOWN: u8 = 4;
+}
+
+/// Wire-значения `GpuMuxState` (domain enum в protocol crate).
+pub mod gpu_mux {
+    /// MUX направлен на iGPU.
+    pub const INTEGRATED: u8 = 0;
+    /// MUX направлен на dGPU.
+    pub const DISCRETE: u8 = 1;
+    /// Semantic state неизвестно.
+    pub const UNKNOWN: u8 = 2;
+}
+
+/// Wire-значения `GpuAccessPolicy` (domain enum в protocol crate).
+pub mod gpu_access {
+    /// dGPU доступна приложениям.
+    pub const UNBLOCKED: u8 = 0;
+    /// dGPU заблокирована для приложений.
+    pub const BLOCKED: u8 = 1;
+    /// Переключение в процессе.
+    pub const PENDING: u8 = 2;
+    /// Semantic state неизвестно.
+    pub const UNKNOWN: u8 = 3;
 }
 
 #[cfg(test)]
@@ -232,5 +281,24 @@ mod tests {
         let data = zbus::zvariant::to_bytes(ctx, &info).expect("serialize");
         let (decoded, _): (ChargeLimitInfo, usize) = data.deserialize().expect("deserialize");
         assert_eq!(decoded, info);
+    }
+
+    #[test]
+    fn gpu_wire_constants_are_stable() {
+        // GpuPowerState wire values (domain: Active/Suspended/Off/Stale/Unknown).
+        assert_eq!(gpu_power::ACTIVE, 0);
+        assert_eq!(gpu_power::SUSPENDED, 1);
+        assert_eq!(gpu_power::OFF, 2);
+        assert_eq!(gpu_power::STALE, 3);
+        assert_eq!(gpu_power::UNKNOWN, 4);
+        // GpuMuxState wire values (domain: Integrated/Discrete/Unknown).
+        assert_eq!(gpu_mux::INTEGRATED, 0);
+        assert_eq!(gpu_mux::DISCRETE, 1);
+        assert_eq!(gpu_mux::UNKNOWN, 2);
+        // GpuAccessPolicy wire values (domain: Unblocked/Blocked/Pending/Unknown).
+        assert_eq!(gpu_access::UNBLOCKED, 0);
+        assert_eq!(gpu_access::BLOCKED, 1);
+        assert_eq!(gpu_access::PENDING, 2);
+        assert_eq!(gpu_access::UNKNOWN, 3);
     }
 }

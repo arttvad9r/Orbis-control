@@ -8,23 +8,53 @@
 use std::sync::Arc;
 
 use orbis_core::battery::ChargeLimit;
+use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_providers::error::ProviderError;
-use orbis_providers::traits::BatteryProvider;
-use orbis_session_protocol::ChargeLimitInfo;
+use orbis_providers::traits::{
+    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
+};
+use orbis_session_protocol::{ChargeLimitInfo, gpu_access, gpu_mux, gpu_power};
 
 /// Read-only service object session интерфейса.
 ///
-/// Владеет только `Arc<dyn BatteryProvider>`; provider передаётся извне.
+/// Владеет независимыми capability providers: battery + опциональные GPU
+/// capabilities (power / MUX / access). Провайдеры передаются извне.
 /// Конструктор не выполняет I/O, не читает состояние, не открывает D-Bus и не
 /// создаёт runtime; кэш/last error/mutable state отсутствуют.
 pub struct SessionService {
     battery: Arc<dyn BatteryProvider>,
+    gpu_power: Option<Arc<dyn GpuPowerProvider>>,
+    gpu_mux: Option<Arc<dyn GpuMuxProvider>>,
+    gpu_access: Option<Arc<dyn GpuAccessProvider>>,
 }
 
 impl SessionService {
-    /// Создать service object над provider.
+    /// Создать service object над battery provider.
     pub fn new(battery: Arc<dyn BatteryProvider>) -> Self {
-        Self { battery }
+        Self {
+            battery,
+            gpu_power: None,
+            gpu_mux: None,
+            gpu_access: None,
+        }
+    }
+
+    /// Добавить read-only GPU power capability provider.
+    pub fn with_gpu_power(mut self, provider: Arc<dyn GpuPowerProvider>) -> Self {
+        self.gpu_power = Some(provider);
+        self
+    }
+
+    /// Добавить read-only GPU MUX capability provider.
+    pub fn with_gpu_mux(mut self, provider: Arc<dyn GpuMuxProvider>) -> Self {
+        self.gpu_mux = Some(provider);
+        self
+    }
+
+    /// Добавить read-only GPU access capability provider.
+    pub fn with_gpu_access(mut self, provider: Arc<dyn GpuAccessProvider>) -> Self {
+        self.gpu_access = Some(provider);
+        self
     }
 
     /// Прочитать authoritative domain Charge Limit и вернуть wire DTO.
@@ -35,6 +65,60 @@ impl SessionService {
     pub async fn read_charge_limit(&self) -> Result<ChargeLimitInfo, ProviderError> {
         let value = self.battery.charge_limit().await?;
         Ok(charge_limit_to_wire(value))
+    }
+
+    /// Прочитать authoritative dGPU power state (domain).
+    pub async fn read_gpu_power(&self) -> Result<GpuPowerState, ProviderError> {
+        let provider = self.gpu_power.as_ref().ok_or_else(|| {
+            ProviderError::Unsupported("session: GPU power capability недоступна".into())
+        })?;
+        provider.power_state().await
+    }
+
+    /// Прочитать authoritative physical MUX state (domain).
+    pub async fn read_gpu_mux(&self) -> Result<GpuMuxState, ProviderError> {
+        let provider = self.gpu_mux.as_ref().ok_or_else(|| {
+            ProviderError::Unsupported("session: GPU MUX capability недоступна".into())
+        })?;
+        provider.mux_state().await
+    }
+
+    /// Прочитать authoritative dGPU access policy (domain).
+    pub async fn read_gpu_access(&self) -> Result<GpuAccessPolicy, ProviderError> {
+        let provider = self.gpu_access.as_ref().ok_or_else(|| {
+            ProviderError::Unsupported("session: GPU access capability недоступна".into())
+        })?;
+        provider.access_policy().await
+    }
+}
+
+/// Преобразовать domain `GpuPowerState` в canonical wire `u8`.
+fn gpu_power_to_wire(value: GpuPowerState) -> u8 {
+    match value {
+        GpuPowerState::Active => gpu_power::ACTIVE,
+        GpuPowerState::Suspended => gpu_power::SUSPENDED,
+        GpuPowerState::Off => gpu_power::OFF,
+        GpuPowerState::Stale => gpu_power::STALE,
+        GpuPowerState::Unknown => gpu_power::UNKNOWN,
+    }
+}
+
+/// Преобразовать domain `GpuMuxState` в canonical wire `u8`.
+fn gpu_mux_to_wire(value: GpuMuxState) -> u8 {
+    match value {
+        GpuMuxState::Integrated => gpu_mux::INTEGRATED,
+        GpuMuxState::Discrete => gpu_mux::DISCRETE,
+        GpuMuxState::Unknown => gpu_mux::UNKNOWN,
+    }
+}
+
+/// Преобразовать domain `GpuAccessPolicy` в canonical wire `u8`.
+fn gpu_access_to_wire(value: GpuAccessPolicy) -> u8 {
+    match value {
+        GpuAccessPolicy::Unblocked => gpu_access::UNBLOCKED,
+        GpuAccessPolicy::Blocked => gpu_access::BLOCKED,
+        GpuAccessPolicy::Pending => gpu_access::PENDING,
+        GpuAccessPolicy::Unknown => gpu_access::UNKNOWN,
     }
 }
 
@@ -115,6 +199,33 @@ impl SessionService {
             .await
             .map_err(provider_error_to_dbus)?;
         Ok(charge_limit_info_to_tuple(info))
+    }
+
+    /// Текущий dGPU runtime power state (read-only property, wire signature `y`).
+    #[zbus(property)]
+    async fn gpu_power(&self) -> zbus::fdo::Result<u8> {
+        let value = self
+            .read_gpu_power()
+            .await
+            .map_err(provider_error_to_dbus)?;
+        Ok(gpu_power_to_wire(value))
+    }
+
+    /// Текущее физическое MUX состояние (read-only property, wire signature `y`).
+    #[zbus(property)]
+    async fn gpu_mux(&self) -> zbus::fdo::Result<u8> {
+        let value = self.read_gpu_mux().await.map_err(provider_error_to_dbus)?;
+        Ok(gpu_mux_to_wire(value))
+    }
+
+    /// Текущая dGPU access policy (read-only property, wire signature `y`).
+    #[zbus(property)]
+    async fn gpu_access(&self) -> zbus::fdo::Result<u8> {
+        let value = self
+            .read_gpu_access()
+            .await
+            .map_err(provider_error_to_dbus)?;
+        Ok(gpu_access_to_wire(value))
     }
 }
 
@@ -354,5 +465,147 @@ mod tests {
         let (svc, _) = service(vec![ScriptedRead::Unsupported]);
         let err = svc.charge_limit().await.expect_err("unsupported");
         assert!(matches!(err, zbus::fdo::Error::NotSupported(_)));
+    }
+
+    // -----------------------------------------------------------------------
+    // GPU capability routing: каждый property обращается только к своему
+    // capability provider.
+    // -----------------------------------------------------------------------
+
+    struct ScriptedGpuPower {
+        value: GpuPowerState,
+    }
+    impl Provider for ScriptedGpuPower {
+        fn id(&self) -> &'static str {
+            "scripted-gpu-power"
+        }
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-gpu-power")
+        }
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted-gpu-power: {feature} недоступен")
+        }
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+    #[async_trait]
+    impl GpuPowerProvider for ScriptedGpuPower {
+        async fn power_state(&self) -> Result<GpuPowerState, ProviderError> {
+            Ok(self.value)
+        }
+    }
+
+    struct ScriptedGpuMux {
+        value: GpuMuxState,
+    }
+    impl Provider for ScriptedGpuMux {
+        fn id(&self) -> &'static str {
+            "scripted-gpu-mux"
+        }
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-gpu-mux")
+        }
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted-gpu-mux: {feature} недоступен")
+        }
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+    #[async_trait]
+    impl GpuMuxProvider for ScriptedGpuMux {
+        async fn mux_state(&self) -> Result<GpuMuxState, ProviderError> {
+            Ok(self.value)
+        }
+    }
+
+    struct ScriptedGpuAccess {
+        value: GpuAccessPolicy,
+    }
+    impl Provider for ScriptedGpuAccess {
+        fn id(&self) -> &'static str {
+            "scripted-gpu-access"
+        }
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-gpu-access")
+        }
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted-gpu-access: {feature} недоступен")
+        }
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+    #[async_trait]
+    impl GpuAccessProvider for ScriptedGpuAccess {
+        async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError> {
+            Ok(self.value)
+        }
+    }
+
+    fn gpu_service() -> SessionService {
+        SessionService::new(Arc::new(ScriptedBatteryProvider::new(vec![
+            ScriptedRead::Limit(limit(true, Some(80), 40, 100, 5)),
+        ])))
+        .with_gpu_power(Arc::new(ScriptedGpuPower {
+            value: GpuPowerState::Suspended,
+        }))
+        .with_gpu_mux(Arc::new(ScriptedGpuMux {
+            value: GpuMuxState::Integrated,
+        }))
+        .with_gpu_access(Arc::new(ScriptedGpuAccess {
+            value: GpuAccessPolicy::Unblocked,
+        }))
+    }
+
+    #[tokio::test]
+    async fn gpu_properties_route_to_own_capability() {
+        let svc = gpu_service();
+        // Каждый property возвращает значение строго своего capability.
+        assert_eq!(svc.gpu_power().await.expect("power"), gpu_power::SUSPENDED);
+        assert_eq!(svc.gpu_mux().await.expect("mux"), gpu_mux::INTEGRATED);
+        assert_eq!(
+            svc.gpu_access().await.expect("access"),
+            gpu_access::UNBLOCKED
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_gpu_capability_is_not_supported() {
+        // SessionService без GPU capabilities.
+        let svc = SessionService::new(Arc::new(ScriptedBatteryProvider::new(vec![
+            ScriptedRead::Limit(limit(true, Some(80), 40, 100, 5)),
+        ])));
+        assert!(matches!(
+            svc.gpu_power().await,
+            Err(zbus::fdo::Error::NotSupported(_))
+        ));
+        assert!(matches!(
+            svc.gpu_mux().await,
+            Err(zbus::fdo::Error::NotSupported(_))
+        ));
+        assert!(matches!(
+            svc.gpu_access().await,
+            Err(zbus::fdo::Error::NotSupported(_))
+        ));
     }
 }
