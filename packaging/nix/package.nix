@@ -68,6 +68,15 @@ rustPlatform.buildRustPackage {
           libglvnd
         ]
       }"
+
+    # D-Bus system policy: только root own + send_destination к hardwared
+    # (авторизация операции — polkit внутри hardwared).
+    install -Dm644 ${./dbus/io.github.orbiscontrol.Hardware.conf} \
+      $out/etc/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf
+
+    # Polkit action: единственная capability — SetPerformanceProfile.
+    install -Dm644 ${./polkit/io.github.orbiscontrol.hardware.policy} \
+      $out/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy
   '';
 
   # Запускаем полный набор проверок как часть пакета (как в CI).

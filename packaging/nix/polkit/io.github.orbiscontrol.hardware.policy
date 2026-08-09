@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- Единственная polkit action orbis-hardwared: смена Performance profile.
+     Только активный локальный пользователь; без generic root wording. -->
+<policyconfig>
+  <action id="io.github.orbiscontrol.hardware.set-performance-profile">
+    <description>Change the Orbis Control performance profile</description>
+    <description xml:lang="ru">Изменить профиль производительности Orbis Control</description>
+    <message>Authentication is required to change the performance profile</message>
+    <message xml:lang="ru">Требуется аутентификация для изменения профиля производительности</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

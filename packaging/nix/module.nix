@@ -64,5 +64,46 @@ in
         RestartSec = "2s";
       };
     };
+
+    # orbis-hardwared: system (root) service. НЕ универсальный hardware helper:
+    # единственная capability — Performance profile write (ADR 0006).
+    systemd.services.orbis-hardwared = {
+      description = "Orbis Control hardware helper (performance profile)";
+      after = [ "dbus.service" ];
+      requires = [ "dbus.service" ];
+      serviceConfig = {
+        Type = "dbus";
+        BusName = "io.github.orbiscontrol.Hardware";
+        ExecStart = "${cfg.package}/bin/orbis-hardwared";
+        Restart = "on-failure";
+        RestartSec = "2s";
+        # Sandbox (threat-model §3.3). В этой nixpkgs нет structured
+        # sandboxing options — задаём raw systemd settings.
+        # ProtectKernelTunables НЕ используется: /sys открывается на write
+        # точечно через ReadWritePaths внутри ReadOnlyPaths (man systemd.exec).
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        PrivateDevices = true;
+        ProtectControlGroups = true;
+        RestrictAddressFamilies = [ "AF_UNIX" ];
+        MemoryDenyWriteExecute = true;
+        AmbientCapabilities = [ ];
+        CapabilityBoundingSet = [ ];
+        # /sys read-only, на write открыт ТОЛЬКО platform_profile;
+        # platform_profile_choices остаётся read-only.
+        ReadOnlyPaths = [ "/sys" ];
+        ReadWritePaths = [ "/sys/firmware/acpi/platform_profile" ];
+      };
+    };
+
+    # D-Bus system policy (root own + send_destination; авторизация — polkit).
+    environment.etc."dbus-1/system.d/io.github.orbiscontrol.Hardware.conf".source =
+      "${cfg.package}/etc/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf";
+
+    # Polkit action (единственная: SetPerformanceProfile; active local user).
+    environment.etc."polkit-1/actions/io.github.orbiscontrol.hardware.policy".source =
+      "${cfg.package}/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy";
   };
 }
