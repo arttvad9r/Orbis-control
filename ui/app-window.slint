@@ -13,6 +13,12 @@ export enum ChargeLimitState {
     Unavailable,
 }
 
+export enum GpuHwState {
+    Loading,
+    Ready,
+    Unavailable,
+}
+
 export struct UiState {
     perf-selected: int,             // 0=Silent, 1=Balanced, 2=Turbo
     available-perf-mask: int,       // bit0=Silent, bit1=Balanced, bit2=Turbo
@@ -25,6 +31,12 @@ export struct UiState {
     charge-limit-enabled: bool,
     charge-limit-writable: bool,
     charge-limit-state: ChargeLimitState,
+    gpu-power-state: GpuHwState,
+    gpu-mux-state: GpuHwState,
+    gpu-access-state: GpuHwState,
+    gpu-power-value: int,
+    gpu-mux-value: int,
+    gpu-access-value: int,
     cpu-temp: int,
     gpu-temp: int,
     cpu-fan-rpm: int,
@@ -56,6 +68,27 @@ component TelemetryCell {
     }
 }
 
+component HwStatusCell {
+    in property <string> label;
+    in property <string> text;
+
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: center;
+        Text {
+            text: root.label + ":";
+            font-size: 12px;
+            color: Palette.text-secondary;
+        }
+        Text {
+            text: root.text;
+            font-size: 12px;
+            font-weight: 600;
+            color: Palette.text-primary;
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     width: 425px;
     height: 381px;
@@ -74,6 +107,12 @@ export component AppWindow inherits Window {
         charge-limit-enabled: false,
         charge-limit-writable: false,
         charge-limit-state: ChargeLimitState.Loading,
+        gpu-power-state: GpuHwState.Loading,
+        gpu-mux-state: GpuHwState.Loading,
+        gpu-access-state: GpuHwState.Loading,
+        gpu-power-value: 0,
+        gpu-mux-value: 0,
+        gpu-access-value: 0,
         cpu-temp: 0,
         gpu-temp: 0,
         cpu-fan-rpm: 0,
@@ -93,6 +132,36 @@ export component AppWindow inherits Window {
     function bit-set(mask: int, bit: int) -> bool {
         let shifted = Math.floor(mask / bit);
         return shifted - 2 * Math.floor(shifted / 2) == 1;
+    }
+
+    // Текстовое представление read-only GPU hardware capability.
+    // Unavailable → "Unavailable"; Loading → "…"; Ready → semantic value.
+
+    function gpu-power-text(state: GpuHwState, value: int) -> string {
+        if (state == GpuHwState.Unavailable) { return "Unavailable"; }
+        if (state == GpuHwState.Loading) { return "…"; }
+        if (value == 0) { return "Active"; }
+        if (value == 1) { return "Suspended"; }
+        if (value == 2) { return "Off"; }
+        if (value == 3) { return "Stale"; }
+        return "Unknown";
+    }
+
+    function gpu-mux-text(state: GpuHwState, value: int) -> string {
+        if (state == GpuHwState.Unavailable) { return "Unavailable"; }
+        if (state == GpuHwState.Loading) { return "…"; }
+        if (value == 0) { return "Integrated"; }
+        if (value == 1) { return "Discrete"; }
+        return "Unknown";
+    }
+
+    function gpu-access-text(state: GpuHwState, value: int) -> string {
+        if (state == GpuHwState.Unavailable) { return "Unavailable"; }
+        if (state == GpuHwState.Loading) { return "…"; }
+        if (value == 0) { return "Unblocked"; }
+        if (value == 1) { return "Blocked"; }
+        if (value == 2) { return "Pending"; }
+        return "Unknown";
     }
 
     VerticalLayout {
@@ -211,6 +280,22 @@ export component AppWindow inherits Window {
                         selected: root.ui-state.gpu-selected == 3;
                         disabled: !root.bit-set(root.ui-state.available-gpu-mask, 8);
                         clicked => { root.gpu-clicked(3); }
+                    }
+                }
+                // Read-only GPU hardware status (не интерактивно; независимо от product buttons).
+                HorizontalLayout {
+                    spacing: 8px;
+                    HwStatusCell {
+                        label: "Power";
+                        text: root.gpu-power-text(root.ui-state.gpu-power-state, root.ui-state.gpu-power-value);
+                    }
+                    HwStatusCell {
+                        label: "MUX";
+                        text: root.gpu-mux-text(root.ui-state.gpu-mux-state, root.ui-state.gpu-mux-value);
+                    }
+                    HwStatusCell {
+                        label: "Access";
+                        text: root.gpu-access-text(root.ui-state.gpu-access-state, root.ui-state.gpu-access-value);
                     }
                 }
             }

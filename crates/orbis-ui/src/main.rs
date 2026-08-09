@@ -25,11 +25,14 @@ use orbis_application::{
 };
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::battery::ChargeLimit;
-use orbis_core::gpu::GpuMode;
+use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 use orbis_providers::mock::MockProvider;
-use orbis_session_client::{SessionChargeLimitProvider, ZbusSessionChargeLimitSource};
+use orbis_session_client::{
+    SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
+    SessionGpuPowerProvider, ZbusSessionChargeLimitSource, ZbusSessionGpuSource,
+};
 use orbis_test_support::devices::build_state_arc;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
@@ -121,6 +124,24 @@ fn to_slint(state: &controller::UiState) -> UiState {
             controller::ChargeLimitState::Ready => ChargeLimitState::Ready,
             controller::ChargeLimitState::Unavailable => ChargeLimitState::Unavailable,
         },
+        gpu_power_state: match state.gpu_power {
+            controller::GpuHwState::Loading => GpuHwState::Loading,
+            controller::GpuHwState::Ready => GpuHwState::Ready,
+            controller::GpuHwState::Unavailable => GpuHwState::Unavailable,
+        },
+        gpu_mux_state: match state.gpu_mux {
+            controller::GpuHwState::Loading => GpuHwState::Loading,
+            controller::GpuHwState::Ready => GpuHwState::Ready,
+            controller::GpuHwState::Unavailable => GpuHwState::Unavailable,
+        },
+        gpu_access_state: match state.gpu_access {
+            controller::GpuHwState::Loading => GpuHwState::Loading,
+            controller::GpuHwState::Ready => GpuHwState::Ready,
+            controller::GpuHwState::Unavailable => GpuHwState::Unavailable,
+        },
+        gpu_power_value: state.gpu_power_value,
+        gpu_mux_value: state.gpu_mux_value,
+        gpu_access_value: state.gpu_access_value,
         cpu_temp: state.cpu_temp,
         gpu_temp: state.gpu_temp,
         cpu_fan_rpm: state.cpu_fan_rpm,
@@ -149,6 +170,24 @@ fn from_slint(state: &UiState) -> controller::UiState {
             ChargeLimitState::Ready => controller::ChargeLimitState::Ready,
             ChargeLimitState::Unavailable => controller::ChargeLimitState::Unavailable,
         },
+        gpu_power: match state.gpu_power_state {
+            GpuHwState::Loading => controller::GpuHwState::Loading,
+            GpuHwState::Ready => controller::GpuHwState::Ready,
+            GpuHwState::Unavailable => controller::GpuHwState::Unavailable,
+        },
+        gpu_mux: match state.gpu_mux_state {
+            GpuHwState::Loading => controller::GpuHwState::Loading,
+            GpuHwState::Ready => controller::GpuHwState::Ready,
+            GpuHwState::Unavailable => controller::GpuHwState::Unavailable,
+        },
+        gpu_access: match state.gpu_access_state {
+            GpuHwState::Loading => controller::GpuHwState::Loading,
+            GpuHwState::Ready => controller::GpuHwState::Ready,
+            GpuHwState::Unavailable => controller::GpuHwState::Unavailable,
+        },
+        gpu_power_value: state.gpu_power_value,
+        gpu_mux_value: state.gpu_mux_value,
+        gpu_access_value: state.gpu_access_value,
         cpu_temp: state.cpu_temp,
         gpu_temp: state.gpu_temp,
         cpu_fan_rpm: state.cpu_fan_rpm,
@@ -403,6 +442,86 @@ fn apply_charge_limit_refresh(
     }
 }
 
+/// Применить результат read-only GPU capability refresh.
+///
+/// Ok(value) → Ready + semantic value (domain `Unknown` — валидный Ready).
+/// Err → Unavailable (backend/read недоступен; без mock fallback).
+fn apply_gpu_power_refresh(
+    state: &mut controller::UiState,
+    result: Result<GpuPowerState, ProviderError>,
+) {
+    match result {
+        Ok(v) => {
+            state.gpu_power = controller::GpuHwState::Ready;
+            state.gpu_power_value = gpu_power_value_to_int(v);
+        }
+        Err(e) => {
+            state.gpu_power = controller::GpuHwState::Unavailable;
+            tracing::warn!("gpu-power: refresh недоступен: {e:?}");
+        }
+    }
+}
+
+fn apply_gpu_mux_refresh(
+    state: &mut controller::UiState,
+    result: Result<GpuMuxState, ProviderError>,
+) {
+    match result {
+        Ok(v) => {
+            state.gpu_mux = controller::GpuHwState::Ready;
+            state.gpu_mux_value = gpu_mux_value_to_int(v);
+        }
+        Err(e) => {
+            state.gpu_mux = controller::GpuHwState::Unavailable;
+            tracing::warn!("gpu-mux: refresh недоступен: {e:?}");
+        }
+    }
+}
+
+fn apply_gpu_access_refresh(
+    state: &mut controller::UiState,
+    result: Result<GpuAccessPolicy, ProviderError>,
+) {
+    match result {
+        Ok(v) => {
+            state.gpu_access = controller::GpuHwState::Ready;
+            state.gpu_access_value = gpu_access_value_to_int(v);
+        }
+        Err(e) => {
+            state.gpu_access = controller::GpuHwState::Unavailable;
+            tracing::warn!("gpu-access: refresh недоступен: {e:?}");
+        }
+    }
+}
+
+/// Wire-совместимые числовые представления (те же, что в session protocol).
+fn gpu_power_value_to_int(v: GpuPowerState) -> i32 {
+    match v {
+        GpuPowerState::Active => 0,
+        GpuPowerState::Suspended => 1,
+        GpuPowerState::Off => 2,
+        GpuPowerState::Stale => 3,
+        GpuPowerState::Unknown => 4,
+    }
+}
+
+fn gpu_mux_value_to_int(v: GpuMuxState) -> i32 {
+    match v {
+        GpuMuxState::Integrated => 0,
+        GpuMuxState::Discrete => 1,
+        GpuMuxState::Unknown => 2,
+    }
+}
+
+fn gpu_access_value_to_int(v: GpuAccessPolicy) -> i32 {
+    match v {
+        GpuAccessPolicy::Unblocked => 0,
+        GpuAccessPolicy::Blocked => 1,
+        GpuAccessPolicy::Pending => 2,
+        GpuAccessPolicy::Unknown => 3,
+    }
+}
+
 /// Применить событие worker-а к UI-состоянию.
 ///
 /// Performance: Ok -> authoritative state; Err (Command/ReadBack) -> UiState не
@@ -440,6 +559,15 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         }
         WorkerEvent::ChargeLimitRefresh(result) => {
             apply_charge_limit_refresh(state, result);
+        }
+        WorkerEvent::GpuPowerRefresh(result) => {
+            apply_gpu_power_refresh(state, result);
+        }
+        WorkerEvent::GpuMuxRefresh(result) => {
+            apply_gpu_mux_refresh(state, result);
+        }
+        WorkerEvent::GpuAccessRefresh(result) => {
+            apply_gpu_access_refresh(state, result);
         }
     }
 }
@@ -669,9 +797,21 @@ fn main() -> anyhow::Result<()> {
     let session_connection = runtime
         .block_on(zbus::Connection::session())
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к session bus: {e}"))?;
-    let battery_source = ZbusSessionChargeLimitSource::new(session_connection);
+    let battery_source = ZbusSessionChargeLimitSource::new(session_connection.clone());
     let battery_provider = SessionChargeLimitProvider::new(battery_source);
     let battery_service = AppService::new(Arc::new(battery_provider));
+
+    // Read-only GPU hardware capabilities через тот же session connection
+    // (по ADR 0005: независимые capability providers, без mega-GpuProvider).
+    let gpu_power_service = AppService::new(Arc::new(SessionGpuPowerProvider::new(
+        ZbusSessionGpuSource::new(session_connection.clone()),
+    )));
+    let gpu_mux_service = AppService::new(Arc::new(SessionGpuMuxProvider::new(
+        ZbusSessionGpuSource::new(session_connection.clone()),
+    )));
+    let gpu_access_service = AppService::new(Arc::new(SessionGpuAccessProvider::new(
+        ZbusSessionGpuSource::new(session_connection),
+    )));
 
     let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();
 
@@ -693,6 +833,9 @@ fn main() -> anyhow::Result<()> {
     runtime.spawn(run_worker(
         main_service,
         battery_service,
+        gpu_power_service,
+        gpu_mux_service,
+        gpu_access_service,
         worker_rx,
         event_sink,
     ));
@@ -702,6 +845,12 @@ fn main() -> anyhow::Result<()> {
     // orbis-sessiond на будущем session backend) не превращается в mock data.
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshChargeLimit) {
         tracing::warn!("worker закрыт, initial battery refresh не отправлен: {e:?}");
+    }
+
+    // Ровно один initial refresh read-only GPU hardware capabilities.
+    // Ошибка одного concept не блокирует остальные; без polling.
+    if let Err(e) = worker_tx.send(WorkerCommand::RefreshGpuCapabilities) {
+        tracing::warn!("worker закрыт, initial gpu capabilities refresh не отправлен: {e:?}");
     }
 
     app.show()?;
@@ -1157,5 +1306,49 @@ mod tests {
         assert_eq!(s.charge_limit, 80);
         // Уже существовавший Ready value не помечается как authoritative при
         // Unavailable — slider скрыт.
+    }
+
+    // -----------------------------------------------------------------------
+    // Read-only GPU hardware capability refresh semantics
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gpu_power_unknown_is_ready_not_unavailable() {
+        let mut s = base_state();
+        s.gpu_power = controller::GpuHwState::Loading;
+        apply_gpu_power_refresh(&mut s, Ok(GpuPowerState::Unknown));
+        // Domain Unknown — валидный Ready state, НЕ Unavailable.
+        assert_eq!(s.gpu_power, controller::GpuHwState::Ready);
+        assert_eq!(s.gpu_power_value, 4);
+    }
+
+    #[test]
+    fn gpu_power_error_is_unavailable() {
+        let mut s = base_state();
+        s.gpu_power = controller::GpuHwState::Loading;
+        apply_gpu_power_refresh(
+            &mut s,
+            Err(orbis_providers::error::ProviderError::Dbus("down".into())),
+        );
+        assert_eq!(s.gpu_power, controller::GpuHwState::Unavailable);
+    }
+
+    #[test]
+    fn gpu_mux_and_access_values_mapped() {
+        let mut s = base_state();
+        apply_gpu_mux_refresh(&mut s, Ok(GpuMuxState::Discrete));
+        assert_eq!(s.gpu_mux, controller::GpuHwState::Ready);
+        assert_eq!(s.gpu_mux_value, 1);
+        apply_gpu_access_refresh(&mut s, Ok(GpuAccessPolicy::Blocked));
+        assert_eq!(s.gpu_access, controller::GpuHwState::Ready);
+        assert_eq!(s.gpu_access_value, 1);
+    }
+
+    #[test]
+    fn gpu_hw_states_default_loading() {
+        let s = base_state();
+        assert_eq!(s.gpu_power, controller::GpuHwState::Loading);
+        assert_eq!(s.gpu_mux, controller::GpuHwState::Loading);
+        assert_eq!(s.gpu_access, controller::GpuHwState::Loading);
     }
 }

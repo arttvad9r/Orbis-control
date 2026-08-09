@@ -26,6 +26,22 @@ pub enum ChargeLimitState {
     Unavailable,
 }
 
+/// Состояние готовности read-only GPU hardware capability.
+///
+/// Domain `Unknown` является валидным `Ready` значением (backend сообщил
+/// semantic unknown), а не `Unavailable`. `Unavailable` — только backend/read
+/// error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GpuHwState {
+    /// Первый authoritative read ещё не выполнен.
+    #[default]
+    Loading,
+    /// Authoritative read успешен (значение может быть `Unknown`).
+    Ready,
+    /// Backend/read недоступен.
+    Unavailable,
+}
+
 /// Отображаемое состояние главного окна.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiState {
@@ -55,6 +71,18 @@ pub struct UiState {
     pub charge_limit_writable: bool,
     /// Состояние готовности/доступности Battery Charge Limit.
     pub charge_limit_state: ChargeLimitState,
+    /// Read-only GPU hardware capability: dGPU power state.
+    pub gpu_power: GpuHwState,
+    /// Read-only GPU hardware capability: physical MUX state.
+    pub gpu_mux: GpuHwState,
+    /// Read-only GPU hardware capability: dGPU access policy.
+    pub gpu_access: GpuHwState,
+    /// Значение dGPU power state (0=Active,1=Suspended,2=Off,4=Unknown).
+    pub gpu_power_value: i32,
+    /// Значение MUX state (0=Integrated,1=Discrete,2=Unknown).
+    pub gpu_mux_value: i32,
+    /// Значение access policy (0=Unblocked,1=Blocked,2=Pending,3=Unknown).
+    pub gpu_access_value: i32,
     /// Телеметрия.
     pub cpu_temp: i32,
     pub gpu_temp: i32,
@@ -168,6 +196,14 @@ impl UiState {
             charge_limit_writable: true,
             // fixture-профиль: первое значение готово сразу (offscreen/tests).
             charge_limit_state: ChargeLimitState::Ready,
+            // GPU hardware capabilities: Loading до первого authoritative read;
+            // mock profile не предоставляет real hardware states.
+            gpu_power: GpuHwState::Loading,
+            gpu_mux: GpuHwState::Loading,
+            gpu_access: GpuHwState::Loading,
+            gpu_power_value: 0,
+            gpu_mux_value: 0,
+            gpu_access_value: 0,
             cpu_temp,
             gpu_temp,
             cpu_fan_rpm,
