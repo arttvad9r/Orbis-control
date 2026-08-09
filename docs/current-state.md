@@ -177,15 +177,52 @@ choices на этой машине во время validation и не выдаё
 
 ## GPU Mode
 
-**PARTIAL / MOCK-ONLY**
+### GPU runtime power production provider
+
+**IMPLEMENTED / LIVE-VALIDATED**
+
+- `SupergfxdGpuPowerProvider` + `ZbusSupergfxdGpuPowerSource`;
+- backend: ready `zbus::Connection` → `org.supergfxctl.Daemon` →
+  `/org/supergfxctl/Gfx` → read-only `Power()`;
+- PROVEN enum mapping: 0→Active, 1→Suspended, 2→Off, 3=AsusDisabled→Unknown,
+  4=Unknown→Unknown, future unknown raw→Unknown (без clamp/fallback);
+- каждый `power_state()` — authoritative fresh read; собственного cache нет;
+- live ignored test: raw `Power()=1` → provider `Suspended`; supporting
+  read-only PCI `runtime_status=suspended` (не provider contract, только
+  consistency evidence);
+- никаких GPU writes/state changes.
+
+### GPU application/UI vertical slice
+
+**PARTIAL / MOCK-ONLY в production GUI**
 
 - Domain разделяет requested mode, physical MUX, access policy и power state.
 - `GpuProvider`, application state/read-back, worker и UI states
   (pending/disabled/error) реализованы.
 - Mock tests сохраняют applied state при pending Ultimate/Eco.
-- Production asusd/supergfxd/Cardwire/sysfs provider отсутствует.
-- Raw backend enum mapping, safe switch checks и real pending/reboot workflow не
-  реализованы и без evidence считаются UNKNOWN.
+- Production GUI GPU всё ещё использует `MockProvider`.
+- Session1/session-client GPU path не реализован.
+- `AppService::gpu_state()` fail-fast (requested→mux→access→power) блокирует
+  частично-real concepts: при Unsupported requested mode power через aggregate
+  практически недоступен. Это архитектурный gap, не дефект power provider.
+- Production GPU mutations отсутствуют.
+
+### MUX / access
+
+**NOT IMPLEMENTED / semantic mapping incomplete**
+
+- asusd/kernel `gpu_mux_mode` raw 0/1 observed;
+- `dgpu_disable` raw 0/1 observed;
+- live/historical evidence mutually consistent с предполагаемой semantics;
+- authoritative numeric enum mapping пока не proven;
+- не маппить в Integrated/Discrete/Blocked без дальнейшего evidence.
+
+### Product GpuMode
+
+Eco / Standard / Ultimate / Optimized backend mapping — **NOT PROVEN**.
+Не превращать supergfxd Hybrid/Integrated/AsusMuxDgpu в Orbis product
+GpuMode автоматически. Optimized остаётся product/session policy, не raw
+backend state.
 
 ## Fans, power limits, lighting and display
 

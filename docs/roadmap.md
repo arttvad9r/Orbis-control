@@ -136,15 +136,20 @@ selection на реальном hardware.
    Performance provider — **COMPLETED / LIVE-VALIDATED**
    (`KernelPerformanceProvider`, symbolic kernel `platform_profile` ABI; live
    ignored integration test PASS).
-2. GPU concepts read-only providers — **ACTIVE: сначала evidence/API audit**
-   (asusd `AsusArmoury` gpu_mux_mode/dgpu_disable/nv_*, supergfxd, fixtures
-   FA707NV, mapping tests; без implementation до доказательства semantic
-   mappings).
+2. GPU concepts read-only providers — **ACTIVE: evidence/API audit выполнен**;
+   GPU runtime power sub-concept **COMPLETED / LIVE-VALIDATED**
+   (`SupergfxdGpuPowerProvider`, PROVEN supergfxd `Power()` enum; live ignored
+   test PASS). MUX/access НЕ completed.
 3. fan/other proven ASUS reads — pending.
 4. telemetry только по доказанным источникам — pending.
 
-Каждый пункт начинается с evidence/API audit и mapping tests; текущая задача —
-пункт 2.
+Следующий active architectural step в GPU-направлении:
+
+**GPU partial-state / domain / API decision** — решить fail-fast limitation
+`AppService::gpu_state()` (requested→mux→access→power), позволить GPU concepts
+быть independently available без fake `GpuMode` ради real power, подготовить
+independent MUX/access/pending providers. После architecture decision:
+evidence completion MUX/access; minimal provider только после proven mapping.
 
 **Definition of done:**
 

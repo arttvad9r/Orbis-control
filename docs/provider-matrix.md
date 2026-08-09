@@ -157,12 +157,28 @@ production UPower provider возвращает `bounds=None`. Историче�
 
 | Приоритет | Backend | Интерфейс | Действия |
 |---|---|---|---|
-| 1 | sysfs/DRM | `/sys/bus/pci/devices/*/power/runtime_status`, hwmon | read-only |
-| 2 | supergfxd | `Power()` | read |
+| 1 | supergfxd | `Power()` (PROVEN enum) | read — **current implemented** |
+| 2 | sysfs/DRM | `/sys/bus/pci/devices/*/power/runtime_status`, hwmon | read-only (supporting evidence) |
 | 3 | NVML/nvidia-smi (read-only, timeout) | температуры/мощность | read |
 | 4 | Cardwire | `Gpu.power_state`, signal `power_state_changed` | read |
 
+Current implemented production read concept: supergfxd `Power()` →
+`SupergfxdGpuPowerProvider` → `GpuPowerState` → **LIVE-VALIDATED**. Mapping:
+0→Active, 1→Suspended, 2→Off, 3=AsusDisabled→Unknown (conservative, не Off),
+4=Unknown→Unknown, future unknown→Unknown. PCI runtime_status — только
+independent consistency evidence, не provider contract.
+
 Не будить dGPU ради телеметрии; устаревшее значение помечать как `Sleeping`/stale.
+
+### 5.4 Незакрытые GPU concepts (отдельно, не объединять)
+
+- physical MUX: evidence/mapping pending (raw 0/1 observed, authoritative enum
+  не proven);
+- dGPU access/disable (`dgpu_disable`): evidence/mapping pending;
+- product `GpuMode` (Eco/Standard/Ultimate/Optimized): no proven backend
+  mapping;
+- supergfxd pending/user-action enums proven как evidence, но provider ещё не
+  реализован.
 
 ---
 
