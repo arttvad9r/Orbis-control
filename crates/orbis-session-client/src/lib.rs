@@ -5,7 +5,7 @@
 //!
 //! - source получает готовую `zbus::Connection` извне; crate не открывает
 //!   session/system bus, не создаёт runtime и не выполняет hardware access;
-//! - mutation-методы `BatteryProvider` возвращают `ProviderError::Unsupported`;
+//! - mutation-методы BatteryProvider возвращают `ProviderError::Unsupported`;
 //! - каждый вызов `charge_limit()` выполняет новый authoritative property Get
 //!   (кэш отсутствует).
 
@@ -527,6 +527,15 @@ pub fn performance_current_from_wire(raw: u8) -> Result<PerformanceProfile, Prov
     }
 }
 
+/// Преобразовать domain Performance profile в wire value.
+fn performance_profile_to_wire(profile: PerformanceProfile) -> u8 {
+    match profile {
+        PerformanceProfile::Silent => performance::SILENT,
+        PerformanceProfile::Balanced => performance::BALANCED,
+        PerformanceProfile::Turbo => performance::TURBO,
+    }
+}
+
 /// Преобразовать wire mask в список доступных `PerformanceProfile`.
 ///
 /// Strict decode: установленный бит вне (bit0..=bit2) → `Internal`. Порядок
@@ -559,6 +568,9 @@ pub trait SessionPerformanceSource: Send + Sync {
     /// Прочитать authoritative `PerformanceInfo` (wire DTO, без domain
     /// conversion); ошибка не превращается в default.
     async fn read_performance(&self) -> Result<PerformanceInfo, ProviderError>;
+
+    /// Установить Performance profile и вернуть подтверждённый wire value.
+    async fn set_performance(&self, profile: u8) -> Result<u8, ProviderError>;
 }
 
 /// Реальный zbus источник Performance через generated `Session1Proxy`.
@@ -589,13 +601,25 @@ impl SessionPerformanceSource for ZbusSessionPerformanceSource {
             .map_err(zbus_error_to_provider)?;
         proxy.performance().await.map_err(zbus_error_to_provider)
     }
+
+    async fn set_performance(&self, profile: u8) -> Result<u8, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .set_performance(profile)
+            .await
+            .map_err(zbus_error_to_provider)
+    }
 }
 
-/// Read-only Performance Mode provider над session protocol source.
+/// Performance Mode provider над session protocol source.
 ///
 /// `S` — source (реальный zbus или scripted в тестах); source передаётся в
 /// конструкторе, который не выполняет I/O. Mutation-методы возвращают
-/// `Unsupported`; `set_profile`/validate не читают source.
+/// `set_profile` делегирует подтверждённую mutation в Session1.
 pub struct SessionPerformanceProvider<S> {
     source: S,
 }
@@ -656,13 +680,15 @@ where
         performance_current_from_wire(info.current)
     }
 
-    async fn set_profile(
-        &self,
-        _profile: PerformanceProfile,
-    ) -> Result<ApplyResult, ProviderError> {
-        Err(ProviderError::Unsupported(
-            "session protocol read-only: set_profile недоступна".into(),
-        ))
+    async fn set_profile(&self, profile: PerformanceProfile) -> Result<ApplyResult, ProviderError> {
+        let requested = performance_profile_to_wire(profile);
+        let confirmed = self.source.set_performance(requested).await?;
+        if confirmed != requested {
+            return Err(ProviderError::Internal(format!(
+                "session protocol: set_performance подтвердил другой profile: requested={requested}, confirmed={confirmed}"
+            )));
+        }
+        Ok(ApplyResult::Applied)
     }
 
     async fn profile_on_ac(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
@@ -674,7 +700,7 @@ where
     }
 
     fn validate_set_profile(&self, _profile: PerformanceProfile) -> ValidationResult {
-        ValidationResult::invalid("session protocol read-only: запись profile не поддерживается")
+        ValidationResult::ok()
     }
 }
 
@@ -1093,6 +1119,8 @@ mod tests {
     struct ScriptedPerfSource {
         results: Mutex<VecDeque<ScriptedPerfRead>>,
         reads: AtomicUsize,
+        mutation_result: Mutex<Result<u8, &'static str>>,
+        mutations: AtomicUsize,
     }
 
     impl ScriptedPerfSource {
@@ -1100,11 +1128,17 @@ mod tests {
             Self {
                 results: Mutex::new(reads.into()),
                 reads: AtomicUsize::new(0),
+                mutation_result: Mutex::new(Ok(performance::SILENT)),
+                mutations: AtomicUsize::new(0),
             }
         }
 
         fn reads(&self) -> usize {
             self.reads.load(Ordering::SeqCst)
+        }
+
+        fn mutations(&self) -> usize {
+            self.mutations.load(Ordering::SeqCst)
         }
     }
 
@@ -1121,6 +1155,15 @@ mod tests {
             {
                 ScriptedPerfRead::Info(info) => Ok(info),
                 ScriptedPerfRead::Dbus => Err(ProviderError::Dbus("scripted dbus error".into())),
+            }
+        }
+
+        async fn set_performance(&self, profile: u8) -> Result<u8, ProviderError> {
+            self.mutations.fetch_add(1, Ordering::SeqCst);
+            match *self.mutation_result.lock().unwrap() {
+                Ok(confirmed) if confirmed == performance::SILENT => Ok(profile),
+                Ok(confirmed) => Ok(confirmed),
+                Err(_) => Err(ProviderError::Dbus("scripted dbus error".into())),
             }
         }
     }
@@ -1166,21 +1209,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn performance_mutation_is_unsupported_without_source_access() {
+    async fn performance_mutation_is_applied_and_does_not_read_source() {
         let source = ScriptedPerfSource::new(vec![ScriptedPerfRead::Info(perf_info(1, 0b111))]);
         let provider = SessionPerformanceProvider::new(source);
-        assert!(matches!(
+        assert_eq!(
             provider
                 .set_profile(PerformanceProfile::Turbo)
                 .await
-                .expect_err("set unsupported"),
-            ProviderError::Unsupported(_)
-        ));
-        assert!(!matches!(
+                .expect("set"),
+            ApplyResult::Applied
+        );
+        assert!(matches!(
             provider.validate_set_profile(PerformanceProfile::Turbo),
             ValidationResult::Valid
         ));
         assert_eq!(provider.source.reads(), 0);
+        assert_eq!(provider.source.mutations(), 1);
     }
 
     #[tokio::test]

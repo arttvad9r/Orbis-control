@@ -380,6 +380,20 @@ impl HardwareService {
     }
 }
 
+/// Client proxy контракта `io.github.orbiscontrol.Hardware1` (для sessiond).
+///
+/// Тот же wire contract, что server: `SetPerformanceProfile(y) -> y`; никаких
+/// strings/paths. Константы shared (`DBUS_NAME`/`DBUS_OBJECT_PATH`).
+#[zbus::proxy(
+    interface = "io.github.orbiscontrol.Hardware1",
+    default_service = "io.github.orbiscontrol.Hardware",
+    default_path = "/io/github/orbiscontrol/Hardware"
+)]
+pub trait Hardware1 {
+    /// Установить Performance profile; возвращает подтверждённый wire profile.
+    fn set_performance_profile(&self, profile: u8) -> zbus::Result<u8>;
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;

@@ -164,11 +164,11 @@ pub struct PerformanceInfo {
     pub available_mask: u8,
 }
 
-/// Getter-only zbus proxy контракт интерфейса `Session1`.
+/// zbus proxy контракт интерфейса `Session1`.
 ///
-/// Контракт read-only: только чтение свойств `ChargeLimit`, `GpuPower`,
-/// `GpuMux`, `GpuAccess` и `Performance`; setter, mutation-методы и signals
-/// в этом микрошаге отсутствуют.
+/// Read-only свойства (`ChargeLimit`, `GpuPower`, `GpuMux`, `GpuAccess`,
+/// `Performance`) + единственный mutation-метод `SetPerformance` (read-only
+/// getter semantics не меняются).
 #[zbus::proxy(
     interface = "io.github.orbiscontrol.Session1",
     default_service = "io.github.orbiscontrol.Session",
@@ -194,6 +194,13 @@ pub trait Session1 {
     /// Текущий Performance Mode (current + available, read-only property).
     #[zbus(property)]
     fn performance(&self) -> zbus::Result<PerformanceInfo>;
+
+    /// Установить Performance profile (mutation method).
+    ///
+    /// Input `y`: 0=Silent, 1=Balanced, 2=Turbo; unknown → error.
+    /// Return `y`: profile, подтверждённый hardware после его write/read-back.
+    /// Никаких strings/backend symbols.
+    fn set_performance(&self, profile: u8) -> zbus::Result<u8>;
 }
 
 /// Wire-значения `GpuPowerState` (domain enum в protocol crate).

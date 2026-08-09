@@ -7,6 +7,7 @@ use orbis_providers::traits::{
 };
 use orbis_session_protocol::{BUS_NAME, OBJECT_PATH};
 
+use crate::hardwared::HardwarePerformanceClient;
 use crate::service::SessionService;
 
 /// Дополнительные read-only GPU capabilities для session server.
@@ -37,6 +38,7 @@ pub async fn build_session_server(
     battery: Arc<dyn BatteryProvider>,
     gpu: GpuCapabilities,
     performance: Option<Arc<dyn PerformanceProvider>>,
+    hardware: Option<Arc<dyn HardwarePerformanceClient>>,
 ) -> zbus::Result<zbus::Connection> {
     let mut service = SessionService::new(battery);
     if let Some(p) = gpu.power {
@@ -50,6 +52,9 @@ pub async fn build_session_server(
     }
     if let Some(p) = performance {
         service = service.with_performance(p);
+    }
+    if let Some(h) = hardware {
+        service = service.with_hardware(h);
     }
     let builder = builder.name(BUS_NAME)?;
     let builder = builder.serve_at(OBJECT_PATH, service)?;
