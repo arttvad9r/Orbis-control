@@ -60,12 +60,22 @@
 
 | Приоритет | Backend | Интерфейс | Действия |
 |---|---|---|---|
-| 1 | asusd | `xyz.ljones.Platform.PlatformProfile` (+ Choices) | get/set |
-| 2 | kernel ABI | `/sys/firmware/acpi/platform_profile`, `_choices` | get/set |
+| 1 | kernel ABI | `/sys/firmware/acpi/platform_profile`, `_choices` | get/set |
+| 2 | asusd | `xyz.ljones.Platform.PlatformProfile` (+ Choices) | get/set |
 | 3 | power-profiles-daemon | `org.freedesktop.UPower.PowerProfiles` | get/set (только при отсутствии конфликта) |
+
+Current implemented read backend: kernel `platform_profile` →
+`KernelPerformanceProvider` (LIVE-VALIDATED). Причина: symbolic ABI, canonical
+domain mapping, без raw numeric inference.
 
 Дополнительно (asusd): `PlatformProfileOnAc`, `PlatformProfileOnBattery`,
 `Profile{Quiet,Balanced,Performance}Epp`, `PlatformProfileLinkedEpp`.
+
+asusd `PlatformProfile` остаётся доступным ASUS evidence/API, но его numeric
+mapping не verified independently локально: observations
+`kernel quiet ↔ PlatformProfile=2` и раннее `kernel balanced ↔ PlatformProfile=0`
+согласуются с historical mapping (`2=Quiet`, `0=Balanced`), однако authoritative
+local asusd/rog-platform numeric enum definition не найден.
 
 Статус на эталоне (FA707NV, asusd 6.3.8): **Supported**, профили `[LowPower, Quiet, Balanced, Performance]`.
 

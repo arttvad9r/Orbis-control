@@ -134,14 +134,45 @@ released, процесс отсутствует.
 
 ## Performance
 
-**PARTIAL / MOCK-ONLY**
+### Performance production provider
+
+**IMPLEMENTED / LIVE-VALIDATED**
+
+- `KernelPerformanceProvider` + `SysfsKernelPlatformProfileSource`;
+- backend: symbolic Linux kernel ABI
+  `/sys/firmware/acpi/platform_profile` + `/sys/firmware/acpi/platform_profile_choices`;
+- authoritative fresh reads: каждый вызов делает новый source read (кэш
+  отсутствует); no-cache доказан deterministic scripted unit test;
+- `current` + `available` возвращаются через canonical domain mapping;
+- неизвестные значения отклоняются (`ProviderError::Unsupported`), без
+  fallback/clamp/подбора ближайшего;
+- mutation `set_profile` → `Unsupported`; write path отсутствует;
+- opt-in live ignored integration test PASS (обычный `cargo test --workspace`
+  live sysfs не читает).
+
+Live observation (FA707NV, 2026-08-09):
+
+- kernel current = `quiet` → `Silent`;
+- choices = `quiet balanced performance` → `{Silent, Balanced, Turbo}`;
+- provider current/available совпали с raw sysfs через domain mapping.
+
+Это dated/current observation, не универсальная ASUS specification. Domain
+также поддерживает `low-power → Silent`, но `low-power` НЕ наблюдался в live
+choices на этой машине во время validation и не выдаётся за live-supported
+профиль FA707NV.
+
+### Performance application/UI vertical slice
+
+**PARTIAL / MOCK-ONLY в production GUI**
 
 - Domain types, `PerformanceProvider`, application read/set/read-back path,
   sequential worker и UI cards реализованы.
 - Mock scenarios и tests покрывают state transitions/errors.
 - General capability fixture содержит dated evidence наличия platform profiles
   на FA707NV.
-- Production asusd/kernel/PPD provider отсутствует.
+- Production GUI всё ещё использует `MockProvider` для Performance.
+- Provider пока не exposed через `Session1`/session client.
+- Real Performance mutation отсутствует.
 - UI не читает real current profile и не применяет profile к hardware.
 
 ## GPU Mode

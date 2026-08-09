@@ -133,13 +133,18 @@ selection на реальном hardware.
 **Sequencing (внутри milestone, evidence-driven):**
 
 1. Performance read-only provider — READ-ONLY AUDIT + минимальный production
-   Performance provider;
-2. GPU concepts read-only providers;
-3. fan/other proven ASUS reads;
-4. telemetry только по доказанным источникам.
+   Performance provider — **COMPLETED / LIVE-VALIDATED**
+   (`KernelPerformanceProvider`, symbolic kernel `platform_profile` ABI; live
+   ignored integration test PASS).
+2. GPU concepts read-only providers — **ACTIVE: сначала evidence/API audit**
+   (asusd `AsusArmoury` gpu_mux_mode/dgpu_disable/nv_*, supergfxd, fixtures
+   FA707NV, mapping tests; без implementation до доказательства semantic
+   mappings).
+3. fan/other proven ASUS reads — pending.
+4. telemetry только по доказанным источникам — pending.
 
-Каждый пункт начинается с evidence/API audit и mapping tests; следующая задача
-после текущего docs-sync — пункт 1.
+Каждый пункт начинается с evidence/API audit и mapping tests; текущая задача —
+пункт 2.
 
 **Definition of done:**
 
