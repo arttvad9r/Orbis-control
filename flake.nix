@@ -56,13 +56,15 @@
         };
 
         # nix flake check
-        checks.default = pkgs.stdenv.mkDerivation {
-          name = "orbis-control-flake-check";
-          src = self;
-          buildInputs = with pkgs; [ cargo rustc rustfmt clippy pkg-config dbus ];
-          nativeBuildInputs = [ pkgs.makeWrapper ];
+        # Переиспользует offline Cargo dependency machinery package
+        # derivation (cargoLock vendoring) и реально выполняет fmt/clippy/test.
+        checks.default = orbis-control.overrideAttrs (old: {
+          pname = "orbis-control-flake-check";
+          nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
+            pkgs.rustfmt
+            pkgs.clippy
+          ];
           buildPhase = ''
-            export CARGO_HOME=$TMPDIR/cargo
             export XDG_CACHE_HOME=$TMPDIR/cache
             export XDG_DATA_HOME=$TMPDIR/data
             export XDG_CONFIG_HOME=$TMPDIR/config
@@ -74,6 +76,7 @@
             mkdir -p $out
             echo "flake check OK" > $out/check.log
           '';
-        };
+          doCheck = false;
+        });
       });
 }
