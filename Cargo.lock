@@ -3622,6 +3622,7 @@ dependencies = [
  "orbis-capabilities",
  "orbis-core",
  "orbis-providers",
+ "orbis-session-client",
  "orbis-sessiond",
  "orbis-test-support",
  "serde",

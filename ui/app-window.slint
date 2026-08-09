@@ -23,6 +23,7 @@ export struct UiState {
     gpu-section-error: bool,
     charge-limit: int,
     charge-limit-enabled: bool,
+    charge-limit-writable: bool,
     charge-limit-state: ChargeLimitState,
     cpu-temp: int,
     gpu-temp: int,
@@ -71,6 +72,7 @@ export component AppWindow inherits Window {
         gpu-section-error: false,
         charge-limit: 80,
         charge-limit-enabled: false,
+        charge-limit-writable: false,
         charge-limit-state: ChargeLimitState.Loading,
         cpu-temp: 0,
         gpu-temp: 0,
@@ -222,7 +224,10 @@ export component AppWindow inherits Window {
                     max: 100;
                     step: 5;
                     value: root.ui-state.charge-limit;
-                    disabled: !root.ui-state.charge-limit-enabled;
+                    // Mutation control доступен только если backend действительно
+                    // позволяет запись И функция включена. Read-only session
+                    // backend: writable=false -> slider disabled, значение видно.
+                    disabled: !root.ui-state.charge-limit-enabled || !root.ui-state.charge-limit-writable;
                     changed(v) => {
                         root.charge-changed(v);
                     }

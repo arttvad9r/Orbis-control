@@ -94,7 +94,8 @@ pub fn command_channel() -> (
 /// Последовательный worker для Performance Mode, GPU Mode и Battery Charge
 /// Limit.
 ///
-/// - `service` — владеемый `AppService<P>`;
+/// - `main_service` — владеемый `AppService<M>` для Performance/GPU;
+/// - `battery_service` — владеемый `AppService<B>` для Battery Charge Limit;
 /// - `receiver` — команды в порядке получения;
 /// - `emit` — event sink, вызывается ровно один раз на каждую выполненную
 ///   команду или coalesced Battery-группу.
@@ -102,18 +103,20 @@ pub fn command_channel() -> (
 /// Queue coalescing Battery-команд: несколько подряд стоящих в очереди
 /// `SetChargeLimit` объединяются — выполняется только последний percent
 /// соседней группы; одна группа создаёт один `WorkerEvent::ChargeLimit`.
-/// Performance/GPU-команда является границей группы (не объединяется).
+/// Performance/GPU/Refresh-команда является границей группы (не объединяется).
 ///
 /// Invariants: одновременно выполняется не более одной команды; следующая
 /// команда начинается только после завершения предыдущей (включая её
 /// authoritative read-back внутри `AppService`); события выдаются в порядке
 /// команд; stale results внутри одного worker невозможны.
-pub async fn run_worker<P, F>(
-    service: AppService<P>,
+pub async fn run_worker<M, B, F>(
+    main_service: AppService<M>,
+    battery_service: AppService<B>,
     mut receiver: UnboundedReceiver<WorkerCommand>,
     mut emit: F,
 ) where
-    P: PerformanceProvider + GpuProvider + BatteryProvider + Send + Sync + 'static,
+    M: PerformanceProvider + GpuProvider + Send + Sync + 'static,
+    B: BatteryProvider + Send + Sync + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
     // Команда, дочитанная при drain соседней Battery-группы (граница группы),
@@ -131,10 +134,10 @@ pub async fn run_worker<P, F>(
 
         let event = match command {
             WorkerCommand::SetPerformance(profile) => {
-                WorkerEvent::Performance(service.set_performance(profile).await)
+                WorkerEvent::Performance(main_service.set_performance(profile).await)
             }
             WorkerCommand::SetGpuMode { mode, confirmed } => {
-                WorkerEvent::Gpu(service.set_gpu_mode(mode, confirmed).await)
+                WorkerEvent::Gpu(main_service.set_gpu_mode(mode, confirmed).await)
             }
             WorkerCommand::SetChargeLimit { percent } => {
                 // Coalescing соседних Battery-команд: выполняется только
@@ -155,13 +158,13 @@ pub async fn run_worker<P, F>(
                         Err(TryRecvError::Disconnected) => break,
                     }
                 }
-                WorkerEvent::ChargeLimit(service.set_charge_limit(latest_percent).await)
+                WorkerEvent::ChargeLimit(battery_service.set_charge_limit(latest_percent).await)
             }
             WorkerCommand::RefreshChargeLimit => {
                 // Authoritative read-only refresh: обычная ordered команда,
                 // не coalesce-ится и является границей для соседних
                 // SetChargeLimit-групп.
-                WorkerEvent::ChargeLimitRefresh(service.charge_limit().await)
+                WorkerEvent::ChargeLimitRefresh(battery_service.charge_limit().await)
             }
         };
         emit(event);
@@ -171,6 +174,7 @@ pub async fn run_worker<P, F>(
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use async_trait::async_trait;
@@ -192,9 +196,14 @@ mod tests {
 
     use super::{WorkerCommand, WorkerEvent, command_channel, run_worker};
 
-    fn service() -> AppService<MockProvider> {
+    fn services() -> (AppService<MockProvider>, AppService<MockProvider>) {
         let state = build_state_arc("zephyrus-full").expect("profile exists");
-        AppService::new(Arc::new(MockProvider::new(state)))
+        let provider = Arc::new(MockProvider::new(state));
+        // Один Arc<MockProvider> для двух AppService: старые тесты проверяют
+        // единый provider state; split в production использует разные backends.
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider);
+        (main_service, battery_service)
     }
 
     #[tokio::test]
@@ -203,7 +212,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(service(), rx, move |event| {
+            run_worker(services().0, services().1, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -234,7 +243,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(service(), rx, move |event| {
+            run_worker(services().0, services().1, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -269,7 +278,7 @@ mod tests {
         drop(tx); // закрыть все senders до запуска
 
         let worker = tokio::spawn(async move {
-            run_worker(service(), rx, |_event| {}).await;
+            run_worker(services().0, services().1, rx, |_event| {}).await;
         });
 
         // worker должен завершиться нормально (recv -> None), без зависания/panic
@@ -283,7 +292,8 @@ mod tests {
     async fn command_error_not_lost() {
         let state = build_state_arc("zephyrus-full").expect("profile exists");
         let provider = Arc::new(MockProvider::new(state.clone()));
-        let app_service = AppService::new(provider.clone());
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
 
         // Ошибка до команды: мутация не должна примениться.
         state.write().await.error_mode = MockErrorMode::BackendDown;
@@ -292,7 +302,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(app_service, rx, move |event| {
+            run_worker(main_service, battery_service, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -335,7 +345,7 @@ mod tests {
             .expect("send2");
 
         let worker = tokio::spawn(async move {
-            run_worker(service(), rx, move |event| {
+            run_worker(services().0, services().1, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -530,7 +540,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(service(), rx, move |event| {
+            run_worker(services().0, services().1, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -566,16 +576,17 @@ mod tests {
         let provider = Arc::new(MockProvider::new(
             build_state_arc("zephyrus-full").expect("profile exists"),
         ));
-        let app_service = AppService::new(provider.clone());
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
 
         // Начальное applied GPU state через публичный API до команды.
-        let initial = app_service.gpu_state().await.expect("initial gpu state");
+        let initial = main_service.gpu_state().await.expect("initial gpu state");
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(app_service, rx, move |event| {
+            run_worker(main_service, battery_service, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -622,7 +633,8 @@ mod tests {
         let provider = Arc::new(MockProvider::new(
             build_state_arc("zephyrus-full").expect("profile exists"),
         ));
-        let app_service = AppService::new(provider.clone());
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -639,7 +651,7 @@ mod tests {
             .expect("send3");
 
         let worker = tokio::spawn(async move {
-            run_worker(app_service, rx, move |event| {
+            run_worker(main_service, battery_service, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -679,7 +691,8 @@ mod tests {
     async fn gpu_command_error_not_lost() {
         let state = build_state_arc("zephyrus-full").expect("profile exists");
         let provider = Arc::new(MockProvider::new(state.clone()));
-        let app_service = AppService::new(provider.clone());
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
 
         // Начальное GPU state через публичный provider API до ошибки.
         let before = (
@@ -696,7 +709,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(app_service, rx, move |event| {
+            run_worker(main_service, battery_service, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -731,13 +744,14 @@ mod tests {
     #[tokio::test]
     async fn gpu_confirmed_flag_passed_unmodified() {
         let provider = Arc::new(ScriptedProvider::new());
-        let app_service = AppService::new(provider.clone());
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(app_service, rx, move |event| {
+            run_worker(main_service, battery_service, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -778,7 +792,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(service(), rx, move |event| {
+            run_worker(services().0, services().1, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -814,7 +828,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(service(), rx, move |event| {
+            run_worker(services().0, services().1, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -845,7 +859,8 @@ mod tests {
         let provider = Arc::new(MockProvider::new(
             build_state_arc("zephyrus-full").expect("profile exists"),
         ));
-        let app_service = AppService::new(provider.clone());
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -864,7 +879,7 @@ mod tests {
             .expect("send4");
 
         let worker = tokio::spawn(async move {
-            run_worker(app_service, rx, move |event| {
+            run_worker(main_service, battery_service, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -916,7 +931,8 @@ mod tests {
     async fn charge_limit_command_error_not_lost() {
         let state = build_state_arc("zephyrus-full").expect("profile exists");
         let provider = Arc::new(MockProvider::new(state.clone()));
-        let app_service = AppService::new(provider.clone());
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
 
         // Начальный ChargeLimit через публичный provider API до ошибки.
         let before = provider.charge_limit().await.expect("initial charge limit");
@@ -928,7 +944,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(app_service, rx, move |event| {
+            run_worker(main_service, battery_service, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -970,7 +986,8 @@ mod tests {
         let provider = Arc::new(MockProvider::new(
             build_state_arc("zephyrus-full").expect("profile exists"),
         ));
-        let app_service = AppService::new(provider.clone());
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -985,7 +1002,7 @@ mod tests {
             .expect("send3");
 
         let worker = tokio::spawn(async move {
-            run_worker(app_service, rx, move |event| {
+            run_worker(main_service, battery_service, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -1018,7 +1035,8 @@ mod tests {
         let provider = Arc::new(MockProvider::new(
             build_state_arc("zephyrus-full").expect("profile exists"),
         ));
-        let app_service = AppService::new(provider.clone());
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1038,7 +1056,7 @@ mod tests {
             .expect("send5");
 
         let worker = tokio::spawn(async move {
-            run_worker(app_service, rx, move |event| {
+            run_worker(main_service, battery_service, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -1092,7 +1110,7 @@ mod tests {
             .expect("send3");
 
         let worker = tokio::spawn(async move {
-            run_worker(service(), rx, move |event| {
+            run_worker(services().0, services().1, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -1137,12 +1155,13 @@ mod tests {
             .await
             .expect("set charge limit");
 
-        let app_service = AppService::new(provider.clone());
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(app_service, rx, move |event| {
+            run_worker(main_service, battery_service, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -1170,7 +1189,8 @@ mod tests {
     async fn refresh_charge_limit_error_is_preserved() {
         let state = build_state_arc("zephyrus-full").expect("profile exists");
         let provider = Arc::new(MockProvider::new(state.clone()));
-        let app_service = AppService::new(provider.clone());
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
 
         // Ошибка backend: refresh должен вернуть ошибку, а не mock default.
         state.write().await.error_mode = MockErrorMode::BackendDown;
@@ -1179,7 +1199,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(app_service, rx, move |event| {
+            run_worker(main_service, battery_service, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -1217,7 +1237,7 @@ mod tests {
             .expect("send4");
 
         let worker = tokio::spawn(async move {
-            run_worker(service(), rx, move |event| {
+            run_worker(services().0, services().1, rx, move |event| {
                 let _ = result_tx.send(event);
             })
             .await;
@@ -1239,6 +1259,262 @@ mod tests {
             }
             other => panic!("ожидался порядок Charge(Refresh(Charge), получено: {other:?}"),
         }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression: routing между main (Performance/GPU) и battery provider
+    // -----------------------------------------------------------------------
+
+    /// Тестовый provider только для Performance/GPU: реализует именно те traits,
+    /// которые `run_worker` требует от `M`. Если worker (неверно) направит сюда
+    /// Battery-команду — компиляции бы не было; на runtime счётчики это видно.
+    struct MainOnlyProvider {
+        perf_calls: Arc<AtomicUsize>,
+        gpu_calls: Arc<AtomicUsize>,
+        profile: tokio::sync::RwLock<PerformanceProfile>,
+    }
+
+    impl MainOnlyProvider {
+        fn new() -> (Arc<Self>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+            let provider = Arc::new(Self {
+                perf_calls: Arc::new(AtomicUsize::new(0)),
+                gpu_calls: Arc::new(AtomicUsize::new(0)),
+                profile: tokio::sync::RwLock::new(PerformanceProfile::Balanced),
+            });
+            (
+                provider.clone(),
+                provider.perf_calls.clone(),
+                provider.gpu_calls.clone(),
+            )
+        }
+    }
+
+    #[async_trait]
+    impl Provider for MainOnlyProvider {
+        fn id(&self) -> &'static str {
+            "main-only"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("main-only")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_millis(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("main-only: {feature} недоступен")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl PerformanceProvider for MainOnlyProvider {
+        async fn profiles(&self) -> Result<Vec<PerformanceProfile>, ProviderError> {
+            Ok(vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ])
+        }
+
+        async fn current_profile(&self) -> Result<PerformanceProfile, ProviderError> {
+            Ok(*self.profile.read().await)
+        }
+
+        async fn set_profile(
+            &self,
+            profile: PerformanceProfile,
+        ) -> Result<ApplyResult, ProviderError> {
+            self.perf_calls.fetch_add(1, Ordering::SeqCst);
+            *self.profile.write().await = profile;
+            Ok(ApplyResult::Applied)
+        }
+
+        async fn profile_on_ac(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+            Ok(None)
+        }
+
+        async fn profile_on_battery(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+            Ok(None)
+        }
+
+        fn validate_set_profile(&self, _profile: PerformanceProfile) -> ValidationResult {
+            ValidationResult::Valid
+        }
+    }
+
+    #[async_trait]
+    impl GpuProvider for MainOnlyProvider {
+        async fn requested_mode(&self) -> Result<GpuMode, ProviderError> {
+            Ok(GpuMode::Standard)
+        }
+
+        async fn set_mode(
+            &self,
+            mode: GpuMode,
+            _confirmed: bool,
+        ) -> Result<ApplyResult, ProviderError> {
+            self.gpu_calls.fetch_add(1, Ordering::SeqCst);
+            let _ = mode;
+            Ok(ApplyResult::Applied)
+        }
+
+        async fn mux_state(&self) -> Result<GpuMuxState, ProviderError> {
+            Ok(GpuMuxState::Integrated)
+        }
+
+        async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError> {
+            Ok(GpuAccessPolicy::Unblocked)
+        }
+
+        async fn power_state(&self) -> Result<GpuPowerState, ProviderError> {
+            Ok(GpuPowerState::Active)
+        }
+
+        fn requirement_for(&self, _mode: GpuMode) -> ActionRequirement {
+            ActionRequirement::None
+        }
+
+        fn validate_mode(&self, _mode: GpuMode) -> ValidationResult {
+            ValidationResult::Valid
+        }
+    }
+
+    /// Тестовый provider только для Battery: реализует именно traits, которые
+    /// `run_worker` требует от `B`. Если worker направит сюда Performance/GPU —
+    /// это было бы compile error; runtime счётчик refresh/set виден.
+    struct BatteryOnlyProvider {
+        refresh_calls: Arc<AtomicUsize>,
+        set_calls: Arc<AtomicUsize>,
+        limit: tokio::sync::RwLock<u8>,
+    }
+
+    impl BatteryOnlyProvider {
+        fn new() -> (Arc<Self>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+            let provider = Arc::new(Self {
+                refresh_calls: Arc::new(AtomicUsize::new(0)),
+                set_calls: Arc::new(AtomicUsize::new(0)),
+                limit: tokio::sync::RwLock::new(80),
+            });
+            (
+                provider.clone(),
+                provider.refresh_calls.clone(),
+                provider.set_calls.clone(),
+            )
+        }
+    }
+
+    #[async_trait]
+    impl Provider for BatteryOnlyProvider {
+        fn id(&self) -> &'static str {
+            "battery-only"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("battery-only")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_millis(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("battery-only: {feature} недоступен")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl BatteryProvider for BatteryOnlyProvider {
+        async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
+            self.refresh_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(ChargeLimit::new(
+                true,
+                Some(Percent::new(*self.limit.read().await).expect("const")),
+                None,
+            )
+            .expect("valid"))
+        }
+
+        async fn set_charge_limit(&self, percent: u8) -> Result<ApplyResult, ProviderError> {
+            self.set_calls.fetch_add(1, Ordering::SeqCst);
+            *self.limit.write().await = percent;
+            Ok(ApplyResult::Applied)
+        }
+
+        async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("read-only".into()))
+        }
+
+        fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
+            ValidationResult::Valid
+        }
+    }
+
+    #[tokio::test]
+    async fn routes_commands_to_distinct_providers() {
+        let (main_provider, perf_calls, gpu_calls) = MainOnlyProvider::new();
+        let (battery_provider, refresh_calls, set_calls) = BatteryOnlyProvider::new();
+
+        let main_service = AppService::new(main_provider);
+        let battery_service = AppService::new(battery_provider);
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker(main_service, battery_service, rx, move |event| {
+                let _ = result_tx.send(event);
+            })
+            .await;
+        });
+
+        tx.send(WorkerCommand::SetPerformance(PerformanceProfile::Silent))
+            .expect("send1");
+        tx.send(WorkerCommand::SetGpuMode {
+            mode: GpuMode::Optimized,
+            confirmed: false,
+        })
+        .expect("send2");
+        tx.send(WorkerCommand::RefreshChargeLimit).expect("send3");
+        tx.send(WorkerCommand::SetChargeLimit { percent: 60 })
+            .expect("send4");
+
+        // 4 события в FIFO-порядке.
+        for _ in 0..4 {
+            let _ = result_rx.recv().await.expect("event");
+        }
+
+        // Правильная маршрутизация: Performance/GPU -> main; Refresh/Set -> battery.
+        assert_eq!(perf_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(gpu_calls.load(Ordering::SeqCst), 1);
+        // RefreshChargeLimit -> 1 вызов charge_limit(); SetChargeLimit -> 1 вызов
+        // set_charge_limit() + обязательный authoritative read-back через
+        // charge_limit() внутри AppService, поэтому refresh_calls == 2.
+        assert_eq!(refresh_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(set_calls.load(Ordering::SeqCst), 1);
 
         drop(tx);
         tokio::time::timeout(std::time::Duration::from_secs(5), worker)

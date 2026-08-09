@@ -48,6 +48,11 @@ pub struct UiState {
     pub charge_limit: i32,
     /// Функция Battery Charge Limit доступна (из mock-состояния).
     pub charge_limit_enabled: bool,
+    /// Можно ли применять Battery Charge Limit (write-capability).
+    ///
+    /// Отдельно от `charge_limit_enabled` (hardware/backend state): read-only
+    /// session backend при `enabled=true` всё равно не позволяет запись.
+    pub charge_limit_writable: bool,
     /// Состояние готовности/доступности Battery Charge Limit.
     pub charge_limit_state: ChargeLimitState,
     /// Телеметрия.
@@ -158,6 +163,9 @@ impl UiState {
             gpu_section_error: false,
             charge_limit,
             charge_limit_enabled,
+            // mock/offscreen/tests могут применять лимит (fake interactive semantics);
+            // production interactive выставляет writable=false отдельно в main().
+            charge_limit_writable: true,
             // fixture-профиль: первое значение готово сразу (offscreen/tests).
             charge_limit_state: ChargeLimitState::Ready,
             cpu_temp,

@@ -29,6 +29,7 @@ use orbis_core::gpu::GpuMode;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 use orbis_providers::mock::MockProvider;
+use orbis_session_client::{SessionChargeLimitProvider, ZbusSessionChargeLimitSource};
 use orbis_test_support::devices::build_state_arc;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
@@ -114,6 +115,7 @@ fn to_slint(state: &controller::UiState) -> UiState {
         gpu_section_error: state.gpu_section_error,
         charge_limit: state.charge_limit,
         charge_limit_enabled: state.charge_limit_enabled,
+        charge_limit_writable: state.charge_limit_writable,
         charge_limit_state: match state.charge_limit_state {
             controller::ChargeLimitState::Loading => ChargeLimitState::Loading,
             controller::ChargeLimitState::Ready => ChargeLimitState::Ready,
@@ -141,6 +143,7 @@ fn from_slint(state: &UiState) -> controller::UiState {
         gpu_section_error: state.gpu_section_error,
         charge_limit: state.charge_limit,
         charge_limit_enabled: state.charge_limit_enabled,
+        charge_limit_writable: state.charge_limit_writable,
         charge_limit_state: match state.charge_limit_state {
             ChargeLimitState::Loading => controller::ChargeLimitState::Loading,
             ChargeLimitState::Ready => controller::ChargeLimitState::Ready,
@@ -622,11 +625,28 @@ fn main() -> anyhow::Result<()> {
     // Loading; первый RefreshChargeLimit (ниже) переведёт в Ready/Unavailable.
     state.charge_limit_state = controller::ChargeLimitState::Loading;
 
-    // Mock provider и application service (только интерактивный путь).
+    // Production Battery backend — read-only session client (SessionChargeLimitProvider
+    // возвращает Unsupported для set_charge_limit): mutation control не должен
+    // выглядеть рабочим. Это независимо от charge_limit_enabled (hardware state).
+    state.charge_limit_writable = false;
+
+    // Mock provider и application service для Performance/GPU (только
+    // интерактивный путь). Battery production больше через MockProvider не читается.
     let mock_state = build_state_arc("zephyrus-full")
         .ok_or_else(|| anyhow::anyhow!("mock profile 'zephyrus-full' отсутствует"))?;
-    let provider = Arc::new(MockProvider::new(mock_state));
-    let service = AppService::new(provider);
+    let mock_provider = Arc::new(MockProvider::new(mock_state));
+    let main_service = AppService::new(mock_provider);
+
+    // Ровно одна user-session connection на composition/startup level.
+    // Ошибка подключения завершает startup через существующий Result path;
+    // никакого unwrap/expect и никакого silent fallback на MockProvider.
+    let session_connection = runtime
+        .block_on(zbus::Connection::session())
+        .map_err(|e| anyhow::anyhow!("не удалось подключиться к session bus: {e}"))?;
+    let battery_source = ZbusSessionChargeLimitSource::new(session_connection);
+    let battery_provider = SessionChargeLimitProvider::new(battery_source);
+    let battery_service = AppService::new(Arc::new(battery_provider));
+
     let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();
 
     let app = build_app(&state, Some(worker_tx.clone()))?;
@@ -644,7 +664,12 @@ fn main() -> anyhow::Result<()> {
             tracing::warn!("не удалось вернуть событие worker-а в event loop: {e:?}");
         }
     };
-    runtime.spawn(run_worker(service, worker_rx, event_sink));
+    runtime.spawn(run_worker(
+        main_service,
+        battery_service,
+        worker_rx,
+        event_sink,
+    ));
 
     // Ровно один authoritative initial Battery read при старте, без действия
     // пользователя и без polling. Ошибка provider (включая отсутствие

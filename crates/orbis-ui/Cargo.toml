@@ -25,6 +25,8 @@ slint = { workspace = true }
 orbis-core = { workspace = true }
 orbis-capabilities = { workspace = true }
 orbis-application = { path = "../orbis-application", version = "0.1.0" }
+# Production read-only Battery backend поверх session D-Bus protocol.
+orbis-session-client = { path = "../orbis-session-client", version = "0.1.0" }
 # Прямая зависимость на provider traits для worker; default-features=false,
 # чтобы не добавлять новых причин включения mock в production (mock уже идёт
 # транзитивно через orbis-sessiond на текущем этапе).
