@@ -607,6 +607,26 @@ fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<
     Ok(())
 }
 
+/// Инициализировать один global tracing subscriber для production GUI.
+///
+/// - stderr — обычный diagnostic destination;
+/// - `RUST_LOG` (EnvFilter) полностью управляет фильтром, когда задан;
+/// - без `RUST_LOG` default filter = `warn` (видны WARN и ERROR, debug/info
+///   скрыты — не hard-code verbosity выше warn);
+/// - malformed `RUST_LOG` не приводит к panic: используется безопасный
+///   default `warn`;
+/// - `try_init()` вместо `.init()`: при уже установленном global subscriber
+///   возвращает Err без panic (duplicate-safe), произвольные configuration
+///   errors не скрываются молча.
+///
+/// Ошибка инициализации не логируется через tracing (subscriber ещё не
+/// установлен); поведение — тихо продолжить без subscriber, как раньше.
+fn init_tracing() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+}
+
 fn main() -> anyhow::Result<()> {
     let args = parse_args();
     let mut state = state_for_scenario(&args.ui_state);
@@ -614,6 +634,12 @@ fn main() -> anyhow::Result<()> {
     if let Some(path) = args.screenshot {
         return render_screenshot(&state, &path);
     }
+
+    // Tracing diagnostics: один global subscriber в GUI composition root.
+    // Выполняется ДО создания runtime, session D-Bus connection, initial
+    // Battery refresh и Slint event loop, чтобы существующие tracing::warn!/
+    // debug! могли попадать в stderr.
+    init_tracing();
 
     // Интерактивный запуск через штатный winit-бэкенд (без set_platform).
     // Один явный многопоточный runtime для worker-задачи.
