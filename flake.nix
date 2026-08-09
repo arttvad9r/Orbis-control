@@ -78,5 +78,12 @@
           '';
           doCheck = false;
         });
+
+        # Targeted NixOS VM test: production lifecycle orbis-hardwared
+        # без hardware mutation (service/bus/caps/introspection/invalid-wire).
+        checks.hardwared-lifecycle = lib.nixos.runTest {
+          hostPkgs = pkgs;
+          imports = [ ./packaging/nix/tests/hardwared-lifecycle.nix ];
+        };
       });
 }

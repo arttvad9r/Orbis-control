@@ -96,14 +96,19 @@ in
         CapabilityBoundingSet = "";
         # /sys read-only, на write открыт ТОЛЬКО platform_profile;
         # platform_profile_choices остаётся read-only.
+        # Префикс "-": путь игнорируется, если файл отсутствует (например,
+        # VM/машина без ACPI platform_profile), но НЕ расширяет writable
+        # surface при его наличии.
         ReadOnlyPaths = [ "/sys" ];
-        ReadWritePaths = [ "/sys/firmware/acpi/platform_profile" ];
+        ReadWritePaths = [ "-/sys/firmware/acpi/platform_profile" ];
       };
     };
 
-    # Пакет попадает в system.path: dbus-daemon читает
-    # system-path/share/dbus-1/system.d (см. system.conf).
-    systemd.packages = [ cfg.package ];
+    # Пакет попадает в system.path (environment.systemPackages): dbus-daemon
+    # читает includedir system-path/share/dbus-1/system.d (см. system.conf).
+    # systemd.packages НЕ подходит: он добавляет пакеты только в
+    # /etc/systemd hooks, не в system.path.
+    environment.systemPackages = [ cfg.package ];
 
     # D-Bus system policy (root own + send_destination; авторизация — polkit)
     # устанавливается из share/dbus-1/system.d пакета через system.path.
