@@ -87,19 +87,19 @@ closure.
 
 ## Milestone 3 — GUI diagnostics / tracing initialization
 
-**Status: NEXT.**
+**Status: COMPLETED / LIVE-VALIDATED** (2026-08-09).
 
 **Goal:** инициализировать tracing subscriber в GUI, чтобы существующие
 `tracing::warn!`/`debug!` попадали в полезный runtime log.
 
-**Why:** сейчас GUI tracing не инициализирован; диагностические события
-(включая `battery: refresh недоступен`) молча теряются — это затрудняет
-операционную диагностику (например, отсутствие sessiond требует visual-only
+**Why:** ранее GUI tracing не инициализирован; диагностические события
+(включая `battery: refresh недоступен`) молча терялись — это затрудняло
+операционную диагностику (например, отсутствие sessiond требовало visual-only
 evidence).
 
 **Entry conditions:** packaging runtime correctness закрыт (Milestone 2).
 
-**Definition of done:**
+**Definition of done (выполнен):**
 
 - production GUI инициализирует tracing subscriber;
 - semantics `RUST_LOG`/EnvFilter определены;
@@ -108,10 +108,18 @@ evidence).
 - duplicate/global subscriber initialization корректно обрабатывается;
 - packaged GUI live validation подтверждает diagnostics.
 
-**Risks/dependencies:** минимальное изменение в `orbis-ui`; не должно менять UI
-semantics.
+**Result/notes:**
+
+- default filter без `RUST_LOG` = `warn`;
+- `RUST_LOG`/EnvFilter: `RUST_LOG=debug` live-validated;
+- отсутствие sessiond видно в stderr: существующий Battery refresh WARN
+  (ServiceUnknown) наблюдается в packaged GUI stderr;
+- duplicate-safe initialization через non-panicking `try_init()`;
+- packaged live validation passed (273 Rust tests, nix flake check, nix build).
 
 ## Milestone 4 — Real read-only ASUS providers
+
+**Status: NEXT.**
 
 **Goal:** добавить доказанные read-only providers для приоритетных user-visible
 areas: Performance, GPU concepts, fan/telemetry и доступные ASUS properties.
@@ -121,6 +129,17 @@ selection на реальном hardware.
 
 **Entry conditions:** capability discovery умеет честно классифицировать
 отсутствующие/ошибочные endpoints; имеются dated probes для target backend/version.
+
+**Sequencing (внутри milestone, evidence-driven):**
+
+1. Performance read-only provider — READ-ONLY AUDIT + минимальный production
+   Performance provider;
+2. GPU concepts read-only providers;
+3. fan/other proven ASUS reads;
+4. telemetry только по доказанным источникам.
+
+Каждый пункт начинается с evidence/API audit и mapping tests; следующая задача
+после текущего docs-sync — пункт 1.
 
 **Definition of done:**
 

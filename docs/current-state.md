@@ -125,8 +125,6 @@ released, процесс отсутствует.
 
 ### Gaps
 
-- **Diagnostics**: GUI не инициализирует tracing subscriber; существующие
-  `tracing::warn!` не попадают в полезный runtime log.
 - Performance/GPU production backends остаются mock (см. ниже).
 - Production `set_charge_limit` и one-shot full charge — **NOT IMPLEMENTED**.
 - asusd write provider — **NOT IMPLEMENTED**.
@@ -187,6 +185,27 @@ Planned capability или hardware object presence не считается imple
 Не реализованы reconnect, multiple-battery selection, generic provider registry,
 automation engine и остальные feature APIs из исторической Stage 0
 спецификации.
+
+## Diagnostics
+
+**IMPLEMENTED / LIVE-VALIDATED**
+
+- production GUI инициализирует один global tracing subscriber в composition
+  root (interactive path; offscreen rendering path subscriber не устанавливает);
+- инициализация происходит до runtime/session connection/initial Battery
+  refresh/Slint event loop;
+- default filter без `RUST_LOG` = `warn` (видны WARN/ERROR);
+- `RUST_LOG` обрабатывается стандартным EnvFilter; `RUST_LOG=debug`
+  live-validated (реально исполняемые winit/sctk DEBUG события и Battery WARN
+  видны);
+- duplicate global initialization использует non-panicking `try_init()`;
+- существующие `tracing::*` callsites не переписывались;
+- отсутствие sessiond диагностируется через stderr: live packaged GUI показал
+  существующий WARN
+  `battery: refresh недоступен: Dbus("org.freedesktop.DBus.Error.ServiceUnknown:
+  The name is not activatable")`;
+- подтверждён stderr/fmt subscriber; file logging/journald integration
+  отсутствует и не заявляется.
 
 ## Packaging
 
