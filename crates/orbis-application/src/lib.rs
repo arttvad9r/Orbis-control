@@ -22,7 +22,9 @@ use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
-use orbis_providers::traits::{BatteryProvider, GpuProvider, PerformanceProvider};
+use orbis_providers::traits::{
+    BatteryProvider, GpuPowerProvider, GpuProvider, PerformanceProvider,
+};
 
 /// Authoritative состояние Performance Mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -275,14 +277,30 @@ where
     }
 }
 
+impl<P> AppService<P>
+where
+    P: GpuPowerProvider + Send + Sync,
+{
+    /// Прочитать authoritative dGPU runtime power state.
+    ///
+    /// Вызывает только `GpuPowerProvider::power_state()`; не получает requested
+    /// mode / MUX / access policy и не строит `GpuState`. `ProviderError`
+    /// сохраняется без преобразования и не подменяется `Unknown`.
+    pub async fn gpu_power_state(&self) -> Result<GpuPowerState, ProviderError> {
+        self.provider.power_state().await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
 
     use async_trait::async_trait;
     use orbis_core::action::{ActionRequirement, ApplyResult};
     use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
+    use orbis_core::diagnostics::DiagnosticEntry;
     use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
     use orbis_core::identity::BackendIdentity;
     use orbis_core::newtypes::Percent;
@@ -290,7 +308,8 @@ mod tests {
     use orbis_providers::error::{ProviderError, ValidationResult};
     use orbis_providers::mock::{MockErrorMode, MockProvider};
     use orbis_providers::traits::{
-        BatteryProvider, GpuProvider, PerformanceProvider, Provider, ProviderHealth,
+        BatteryProvider, GpuPowerProvider, GpuProvider, PerformanceProvider, Provider,
+        ProviderHealth,
     };
     use orbis_test_support::devices::build_state_arc;
 
@@ -1008,5 +1027,86 @@ mod tests {
         assert_eq!(*provider.last_mode.read().await, Some(GpuMode::Optimized));
         assert_eq!(*provider.last_confirmed.read().await, Some(false));
         assert_eq!(*provider.requested.read().await, GpuMode::Optimized);
+    }
+
+    // -----------------------------------------------------------------------
+    // Independent power capability (GpuPowerProvider, split GPU concepts)
+    // -----------------------------------------------------------------------
+
+    /// Тестовый provider ТОЛЬКО для power capability: реализует
+    /// `Provider + GpuPowerProvider` и НЕ реализует legacy `GpuProvider`.
+    /// Это доказывает, что power доступен независимо от requested/mux/access.
+    struct PowerOnlyProvider {
+        power: GpuPowerState,
+        fail: AtomicBool,
+    }
+
+    impl PowerOnlyProvider {
+        fn new(power: GpuPowerState) -> Self {
+            Self {
+                power,
+                fail: AtomicBool::new(false),
+            }
+        }
+    }
+
+    impl Provider for PowerOnlyProvider {
+        fn id(&self) -> &'static str {
+            "power-only"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("power-only")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("power-only: {feature} недоступен")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl GpuPowerProvider for PowerOnlyProvider {
+        async fn power_state(&self) -> Result<GpuPowerState, ProviderError> {
+            if self.fail.load(Ordering::SeqCst) {
+                return Err(ProviderError::BackendUnavailable(
+                    "power-only backend down".into(),
+                ));
+            }
+            Ok(self.power)
+        }
+    }
+
+    #[tokio::test]
+    async fn power_capability_works_without_gpu_provider() {
+        let provider = Arc::new(PowerOnlyProvider::new(GpuPowerState::Suspended));
+        let svc = AppService::new(provider);
+
+        // Только power: не требуется requested_mode / mux / access.
+        assert_eq!(
+            svc.gpu_power_state().await.expect("power"),
+            GpuPowerState::Suspended
+        );
+    }
+
+    #[tokio::test]
+    async fn power_capability_preserves_provider_error() {
+        let provider = Arc::new(PowerOnlyProvider::new(GpuPowerState::Active));
+        provider.fail.store(true, Ordering::SeqCst);
+        let svc = AppService::new(provider);
+
+        let err = svc.gpu_power_state().await.expect_err("power error");
+        assert!(matches!(err, ProviderError::BackendUnavailable(_)));
     }
 }

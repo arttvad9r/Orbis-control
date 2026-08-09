@@ -15,8 +15,7 @@
 //! сообщением; это не превращается в production assumption.
 
 use orbis_core::gpu::GpuPowerState;
-use orbis_providers::error::ProviderError;
-use orbis_providers::traits::GpuProvider;
+use orbis_providers::traits::GpuPowerProvider;
 use orbis_sessiond::supergfxd::{SupergfxdGpuPowerProvider, ZbusSupergfxdGpuPowerSource};
 
 /// Прочитать raw `Power()` независимо от provider (read-only D-Bus call).
@@ -77,10 +76,4 @@ async fn live_gpu_power_provider_matches_supergfxd() {
         Ok(s) => eprintln!("supporting PCI runtime_status = '{s}'"),
         Err(_) => eprintln!("supporting PCI runtime_status недоступен (не failure)"),
     }
-
-    // sanity: power_state доступен, а requested/mux/access честно Unsupported.
-    assert!(matches!(
-        provider.requested_mode().await,
-        Err(ProviderError::Unsupported(_))
-    ));
 }

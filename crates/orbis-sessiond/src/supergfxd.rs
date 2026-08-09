@@ -1,6 +1,6 @@
 //! Read-only supergfxd adapter для dGPU runtime power state.
 //!
-//! Реализует `GpuProvider` (read-only power concept) через D-Bus метод
+//! Реализует `GpuPowerProvider` (read-only power concept) через D-Bus метод
 //! `Power()` интерфейса `org.supergfxctl.Daemon` (объект
 //! `/org/supergfxctl/Gfx`).
 //!
@@ -8,9 +8,9 @@
 //!   открывает и не создаёт runtime;
 //! - каждый вызов `power_state()` выполняет новый authoritative D-Bus method
 //!   call (кэш отсутствует);
-//! - `requested_mode`/`mux_state`/`access_policy`/`set_mode` недоступны и
-//!   честно возвращают `ProviderError::Unsupported` — этот provider НЕ
-//!   притворяется источником product `GpuMode`;
+//! - этот provider реализует ТОЛЬКО power capability (`GpuPowerProvider`) и НЕ
+//!   предоставляет requested mode / MUX / access policy — эти concepts просто
+//!   отсутствуют у capability, а не возвращают `Unsupported`;
 //! - mapping `Power()` → `GpuPowerState` использует PROVEN enum definitions из
 //!   локального authoritative API evidence (XML introspection установленного
 //!   supergfxctl 5.2.7): 0=Active, 1=Suspended, 2=Off, 3=AsusDisabled,
@@ -23,12 +23,11 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::diagnostics::DiagnosticEntry;
-use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
+use orbis_core::gpu::GpuPowerState;
 use orbis_core::identity::BackendIdentity;
-use orbis_providers::error::{ProviderError, ValidationResult};
-use orbis_providers::traits::{GpuProvider, Provider, ProviderHealth};
+use orbis_providers::error::ProviderError;
+use orbis_providers::traits::{GpuPowerProvider, Provider, ProviderHealth};
 use zbus::proxy::CacheProperties;
 
 /// Testable источник raw dGPU power state через supergfxd.
@@ -148,51 +147,13 @@ fn power_from_raw(raw: u32) -> GpuPowerState {
 }
 
 #[async_trait]
-impl<S> GpuProvider for SupergfxdGpuPowerProvider<S>
+impl<S> GpuPowerProvider for SupergfxdGpuPowerProvider<S>
 where
     S: SupergfxdGpuPowerSource,
 {
-    async fn requested_mode(&self) -> Result<GpuMode, ProviderError> {
-        Err(ProviderError::Unsupported(
-            "supergfxd read-only power backend: requested GpuMode недоступен".into(),
-        ))
-    }
-
-    async fn set_mode(
-        &self,
-        _mode: GpuMode,
-        _confirmed: bool,
-    ) -> Result<ApplyResult, ProviderError> {
-        Err(ProviderError::Unsupported(
-            "supergfxd read-only power backend: set_mode недоступна".into(),
-        ))
-    }
-
-    async fn mux_state(&self) -> Result<GpuMuxState, ProviderError> {
-        Err(ProviderError::Unsupported(
-            "supergfxd read-only power backend: MUX state недоступен".into(),
-        ))
-    }
-
-    async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError> {
-        Err(ProviderError::Unsupported(
-            "supergfxd read-only power backend: access policy недоступна".into(),
-        ))
-    }
-
     async fn power_state(&self) -> Result<GpuPowerState, ProviderError> {
         let raw = self.source.read_power().await?;
         Ok(power_from_raw(raw))
-    }
-
-    fn requirement_for(&self, _mode: GpuMode) -> ActionRequirement {
-        // Read-only provider: никакой mode не применяется, требование не имеет
-        // смысла.
-        ActionRequirement::None
-    }
-
-    fn validate_mode(&self, _mode: GpuMode) -> ValidationResult {
-        ValidationResult::invalid("read-only backend: запись GPU mode не поддерживается")
     }
 }
 
@@ -281,34 +242,5 @@ mod tests {
         );
         // Каждый вызов делает новый source call; кэш отсутствует.
         assert_eq!(p.source.reads(), 2);
-    }
-
-    #[tokio::test]
-    async fn unsupported_concepts_are_honest() {
-        let p = provider(vec![Ok(1)]);
-        assert!(matches!(
-            p.requested_mode().await.expect_err("requested"),
-            ProviderError::Unsupported(_)
-        ));
-        assert!(matches!(
-            p.mux_state().await.expect_err("mux"),
-            ProviderError::Unsupported(_)
-        ));
-        assert!(matches!(
-            p.access_policy().await.expect_err("access"),
-            ProviderError::Unsupported(_)
-        ));
-        assert!(matches!(
-            p.set_mode(GpuMode::Standard, false).await.expect_err("set"),
-            ProviderError::Unsupported(_)
-        ));
-        assert!(matches!(
-            p.validate_mode(GpuMode::Standard),
-            ValidationResult::Invalid(_)
-        ));
-        assert_eq!(
-            p.requirement_for(GpuMode::Ultimate),
-            ActionRequirement::None
-        );
     }
 }

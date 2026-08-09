@@ -173,6 +173,17 @@ pub trait GpuProvider: Provider {
     fn validate_mode(&self, mode: GpuMode) -> ValidationResult;
 }
 
+/// Read-only dGPU runtime power capability (отдельный GPU concept, ADR 0003).
+///
+/// Провайдер, реализующий только эту capability, не обязан предоставлять
+/// requested mode / MUX / access policy. Это позволяет независимо подключать
+/// runtime power без fake `GpuMode`.
+#[async_trait]
+pub trait GpuPowerProvider: Provider {
+    /// Фактический power state dGPU (чтение не должно будить GPU).
+    async fn power_state(&self) -> Result<GpuPowerState, ProviderError>;
+}
+
 /// Дисплей.
 #[async_trait]
 pub trait DisplayProvider: Provider {
