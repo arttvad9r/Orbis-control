@@ -13,6 +13,8 @@
 
 ## Milestone 1 — Real read-only Battery state in GUI
 
+**Status: COMPLETED / LIVE-VALIDATED** (2026-08-09).
+
 **Goal:** подключить интерактивный GUI к существующему
 `orbis-session-client → sessiond → UPower` path, сохранив mock для tests и
 offscreen screenshots.
@@ -26,7 +28,7 @@ offscreen screenshots.
 - Nix user service live-validated;
 - authoritative UI worker/application invariants сохранены.
 
-**Definition of done:**
+**Definition of done (выполнен):**
 
 - running GUI открывает session connection вне session-client constructors;
 - Battery current/enabled приходят из sessiond;
@@ -34,33 +36,75 @@ offscreen screenshots.
 - read-only backend не предлагает успешную mutation;
 - mock остаётся для unit tests и `--screenshot`;
 - backend unavailable/invalid payload отображаются как явный status/error;
-- targeted UI/client tests и relevant workspace checks green.
+- targeted UI/client tests и relevant workspace checks green;
+- live-validated: daemon absent → Unavailable без mock fallback; daemon present →
+  Ready со значением, совпадающим с authoritative D-Bus baseline; read-only
+  slider доказан pixel analysis + `charge_limit_writable=false`.
 
-**Risks/dependencies:** текущий worker generic требует одного provider с
-Performance+GPU+Battery; нужен минимальный composition/backend-selection design,
-не превращающий real Battery и mock Performance/GPU в ложный production backend.
+**Result/notes:** split composition `run_worker<M, B, F>` реализован
+(Performance/GPU → MockProvider; Battery → SessionChargeLimitProvider; один
+sequential loop; FIFO/barriers/coalescing сохранены). Обнаружены два gap'а,
+вынесены в отдельные milestones: packaging runtime correctness (LD_LIBRARY_PATH)
+и GUI diagnostics (tracing initialization).
 
-## Milestone 2 — Runtime capability discovery and read-only status
+**Risks/dependencies (закрыты):** ранее worker generic требовал один provider с
+Performance+GPU+Battery; split-дизайн устранил это требование.
 
-**Goal:** превратить fixture-oriented capability model в runtime discovery для
-реально подключённых backends, начиная с уже используемых battery/session facts.
+## Milestone 2 — Packaging runtime correctness
 
-**Why:** UI не должен предполагать функции по профилю mock или модели устройства.
+**Status: NEXT.**
 
-**Entry conditions:** Milestone 1 даёт рабочую error/status boundary.
+**Goal:** packaged GUI должен запускаться напрямую без ручного
+`LD_LIBRARY_PATH`.
+
+**Why:** `nix build .#orbis-control` PASS, но при live запуске packaged GUI
+потребовал ручной LD_LIBRARY_PATH для runtime/dlopen библиотек (Wayland/
+xkbcommon/fontconfig/mesa/EGL-related). Точная root cause не выяснялась —
+нужен отдельный packaging audit.
+
+**Entry conditions:**
+
+- текущий GUI/session composition code green (Milestone 1);
+- отсутствие несвязанных изменений.
 
 **Definition of done:**
 
-- runtime report различает Supported/ReadOnly/Unsupported/PermissionDenied/Unknown;
-- backend identity, endpoint и reason доступны UI/diagnostics;
-- stale/missing services не приводят к fabricated support;
-- hardware fixtures остаются regression evidence, а не runtime truth;
-- нет writes.
+- `nix build .#orbis-control` PASS;
+- direct packaged `result/bin/orbis-control` startup;
+- без ручного LD_LIBRARY_PATH;
+- runtime/dlopen зависимости предоставляются декларативно (wrapper/RUNPATH/
+  propagated buildInputs по итогам audit);
+- live GUI startup повторно подтверждён (packaged GUI открывает окно без
+  ручного окружения).
 
-**Risks/dependencies:** version drift asusd, multiple batteries, conflict между
+**Risks/dependencies:** dlopen-зависимости winit (wayland/xkbcommon) и
+rendering (fontconfig/EGL/mesa) не попадают в closure пакета; требуется
+аккуратный fix без ослабления sandbox/reproducibility.
+
+## Milestone 3 — GUI diagnostics / tracing initialization
+
+**Status: NEXT (после packaging cleanup).**
+
+**Goal:** инициализировать tracing subscriber в GUI, чтобы существующие
+`tracing::warn!`/`debug!` попадали в полезный runtime log.
+
+**Why:** сейчас GUI tracing не инициализирован; диагностические события
+(включая `battery: refresh недоступен`) молча теряются — это затрудняет
+операционную диагностику.
+
+**Entry conditions:** packaging runtime correctness закрыт (Milestone 2).
+
+**Definition of done:**
+
+- GUI инициализирует tracing (например, через `RUST_LOG`/EnvFilter);
+- startup/refresh/command warn-события видны в runtime log;
+- существующие debug-логи не спамят по умолчанию.
+
+**Risks/dependencies:** минимальное изменение в `orbis-ui`; не должно менять UI
+semantics.
 backend presence и фактической readable capability.
 
-## Milestone 3 — Real read-only ASUS providers
+## Milestone 4 — Real read-only ASUS providers
 
 **Goal:** добавить доказанные read-only providers для приоритетных user-visible
 areas: Performance, GPU concepts, fan/telemetry и доступные ASUS properties.
@@ -83,7 +127,7 @@ selection на реальном hardware.
 **Risks/dependencies:** backend version differences, raw enum ambiguity,
 несогласованные system services и incomplete hardware evidence.
 
-## Milestone 4 — Controlled mutation foundations
+## Milestone 5 — Controlled mutation foundations
 
 **Goal:** реализовать первый узкий production write path только для операции с
 доказанными capability, range/semantics и privilege boundary.
@@ -109,7 +153,7 @@ selection на реальном hardware.
 **Risks/dependencies:** unsafe guessed ranges, firmware-latched behavior,
 privilege escalation, conflict с asusd/system policy.
 
-## Milestone 5 — Persistence and automation semantics
+## Milestone 6 — Persistence and automation semantics
 
 **Goal:** определить, что является user intent, confirmed hardware state и
 pending state; подключить versioned config без ложного applied state.
@@ -131,7 +175,7 @@ authoritative state model.
 **Risks/dependencies:** stale config после backend/hardware change, automation
 conflicts, resume lifecycle.
 
-## Milestone 6 — Error/status UX and diagnostics
+## Milestone 7 — Error/status UX and diagnostics
 
 **Goal:** сделать degraded/unknown/read-only state понятным без обращения к
 логам.
@@ -149,7 +193,7 @@ conflicts, resume lifecycle.
 **Risks/dependencies:** утечка hardware identifiers, слишком общие errors,
 расхождение GUI и CLI semantics.
 
-## Milestone 7 — Packaging and installation maturity
+## Milestone 8 — Packaging and installation maturity
 
 **Goal:** перейти от validated Nix development package к устойчивой установке и
 обновлению.
@@ -167,7 +211,7 @@ conflicts, resume lifecycle.
 **Risks/dependencies:** user-session target lifecycle, package/backend version
 compatibility, duplicated service ownership.
 
-## Milestone 8 — Broader hardware support
+## Milestone 9 — Broader hardware support
 
 **Goal:** расширять support по evidence-driven device profiles, не по общим ASUS
 предположениям.

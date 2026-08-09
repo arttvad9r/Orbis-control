@@ -16,9 +16,11 @@ UPower → orbis-sessiond → session D-Bus → orbis-session-client
 ```
 
 Этот slice протестирован и live-validated как Nix-installed systemd user
-service с `Type=dbus` и clean SIGTERM shutdown. Интерактивный GUI пока использует
-`MockProvider`; production session client к UI ещё не подключён. Hardware
-mutations не реализованы.
+service с `Type=dbus` и clean SIGTERM shutdown. Production GUI подключён к
+этому пути через `orbis-session-client` для Battery Charge Limit и
+live-validated (daemon absent → Unavailable без mock fallback; daemon present →
+Ready со значением, совпадающим с authoritative D-Bus baseline). Performance/
+GPU в GUI пока используют `MockProvider`. Hardware mutations не реализованы.
 
 Точный статус по областям: [`docs/current-state.md`](docs/current-state.md).
 
@@ -27,8 +29,8 @@ mutations не реализованы.
 ```text
 Slint UI → sequential worker → AppService → provider traits
                                       |
-                                      +→ mock (текущий UI)
-                                      +→ session client → sessiond → UPower
+                                      +→ MockProvider (Performance/GPU)
+                                      +→ session client → sessiond → UPower (Battery)
 ```
 
 - Backend state обновляется только из authoritative reads/read-back.

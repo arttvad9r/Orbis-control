@@ -21,9 +21,12 @@
 UPower → orbis-sessiond → Session1 D-Bus → orbis-session-client
 ```
 
-Он протестирован и live-validated как Nix-installed systemd user service. GUI
-пока использует `MockProvider`; production session client к нему не подключён.
-Production hardware mutations отсутствуют.
+Daemon vertical slice протестирован и live-validated как Nix-installed systemd
+user service. Production GUI **подключён** к этому пути через
+`orbis-session-client` и **LIVE-VALIDATED** (Scenario A: daemon absent →
+Unavailable без mock fallback; Scenario B: daemon present → Ready со значением,
+совпадающим с authoritative D-Bus baseline). Production hardware mutations
+отсутствуют.
 
 ## Major areas
 
@@ -35,7 +38,7 @@ Production hardware mutations отсутствуют.
 | Provider contracts | IMPLEMENTED | Traits и error model существуют |
 | Broad provider implementation | MOCK-ONLY | `MockProvider` покрывает UI/application scenarios |
 | Application layer | IMPLEMENTED | Performance/GPU/Battery commands + authoritative read-back |
-| UI | MOCK-ONLY | Slint main window + sequential worker; interactive backend — mock |
+| UI | PARTIAL | Slint main window + sequential worker; interactive Battery — real session client (LIVE-VALIDATED), Performance/GPU — mock |
 | Session protocol | IMPLEMENTED | Getter-only `Session1.ChargeLimit`, `(bbybyyy)` |
 | Session client | IMPLEMENTED | Fresh D-Bus Get, validation, read-only `BatteryProvider` |
 | sessiond | LIVE-VALIDATED | Discovery, UPower read, server, runtime, signals, Nix user service |
@@ -45,45 +48,91 @@ Production hardware mutations отсутствуют.
 
 ## Battery Charge Limit
 
-### IMPLEMENTED
+### IMPLEMENTED / LIVE-VALIDATED
 
-- Slint Battery section и slider существуют.
-- UI commands проходят через общий sequential async worker.
-- Соседние queued `SetChargeLimit` coalesce-ятся last-wins; Performance/GPU
-  команды разделяют группы.
-- `AppService` выполняет provider command и обязательный authoritative read-back.
-- Domain model:
-  `ChargeLimit { enabled, percent: Option<Percent>, bounds: Option<ChargeLimitBounds> }`.
-- `bounds=None` поддержан end-to-end и означает UNKNOWN hardware constraints.
-- Session wire signature: `(bbybyyy)` с canonical absent values.
-- Session client валидирует untrusted wire payload и не использует property cache.
+Production GUI composition (split worker, один sequential loop):
+
+- Performance/GPU → `MockProvider` (`main_service`);
+- Battery → `SessionChargeLimitProvider` через
+  `ZbusSessionChargeLimitSource` (`battery_service`);
+- `run_worker<M, B, F>` принимает независимые `main_service` и
+  `battery_service`; один provider не обязан реализовывать все три traits;
+- FIFO/barriers/Battery adjacent coalescing сохранены.
+
+UI Battery state semantics:
+
+- `ChargeLimitState { Loading, Ready, Unavailable }` — честное
+  availability/readiness состояние, отдельное от `charge_limit_enabled`;
+- initial interactive state = Loading; ровно один authoritative
+  `RefreshChargeLimit` при startup через `battery_service.charge_limit()`;
+- daemon absent → session-client error → Unavailable **без mock fallback**;
+- daemon present → Ready с фактическим значением из sessiond;
+- `charge_limit_writable=false` для production session backend; mutation
+  control disabled; `charge_limit_enabled` остаётся hardware state и не
+  используется как writability.
+
+Domain model:
+
+```text
+ChargeLimit { enabled, percent: Option<Percent>, bounds: Option<ChargeLimitBounds> }
+```
+
+- `bounds=None` поддержан end-to-end и означает UNKNOWN hardware constraints;
+- Session wire signature: `(bbybyyy)` с canonical absent values;
+- Session client валидирует untrusted wire payload и не использует property cache;
 - sessiond UPower provider, battery discovery, composition и D-Bus server
-  реализованы.
+  реализованы;
 - UPower provider читает support/enabled/end-threshold через
-  `CacheProperties::No` и возвращает `bounds=None`.
+  `CacheProperties::No` и возвращает `bounds=None`;
 - P2P tests покрывают protocol, service/server, client и composed path без real
   system/session bus.
 
-### LIVE-VALIDATED
+### LIVE-VALIDATED (2026-08-09)
 
-2026-08-09 controlled `nixos-rebuild test` подтвердил:
+Packaged GUI + packaged sessiond (direct binaries, без systemd):
 
-- Nix-installed `orbis-sessiond` запущен через generated systemd user unit;
-- `Type=dbus` readiness и ownership
-  `io.github.orbiscontrol.Session`;
-- raw `ChargeLimit`:
-  `(bbybyyy) false true 80 false 0 0 0`;
-- 80 — observed current threshold на момент validation, не спецификация;
-- `bounds_present=false`, canonical `min/max/step=0`;
-- `systemctl --user stop` привёл к exit status 0, освобождению bus name и
-  отсутствию процесса.
+- Scenario A (daemon absent): user D-Bus name отсутствовал, daemon process
+  отсутствовал; GUI остался жив; Vision MCP подтвердил `Battery backend
+  unavailable`, slider отсутствует, `80%` не отображается; mock Battery
+  fallback отсутствует; Performance/GPU карточки продолжают отображаться.
+- Scenario B (packaged sessiond работает): daemon занял
+  `io.github.orbiscontrol.Session`; RAW authoritative property:
+  `(bbybyyy) false true 80 false 0 0 0` (enabled=false, percent_present=true,
+  observed percent=80, bounds_present=false, min/max/step=0 canonical absent
+  bounds); Vision MCP подтвердил Battery section `80%`, labels `40`/`100`,
+  отсутствие `Battery backend unavailable` → Ready; GUI `80%` совпал с
+  authoritative D-Bus baseline `80`.
+- Read-only/disabled slider доказан **pixel analysis** Palette tokens: active
+  accent `#2DA8F2` отсутствует в Battery slider; track = surface-disabled
+  `#292929`; thumb/labels = text-disabled `#777777`. (Vision-модель ошибочно
+  интерпретировала disabled style как active — disabled/read-only state
+  доказан pixel analysis + production `charge_limit_writable=false`, не
+  интерпретацией Vision.)
+- Loading transition визуально не пойман из-за скорости; startup refresh
+  доказан code/tests и конечными Ready/Unavailable сценариями.
+- Hardware writes отсутствовали.
+
+Семантика observed value:
+
+- `80` — observed live value на момент validation, **НЕ hardware constant**;
+- `bounds_present=false`, canonical `min/max/step=0`; hardware bounds остаются
+  UNKNOWN;
+- `40`/`100` — presentation policy slider labels, не доказанные hardware bounds.
+
+Ранее (контролируемый `nixos-rebuild test`) также подтверждены: systemd user
+unit с `Type=dbus`, ownership bus name, clean SIGTERM → exit status 0, bus name
+released, процесс отсутствует.
 
 ### Gaps
 
-- GUI не использует `orbis-session-client`: интерактивный runtime всё ещё
-  создаёт `MockProvider`.
-- Worker type требует общий provider для Performance/GPU/Battery; безопасная
-  composition/backend selection для mixed real/mock state ещё не выбрана.
+- **Packaging (runtime)**: packaged GUI при live запуске потребовал ручной
+  `LD_LIBRARY_PATH` для runtime/dlopen библиотек (Wayland/xkbcommon/fontconfig/
+  mesa/EGL-related). Точная root cause не выяснялась — требуется отдельный
+  packaging audit; следующий milestone: packaged GUI запускается напрямую без
+  ручного LD_LIBRARY_PATH.
+- **Diagnostics**: GUI не инициализирует tracing subscriber; существующие
+  `tracing::warn!` не попадают в полезный runtime log.
+- Performance/GPU production backends остаются mock (см. ниже).
 - Production `set_charge_limit` и one-shot full charge — **NOT IMPLEMENTED**.
 - asusd write provider — **NOT IMPLEMENTED**.
 - sysfs fallback/write provider — **NOT IMPLEMENTED**.

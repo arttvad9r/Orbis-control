@@ -37,7 +37,7 @@ orbis-providers traits
         |                              |
         v                              v
 MockProvider                    orbis-session-client
-(текущий GUI backend)           (read-only BatteryProvider)
+(Performance/GPU backend)       (read-only BatteryProvider)
                                        |
                                        v
                          session D-Bus Session1
@@ -49,10 +49,12 @@ MockProvider                    orbis-session-client
                          system D-Bus / UPower
 ```
 
-Текущий интерактивный GUI использует `MockProvider`. Реальный read-only путь
-`orbis-session-client → sessiond → UPower` реализован и проверен отдельно, но
-ещё не подключён к GUI. Поэтому схема показывает существующие компоненты и
-направление интеграции, а не заявляет завершённый GUI production path.
+Production interactive GUI: Performance/GPU идут через `MockProvider`
+(`main_service`), Battery — через `orbis-session-client` → sessiond → UPower
+(`battery_service`). Split composition `run_worker<M, B, F>` использует
+независимые сервисы; реальный read-only Battery path подключён к GUI и
+live-validated. Mock сохраняется для Performance/GPU production backend на
+текущем этапе, unit tests и offscreen rendering.
 
 ### Crate boundaries
 
@@ -99,10 +101,12 @@ trait или domain type не означает существование produc
 
 На текущем этапе:
 
-- `MockProvider` реализует широкий набор traits для UI и tests;
+- `MockProvider` реализует широкий набор traits для UI/tests и остаётся
+  production Performance/GPU backend;
 - `UPowerChargeLimitProvider` — реальный read-only Battery provider внутри
   `orbis-sessiond`;
-- `SessionChargeLimitProvider` — read-only Battery provider над session D-Bus;
+- `SessionChargeLimitProvider` — read-only Battery provider над session D-Bus,
+  используется production GUI как `battery_service` (live-validated);
 - runtime capability discovery общего назначения ещё не реализован;
   `orbis-capabilities` в основном собирает reports и читает dated fixtures.
 
