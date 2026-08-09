@@ -181,7 +181,10 @@ choices на этой машине во время validation и не выдаё
 
 **IMPLEMENTED / LIVE-VALIDATED**
 
-- `SupergfxdGpuPowerProvider` + `ZbusSupergfxdGpuPowerSource`;
+- Production contract: `SupergfxdGpuPowerProvider` → `GpuPowerProvider` →
+  `AppService::gpu_power_state()`;
+- provider реализует `Provider` + `GpuPowerProvider` и НЕ реализует legacy
+  `GpuProvider` (нет fake/Unsupported методов requested/mux/access);
 - backend: ready `zbus::Connection` → `org.supergfxctl.Daemon` →
   `/org/supergfxctl/Gfx` → read-only `Power()`;
 - PROVEN enum mapping: 0→Active, 1→Suspended, 2→Off, 3=AsusDisabled→Unknown,
@@ -191,6 +194,19 @@ choices на этой машине во время validation и не выдаё
   read-only PCI `runtime_status=suspended` (не provider contract, только
   consistency evidence);
 - никаких GPU writes/state changes.
+
+### GPU capability architecture
+
+**IMPLEMENTED / ACCEPTED** (ADR 0005)
+
+- independent `GpuPowerProvider` trait существует;
+- `AppService<P>::gpu_power_state()` independent getter существует (вызывает
+  только `provider.power_state()`);
+- power-only provider regression-tested (PowerOnlyProvider без legacy
+  `GpuProvider`);
+- legacy `GpuProvider` не изменён;
+- worker/production GUI GPU mode path пока остаётся на legacy `GpuProvider` /
+  `MockProvider`.
 
 ### GPU application/UI vertical slice
 
@@ -202,9 +218,10 @@ choices на этой машине во время validation и не выдаё
 - Mock tests сохраняют applied state при pending Ultimate/Eco.
 - Production GUI GPU всё ещё использует `MockProvider`.
 - Session1/session-client GPU path не реализован.
-- `AppService::gpu_state()` fail-fast (requested→mux→access→power) блокирует
-  частично-real concepts: при Unsupported requested mode power через aggregate
-  практически недоступен. Это архитектурный gap, не дефект power provider.
+- `AppService::gpu_state()` legacy aggregate остаётся fail-fast
+  (requested→mux→access→power). Это limitation legacy aggregate; он больше не
+  является единственным API для partially available concepts — real power
+  доступен через независимый `gpu_power_state()`.
 - Production GPU mutations отсутствуют.
 
 ### MUX / access

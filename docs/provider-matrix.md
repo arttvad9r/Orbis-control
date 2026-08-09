@@ -163,10 +163,15 @@ production UPower provider возвращает `bounds=None`. Историче�
 | 4 | Cardwire | `Gpu.power_state`, signal `power_state_changed` | read |
 
 Current implemented production read concept: supergfxd `Power()` →
-`SupergfxdGpuPowerProvider` → `GpuPowerState` → **LIVE-VALIDATED**. Mapping:
+`GpuPowerProvider` → `SupergfxdGpuPowerProvider` → `GpuPowerState` →
+**LIVE-VALIDATED** (via `AppService::gpu_power_state()`). Mapping:
 0→Active, 1→Suspended, 2→Off, 3=AsusDisabled→Unknown (conservative, не Off),
 4=Unknown→Unknown, future unknown→Unknown. PCI runtime_status — только
 independent consistency evidence, не provider contract.
+
+Provider ownership (ADR 0005): `SupergfxdGpuPowerProvider` owns ONLY runtime
+power capability; он НЕ является GPU mode / MUX / access provider. One
+backend/provider need not own all GPU concepts.
 
 Не будить dGPU ради телеметрии; устаревшее значение помечать как `Sleeping`/stale.
 

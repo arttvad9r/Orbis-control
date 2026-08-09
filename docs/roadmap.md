@@ -136,20 +136,28 @@ selection на реальном hardware.
    Performance provider — **COMPLETED / LIVE-VALIDATED**
    (`KernelPerformanceProvider`, symbolic kernel `platform_profile` ABI; live
    ignored integration test PASS).
-2. GPU concepts read-only providers — **ACTIVE: evidence/API audit выполнен**;
-   GPU runtime power sub-concept **COMPLETED / LIVE-VALIDATED**
-   (`SupergfxdGpuPowerProvider`, PROVEN supergfxd `Power()` enum; live ignored
-   test PASS). MUX/access НЕ completed.
+2. GPU concepts read-only providers — **ACTIVE**; GPU runtime power sub-concept
+   **COMPLETED / LIVE-VALIDATED**
+   (`SupergfxdGpuPowerProvider` → `GpuPowerProvider`, PROVEN supergfxd `Power()`
+   enum; live ignored test PASS); **GPU partial-state / domain / API decision
+   COMPLETED** (ADR 0005: split capability traits; `GpuPowerProvider` и
+   `AppService::gpu_power_state()` реализованы; `SupergfxdGpuPowerProvider`
+   больше не реализует fake full GPU contract; live validation still PASS).
+   MUX/access НЕ completed.
 3. fan/other proven ASUS reads — pending.
 4. telemetry только по доказанным источникам — pending.
 
-Следующий active architectural step в GPU-направлении:
+Следующий active substep в GPU-направлении:
 
-**GPU partial-state / domain / API decision** — решить fail-fast limitation
-`AppService::gpu_state()` (requested→mux→access→power), позволить GPU concepts
-быть independently available без fake `GpuMode` ради real power, подготовить
-independent MUX/access/pending providers. После architecture decision:
-evidence completion MUX/access; minimal provider только после proven mapping.
+**MUX/access evidence completion** (evidence-first):
+
+1. найти authoritative semantics для `gpu_mux_mode` / `dgpu_disable`;
+2. решить exact mapping в существующие `GpuMuxState` / `GpuAccessPolicy`;
+3. только после PROVEN mapping вводить independent capability trait/provider;
+4. никаких product `GpuMode` mappings из этого автоматически не выводить.
+
+Pending остаётся: MUX provider; access provider; pending/action provider;
+Session1 exposure; real GUI GPU integration; mutation.
 
 **Definition of done:**
 

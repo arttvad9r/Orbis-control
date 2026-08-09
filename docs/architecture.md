@@ -200,6 +200,30 @@ MUX state не подтверждён после необходимого reboot
 physical MUX. Raw numeric enum semantics конкретного ASUS backend остаётся
 UNKNOWN без versioned evidence и mapping tests (ADR 0003).
 
+### GPU capability boundary
+
+GPU backend capabilities выражаются независимыми concept-specific provider
+traits: provider реализует только те capabilities, которыми реально владеет,
+и не обязан предоставлять полную GPU product model (ADR 0005).
+
+- `GpuPowerProvider` — первый production example
+  (`SupergfxdGpuPowerProvider` реализует только runtime power capability);
+- legacy `GpuProvider` пока существует для full product-mode / mutation /
+  aggregate path;
+- application может выставлять independent reads (например,
+  `AppService::gpu_power_state()`);
+- hardware backend не обязан быть источником всех GPU concepts.
+
+Сохраняется формула:
+
+```text
+physical MUX
+!= dGPU access policy
+!= runtime power
+!= requested/product mode
+!= pending/action requirement
+```
+
 ## 9. Writes
 
 Наличие read path, writable property в introspection или mode `0644` не доказывает
@@ -224,5 +248,7 @@ asusd/sysfs writes.
 - [ADR 0003](adr/0003-gpu-provider-strategy.md) — независимые GPU concepts.
 - [ADR 0004](adr/0004-authoritative-read-only-session.md) — authoritative
   read-only session contract.
+- [ADR 0005](adr/0005-split-gpu-provider-capabilities.md) — split GPU provider
+  capabilities по hardware concepts.
 - [`research-report.md`](research-report.md) и hardware fixtures — dated evidence,
   не current implementation status.
