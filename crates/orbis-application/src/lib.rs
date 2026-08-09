@@ -23,7 +23,8 @@ use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
-    BatteryProvider, GpuPowerProvider, GpuProvider, PerformanceProvider,
+    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, GpuProvider,
+    PerformanceProvider,
 };
 
 /// Authoritative состояние Performance Mode.
@@ -291,6 +292,34 @@ where
     }
 }
 
+impl<P> AppService<P>
+where
+    P: GpuMuxProvider + Send + Sync,
+{
+    /// Прочитать authoritative physical MUX state.
+    ///
+    /// Вызывает только `GpuMuxProvider::mux_state()`; не строит `GpuState`.
+    /// `ProviderError` сохраняется без преобразования и не подменяется
+    /// `Unknown`.
+    pub async fn gpu_mux_state(&self) -> Result<GpuMuxState, ProviderError> {
+        self.provider.mux_state().await
+    }
+}
+
+impl<P> AppService<P>
+where
+    P: GpuAccessProvider + Send + Sync,
+{
+    /// Прочитать authoritative dGPU access policy.
+    ///
+    /// Вызывает только `GpuAccessProvider::access_policy()`; не строит
+    /// `GpuState`. `ProviderError` сохраняется без преобразования и не
+    /// подменяется `Unknown`.
+    pub async fn gpu_access_policy(&self) -> Result<GpuAccessPolicy, ProviderError> {
+        self.provider.access_policy().await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -308,8 +337,8 @@ mod tests {
     use orbis_providers::error::{ProviderError, ValidationResult};
     use orbis_providers::mock::{MockErrorMode, MockProvider};
     use orbis_providers::traits::{
-        BatteryProvider, GpuPowerProvider, GpuProvider, PerformanceProvider, Provider,
-        ProviderHealth,
+        BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, GpuProvider,
+        PerformanceProvider, Provider, ProviderHealth,
     };
     use orbis_test_support::devices::build_state_arc;
 
@@ -1108,5 +1137,82 @@ mod tests {
 
         let err = svc.gpu_power_state().await.expect_err("power error");
         assert!(matches!(err, ProviderError::BackendUnavailable(_)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Independent MUX/access capabilities (GpuMuxProvider / GpuAccessProvider)
+    // -----------------------------------------------------------------------
+
+    /// Тестовый provider ТОЛЬКО для MUX+access capabilities: реализует
+    /// `Provider + GpuMuxProvider + GpuAccessProvider` и НЕ реализует legacy
+    /// `GpuProvider`. Это доказывает независимость MUX/access от product mode.
+    struct MuxAccessOnlyProvider {
+        mux: GpuMuxState,
+        access: GpuAccessPolicy,
+    }
+
+    impl MuxAccessOnlyProvider {
+        fn new(mux: GpuMuxState, access: GpuAccessPolicy) -> Self {
+            Self { mux, access }
+        }
+    }
+
+    impl Provider for MuxAccessOnlyProvider {
+        fn id(&self) -> &'static str {
+            "mux-access-only"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("mux-access-only")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("mux-access-only: {feature} недоступен")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl GpuMuxProvider for MuxAccessOnlyProvider {
+        async fn mux_state(&self) -> Result<GpuMuxState, ProviderError> {
+            Ok(self.mux)
+        }
+    }
+
+    #[async_trait]
+    impl GpuAccessProvider for MuxAccessOnlyProvider {
+        async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError> {
+            Ok(self.access)
+        }
+    }
+
+    #[tokio::test]
+    async fn mux_access_capabilities_work_without_gpu_provider() {
+        let provider = Arc::new(MuxAccessOnlyProvider::new(
+            GpuMuxState::Discrete,
+            GpuAccessPolicy::Blocked,
+        ));
+        let svc = AppService::new(provider);
+
+        // Только MUX/access: не требуется requested_mode / power.
+        assert_eq!(
+            svc.gpu_mux_state().await.expect("mux"),
+            GpuMuxState::Discrete
+        );
+        assert_eq!(
+            svc.gpu_access_policy().await.expect("access"),
+            GpuAccessPolicy::Blocked
+        );
     }
 }

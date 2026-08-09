@@ -28,9 +28,9 @@ use orbis_core::telemetry::Telemetry;
 use crate::error::{OperationId, ProviderError, ValidationResult};
 use crate::traits::{
     AnimeProvider, AutomationProvider, BatteryProvider, DisplayProvider, FanProvider,
-    FirmwareUpdate, FirmwareUpdateProvider, GpuPowerProvider, GpuProvider, HotkeyProvider,
-    LightingProvider, PerformanceProvider, PowerLimitProvider, Provider, ProviderHealth,
-    TelemetryProvider,
+    FirmwareUpdate, FirmwareUpdateProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
+    GpuProvider, HotkeyProvider, LightingProvider, PerformanceProvider, PowerLimitProvider,
+    Provider, ProviderHealth, TelemetryProvider,
 };
 
 /// Способ имитации ошибки в mock-режиме.
@@ -598,6 +598,22 @@ impl GpuPowerProvider for MockProvider {
     async fn power_state(&self) -> Result<GpuPowerState, ProviderError> {
         // Делегирование существующему mock GPU power state; дублирования нет.
         self.read(|s| Ok(s.gpu_power_state)).await
+    }
+}
+
+#[async_trait]
+impl GpuMuxProvider for MockProvider {
+    async fn mux_state(&self) -> Result<GpuMuxState, ProviderError> {
+        // Делегирование существующему mock MUX state; дублирования нет.
+        self.read(|s| Ok(s.mux)).await
+    }
+}
+
+#[async_trait]
+impl GpuAccessProvider for MockProvider {
+    async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError> {
+        // Делегирование существующему mock access state; дублирования нет.
+        self.read(|s| Ok(s.access_policy)).await
     }
 }
 

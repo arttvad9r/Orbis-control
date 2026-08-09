@@ -22,6 +22,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod armoury;
 pub mod bootstrap;
 pub mod composition;
 pub mod discovery;

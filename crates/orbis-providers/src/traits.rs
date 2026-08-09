@@ -184,6 +184,26 @@ pub trait GpuPowerProvider: Provider {
     async fn power_state(&self) -> Result<GpuPowerState, ProviderError>;
 }
 
+/// Read-only physical MUX capability (отдельный GPU concept, ADR 0003/0005).
+///
+/// Провайдер реализует только MUX; не обязан предоставлять product mode,
+/// access policy или runtime power.
+#[async_trait]
+pub trait GpuMuxProvider: Provider {
+    /// Физическое состояние MUX (какой GPU обслуживает внутренний дисплей).
+    async fn mux_state(&self) -> Result<GpuMuxState, ProviderError>;
+}
+
+/// Read-only dGPU access policy capability (отдельный GPU concept, ADR 0003/0005).
+///
+/// Провайдер реализует только access; не обязан предоставлять product mode,
+/// MUX или runtime power.
+#[async_trait]
+pub trait GpuAccessProvider: Provider {
+    /// Политика доступа приложений к dGPU.
+    async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError>;
+}
+
 /// Дисплей.
 #[async_trait]
 pub trait DisplayProvider: Provider {
