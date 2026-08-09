@@ -25,13 +25,25 @@ use orbis_core::identity::BackendIdentity;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{GpuAccessProvider, GpuMuxProvider, Provider, ProviderHealth};
 
-/// Raw snapshot kernel ASUS Armoury current values (независим от domain).
+/// Результат чтения одного Armoury attribute.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArmouryRawValue {
+    /// Атрибут присутствует и прочитан (raw u32).
+    Present(u32),
+    /// Атрибут отсутствует: capability не предоставляется на этой машине.
+    Absent,
+}
+
+/// Raw snapshot kernel ASUS Armoury current values (независим от domain).
+///
+/// Каждый attribute хранит свой результат: отсутствие одного не должно
+/// блокировать чтение другого.
+#[derive(Debug)]
 pub struct ArmouryGpuSnapshot {
-    /// Текущее значение `gpu_mux_mode` (0/1).
-    pub mux_mode_raw: Option<u32>,
-    /// Текущее значение `dgpu_disable` (0/1).
-    pub dgpu_disable_raw: Option<u32>,
+    /// Результат чтения `gpu_mux_mode`.
+    pub mux_mode_raw: Result<ArmouryRawValue, ProviderError>,
+    /// Результат чтения `dgpu_disable`.
+    pub dgpu_disable_raw: Result<ArmouryRawValue, ProviderError>,
 }
 
 /// Testable источник kernel ASUS Armoury current values.
@@ -77,25 +89,34 @@ impl Default for SysfsArmouryGpuSource {
 impl SysfsArmouryGpuSource {
     /// Прочитать один файл, trim, распарсить u32.
     ///
-    /// Отсутствие файла → `None` (capability может отсутствовать на других
-    /// системах); malformed содержимое → `Internal`; I/O ошибка → `Io`.
-    fn read_u32(path: &std::path::Path) -> Result<Option<u32>, ProviderError> {
+    /// Отсутствие файла → `Absent` (capability не предоставляется на этой
+    /// машине → Unsupported на provider-уровне); пустое/malformed содержимое →
+    /// `Internal`; прочие I/O ошибки → `Io`.
+    fn read_raw(path: &std::path::Path) -> Result<ArmouryRawValue, ProviderError> {
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ArmouryRawValue::Absent);
+            }
             Err(e) => return Err(ProviderError::Io(e)),
         };
         let trimmed = content.trim();
         if trimmed.is_empty() {
-            return Ok(None);
-        }
-        trimmed.parse::<u32>().map(Some).map_err(|_| {
-            ProviderError::Internal(format!(
-                "kernel asus-armoury: невалидное значение '{}' в '{}'",
-                trimmed,
+            return Err(ProviderError::Internal(format!(
+                "kernel asus-armoury: пустой файл '{}'",
                 path.display()
-            ))
-        })
+            )));
+        }
+        trimmed
+            .parse::<u32>()
+            .map(ArmouryRawValue::Present)
+            .map_err(|_| {
+                ProviderError::Internal(format!(
+                    "kernel asus-armoury: невалидное значение '{}' в '{}'",
+                    trimmed,
+                    path.display()
+                ))
+            })
     }
 }
 
@@ -104,9 +125,11 @@ impl ArmouryGpuSource for SysfsArmouryGpuSource {
     async fn read_snapshot(&self) -> Result<ArmouryGpuSnapshot, ProviderError> {
         // Простое read-only чтение маленьких файлов выполняется синхронно в
         // async context: операции tiny и не блокируют runtime заметно.
+        // Каждый attribute читается независимо; отсутствие одного не мешает
+        // другому.
         Ok(ArmouryGpuSnapshot {
-            mux_mode_raw: Self::read_u32(&self.mux_path)?,
-            dgpu_disable_raw: Self::read_u32(&self.dgpu_path)?,
+            mux_mode_raw: Self::read_raw(&self.mux_path),
+            dgpu_disable_raw: Self::read_raw(&self.dgpu_path),
         })
     }
 }
@@ -185,10 +208,14 @@ where
 {
     async fn mux_state(&self) -> Result<GpuMuxState, ProviderError> {
         let snapshot = self.source.read_snapshot().await?;
-        Ok(snapshot
-            .mux_mode_raw
-            .map(mux_from_raw)
-            .unwrap_or(GpuMuxState::Unknown))
+        match snapshot.mux_mode_raw {
+            Ok(ArmouryRawValue::Present(raw)) => Ok(mux_from_raw(raw)),
+            // Attribute отсутствует: capability не предоставляется на этой машине.
+            Ok(ArmouryRawValue::Absent) => Err(ProviderError::Unsupported(
+                "kernel asus-armoury: gpu_mux_mode attribute отсутствует".into(),
+            )),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -199,10 +226,14 @@ where
 {
     async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError> {
         let snapshot = self.source.read_snapshot().await?;
-        Ok(snapshot
-            .dgpu_disable_raw
-            .map(access_from_raw)
-            .unwrap_or(GpuAccessPolicy::Unknown))
+        match snapshot.dgpu_disable_raw {
+            Ok(ArmouryRawValue::Present(raw)) => Ok(access_from_raw(raw)),
+            // Attribute отсутствует: capability не предоставляется на этой машине.
+            Ok(ArmouryRawValue::Absent) => Err(ProviderError::Unsupported(
+                "kernel asus-armoury: dgpu_disable attribute отсутствует".into(),
+            )),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -245,8 +276,12 @@ mod tests {
 
     fn snapshot(mux: Option<u32>, dgpu: Option<u32>) -> ArmouryGpuSnapshot {
         ArmouryGpuSnapshot {
-            mux_mode_raw: mux,
-            dgpu_disable_raw: dgpu,
+            mux_mode_raw: Ok(mux
+                .map(ArmouryRawValue::Present)
+                .unwrap_or(ArmouryRawValue::Absent)),
+            dgpu_disable_raw: Ok(dgpu
+                .map(ArmouryRawValue::Present)
+                .unwrap_or(ArmouryRawValue::Absent)),
         }
     }
 
@@ -296,13 +331,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_file_is_unknown() {
+    async fn missing_file_is_unsupported() {
         let p = provider(vec![Ok(snapshot(None, None)), Ok(snapshot(None, None))]);
-        assert_eq!(p.mux_state().await.expect("mux"), GpuMuxState::Unknown);
-        assert_eq!(
-            p.access_policy().await.expect("access"),
-            GpuAccessPolicy::Unknown
-        );
+        assert!(matches!(
+            p.mux_state().await.expect_err("mux absent"),
+            ProviderError::Unsupported(_)
+        ));
+        assert!(matches!(
+            p.access_policy().await.expect_err("access absent"),
+            ProviderError::Unsupported(_)
+        ));
     }
 
     #[tokio::test]
