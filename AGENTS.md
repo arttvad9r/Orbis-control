@@ -83,7 +83,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 git diff --check
 ```
 
-- Run the narrow test target of the changed crate first, then workspace checks.
+- For small single-crate changes prefer targeted verification
+  (`cargo check -p <crate>`, narrow test target); run the full workspace
+  pipeline for multi-crate changes, before commit/release, or when the user
+  asks for it.
+- For docs-only changes, use `git diff --check` plus the relevant Markdown/link
+  validation; do not run the Cargo pipeline without a concrete reason.
 - Integration tests that can deadlock during handshake must use a bounded
   timeout; the timeout is not a substitute for correct lifecycle handling.
 - Do not use `sleep`, polling or retry to mask races or deadlocks.
@@ -129,5 +134,5 @@ bus bootstrap, and migration or dependency-resolution issues.
 ## Skills
 
 Project-specific procedures live in `.opencode/skills/`:
-`orbis-rust-change`, `orbis-slint-ui`, `orbis-hardware-safety`,
-`orbis-verification`. Load the relevant skill before starting work.
+`orbis-slint-ui` and `orbis-hardware-safety`. Load one only when the task
+matches its scope; ordinary Rust work follows this file directly.
