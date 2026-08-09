@@ -29,4 +29,5 @@ pub mod performance;
 pub mod runtime;
 pub mod server;
 pub mod service;
+pub mod supergfxd;
 pub mod upower;
