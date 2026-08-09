@@ -23,7 +23,34 @@ rustPlatform.buildRustPackage {
   pname = "orbis-control";
   version = "0.1.0";
 
-  src = lib.cleanSource ../..;
+  # Source filter: только реальные build/test inputs для Rust-пакета, чтобы
+  # docs/README и прочие файлы не инвалидировали derivation.
+  #
+  # Включены (проверено):
+  # - Cargo.toml, Cargo.lock
+  # - crates/** (Rust source + build.rs)
+  # - ui/** (Slint sources; orbis-ui/build.rs компилирует ui/app-window.slint)
+  # - tests/** (fixtures/dbus читаются тестами при doCheck)
+  # - clippy.toml, rustfmt.toml (конфиги проверок пакета)
+  #
+  # Исключены: docs/**, README.md, data/**, packaging/**, tools/**,
+  # flake.nix, flake.lock, LICENSE, .github/**, .opencode/**, deny.toml
+  # и прочее, не используемое сборкой.
+  src = lib.cleanSourceWith {
+    src = lib.cleanSource ../..;
+    filter = path: type:
+      let
+        root = toString ../..;
+        rel =
+          if lib.hasPrefix (root + "/") (toString path)
+          then lib.removePrefix (root + "/") (toString path)
+          else "";
+        top = builtins.head (lib.splitString "/" rel);
+      in
+        rel == "" # корень
+        || builtins.elem top [ "crates" "ui" "tests" ]
+        || builtins.elem rel [ "Cargo.toml" "Cargo.lock" "clippy.toml" "rustfmt.toml" ];
+  };
 
   cargoLock = {
     lockFile = ../../Cargo.lock;

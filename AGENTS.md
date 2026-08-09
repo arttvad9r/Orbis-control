@@ -75,26 +75,61 @@ Rust workspace (`resolver = 3`, edition 2024, MSRV 1.85). Crates:
 
 ## Build / check / test commands
 
+Verification tiers: выбирай минимальный tier, который реально покрывает
+изменение. Не ослабляй correctness/security tests — tier выбирается по охвату,
+а не для экономии.
+
+### FAST — default для обычного изменения одного crate
+
 ```bash
 cargo fmt --all -- --check
-cargo check --workspace
+cargo check -p <affected-crate> --all-targets
+cargo test -p <affected-crate>
+cargo clippy -p <affected-crate> --all-targets -- -D warnings
+git diff --check
+```
+
+### INTEGRATION — изменение пересекает несколько crates / service boundaries
+
+```bash
+cargo fmt --all -- --check
+cargo check --workspace --all-targets
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 git diff --check
 ```
 
-- For small single-crate changes prefer targeted verification
-  (`cargo check -p <crate>`, narrow test target); run the full workspace
-  pipeline for multi-crate changes, before commit/release, or when the user
-  asks for it.
-- For docs-only changes, use `git diff --check` plus the relevant Markdown/link
-  validation; do not run the Cargo pipeline without a concrete reason.
-- Integration tests that can deadlock during handshake must use a bounded
-  timeout; the timeout is not a substitute for correct lifecycle handling.
-- Do not use `sleep`, polling or retry to mask races or deadlocks.
-- When cache semantics matter, verify fresh authoritative reads with at least
-  two sequential differing values. Assert the error class, not only that an
-  error occurred. Assert call counts/order when short-circuit matters.
+### FULL — только для milestone/release acceptance, Nix/package/module изменений,
+перед контролируемой live hardware mutation, или когда task явно требует
+
+INTEGRATION + (при необходимости) тяжёлые Nix commands:
+
+```bash
+nix build .#orbis-control --max-jobs 1 --cores 4
+nix flake check --max-jobs 1 --cores 4
+```
+
+### Docs-only
+
+```bash
+git diff --check
+# + релевантный rg по затронутым docs
+```
+
+Никаких cargo/nix checks без отдельной причины.
+
+### Notes
+
+- Для тяжёлых Nix commands всегда использовать `--max-jobs 1 --cores 4`
+  (предотвращает OOM / SIGKILL 137 на рабочих машинах).
+- Интеграционные тесты, которые могут deadlock во время handshake, обязаны
+  использовать bounded timeout; timeout не заменяет корректную обработку
+  lifecycle.
+- Не используй `sleep`, polling или retry для маскировки races/deadlocks.
+- Когда важна cache semantics, проверяй свежие authoritative reads минимум
+  двумя последовательными различающимися значениями. Ассертируй класс
+  ошибки, не только факт ошибки. Ассертируй счётчики/порядок вызовов, если
+  short-circuit важен.
 
 ## Git policy
 
