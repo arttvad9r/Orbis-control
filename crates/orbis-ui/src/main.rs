@@ -31,8 +31,8 @@ use orbis_providers::error::ProviderError;
 use orbis_providers::mock::MockProvider;
 use orbis_session_client::{
     SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
-    SessionGpuPowerProvider, SessionPerformanceProvider, ZbusSessionChargeLimitSource,
-    ZbusSessionGpuSource, ZbusSessionPerformanceSource,
+    SessionGpuPowerProvider, SessionHardwarePerformanceProvider, ZbusHardwarePerformanceSource,
+    ZbusSessionChargeLimitSource, ZbusSessionGpuSource, ZbusSessionPerformanceSource,
 };
 use orbis_test_support::devices::build_state_arc;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker};
@@ -889,9 +889,9 @@ fn main() -> anyhow::Result<()> {
     // Loading; первый RefreshPerformance переведёт в Ready/Unavailable.
     state.perf_state = controller::PerformanceHwState::Loading;
 
-    // Production Performance backend — read-only session client
-    // (SessionPerformanceProvider возвращает Unsupported для set_profile):
-    // mutation control не должен выглядеть рабочим; кнопки read-only.
+    // Production Performance mutation остаётся UI-disabled (`perf_writable=false`),
+    // но provider composition разделяет transport boundaries: Session1 для
+    // authoritative reads и direct Hardware1 для controlled writes.
     state.perf_writable = false;
 
     // Production product GPU Mode: реального backend нет (read-only hardware
@@ -914,6 +914,9 @@ fn main() -> anyhow::Result<()> {
     let session_connection = runtime
         .block_on(zbus::Connection::session())
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к session bus: {e}"))?;
+    let system_connection = runtime
+        .block_on(zbus::Connection::system())
+        .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
     let battery_source = ZbusSessionChargeLimitSource::new(session_connection.clone());
     let battery_provider = SessionChargeLimitProvider::new(battery_source);
     let battery_service = AppService::new(Arc::new(battery_provider));
@@ -930,10 +933,12 @@ fn main() -> anyhow::Result<()> {
         ZbusSessionGpuSource::new(session_connection.clone()),
     )));
 
-    // Read-only Performance Mode через тот же session connection
-    // (отдельный real read service; НЕ main MockProvider).
-    let performance_service = AppService::new(Arc::new(SessionPerformanceProvider::new(
+    // Composed Performance provider: reads через Session1, mutation напрямую
+    // через Hardware1 с connection этого application process. UI capability
+    // остаётся disabled выше (`perf_writable=false`) до отдельного UI decision.
+    let performance_service = AppService::new(Arc::new(SessionHardwarePerformanceProvider::new(
         ZbusSessionPerformanceSource::new(session_connection),
+        ZbusHardwarePerformanceSource::new(system_connection),
     )));
 
     let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();

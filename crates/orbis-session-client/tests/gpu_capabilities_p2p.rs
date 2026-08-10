@@ -178,7 +178,7 @@ async fn connect_pair()
         })),
     };
     let (server_conn, client_conn) = tokio::try_join!(
-        build_session_server(server_builder, battery, gpu, None, None),
+        build_session_server(server_builder, battery, gpu, None),
         client_builder.build()
     )?;
     Ok((server_conn, client_conn))

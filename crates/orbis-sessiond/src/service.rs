@@ -1,9 +1,8 @@
 //! D-Bus service object для session интерфейса.
 //!
 //! Серверная сторона интерфейса `io.github.orbiscontrol.Session1`: read-only
-//! properties (`ChargeLimit`, GPU capabilities, `Performance`) + единственный
-//! mutation-метод `SetPerformance`, делегирующий в system-bus hardwared
-//! (`Hardware1`). Этот модуль только определяет service object и
+//! properties (`ChargeLimit`, GPU capabilities, `Performance`). Этот модуль
+//! только определяет service object и
 //! domain-to-wire conversion; он не создаёт Connection, ObjectServer, runtime и
 //! не регистрирует bus name — bus bootstrap выполняется отдельным микрошагом.
 
@@ -18,13 +17,10 @@ use orbis_providers::traits::{
 };
 use orbis_session_protocol::{ChargeLimitInfo, gpu_access, gpu_mux, gpu_power, performance};
 
-use crate::hardwared::HardwarePerformanceClient;
-
 /// Service object session интерфейса.
 ///
 /// Владеет независимыми capability providers: battery + опциональные GPU
-/// capabilities (power / MUX / access) + опциональный Performance Mode +
-/// опциональный hardware Performance client (system-bus Hardwared1).
+/// capabilities (power / MUX / access) + опциональный Performance Mode.
 /// Провайдеры передаются извне. Конструктор не выполняет I/O, не читает
 /// состояние, не открывает D-Bus и не создаёт runtime; кэш/last error/mutable
 /// state отсутствуют.
@@ -34,7 +30,6 @@ pub struct SessionService {
     gpu_mux: Option<Arc<dyn GpuMuxProvider>>,
     gpu_access: Option<Arc<dyn GpuAccessProvider>>,
     performance: Option<Arc<dyn PerformanceProvider>>,
-    hardware: Option<Arc<dyn HardwarePerformanceClient>>,
 }
 
 impl SessionService {
@@ -46,7 +41,6 @@ impl SessionService {
             gpu_mux: None,
             gpu_access: None,
             performance: None,
-            hardware: None,
         }
     }
 
@@ -71,12 +65,6 @@ impl SessionService {
     /// Добавить read-only Performance Mode capability provider.
     pub fn with_performance(mut self, provider: Arc<dyn PerformanceProvider>) -> Self {
         self.performance = Some(provider);
-        self
-    }
-
-    /// Добавить hardware Performance client (system-bus Hardwared1).
-    pub fn with_hardware(mut self, client: Arc<dyn HardwarePerformanceClient>) -> Self {
-        self.hardware = Some(client);
         self
     }
 
@@ -298,44 +286,6 @@ impl SessionService {
             performance_current_to_wire(current),
             performance_mask_to_wire(&available),
         ))
-    }
-
-    /// Установить Performance profile (mutation method, wire `y`).
-    ///
-    /// 1. strict decode requested wire (0/1/2; unknown → InvalidArgs);
-    /// 2. вызвать Hardware1 `SetPerformanceProfile`;
-    /// 3. проверить confirmed wire;
-    /// 4. success только если confirmed == requested; mismatch → error;
-    /// 5. никаких optimistic state updates.
-    async fn set_performance(&self, raw: u8) -> zbus::fdo::Result<u8> {
-        // 1. strict decode — до любого hardware call.
-        let requested = match raw {
-            performance::SILENT | performance::BALANCED | performance::TURBO => raw,
-            other => {
-                return Err(zbus::fdo::Error::InvalidArgs(format!(
-                    "hardwared: неизвестный performance wire value {other}"
-                )));
-            }
-        };
-
-        // 2. hardware client обязателен.
-        let client = self.hardware.as_ref().ok_or_else(|| {
-            zbus::fdo::Error::NotSupported("session: hardware Performance client недоступен".into())
-        })?;
-
-        // 2.5. вызов Hardware1; ошибки честно propagate/map.
-        let confirmed = client
-            .set_performance_profile(requested)
-            .await
-            .map_err(provider_error_to_dbus)?;
-
-        // 3-4. success только при подтверждении requested.
-        if confirmed != requested {
-            return Err(zbus::fdo::Error::Failed(format!(
-                "session: hardwared подтвердил другой profile: requested={requested}, confirmed={confirmed}"
-            )));
-        }
-        Ok(confirmed)
     }
 }
 
@@ -786,28 +736,6 @@ mod tests {
         }))
     }
 
-    struct ScriptedHardware {
-        confirmed: Result<u8, ProviderError>,
-        calls: Arc<AtomicUsize>,
-    }
-
-    #[async_trait]
-    impl HardwarePerformanceClient for ScriptedHardware {
-        async fn set_performance_profile(&self, _profile: u8) -> Result<u8, ProviderError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            match &self.confirmed {
-                Ok(value) => Ok(*value),
-                Err(ProviderError::Unsupported(message)) => {
-                    Err(ProviderError::Unsupported(message.clone()))
-                }
-                Err(ProviderError::PermissionDenied(message)) => {
-                    Err(ProviderError::PermissionDenied(message.clone()))
-                }
-                Err(error) => Err(ProviderError::Internal(error.to_string())),
-            }
-        }
-    }
-
     #[test]
     fn maps_domain_performance_to_wire() {
         assert_eq!(
@@ -851,41 +779,5 @@ mod tests {
             svc.performance().await,
             Err(zbus::fdo::Error::NotSupported(_))
         ));
-    }
-
-    #[tokio::test]
-    async fn performance_mutation_strictly_decodes_and_confirms() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let svc = performance_service().with_hardware(Arc::new(ScriptedHardware {
-            confirmed: Ok(performance::TURBO),
-            calls: calls.clone(),
-        }));
-
-        assert!(matches!(
-            svc.set_performance(9).await,
-            Err(zbus::fdo::Error::InvalidArgs(_))
-        ));
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-
-        assert_eq!(
-            svc.set_performance(performance::TURBO).await.expect("set"),
-            2
-        );
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn performance_mutation_rejects_mismatched_confirmation() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let svc = performance_service().with_hardware(Arc::new(ScriptedHardware {
-            confirmed: Ok(performance::SILENT),
-            calls: calls.clone(),
-        }));
-
-        assert!(matches!(
-            svc.set_performance(performance::TURBO).await,
-            Err(zbus::fdo::Error::Failed(_))
-        ));
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }

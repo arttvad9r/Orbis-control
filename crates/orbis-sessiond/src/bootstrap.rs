@@ -44,7 +44,6 @@ pub async fn connect_upower_session_server(
         battery_object_path,
         GpuCapabilities::default(),
         None,
-        None,
     )
     .await
 }
@@ -91,18 +90,12 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
         KernelPerformanceProvider::new(SysfsKernelPlatformProfileSource::default()),
     );
 
-    // System-bus hardwared Performance client (тот же system connection).
-    let hardware: Arc<dyn crate::hardwared::HardwarePerformanceClient> = Arc::new(
-        crate::hardwared::ZbusHardwarePerformanceClient::new(upower_connection.clone()),
-    );
-
     Ok(build_upower_session_server(
         session_builder,
         upower_connection,
         battery_object_path,
         gpu,
         Some(performance),
-        Some(hardware),
     )
     .await?)
 }

@@ -22,6 +22,7 @@ use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::Percent;
 use orbis_core::profile::PerformanceProfile;
+use orbis_hardwared::{DBUS_OBJECT_PATH, Hardware1Proxy};
 use orbis_providers::error::{ProviderError, ValidationResult};
 use orbis_providers::traits::{
     BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
@@ -568,8 +569,12 @@ pub trait SessionPerformanceSource: Send + Sync {
     /// Прочитать authoritative `PerformanceInfo` (wire DTO, без domain
     /// conversion); ошибка не превращается в default.
     async fn read_performance(&self) -> Result<PerformanceInfo, ProviderError>;
+}
 
-    /// Установить Performance profile и вернуть подтверждённый wire value.
+/// Testable direct system-bus source для Performance mutation через Hardware1.
+#[async_trait]
+pub trait HardwarePerformanceSource: Send + Sync {
+    /// Установить profile и вернуть подтверждённый hardware wire value.
     async fn set_performance(&self, profile: u8) -> Result<u8, ProviderError>;
 }
 
@@ -601,15 +606,35 @@ impl SessionPerformanceSource for ZbusSessionPerformanceSource {
             .map_err(zbus_error_to_provider)?;
         proxy.performance().await.map_err(zbus_error_to_provider)
     }
+}
 
+/// Реальный direct system-bus источник Hardware1 для Performance mutation.
+///
+/// Connection создаётся и хранится в application/GUI process; sessiond в этот
+/// путь не входит и sender Hardware1 остаётся исходным caller process.
+pub struct ZbusHardwarePerformanceSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusHardwarePerformanceSource {
+    /// Создать источник над готовой system-bus Connection.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl HardwarePerformanceSource for ZbusHardwarePerformanceSource {
     async fn set_performance(&self, profile: u8) -> Result<u8, ProviderError> {
-        let proxy = Session1Proxy::builder(&self.connection)
+        let proxy = Hardware1Proxy::builder(&self.connection)
+            .path(DBUS_OBJECT_PATH)
+            .expect("valid hardware object path")
             .cache_properties(CacheProperties::No)
             .build()
             .await
             .map_err(zbus_error_to_provider)?;
         proxy
-            .set_performance(profile)
+            .set_performance_profile(profile)
             .await
             .map_err(zbus_error_to_provider)
     }
@@ -617,9 +642,8 @@ impl SessionPerformanceSource for ZbusSessionPerformanceSource {
 
 /// Performance Mode provider над session protocol source.
 ///
-/// `S` — source (реальный zbus или scripted в тестах); source передаётся в
-/// конструкторе, который не выполняет I/O. Mutation-методы возвращают
-/// `set_profile` делегирует подтверждённую mutation в Session1.
+/// `S` — read-only Session1 source (реальный zbus или scripted в тестах).
+/// Mutation-методы этого provider честно возвращают `Unsupported`.
 pub struct SessionPerformanceProvider<S> {
     source: S,
 }
@@ -680,12 +704,98 @@ where
         performance_current_from_wire(info.current)
     }
 
+    async fn set_profile(
+        &self,
+        _profile: PerformanceProfile,
+    ) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "session protocol read-only: set_profile недоступна".into(),
+        ))
+    }
+
+    async fn profile_on_ac(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+        Ok(None)
+    }
+
+    async fn profile_on_battery(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+        Ok(None)
+    }
+
+    fn validate_set_profile(&self, _profile: PerformanceProfile) -> ValidationResult {
+        ValidationResult::invalid("session protocol read-only: запись profile не поддерживается")
+    }
+}
+
+/// Composed Performance provider: authoritative reads через Session1, mutation
+/// напрямую через Hardware1 из application/GUI process.
+pub struct SessionHardwarePerformanceProvider<S, H> {
+    session: S,
+    hardware: H,
+}
+
+impl<S, H> SessionHardwarePerformanceProvider<S, H> {
+    /// Создать composed provider без I/O на construction.
+    pub fn new(session: S, hardware: H) -> Self {
+        Self { session, hardware }
+    }
+}
+
+impl<S, H> Provider for SessionHardwarePerformanceProvider<S, H>
+where
+    S: SessionPerformanceSource,
+    H: HardwarePerformanceSource,
+{
+    fn id(&self) -> &'static str {
+        "session-hardware-performance"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("session-hardware-performance")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("session + hardware Performance backend: функция '{feature}' недоступна")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.session-hardware-performance",
+            "Session1 read + direct Hardware1 Performance backend",
+        )]
+    }
+}
+
+#[async_trait]
+impl<S, H> PerformanceProvider for SessionHardwarePerformanceProvider<S, H>
+where
+    S: SessionPerformanceSource,
+    H: HardwarePerformanceSource,
+{
+    async fn profiles(&self) -> Result<Vec<PerformanceProfile>, ProviderError> {
+        let info = self.session.read_performance().await?;
+        performance_mask_from_wire(info.available_mask)
+    }
+
+    async fn current_profile(&self) -> Result<PerformanceProfile, ProviderError> {
+        let info = self.session.read_performance().await?;
+        performance_current_from_wire(info.current)
+    }
+
     async fn set_profile(&self, profile: PerformanceProfile) -> Result<ApplyResult, ProviderError> {
         let requested = performance_profile_to_wire(profile);
-        let confirmed = self.source.set_performance(requested).await?;
-        if confirmed != requested {
+        let confirmed = self.hardware.set_performance(requested).await?;
+        let confirmed_profile = performance_current_from_wire(confirmed)?;
+        if confirmed_profile != profile {
             return Err(ProviderError::Internal(format!(
-                "session protocol: set_performance подтвердил другой profile: requested={requested}, confirmed={confirmed}"
+                "hardware protocol: подтверждён другой profile: requested={profile:?}, confirmed={confirmed_profile:?}"
             )));
         }
         Ok(ApplyResult::Applied)
@@ -1119,8 +1229,6 @@ mod tests {
     struct ScriptedPerfSource {
         results: Mutex<VecDeque<ScriptedPerfRead>>,
         reads: AtomicUsize,
-        mutation_result: Mutex<Result<u8, &'static str>>,
-        mutations: AtomicUsize,
     }
 
     impl ScriptedPerfSource {
@@ -1128,17 +1236,11 @@ mod tests {
             Self {
                 results: Mutex::new(reads.into()),
                 reads: AtomicUsize::new(0),
-                mutation_result: Mutex::new(Ok(performance::SILENT)),
-                mutations: AtomicUsize::new(0),
             }
         }
 
         fn reads(&self) -> usize {
             self.reads.load(Ordering::SeqCst)
-        }
-
-        fn mutations(&self) -> usize {
-            self.mutations.load(Ordering::SeqCst)
         }
     }
 
@@ -1157,14 +1259,31 @@ mod tests {
                 ScriptedPerfRead::Dbus => Err(ProviderError::Dbus("scripted dbus error".into())),
             }
         }
+    }
 
-        async fn set_performance(&self, profile: u8) -> Result<u8, ProviderError> {
-            self.mutations.fetch_add(1, Ordering::SeqCst);
-            match *self.mutation_result.lock().unwrap() {
-                Ok(confirmed) if confirmed == performance::SILENT => Ok(profile),
-                Ok(confirmed) => Ok(confirmed),
-                Err(_) => Err(ProviderError::Dbus("scripted dbus error".into())),
+    struct ScriptedHardwareSource {
+        result: Mutex<Option<Result<u8, ProviderError>>>,
+        requests: Mutex<Vec<u8>>,
+    }
+
+    impl ScriptedHardwareSource {
+        fn new(result: Result<u8, ProviderError>) -> Self {
+            Self {
+                result: Mutex::new(Some(result)),
+                requests: Mutex::new(Vec::new()),
             }
+        }
+    }
+
+    #[async_trait]
+    impl HardwarePerformanceSource for ScriptedHardwareSource {
+        async fn set_performance(&self, profile: u8) -> Result<u8, ProviderError> {
+            self.requests.lock().unwrap().push(profile);
+            self.result
+                .lock()
+                .unwrap()
+                .take()
+                .expect("scripted hardware source: one mutation expected")
         }
     }
 
@@ -1209,22 +1328,96 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn performance_mutation_is_applied_and_does_not_read_source() {
+    async fn read_only_performance_mutation_is_unsupported() {
         let source = ScriptedPerfSource::new(vec![ScriptedPerfRead::Info(perf_info(1, 0b111))]);
         let provider = SessionPerformanceProvider::new(source);
-        assert_eq!(
-            provider
-                .set_profile(PerformanceProfile::Turbo)
-                .await
-                .expect("set"),
-            ApplyResult::Applied
-        );
+        assert!(matches!(
+            provider.set_profile(PerformanceProfile::Turbo).await,
+            Err(ProviderError::Unsupported(_))
+        ));
         assert!(matches!(
             provider.validate_set_profile(PerformanceProfile::Turbo),
-            ValidationResult::Valid
+            ValidationResult::Invalid(_)
         ));
         assert_eq!(provider.source.reads(), 0);
-        assert_eq!(provider.source.mutations(), 1);
+    }
+
+    #[tokio::test]
+    async fn composed_provider_writes_direct_hardware_and_confirms_all_profiles() {
+        for (profile, wire) in [
+            (PerformanceProfile::Silent, performance::SILENT),
+            (PerformanceProfile::Balanced, performance::BALANCED),
+            (PerformanceProfile::Turbo, performance::TURBO),
+        ] {
+            let session = ScriptedPerfSource::new(Vec::new());
+            let hardware = ScriptedHardwareSource::new(Ok(wire));
+            let provider = SessionHardwarePerformanceProvider::new(session, hardware);
+            assert_eq!(
+                provider.set_profile(profile).await.expect("set"),
+                ApplyResult::Applied
+            );
+            assert_eq!(
+                provider.hardware.requests.lock().unwrap().as_slice(),
+                &[wire]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn composed_provider_reads_through_session_source() {
+        let session = ScriptedPerfSource::new(vec![
+            ScriptedPerfRead::Info(perf_info(performance::TURBO, 0b111)),
+            ScriptedPerfRead::Info(perf_info(performance::TURBO, 0b111)),
+        ]);
+        let hardware = ScriptedHardwareSource::new(Ok(performance::SILENT));
+        let provider = SessionHardwarePerformanceProvider::new(session, hardware);
+
+        assert_eq!(
+            provider.current_profile().await.expect("current"),
+            PerformanceProfile::Turbo
+        );
+        assert_eq!(
+            provider.profiles().await.expect("profiles"),
+            vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ]
+        );
+        assert_eq!(provider.session.reads(), 2);
+    }
+
+    #[tokio::test]
+    async fn composed_provider_rejects_mismatched_or_unknown_confirmation() {
+        let provider = SessionHardwarePerformanceProvider::new(
+            ScriptedPerfSource::new(Vec::new()),
+            ScriptedHardwareSource::new(Ok(performance::SILENT)),
+        );
+        assert!(matches!(
+            provider.set_profile(PerformanceProfile::Turbo).await,
+            Err(ProviderError::Internal(_))
+        ));
+
+        let provider = SessionHardwarePerformanceProvider::new(
+            ScriptedPerfSource::new(Vec::new()),
+            ScriptedHardwareSource::new(Ok(255)),
+        );
+        assert!(matches!(
+            provider.set_profile(PerformanceProfile::Turbo).await,
+            Err(ProviderError::Internal(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn composed_provider_preserves_hardware_error() {
+        let provider = SessionHardwarePerformanceProvider::new(
+            ScriptedPerfSource::new(Vec::new()),
+            ScriptedHardwareSource::new(Err(ProviderError::PermissionDenied("denied".into()))),
+        );
+        assert!(matches!(
+            provider.set_profile(PerformanceProfile::Turbo).await,
+            Err(ProviderError::PermissionDenied(_))
+        ));
     }
 
     #[tokio::test]

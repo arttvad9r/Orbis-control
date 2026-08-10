@@ -144,7 +144,6 @@ async fn connect_composition(
             object_path,
             Default::default(),
             None,
-            None,
         ),
         session_client_builder.build(),
     )?;

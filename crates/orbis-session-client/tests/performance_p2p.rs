@@ -4,7 +4,7 @@
 //! → `ZbusSessionPerformanceSource`
 //! → generated `Session1Proxy` (`Performance` property)
 //! → `SessionService` (wire `(yy)`)
-//! → scripted server-side `PerformanceProvider` / Hardware1 client.
+//! → scripted server-side read-only `PerformanceProvider`.
 //!
 //! Используется пара локальных Unix streams (`std::os::unix::net::UnixStream::pair`);
 //! внешний D-Bus daemon / system / session bus не задействованы.
@@ -21,7 +21,6 @@ use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::{ProviderError, ValidationResult};
 use orbis_providers::traits::{BatteryProvider, PerformanceProvider, Provider, ProviderHealth};
 use orbis_session_client::{SessionPerformanceProvider, ZbusSessionPerformanceSource};
-use orbis_sessiond::hardwared::HardwarePerformanceClient;
 use orbis_sessiond::server::build_session_server;
 use zbus::connection::Builder;
 
@@ -113,15 +112,6 @@ impl PerformanceProvider for ScriptedPerformance {
     }
 }
 
-struct ScriptedHardware;
-
-#[async_trait]
-impl HardwarePerformanceClient for ScriptedHardware {
-    async fn set_performance_profile(&self, profile: u8) -> Result<u8, ProviderError> {
-        Ok(profile)
-    }
-}
-
 async fn connect_pair()
 -> Result<(zbus::Connection, zbus::Connection), Box<dyn std::error::Error + Send + Sync>> {
     let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair()?;
@@ -138,14 +128,12 @@ async fn connect_pair()
             PerformanceProfile::Turbo,
         ],
     });
-    let hardware: Arc<dyn HardwarePerformanceClient> = Arc::new(ScriptedHardware);
     let (server_conn, client_conn) = tokio::try_join!(
         build_session_server(
             server_builder,
             battery,
             Default::default(),
             Some(performance),
-            Some(hardware),
         ),
         client_builder.build()
     )?;
@@ -170,11 +158,11 @@ async fn performance_roundtrip_over_p2p() {
             PerformanceProfile::Turbo,
         ]
     );
-    assert_eq!(
+    assert!(matches!(
         provider
             .set_profile(PerformanceProfile::Turbo)
             .await
-            .expect("set profile"),
-        ApplyResult::Applied
-    );
+            .expect_err("read-only set"),
+        ProviderError::Unsupported(_)
+    ));
 }
