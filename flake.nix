@@ -85,5 +85,12 @@
           hostPkgs = pkgs;
           imports = [ ./packaging/nix/tests/hardwared-lifecycle.nix ];
         };
+
+        # Targeted E2E Performance mutation through Session1 → hardwared,
+        # using only a test-only bind namespace for fake platform_profile.
+        checks.performance-mutation-vm = lib.nixos.runTest {
+          hostPkgs = pkgs;
+          imports = [ ./packaging/nix/tests/performance-mutation-vm.nix ];
+        };
       });
 }
