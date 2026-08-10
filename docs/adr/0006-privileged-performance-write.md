@@ -70,6 +70,109 @@ Read path live-validated: kernel `/sys/firmware/acpi/platform_profile` →
     immediate/reversible, без reboot/logout. Существующая UI policy (клик без
     `confirmed` для Performance) не меняется.
 
+## Amendment — authorization architecture (2026-08-11)
+
+Статус ADR остаётся **Accepted**. Уточняется окончательная граница
+авторизации первой controlled mutation.
+
+### Read path
+
+```text
+GUI/application
+  → Session1
+  → orbis-sessiond
+  → authoritative read-only Performance backend
+```
+
+`Session1` остаётся getter-only для Performance mutation architecture.
+
+### Write path
+
+```text
+original application caller
+  → Hardware1 на system bus
+  → orbis-hardwared
+  → polkit
+  → fixed platform_profile writer
+  → fresh read-back
+```
+
+Hardware1 contract:
+
+```text
+service:   io.github.orbiscontrol.Hardware
+path:      /io/github/orbiscontrol/Hardware
+interface: io.github.orbiscontrol.Hardware1
+method:    SetPerformanceProfile(y) → y
+```
+
+Polkit subject — `system-bus-name` **original Hardware1 caller**. Не
+используются caller-supplied UID/PID/session, user-unit name, executable-path
+checks или UID-only authorization. `allow_any=yes` и `allow_inactive=yes`
+не допускаются.
+
+Mutation delegation через
+
+```text
+Session1 → orbis-sessiond → Hardware1
+```
+
+в production architecture не допускается.
+
+Причины:
+
+1. `systemd --user` `orbis-sessiond` не является надёжным представителем
+   конкретной active login session;
+2. второй D-Bus hop теряет original caller identity;
+3. замена `UID(sessiond)` на «любую active session этого UID» создаёт
+   confused-deputy risk;
+4. same-UID SSH/background caller не должен наследовать privilege параллельной
+   active KDE session;
+5. direct Hardware1 сохраняет original system-bus sender, который hardwared
+   может передать polkit.
+
+### Empirical evidence
+
+В read-only audit от 2026-08-11 на polkit 127 harmless action с defaults
+
+```text
+allow_any=no
+allow_inactive=no
+allow_active=yes
+```
+
+получил `AUTHORIZED` для `startplasma-wayland`, `plasmashell`, kitty и child
+process из kitty, включая процессы под `systemd --user`. Поэтому KDE
+user-manager process model сам по себе не является blocker для `allow_active`
+semantics. Direct Hardware1 `system-bus-name` authorization должна быть
+подтверждена E2E в изолированной VM до live hardware write.
+
+### Post-mutation confirmation
+
+После confirmed результата Hardware1:
+
+```text
+AppService::set_performance()
+  → fresh Session1 performance_state()
+  → authoritative post-mutation state
+```
+
+Optimistic update не используется.
+
+### Implementation follow-up
+
+Временный route, добавленный ранее для Session1 mutation, должен быть удалён
+следующим implementation step:
+
+- удалить `Session1.SetPerformance`;
+- удалить `orbis-sessiond` `HardwarePerformanceClient` delegation;
+- вернуть Session1 Performance к read-only semantics;
+- application-side production Performance provider должен читать через
+  Session1, а писать через Hardware1.
+
+Конкретное имя Rust struct/provider фиксируется только после implementation
+review.
+
 ## Consequences
 
 - Появляется первый доказанный привилегированный компонент; его атакуемая
@@ -78,8 +181,9 @@ Read path live-validated: kernel `/sys/firmware/acpi/platform_profile` →
 - `orbis-hardwared` НЕ объявляется универсальным владельцем всех hardware
   writes; другие операции (Battery, GPU product) требуют отдельных ADR и
   evidence.
-- Session1 setter (`SetPerformance`) добавляется отдельным шагом после этого
-  ADR: validation, delegation в hardwared, read-back, честный `ApplyResult`.
+- Session1 setter (`SetPerformance`) не является production authorization
+  boundary и подлежит удалению из временной реализации; final write provider
+  использует direct Hardware1 caller path.
 - GUI включает write-capability для Performance (`perf_writable=true`) только
   после подтверждённого read-back path; UI остаётся read-only до этого.
 - Реализация hardwared/Session1 setter/GUI mutation — вне данного ADR
@@ -88,5 +192,6 @@ Read path live-validated: kernel `/sys/firmware/acpi/platform_profile` →
 ## Status
 
 **Accepted.** Фиксирует архитектуру первой controlled mutation (Performance
-profile). Реализация компонентов — отдельные шаги; каждая будущая privileged
-capability требует собственного ADR по evidence.
+profile), включая final direct-caller authorization amendment от 2026-08-11.
+Реализация компонентов — отдельные шаги; каждая будущая privileged capability
+требует собственного ADR по evidence.

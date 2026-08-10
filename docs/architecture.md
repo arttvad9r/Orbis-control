@@ -171,15 +171,17 @@ enabled/support flags, но не hardware min/max/step, поэтому provider 
 NixOS module создаёт systemd user service с `Type=dbus`,
 `BusName=io.github.orbiscontrol.Session`, Nix-store `ExecStart`,
 `Restart=on-failure` и `PartOf/WantedBy=graphical-session.target`. `Type=dbus`
-считает daemon ready только после захвата имени. Mutation API в Session1 нет;
-production Battery mutations возвращают `Unsupported`.
+считает daemon ready только после захвата имени. Session1 Performance остаётся
+getter-only в final mutation architecture; production Battery mutations
+возвращают `Unsupported`.
 
 ## 7. Privilege boundary
 
-- `orbis-ui`: user process, без direct D-Bus к system hardware services и без
-  sysfs writes.
+- `orbis-ui`: user process, без root и sysfs writes. Узкий typed D-Bus вызов
+  `Hardware1` для Performance mutation не считается direct hardware I/O:
+  authorization, fixed-path write и read-back остаются в `orbis-hardwared`.
 - `orbis-sessiond`: user daemon; может читать system services через их публичные
-  D-Bus APIs, но не получает root.
+  D-Bus APIs, но не получает root и не делегирует Performance mutation.
 - System services (`UPower`, в будущем доказанные ASUS backends) сохраняют свою
   собственную privilege boundary.
 - `orbis-hardwared`: не реализован и не входит в workspace. Его введение требует
@@ -188,6 +190,40 @@ production Battery mutations возвращают `Unsupported`.
   write (`/sys/firmware/acpi/platform_profile`), см.
   [ADR 0006](adr/0006-privileged-performance-write.md); hardwared НЕ является
   generic sysfs writer, каждая новая privileged capability добавляется отдельно.
+
+### Performance mutation authorization
+
+Final read path:
+
+```text
+GUI/application → Session1 → orbis-sessiond → authoritative read-only Performance backend
+```
+
+Final write path:
+
+```text
+original application caller
+  → io.github.orbiscontrol.Hardware
+  → /io/github/orbiscontrol/Hardware
+  → io.github.orbiscontrol.Hardware1.SetPerformanceProfile(y) → y
+  → orbis-hardwared → polkit → fixed platform_profile writer → fresh read-back
+```
+
+Polkit authorizes the `system-bus-name` of the original Hardware1 caller.
+Session1 mutation delegation (`Session1 → sessiond → Hardware1`) запрещена в
+production: user-service identity не доказывает конкретную active login
+session, а второй D-Bus hop теряет original caller. Нельзя заменять caller
+identity на UID sessiond или любую active session этого UID: это confused
+deputy risk для same-UID SSH/background/linger callers. Caller-supplied
+UID/PID/session, user-unit name, executable path и permissive polkit defaults
+не являются trust anchors.
+
+После confirmed Hardware1 result `AppService::set_performance()` выполняет
+fresh `Session1` `performance_state()` read-back. Optimistic state update не
+используется. Direct Hardware1 `system-bus-name` path требует E2E VM proof до
+live hardware write; harmless polkit 127 audit 2026-08-11 авторизовал
+`startplasma-wayland`, `plasmashell`, kitty и child process из kitty при
+`allow_any=no`, `allow_inactive=no`, `allow_active=yes`.
 
 ## 8. GPU semantics
 
