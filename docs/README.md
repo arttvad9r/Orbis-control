@@ -8,10 +8,12 @@ of truth.
 
 После корневого [`AGENTS.md`](../AGENTS.md) новая development session читает:
 
-1. [`current-state.md`](current-state.md) — что реально существует сейчас;
-2. [`architecture.md`](architecture.md) — текущие boundaries и invariants;
-3. [`roadmap.md`](roadmap.md) — следующий порядок работ;
-4. релевантный [ADR](adr/) или hardware evidence только по задаче.
+1. [`product.md`](product.md) — что строим и какой user outcome нужен;
+2. [`current-state.md`](current-state.md) — что реально существует сейчас;
+3. [`architecture.md`](architecture.md) — текущие boundaries и invariants;
+4. [`verification.md`](verification.md) — какой evidence нужен для claims;
+5. [`roadmap.md`](roadmap.md) — следующий порядок работ;
+6. релевантный [ADR](adr/) или hardware evidence только по задаче.
 
 ## Source-of-truth hierarchy
 
@@ -52,8 +54,10 @@ current-state, architecture, roadmap или ADR и может устареть.
 
 | Документ | Классификация | Как использовать |
 |---|---|---|
+| [`product.md`](product.md) | PRODUCT INTENT | User outcomes, invariants и non-goals |
 | [`current-state.md`](current-state.md) | CURRENT STATUS | Operational baseline текущего HEAD |
 | [`architecture.md`](architecture.md) | CURRENT DESIGN | Boundaries, semantics, safety contracts |
+| [`verification.md`](verification.md) | VERIFICATION CONTRACT | Evidence levels, profiles и claims policy |
 | [`roadmap.md`](roadmap.md) | FUTURE PLAN | Milestones и порядок работ |
 | [`adr/`](adr/) | ADR | Принятые архитектурные решения |
 | [`provider-matrix.md`](provider-matrix.md) | CURRENT DESIGN + dated evidence | Target provider strategy; не implementation status |
