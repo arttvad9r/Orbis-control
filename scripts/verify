@@ -1,0 +1,409 @@
+#!/usr/bin/env python3
+"""Deterministic Orbis Control verification runner.
+
+The command set is deliberately static. This program is an evidence collector,
+not a reviewer and does not accept arbitrary shell commands.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import signal
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+SCHEMA_VERSION = 1
+CHECK_TIMEOUT_SECONDS = 30 * 60
+EXCERPT_BYTES = 8192
+PROFILES = {"quick", "task", "full"}
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def safe_slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-")
+    return slug or "project"
+
+
+def duration_ms(start: float) -> int:
+    return max(0, int((time.monotonic() - start) * 1000))
+
+
+def command_text(command: list[str]) -> str:
+    return shlex.join(command)
+
+
+def check(
+    check_id: str,
+    kind: str,
+    command: list[str],
+    supported_claims: list[str],
+) -> dict[str, Any]:
+    return {
+        "check_id": check_id,
+        "kind": kind,
+        "command": command,
+        "supported_claims": supported_claims,
+    }
+
+
+def profile_checks(profile: str) -> list[dict[str, Any]]:
+    static_claim = ["STATIC_BUILD_VERIFIED"]
+    checks = [
+        check(
+            "cargo-fmt",
+            "hygiene",
+            ["cargo", "fmt", "--all", "--", "--check"],
+            [],
+        ),
+        check(
+            "cargo-check",
+            "static",
+            ["cargo", "check", "--workspace", "--all-targets"],
+            static_claim,
+        ),
+        check("git-diff-check", "hygiene", ["git", "diff", "--check"], []),
+    ]
+
+    if profile in {"task", "full"}:
+        checks.extend(
+            [
+                check(
+                    "cargo-test",
+                    "test",
+                    ["cargo", "test", "--workspace"],
+                    ["TESTED"],
+                ),
+                check(
+                    "cargo-clippy",
+                    "static",
+                    [
+                        "cargo",
+                        "clippy",
+                        "--workspace",
+                        "--all-targets",
+                        "--",
+                        "-D",
+                        "warnings",
+                    ],
+                    static_claim,
+                ),
+            ]
+        )
+
+    if profile == "full":
+        checks.extend(
+            [
+                check(
+                    "nix-build",
+                    "build",
+                    ["nix", "build", ".#orbis-control", "--max-jobs", "1", "--cores", "4"],
+                    static_claim,
+                ),
+                check(
+                    "nix-flake-check",
+                    "static",
+                    ["nix", "flake", "check", "--max-jobs", "1", "--cores", "4"],
+                    static_claim,
+                ),
+            ]
+        )
+
+    return checks
+
+
+def project_root() -> Path | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return Path(result.stdout.strip()).resolve()
+
+
+def state_directory(root: Path, suffix: str = "verification") -> Path:
+    state_home = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+    project = safe_slug(root.name)
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-{os.getpid()}"
+    directory = state_home / "opencode-autopilot" / project / suffix / run_id
+    directory.mkdir(parents=True, exist_ok=False)
+    return directory
+
+
+def excerpt(log_path: Path) -> str:
+    data = log_path.read_bytes()
+    if len(data) > EXCERPT_BYTES:
+        data = data[-EXCERPT_BYTES:]
+    return data.decode("utf-8", errors="replace").strip()
+
+
+def summary(log_path: Path, status: str) -> str:
+    text = excerpt(log_path)
+    if not text:
+        return "command completed without output" if status == "PASS" else "command produced no output"
+    last_line = next((line.strip() for line in reversed(text.splitlines()) if line.strip()), text)
+    return last_line[:500]
+
+
+def terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    """Stop a timed-out command and all descendants in its process group."""
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=2)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    process.wait(timeout=2)
+
+
+def execute_check(root: Path, run_directory: Path, item: dict[str, Any]) -> dict[str, Any]:
+    command = item["command"]
+    log_path = run_directory / f"{item['check_id']}.log"
+    started = time.monotonic()
+    started_at = now_iso()
+    print(f"[verify] {item['check_id']}: {command_text(command)}", file=sys.stderr)
+
+    status = "PASS"
+    exit_code: int | None = None
+    reason: str | None = None
+    timeout_seconds = float(item.get("timeout_seconds", CHECK_TIMEOUT_SECONDS))
+    try:
+        with log_path.open("wb") as log:
+            process = subprocess.Popen(
+                command,
+                cwd=root,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            try:
+                exit_code = process.wait(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired:
+                terminate_process_group(process)
+                status = "BLOCKED"
+                reason = f"command exceeded {timeout_seconds:g}s timeout"
+        if status == "PASS" and exit_code != 0:
+            status = "FAIL"
+    except subprocess.TimeoutExpired:
+        status = "BLOCKED"
+        reason = f"command process group did not terminate after timeout"
+    except OSError as error:
+        status = "BLOCKED"
+        reason = f"command could not be started: {error}"
+
+    result: dict[str, Any] = {
+        "check_id": item["check_id"],
+        "kind": item["kind"],
+        "status": status,
+        "command": command_text(command),
+        "exit_code": exit_code,
+        "started_at": started_at,
+        "duration_ms": duration_ms(started),
+        "summary": summary(log_path, status),
+        "full_log_path": str(log_path),
+        "supported_claims": item["supported_claims"] if status == "PASS" else [],
+    }
+    if status != "PASS":
+        result["failure_excerpt"] = excerpt(log_path)
+    if reason is not None:
+        result["reason"] = reason
+    return result
+
+
+def run_profile(root: Path, profile: str) -> tuple[dict[str, Any], int]:
+    run_directory = state_directory(root)
+    started = time.monotonic()
+    started_at = now_iso()
+    checks = [execute_check(root, run_directory, item) for item in profile_checks(profile)]
+
+    if any(item["status"] == "BLOCKED" for item in checks):
+        status = "BLOCKED"
+        exit_code = 2
+    elif any(item["status"] == "FAIL" for item in checks):
+        status = "FAIL"
+        exit_code = 1
+    else:
+        status = "PASS"
+        exit_code = 0
+
+    result = {
+        "schema_version": SCHEMA_VERSION,
+        "profile": profile,
+        "status": status,
+        "started_at": started_at,
+        "finished_at": now_iso(),
+        "duration_ms": duration_ms(started),
+        "project_root": str(root),
+        "run_directory": str(run_directory),
+        "checks": checks,
+    }
+    return result, exit_code
+
+
+def failure_path_self_test() -> tuple[dict[str, Any], int]:
+    root = Path.cwd().resolve()
+    run_directory = state_directory(root, suffix="self-test")
+    item = check(
+        "synthetic-failure",
+        "self-test",
+        [sys.executable, "-c", "print('synthetic verifier failure'); raise SystemExit(7)"],
+        [],
+    )
+    result = execute_check(root, run_directory, item)
+    assertions = {
+        "failed_check_is_FAIL": result["status"] == "FAIL",
+        "exit_code_preserved": result["exit_code"] == 7,
+        "bounded_excerpt_present": bool(result.get("failure_excerpt")),
+        "full_log_retained": Path(result["full_log_path"]).is_file(),
+    }
+    passed = all(assertions.values())
+    timeout_item = check(
+        "synthetic-timeout",
+        "self-test",
+        [
+            sys.executable,
+            "-c",
+            (
+                "import subprocess, sys, time; "
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)']); "
+                "print(child.pid, flush=True); time.sleep(10)"
+            ),
+        ],
+        [],
+    )
+    timeout_item["timeout_seconds"] = 0.5
+    timeout_result = execute_check(root, run_directory, timeout_item)
+    child_pid_text = excerpt(Path(timeout_result["full_log_path"]))
+    child_pid = int(child_pid_text.splitlines()[0]) if child_pid_text.splitlines() else None
+    child_terminated = False
+    if child_pid is not None:
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                state = Path(f"/proc/{child_pid}/stat").read_text().split()[2]
+            except (FileNotFoundError, IndexError, OSError):
+                child_terminated = True
+                break
+            if state in {"Z", "X"}:
+                child_terminated = True
+                break
+            time.sleep(0.05)
+
+    timeout_assertions = {
+        "timed_out_check_is_BLOCKED": timeout_result["status"] == "BLOCKED",
+        "timeout_reason_present": "timeout" in timeout_result.get("reason", ""),
+        "child_process_terminated": child_terminated,
+        "full_log_retained": Path(timeout_result["full_log_path"]).is_file(),
+    }
+    output = {
+        "schema_version": SCHEMA_VERSION,
+        "self_test": "failure-path",
+        "status": "PASS" if passed and all(timeout_assertions.values()) else "FAIL",
+        "assertions": {**assertions, **timeout_assertions},
+        "synthetic_failing_command_exit_code": result["exit_code"],
+        "harness_exit_code": 0 if passed and all(timeout_assertions.values()) else 1,
+        "sample_check": result,
+        "timeout_check": timeout_result,
+    }
+    return output, output["harness_exit_code"]
+
+
+def emit(result: dict[str, Any]) -> None:
+    json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
+    sys.stdout.write("\n")
+
+
+def invocation_error(profile: str | None, reason: str) -> tuple[dict[str, Any], int]:
+    return (
+        {
+            "schema_version": SCHEMA_VERSION,
+            "profile": profile,
+            "status": "BLOCKED",
+            "reason": reason,
+            "checks": [],
+        },
+        2,
+    )
+
+
+def run_in_dev_shell(profile: str) -> int:
+    if shutil.which("cargo") or not shutil.which("nix"):
+        return -1
+    script = str(Path(__file__).resolve())
+    command = ["nix", "develop", "--command", sys.executable, script, "--in-dev", profile]
+    print(f"[verify] entering project dev shell: {command_text(command)}", file=sys.stderr)
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.stdout:
+        sys.stdout.write(completed.stdout)
+    if completed.stderr:
+        sys.stderr.write(completed.stderr)
+    if completed.stdout.strip():
+        return completed.returncode
+    emit(invocation_error(profile, "nix develop did not produce verifier JSON output" )[0])
+    return 2
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) == 2 and argv[0] == "--in-dev":
+        return main([argv[1]])
+    if argv == ["--help"] or argv == ["-h"]:
+        print("usage: scripts/verify quick|task|full")
+        print("       scripts/verify --self-test")
+        return 0
+    if argv == ["--self-test"]:
+        result, code = failure_path_self_test()
+        emit(result)
+        return code
+    if len(argv) != 1 or argv[0] not in PROFILES:
+        profile = argv[0] if len(argv) == 1 else None
+        result, code = invocation_error(profile, "profile must be one of: quick, task, full")
+        emit(result)
+        return code
+
+    profile = argv[0]
+    root = project_root()
+    if root is None:
+        result, code = invocation_error(profile, "not inside a Git worktree or git is unavailable")
+        emit(result)
+        return code
+
+    if not shutil.which("cargo"):
+        shell_code = run_in_dev_shell(profile)
+        if shell_code >= 0:
+            return shell_code
+        if not shutil.which("nix"):
+            result, code = invocation_error(profile, "cargo is unavailable and nix is not installed")
+            emit(result)
+            return code
+
+    result, code = run_profile(root, profile)
+    emit(result)
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
