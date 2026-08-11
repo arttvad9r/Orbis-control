@@ -791,7 +791,29 @@ where
 
     async fn set_profile(&self, profile: PerformanceProfile) -> Result<ApplyResult, ProviderError> {
         let requested = performance_profile_to_wire(profile);
-        let confirmed = self.hardware.set_performance(requested).await?;
+        tracing::debug!(
+            requested_profile = ?profile,
+            requested_wire = requested,
+            "performance hardware mutation request"
+        );
+        let confirmed = match self.hardware.set_performance(requested).await {
+            Ok(confirmed) => {
+                tracing::debug!(
+                    requested_wire = requested,
+                    confirmed_wire = confirmed,
+                    "performance hardware mutation reply"
+                );
+                confirmed
+            }
+            Err(error) => {
+                tracing::debug!(
+                    requested_wire = requested,
+                    error = ?error,
+                    "performance hardware mutation error"
+                );
+                return Err(error);
+            }
+        };
         let confirmed_profile = performance_current_from_wire(confirmed)?;
         if confirmed_profile != profile {
             return Err(ProviderError::Internal(format!(
