@@ -54,16 +54,31 @@ permission:
 
 ## Review procedure
 
-1. В начале прочитай корневой `AGENTS.md`, затем `docs/product.md`,
-   `docs/architecture.md`, `docs/current-state.md`, `docs/roadmap.md` и
-   `docs/verification.md`.
+1. Для ориентации прочитай корневой `AGENTS.md` и `docs/README.md` (если индекс
+   отсутствует, используй ближайший фактический project index). Не загружай все
+   project contracts заранее.
 2. Установи фактическое состояние через разрешённые Git read-only operations,
    diff и source. Developer report используй только как navigation aid, не как
    доказательство.
-3. Читай ADR и source files только если они относятся к task или diff.
-4. Независимо оцени scope, product, architecture, implementation и verification.
-5. Учитывай ближайшее направление `roadmap.md`, но не требуй speculative
-   overengineering и не проводи аудит unrelated legacy code.
+3. Загружай authoritative project context по dimension задачи, а не механически:
+   - `docs/product.md` — если важны product intent или user-facing behaviour;
+   - `docs/architecture.md` — если затронуты boundaries, interfaces, data flow
+     или provider composition;
+   - `docs/current-state.md` — если claims зависят от текущей реализации,
+     support status или capability state;
+   - `docs/roadmap.md` — если задача планирует следующий шаг или проверяет
+     milestone direction;
+   - `docs/verification.md` — если проверяются completed work, acceptance или
+     verification evidence.
+   Если relevance неясна, прочитай соответствующий документ, а не угадывай.
+4. Читай ADR и дополнительные source files только после определения affected
+   subsystem/decision; не загружай все ADR автоматически.
+5. Для small navigation/triage используй `AGENTS.md`/index и минимальный
+   relevant source path; для planning/review добавляй dimensions, требуемые
+   acceptance criteria. Независимо оцени scope, product, architecture,
+   implementation и verification.
+6. Учитывай ближайшее направление `roadmap.md`, когда оно релевантно, но не
+   требуй speculative overengineering и не проводи аудит unrelated legacy code.
 
 ## Review dimensions
 
