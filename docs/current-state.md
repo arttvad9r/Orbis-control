@@ -15,20 +15,49 @@
 
 ## Summary
 
-Первый **read-only MVP** завершён и live-validated: production GUI реально
-показывает Battery Charge Limit, Performance Mode, GPU Power, GPU MUX и GPU
-Access через session path:
+Первый **read-only MVP** и первый узкий production mutation path завершены и
+live-validated: production GUI реально показывает Battery Charge Limit,
+Performance Mode, GPU Power, GPU MUX и GPU Access через session path:
 
 ```text
 UPower / kernel platform_profile / supergfxd / ASUS Armoury sysfs
 → orbis-sessiond → Session1 D-Bus → orbis-session-client → worker → GUI
 ```
 
+Performance write path:
+
+```text
+GUI/application caller → Hardware1 → orbis-hardwared → polkit
+→ fixed kernel platform_profile writer → hardwared read-back
+→ fresh Session1 read-back → authoritative GUI state
+```
+
 - все real sections имеют честные `Loading` / `Ready` / `Unavailable`;
 - mock fallback отсутствует; sessiond absent → честный `Unavailable`;
-- все mutation controls в production read-only/disabled (Battery slider,
-  Performance cards, GPU Eco/Standard/Ultimate/Optimized);
-- никаких hardware writes.
+- Battery slider и GPU Eco/Standard/Ultimate/Optimized остаются
+  read-only/disabled;
+- Performance mutation controls enabled только после успешного Hardware1 owner
+  probe; optimistic selection не используется;
+- production Performance mutation live-validated ровно двумя разрешёнными
+  Hardware1 calls: `Silent/wire 0` и `Balanced/wire 1`.
+
+## Production deployment and live evidence
+
+- NixOS generation 80: `orbis-hardwared` auto-starts через `multi-user.target`;
+  system D-Bus name owned, UID root, CapEff=0, CapBnd=0; sandbox live-validated;
+  `orbis-sessiond` active.
+- Final Performance GUI validation: initial `balanced` / Session1 Balanced;
+  GUI `Balanced → Silent → Balanced` подтвердил request/reply wires `0/0` и
+  `1/1`, raw kernel state `balanced → quiet → balanced`, Session1 и GUI state
+  совпали на каждом шаге.
+- Всего: ровно 2 valid Hardware1 calls и 2 hardware writes; Turbo, Battery и
+  GPU mutation не выполнялись; final hardware state совпал с initial.
+- Startup dGPU wake diagnostic: **NOT REPRODUCED**. NVIDIA
+  `runtime_status` оставался `suspended` при normal GUI startup; Orbis не
+  открывал NVIDIA/DRM device nodes.
+- Прямых KDE/KWin/Plasma runtime dependencies не найдено; известных blockers
+  для будущего Hyprland + Caelestia migration нет. Общие требования: Wayland,
+  session/system D-Bus, logind, systemd-user и polkit.
 
 ## Read-only MVP
 
@@ -49,10 +78,11 @@ UI semantics: `Loading` / `Ready(value)` / `Unavailable`; backend error → че
 `Unavailable` (без симуляции успеха); sessiond absent → все real sections
 Unavailable, GUI остаётся usable.
 
-Все mutation controls в production read-only/disabled:
+Mutation controls в production:
 
 - Battery slider (`charge_limit_writable=false`);
-- Performance cards (`perf_writable=false`);
+- Performance cards enabled только при успешном Hardware1 owner probe
+  (`perf_writable=true`); при отсутствии owner остаются read-only/disabled;
 - GPU Eco/Standard/Ultimate/Optimized (`gpu_mode_writable=false`,
   `gpu_mode_state=Unavailable`).
 
@@ -70,7 +100,7 @@ Live MVP validation (packaged GUI + packaged sessiond):
 - значения совпали с raw backends (UPower percent, kernel
   `platform_profile=balanced`, supergfxd `Power()=0`, sysfs `gpu_mux_mode=1`,
   `dgpu_disable=0`);
-- GUI/logs без неожиданных ошибок; никаких hardware writes.
+- GUI/logs без неожиданных ошибок; read-only MVP writes отсутствовали.
 
 ## Major areas
 
@@ -82,13 +112,13 @@ Live MVP validation (packaged GUI + packaged sessiond):
 | Provider contracts | IMPLEMENTED | Traits и error model существуют |
 | Broad provider implementation | MOCK-ONLY | `MockProvider` покрывает UI/application scenarios |
 | Application layer | IMPLEMENTED | Performance/GPU/Battery commands + authoritative read-back |
-| UI | PARTIAL | Slint main window + sequential worker; Battery, Performance, GPU hardware status (Power/MUX/Access) — real session client (LIVE-VALIDATED); product GpuMode — mock-only в legacy, production controls disabled |
+| UI | PARTIAL | Slint main window + sequential worker; Battery, Performance mutation, GPU hardware status (Power/MUX/Access) — real session paths (LIVE-VALIDATED); product GpuMode — mock-only в legacy, production controls disabled |
 | Session protocol | IMPLEMENTED | Getter-only `Session1.ChargeLimit`, `(bbybyyy)` |
-| Session client | IMPLEMENTED | Fresh D-Bus Get, validation, read-only `BatteryProvider` |
+| Session client | IMPLEMENTED | Fresh Session1 reads, validation и direct Hardware1 Performance client |
 | sessiond | LIVE-VALIDATED | Discovery, UPower read, server, runtime, signals, Nix user service |
 | CLI | NOT IMPLEMENTED | `orbisctl` binary — stub |
-| Production mutations | NOT IMPLEMENTED | Read-only providers return `Unsupported` |
-| Privileged helper | NOT IMPLEMENTED | `orbis-hardwared` не входит в workspace |
+| Production mutations | PARTIAL | Performance LIVE-VALIDATED; Battery/GPU mutations не реализованы |
+| Privileged helper | LIVE-VALIDATED | Узкий `orbis-hardwared` для Performance; не generic writer |
 
 ## Battery Charge Limit
 
@@ -96,14 +126,15 @@ Live MVP validation (packaged GUI + packaged sessiond):
 
 Production GUI composition (split worker, один sequential loop):
 
-- legacy Performance/GPU product mode → `MockProvider` (`main_service`);
+- GPU product mode → `MockProvider` (`main_service`);
 - Battery → `SessionChargeLimitProvider` через
   `ZbusSessionChargeLimitSource` (`battery_service`);
-- Performance read → `SessionPerformanceProvider` (`performance_service`);
+- Performance read/write → real `SessionHardwarePerformanceProvider`
+  (`performance_service`): Session1 read + direct Hardware1 mutation;
 - GPU hardware status → три независимых session-client capability providers
   (`gpu_power`/`gpu_mux`/`gpu_access` services);
-- `run_worker` принимает независимые сервисы: main (Performance legacy + GPU
-  product), battery, три GPU capability-сервиса и performance read-сервис; один
+- `run_worker` принимает независимые сервисы: main (GPU product), battery, три
+  GPU capability-сервиса и performance read/write-сервис; один
   provider не обязан реализовывать все traits;
 - FIFO/barriers/Battery adjacent coalescing сохранены.
 
@@ -211,7 +242,7 @@ choices на этой машине во время validation и не выдаё
 
 ### Performance application/UI vertical slice
 
-**READ PATH IMPLEMENTED / LIVE-VALIDATED; mutation MOCK-ONLY**
+**IMPLEMENTED / LIVE-VALIDATED**
 
 - Domain types, `PerformanceProvider`, application read/set/read-back path,
   sequential worker и UI cards реализованы.
@@ -221,9 +252,17 @@ choices на этой машине во время validation и не выдаё
 - Production read path: `KernelPerformanceProvider` → Session1 → session client
   (`SessionPerformanceProvider`) → worker → GUI; current + available совпадают
   с raw kernel `platform_profile(_choices)`; без mock fallback.
-- Production controls read-only/disabled (`perf_writable=false`);
-  fake/mock current не показывается до authoritative read.
-- Real Performance mutation отсутствует (`set_profile` → Unsupported).
+- Production write path: application caller → direct Hardware1 →
+  `orbis-hardwared` → polkit original system-bus-name caller → fixed
+  `platform_profile` writer → hardwared read-back.
+- После confirmed Hardware1 результата `AppService` выполняет fresh Session1
+  read-back; optimistic selected state отсутствует.
+- `perf_writable` становится true только после успешного read-only
+  `NameHasOwner` probe для Hardware1; absent owner сохраняет Performance read
+  path, но отключает controls.
+- Controlled live GUI validation PASS: ровно `Silent/wire 0` и
+  `Balanced/wire 1`, successful replies `0/0` и `1/1`, raw/Session1/GUI
+  совпали, final state равен initial.
 
 ## GPU Mode
 

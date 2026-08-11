@@ -156,11 +156,11 @@ selection на реальном hardware.
 
 Следующий ACTIVE substep (после read-only MVP):
 
-**Controlled mutation — начать с Performance** (Milestone 5 foundations):
-доказать безопасный write path для первого узкого операции с
-capability/range/privilege evidence; остальные направления — отдельно:
-Battery mutation, GPU product policy/mutation, fan/telemetry (substeps 3–4),
-UX/polish (Milestone 7).
+**Performance controlled mutation — COMPLETED / LIVE-VALIDATED** (Milestone 5
+foundations): узкий write path через Hardware1/hardwared, polkit, fixed kernel
+writer и authoritative read-back доказан production GUI cycle. Незавершёнными
+остаются Battery mutation, GPU product policy/mutation, fan/telemetry (substeps
+3–4) и UX/polish (Milestone 7).
 
 Milestone 4 целиком **НЕ закрывается**: fan/telemetry (substeps 3–4) остаются
 pending; product GPU policy/mutation — pending.
@@ -198,9 +198,11 @@ read-only/disabled. Это **не** означает завершённость 
 
 Следующие крупные направления остаются отдельными (привязка к milestones):
 
-1. **Controlled mutation — начать с Performance** (Milestone 5; архитектура
-   принята: [ADR 0006](adr/0006-privileged-performance-write.md) — kernel
-   `platform_profile` через узкий `orbis-hardwared`, polkit, read-back);
+1. **Performance controlled mutation** (Milestone 5) — **COMPLETED /
+   LIVE-VALIDATED**: [ADR 0006](adr/0006-privileged-performance-write.md),
+   kernel `platform_profile` через узкий `orbis-hardwared`, polkit и
+   authoritative read-back; production GUI `Balanced → Silent → Balanced`
+   подтвердил ровно два valid calls/writes;
 2. **Battery mutation** (Milestone 5; write-операция с доказанными bounds/owner);
 3. **GPU product policy/mutation** (Milestone 5; product GpuMode backend
    mapping всё ещё NOT PROVEN);
@@ -210,10 +212,27 @@ read-only/disabled. Это **не** означает завершённость 
 
 ## Milestone 5 — Controlled mutation foundations
 
+**Status: ACTIVE — Performance substep COMPLETED / LIVE-VALIDATED; Battery/GPU
+mutation pending.**
+
 **Goal:** реализовать первый узкий production write path только для операции с
 доказанными capability, range/semantics и privilege boundary.
 
 **Why:** read support не доказывает безопасность записи.
+
+### Completed substep — Performance
+
+- production deployment: generation 80, `orbis-hardwared` auto-start через
+  `multi-user.target`, system D-Bus ownership и sandbox live-validated;
+- GUI controls enabled только после Hardware1 owner probe;
+- direct caller → Hardware1 → hardwared → polkit → fixed
+  `platform_profile` write → hardwared read-back;
+- `AppService` выполняет fresh Session1 post-write read-back;
+- controlled live GUI validation PASS: ровно `wire 0` и `wire 1`, final state
+  равен initial.
+
+Battery mutation, GPU mutation, fan control, real telemetry и broader UX polish
+не отмечаются как completed и остаются отдельными следующими этапами.
 
 **Architecture:** принята в [ADR 0006](adr/0006-privileged-performance-write.md)
 (Performance profile через kernel `platform_profile` + узкий `orbis-hardwared`;

@@ -15,9 +15,8 @@
 - Значения после команд считаются подтверждёнными только после authoritative
   read-back.
 - Неизвестные hardware-ограничения остаются неизвестными.
-- `orbis-hardwared` не является частью production architecture: он будет
-  рассмотрен только после доказанной необходимости узкой privileged operation
-  (ADR 0002).
+- `orbis-hardwared` — узкий production component только для доказанной
+  Performance privileged operation; он не является generic sysfs writer.
 
 ## 2. Фактические слои и зависимости
 
@@ -33,28 +32,28 @@ orbis-application::AppService<P>
         v
 orbis-providers traits
         |
-        +------------------------------+
-        |                              |
-        v                              v
-MockProvider                    orbis-session-client
-(Performance/GPU backend)       (read-only BatteryProvider)
-                                       |
-                                       v
-                         session D-Bus Session1
-                                       |
-                                       v
-                              orbis-sessiond
-                                       |
-                                       v
-                         system D-Bus / UPower
+         +------------------------------+------------------+
+         |                              |                  |
+         v                              v                  v
+ MockProvider                    orbis-session-client   Hardware1
+ (GPU product backend)           (Performance + Battery  (system D-Bus)
+                                  provider)                    |
+         |                              |                  v
+         |                              v             orbis-hardwared
+         |                    session D-Bus Session1       |
+         |                              |                  v
+         |                              v             fixed platform_profile
+         |                       orbis-sessiond
+         |                              |
+         +------------------------------+             system D-Bus / UPower
 ```
 
-Production interactive GUI: Performance/GPU идут через `MockProvider`
-(`main_service`), Battery — через `orbis-session-client` → sessiond → UPower
-(`battery_service`). Split composition `run_worker<M, B, F>` использует
-независимые сервисы; реальный read-only Battery path подключён к GUI и
-live-validated. Mock сохраняется для Performance/GPU production backend на
-текущем этапе, unit tests и offscreen rendering.
+Production interactive GUI: GPU product mode остаётся на `MockProvider`
+(`main_service`), Battery — через `orbis-session-client` → sessiond → UPower,
+Performance read/write — через отдельный real `performance_service` с Session1
+read и direct Hardware1 mutation. Split composition использует независимые
+сервисы; Mock сохраняется для GPU product mode, unit tests и offscreen
+rendering.
 
 ### Crate boundaries
 
@@ -66,15 +65,16 @@ live-validated. Mock сохраняется для Performance/GPU production ba
 | `orbis-providers` | Provider traits, errors и broad `MockProvider` |
 | `orbis-application` | Async use cases и обязательный authoritative read-back |
 | `orbis-session-protocol` | Нейтральный getter-only D-Bus wire contract |
-| `orbis-session-client` | GUI-side read-only Battery provider над Session1 |
+| `orbis-session-client` | GUI-side Session1 reads + direct Hardware1 Performance provider |
 | `orbis-sessiond` | User daemon, UPower adapter, discovery, server и lifecycle |
 | `orbis-ui` | Slint presentation, UI mapping и sequential worker |
 | `orbis-cli` | Зарезервированный CLI crate; текущий binary — stub |
 | `orbis-test-support` | Deterministic mock device states |
 
 `orbis-session-protocol`, client и daemon разделены намеренно. Application layer
-не зависит от daemon или D-Bus transport. `orbis-hardwared` присутствует только
-как directory placeholder и не входит в workspace.
+не зависит от daemon или D-Bus transport. `orbis-hardwared` намеренно не входит
+в workspace; production deployment запускает его как отдельный узкий helper для
+Performance.
 
 ## 3. UI и application boundary
 
@@ -102,7 +102,8 @@ trait или domain type не означает существование produc
 На текущем этапе:
 
 - `MockProvider` реализует широкий набор traits для UI/tests и остаётся
-  production Performance/GPU backend;
+  production GPU product-mode backend; Performance использует real
+  session-client/Hardware1 provider;
 - `UPowerChargeLimitProvider` — реальный read-only Battery provider внутри
   `orbis-sessiond`;
 - `SessionChargeLimitProvider` — read-only Battery provider над session D-Bus,
@@ -184,12 +185,11 @@ getter-only в final mutation architecture; production Battery mutations
   D-Bus APIs, но не получает root и не делегирует Performance mutation.
 - System services (`UPower`, в будущем доказанные ASUS backends) сохраняют свою
   собственную privilege boundary.
-- `orbis-hardwared`: не реализован и не входит в workspace. Его введение требует
-  отдельного ADR с конкретной операцией, capability proof, allowlist, validation,
-  authorization и sandboxing. Первый доказанный use case — Performance profile
-  write (`/sys/firmware/acpi/platform_profile`), см.
-  [ADR 0006](adr/0006-privileged-performance-write.md); hardwared НЕ является
-  generic sysfs writer, каждая новая privileged capability добавляется отдельно.
+- `orbis-hardwared`: реализован для единственной proven capability — Performance
+  profile write (`/sys/firmware/acpi/platform_profile`) — и не входит в workspace.
+  Его allowlist, validation, authorization и sandboxing live-validated; hardwared
+  НЕ является generic sysfs writer, каждая новая privileged capability
+  добавляется отдельно. См. [ADR 0006](adr/0006-privileged-performance-write.md).
 
 ### Performance mutation authorization
 

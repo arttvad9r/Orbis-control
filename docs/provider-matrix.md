@@ -64,9 +64,20 @@
 | 2 | asusd | `xyz.ljones.Platform.PlatformProfile` (+ Choices) | get/set |
 | 3 | power-profiles-daemon | `org.freedesktop.UPower.PowerProfiles` | get/set (только при отсутствии конфликта) |
 
-Current implemented read backend: kernel `platform_profile` →
-`KernelPerformanceProvider` (LIVE-VALIDATED). Причина: symbolic ABI, canonical
-domain mapping, без raw numeric inference.
+Current implemented backend: kernel `platform_profile` →
+`KernelPerformanceProvider` (read LIVE-VALIDATED) и узкий direct Hardware1 →
+`orbis-hardwared` write path (controlled mutation LIVE-VALIDATED). Причина:
+symbolic ABI, canonical domain mapping, без raw numeric inference.
+
+Production Performance evidence:
+
+- read: kernel `platform_profile` → sessiond → Session1 → session client;
+- write: application caller → Hardware1 → polkit → fixed kernel writer →
+  read-back;
+- post-write: fresh Session1 read-back, без optimistic state;
+- live GUI cycle `Balanced → Silent → Balanced` подтвердил ровно два valid
+  Hardware1 calls/writes (`wire 0`, затем `wire 1`);
+- Battery и GPU mutations остаются отдельными незавершёнными направлениями.
 
 Дополнительно (asusd): `PlatformProfileOnAc`, `PlatformProfileOnBattery`,
 `Profile{Quiet,Balanced,Performance}Epp`, `PlatformProfileLinkedEpp`.
