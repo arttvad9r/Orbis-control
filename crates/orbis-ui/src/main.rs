@@ -267,6 +267,45 @@ fn performance_available_mask(available: &[PerformanceProfile]) -> i32 {
     mask
 }
 
+/// Hardware1 write capability is available only when the system-bus name has
+/// an owner. A missing name or a failed probe keeps Performance read-only.
+fn performance_write_available(name_has_owner: Option<bool>) -> bool {
+    name_has_owner == Some(true)
+}
+
+/// Rust-side guard matching the Slint Performance card `disabled` bindings.
+/// Invalid indices, unavailable profiles, non-ready reads and absent write
+/// capability must not reach the worker.
+fn performance_click_allowed(state: &controller::UiState, index: i32) -> bool {
+    (0..=2).contains(&index)
+        && state.perf_state == controller::PerformanceHwState::Ready
+        && state.perf_writable
+        && state.available_perf_mask & (1 << index) != 0
+}
+
+fn performance_command_for_click(state: &controller::UiState, index: i32) -> Option<WorkerCommand> {
+    if !performance_click_allowed(state, index) {
+        return None;
+    }
+    performance_profile_from_index(index).map(WorkerCommand::SetPerformance)
+}
+
+/// Read-only startup probe for the production Hardware1 owner.
+async fn hardware1_write_available(connection: &zbus::Connection) -> bool {
+    let owner = connection
+        .call_method(
+            Some("org.freedesktop.DBus"),
+            "/org/freedesktop/DBus",
+            Some("org.freedesktop.DBus"),
+            "NameHasOwner",
+            &("io.github.orbiscontrol.Hardware",),
+        )
+        .await
+        .ok()
+        .and_then(|reply| reply.body().deserialize::<bool>().ok());
+    performance_write_available(owner)
+}
+
 /// Разрешён ли клик по product GPU Mode карточке (приводит ли он к
 /// `SetGpuMode` в worker).
 ///
@@ -675,14 +714,20 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
     let app_weak = app.as_weak();
     {
         let worker_tx = worker_tx.clone();
+        let app_weak = app.as_weak();
         app.on_perf_clicked(move |i| {
-            let Some(profile) = performance_profile_from_index(i) else {
-                tracing::warn!("perf-clicked с неизвестным индексом: {i}");
+            let Some(app) = app_weak.upgrade() else {
+                tracing::warn!("perf-clicked после уничтожения окна: {i}");
+                return;
+            };
+            let state = from_slint(&app.get_ui_state());
+            let Some(command) = performance_command_for_click(&state, i) else {
+                tracing::warn!("perf-clicked игнорирован: Performance недоступен/read-only: {i}");
                 return;
             };
             match &worker_tx {
                 Some(tx) => {
-                    if let Err(e) = tx.send(WorkerCommand::SetPerformance(profile)) {
+                    if let Err(e) = tx.send(command) {
                         tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
                     }
                 }
@@ -889,11 +934,6 @@ fn main() -> anyhow::Result<()> {
     // Loading; первый RefreshPerformance переведёт в Ready/Unavailable.
     state.perf_state = controller::PerformanceHwState::Loading;
 
-    // Production Performance mutation остаётся UI-disabled (`perf_writable=false`),
-    // но provider composition разделяет transport boundaries: Session1 для
-    // authoritative reads и direct Hardware1 для controlled writes.
-    state.perf_writable = false;
-
     // Production product GPU Mode: реального backend нет (read-only hardware
     // status Power/MUX/Access идёт через независимые capability providers).
     // Не показывать mock-selected как authoritative и не разрешать mutation,
@@ -917,6 +957,9 @@ fn main() -> anyhow::Result<()> {
     let system_connection = runtime
         .block_on(zbus::Connection::system())
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
+    // Read-only capability probe: the UI becomes writable only when the
+    // production Hardware1 name is already owned. No mutation or polling.
+    state.perf_writable = runtime.block_on(hardware1_write_available(&system_connection));
     let battery_source = ZbusSessionChargeLimitSource::new(session_connection.clone());
     let battery_provider = SessionChargeLimitProvider::new(battery_source);
     let battery_service = AppService::new(Arc::new(battery_provider));
@@ -934,8 +977,7 @@ fn main() -> anyhow::Result<()> {
     )));
 
     // Composed Performance provider: reads через Session1, mutation напрямую
-    // через Hardware1 с connection этого application process. UI capability
-    // остаётся disabled выше (`perf_writable=false`) до отдельного UI decision.
+    // через Hardware1 с connection этого application process.
     let performance_service = AppService::new(Arc::new(SessionHardwarePerformanceProvider::new(
         ZbusSessionPerformanceSource::new(session_connection),
         ZbusHardwarePerformanceSource::new(system_connection),
@@ -1066,6 +1108,51 @@ mod tests {
         assert_eq!(
             performance_available_mask(&[PerformanceProfile::Turbo, PerformanceProfile::Silent]),
             0b101
+        );
+    }
+
+    #[test]
+    fn performance_write_probe_requires_owned_hardware_name() {
+        assert!(performance_write_available(Some(true)));
+        assert!(!performance_write_available(Some(false)));
+        assert!(!performance_write_available(None));
+    }
+
+    #[test]
+    fn performance_click_guard_requires_ready_writable_available_state() {
+        let mut state = base_state();
+        assert!(performance_click_allowed(&state, 0));
+
+        state.perf_writable = false;
+        assert!(!performance_click_allowed(&state, 0));
+
+        state.perf_writable = true;
+        state.perf_state = controller::PerformanceHwState::Unavailable;
+        assert!(!performance_click_allowed(&state, 0));
+
+        state.perf_state = controller::PerformanceHwState::Ready;
+        state.available_perf_mask = 0b010;
+        assert!(!performance_click_allowed(&state, 0));
+        assert!(performance_click_allowed(&state, 1));
+    }
+
+    #[test]
+    fn performance_click_guard_emits_only_authorized_command() {
+        let mut state = base_state();
+        assert_eq!(
+            performance_command_for_click(&state, 0),
+            Some(WorkerCommand::SetPerformance(PerformanceProfile::Silent))
+        );
+
+        state.perf_writable = false;
+        assert_eq!(performance_command_for_click(&state, 0), None);
+
+        state.perf_writable = true;
+        state.available_perf_mask = 0b010;
+        assert_eq!(performance_command_for_click(&state, 0), None);
+        assert_eq!(
+            performance_command_for_click(&state, 1),
+            Some(WorkerCommand::SetPerformance(PerformanceProfile::Balanced))
         );
     }
 
