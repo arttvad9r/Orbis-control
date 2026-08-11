@@ -120,12 +120,12 @@ pub fn command_channel() -> (
 /// Последовательный worker для Performance Mode, GPU Mode, Battery Charge Limit
 /// и read-only GPU hardware capabilities.
 ///
-/// - `main_service` — владеемый `AppService<M>` для Performance/GPU product mode;
+/// - `main_service` — владеемый `AppService<M>` для GPU product mode;
 /// - `battery_service` — владеемый `AppService<B>` для Battery Charge Limit;
 /// - `gpu_power_service` / `gpu_mux_service` / `gpu_access_service` — независимые
 ///   read-only GPU capability services (по ADR 0005);
-/// - `performance_service` — отдельный real read-only Performance service
-///   (не main MockProvider); используется только для `RefreshPerformance`;
+/// - `performance_service` — отдельный Performance service (в production —
+///   real provider, не main MockProvider) для mutation и `RefreshPerformance`;
 /// - `receiver` — команды в порядке получения;
 /// - `emit` — event sink, вызывается ровно один раз на каждую выполненную
 ///   команду или coalesced Battery-группу.
@@ -156,7 +156,7 @@ pub async fn run_worker<M, B, P, X, A, R, F>(
     mut receiver: UnboundedReceiver<WorkerCommand>,
     mut emit: F,
 ) where
-    M: PerformanceProvider + GpuProvider + Send + Sync + 'static,
+    M: GpuProvider + Send + Sync + 'static,
     B: BatteryProvider + Send + Sync + 'static,
     P: GpuPowerProvider + Send + Sync + 'static,
     X: GpuMuxProvider + Send + Sync + 'static,
@@ -179,7 +179,7 @@ pub async fn run_worker<M, B, P, X, A, R, F>(
 
         let event = match command {
             WorkerCommand::SetPerformance(profile) => {
-                WorkerEvent::Performance(main_service.set_performance(profile).await)
+                WorkerEvent::Performance(performance_service.set_performance(profile).await)
             }
             WorkerCommand::SetGpuMode { mode, confirmed } => {
                 WorkerEvent::Gpu(main_service.set_gpu_mode(mode, confirmed).await)
@@ -1867,7 +1867,8 @@ mod tests {
 
     #[tokio::test]
     async fn routes_commands_to_distinct_providers() {
-        let (main_provider, perf_calls, gpu_calls) = MainOnlyProvider::new();
+        let (main_provider, main_perf_calls, gpu_calls) = MainOnlyProvider::new();
+        let (performance_provider, performance_calls, _) = MainOnlyProvider::new();
         let (battery_provider, refresh_calls, set_calls) = BatteryOnlyProvider::new();
 
         let main_service = AppService::new(main_provider);
@@ -1875,7 +1876,7 @@ mod tests {
         let gpu_power_service = AppService::new(battery_provider.clone());
         let gpu_mux_service = AppService::new(battery_provider.clone());
         let gpu_access_service = AppService::new(battery_provider.clone());
-        let performance_service = AppService::new(battery_provider);
+        let performance_service = AppService::new(performance_provider);
 
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1907,13 +1908,23 @@ mod tests {
         tx.send(WorkerCommand::SetChargeLimit { percent: 60 })
             .expect("send4");
 
-        // 4 события в FIFO-порядке.
-        for _ in 0..4 {
+        // 4 события в FIFO-порядке. Performance должен вернуть authoritative
+        // state отдельного performance provider, а не main provider.
+        match result_rx.recv().await.expect("performance event") {
+            WorkerEvent::Performance(Ok(outcome)) => {
+                assert_eq!(outcome.state.current, PerformanceProfile::Silent);
+                assert_eq!(outcome.state.available.len(), 3);
+            }
+            other => panic!("ожидался Ok(Performance), получено: {other:?}"),
+        }
+        for _ in 0..3 {
             let _ = result_rx.recv().await.expect("event");
         }
 
-        // Правильная маршрутизация: Performance/GPU -> main; Refresh/Set -> battery.
-        assert_eq!(perf_calls.load(Ordering::SeqCst), 1);
+        // Правильная маршрутизация: GPU -> main; Performance -> performance;
+        // Refresh/Set -> battery.
+        assert_eq!(main_perf_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(performance_calls.load(Ordering::SeqCst), 1);
         assert_eq!(gpu_calls.load(Ordering::SeqCst), 1);
         // RefreshChargeLimit -> 1 вызов charge_limit(); SetChargeLimit -> 1 вызов
         // set_charge_limit() + обязательный authoritative read-back через
