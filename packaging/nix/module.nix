@@ -69,6 +69,7 @@ in
     # единственная capability — Performance profile write (ADR 0006).
     systemd.services.orbis-hardwared = {
       description = "Orbis Control hardware helper (performance profile)";
+      wantedBy = [ "multi-user.target" ];
       after = [ "dbus.service" ];
       requires = [ "dbus.service" ];
       serviceConfig = {

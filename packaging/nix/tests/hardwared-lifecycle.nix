@@ -23,12 +23,6 @@
       imports = [ ../module.nix ];
       services.orbis-control.enable = true;
       services.dbus.enable = true;
-      # module.nix пока не задаёт wantedBy для system сервиса; VM включает его
-      # явно, чтобы проверить lifecycle (production activation policy — вне
-      # этого теста).
-      systemd.services.orbis-hardwared.wantedBy = lib.mkForce [
-        "multi-user.target"
-      ];
     };
 
   testScript = ''
