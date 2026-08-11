@@ -10,6 +10,7 @@
 //! - каждый вызов `charge_limit()` выполняет новое authoritative чтение source
 //!   (кэш отсутствует).
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -54,6 +55,8 @@ pub struct UPowerChargeLimitSnapshot {
     pub enabled: bool,
     /// Конечный порог в процентах (raw `u32`).
     pub end_threshold: u32,
+    /// Effective kernel end threshold, если отдельный source смог его прочитать.
+    pub effective_end_threshold: Option<u8>,
 }
 
 /// Testable источник UPower charge limit snapshot.
@@ -61,6 +64,89 @@ pub struct UPowerChargeLimitSnapshot {
 pub trait UPowerChargeLimitSource: Send + Sync {
     /// Прочитать snapshot (authoritative, без кэша).
     async fn read_charge_limit(&self) -> Result<UPowerChargeLimitSnapshot, ProviderError>;
+}
+
+/// Узкий read-only source effective kernel battery threshold.
+#[async_trait]
+pub trait BatteryEffectiveSource: Send + Sync {
+    /// Прочитать effective end threshold свежим чтением.
+    async fn read_effective_end_threshold(&self) -> Result<u8, ProviderError>;
+}
+
+/// Read-only sysfs source для уже обнаруженного power-supply.
+pub struct SysfsBatteryEndThresholdSource {
+    path: PathBuf,
+}
+
+impl SysfsBatteryEndThresholdSource {
+    /// Создать source из одного validated native power-supply name.
+    pub fn from_native_path(native_path: &str) -> Result<Self, ProviderError> {
+        let name = std::path::Path::new(native_path);
+        if native_path.is_empty()
+            || name.components().count() != 1
+            || name.file_name().and_then(|v| v.to_str()) != Some(native_path)
+        {
+            return Err(ProviderError::InvalidRequest(format!(
+                "invalid power-supply native path: {native_path}"
+            )));
+        }
+        Ok(Self {
+            path: PathBuf::from("/sys/class/power_supply")
+                .join(native_path)
+                .join("charge_control_end_threshold"),
+        })
+    }
+
+    #[cfg(test)]
+    fn new_for_test(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+#[async_trait]
+impl BatteryEffectiveSource for SysfsBatteryEndThresholdSource {
+    async fn read_effective_end_threshold(&self) -> Result<u8, ProviderError> {
+        let raw = std::fs::read_to_string(&self.path).map_err(ProviderError::Io)?;
+        let value = raw.trim().parse::<u16>().map_err(|e| {
+            ProviderError::Internal(format!(
+                "battery effective threshold is not an integer: {e}"
+            ))
+        })?;
+        if value > 100 {
+            Err(ProviderError::Internal(format!(
+                "battery effective threshold outside percent range: {value}"
+            )))
+        } else {
+            Ok(value as u8)
+        }
+    }
+}
+
+/// Объединяет UPower configured/enabled reads и kernel effective read.
+pub struct CombinedChargeLimitSource<U, E> {
+    upower: U,
+    effective: E,
+}
+
+impl<U, E> CombinedChargeLimitSource<U, E> {
+    /// Создать composite read-only source.
+    pub fn new(upower: U, effective: E) -> Self {
+        Self { upower, effective }
+    }
+}
+
+#[async_trait]
+impl<U, E> UPowerChargeLimitSource for CombinedChargeLimitSource<U, E>
+where
+    U: UPowerChargeLimitSource,
+    E: BatteryEffectiveSource,
+{
+    async fn read_charge_limit(&self) -> Result<UPowerChargeLimitSnapshot, ProviderError> {
+        let mut snapshot = self.upower.read_charge_limit().await?;
+        snapshot.effective_end_threshold =
+            Some(self.effective.read_effective_end_threshold().await?);
+        Ok(snapshot)
+    }
 }
 
 /// Реальный zbus источник.
@@ -114,6 +200,7 @@ impl UPowerChargeLimitSource for ZbusUPowerChargeLimitSource {
             supported,
             enabled,
             end_threshold,
+            effective_end_threshold: None,
         })
     }
 }
@@ -188,14 +275,19 @@ where
             ))
         })?;
 
-        ChargeLimit::new(
-            snapshot.enabled,
-            Some(Percent::new(percent_u8).map_err(|e| {
-                ProviderError::Internal(format!("UPower: невалидный threshold: {e}"))
-            })?),
-            None,
-        )
-        .map_err(|e| ProviderError::Internal(format!("UPower: threshold невалиден: {e}")))
+        let configured = Some(Percent::new(percent_u8).map_err(|e| {
+            ProviderError::Internal(format!("UPower: невалидный configured threshold: {e}"))
+        })?);
+        let effective = snapshot
+            .effective_end_threshold
+            .map(|value| {
+                Percent::new(value).map_err(|e| {
+                    ProviderError::Internal(format!("kernel: невалидный effective threshold: {e}"))
+                })
+            })
+            .transpose()?;
+        ChargeLimit::new(snapshot.enabled, configured, effective, None)
+            .map_err(|e| ProviderError::Internal(format!("UPower: threshold невалиден: {e}")))
     }
 
     async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {
@@ -220,6 +312,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+    use tempfile::tempdir;
 
     /// Исход теста ScriptedSource: snapshot либо сценарий ошибки.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,10 +361,11 @@ mod tests {
             supported: true,
             enabled: true,
             end_threshold: 80,
+            effective_end_threshold: None,
         }));
         let limit = p.charge_limit().await.expect("charge limit");
         assert!(limit.enabled);
-        assert_eq!(limit.percent.map(|x| x.get()), Some(80));
+        assert_eq!(limit.configured_percent.map(|x| x.get()), Some(80));
         // UPower не сообщает hardware min/max/step: bounds неизвестны.
         assert!(limit.bounds.is_none());
         assert_eq!(p.source.reads(), 1);
@@ -283,11 +377,12 @@ mod tests {
             supported: true,
             enabled: false,
             end_threshold: 80,
+            effective_end_threshold: None,
         }));
         let limit = p.charge_limit().await.expect("charge limit");
         assert!(!limit.enabled);
         // Выключенная функция не отменяет известный порог.
-        assert_eq!(limit.percent.map(|x| x.get()), Some(80));
+        assert_eq!(limit.configured_percent.map(|x| x.get()), Some(80));
         // UPower не сообщает hardware min/max/step: bounds неизвестны.
         assert!(limit.bounds.is_none());
     }
@@ -298,6 +393,7 @@ mod tests {
             supported: false,
             enabled: false,
             end_threshold: 0,
+            effective_end_threshold: None,
         }));
         let err = p.charge_limit().await.expect_err("unsupported");
         assert!(matches!(err, ProviderError::Unsupported(_)));
@@ -310,6 +406,7 @@ mod tests {
             supported: true,
             enabled: true,
             end_threshold: 300,
+            effective_end_threshold: None,
         }));
         assert!(matches!(
             p_high.charge_limit().await.expect_err("300 rejected"),
@@ -321,10 +418,31 @@ mod tests {
             supported: true,
             enabled: true,
             end_threshold: 0,
+            effective_end_threshold: None,
         }));
         let limit = p_zero.charge_limit().await.expect("0 accepted");
-        assert_eq!(limit.percent.map(|x| x.get()), Some(0));
+        assert_eq!(limit.configured_percent.map(|x| x.get()), Some(0));
         assert!(limit.bounds.is_none());
+    }
+
+    #[tokio::test]
+    async fn sysfs_effective_source_reads_fresh_and_rejects_malformed() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("charge_control_end_threshold");
+        std::fs::write(&path, "100\n").expect("write fixture");
+        let source = SysfsBatteryEndThresholdSource::new_for_test(path.clone());
+        assert_eq!(source.read_effective_end_threshold().await.unwrap(), 100);
+
+        std::fs::write(&path, "not-a-number\n").expect("write malformed fixture");
+        assert!(matches!(
+            source.read_effective_end_threshold().await,
+            Err(ProviderError::Internal(_))
+        ));
+        std::fs::write(&path, "101\n").expect("write out-of-range fixture");
+        assert!(matches!(
+            source.read_effective_end_threshold().await,
+            Err(ProviderError::Internal(_))
+        ));
     }
 
     #[tokio::test]
@@ -340,6 +458,7 @@ mod tests {
             supported: true,
             enabled: true,
             end_threshold: 80,
+            effective_end_threshold: None,
         }));
         assert!(matches!(
             p.set_charge_limit(40).await.expect_err("set unsupported"),
@@ -361,6 +480,7 @@ mod tests {
             supported: true,
             enabled: true,
             end_threshold: 80,
+            effective_end_threshold: None,
         }));
         assert!(!matches!(
             p.validate_charge_limit(80),

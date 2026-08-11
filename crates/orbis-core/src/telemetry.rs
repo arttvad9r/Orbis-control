@@ -128,6 +128,7 @@ impl HardwareSnapshot {
             charge_limit: ChargeLimit::new(
                 false,
                 None,
+                None,
                 Some(
                     ChargeLimitBounds::new(
                         Percent::new(40).expect("const"),

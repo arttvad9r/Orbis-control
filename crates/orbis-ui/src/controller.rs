@@ -108,7 +108,7 @@ pub struct UiState {
     /// Отдельно от `gpu_mode_state`: production запрещает mutation, даже если
     /// legacy MockProvider продолжает обслуживать worker path.
     pub gpu_mode_writable: bool,
-    /// Лимит зарядки, % (authoritative value; не показывать при state != Ready).
+    /// Configured/reported charge threshold, % (не показывать при state != Ready).
     pub charge_limit: i32,
     /// Функция Battery Charge Limit доступна (из mock-состояния).
     pub charge_limit_enabled: bool,
@@ -190,7 +190,7 @@ impl UiState {
 
         let charge_limit = state
             .charge_limit
-            .percent
+            .configured_percent
             .map(|p| i32::from(p.get()))
             .unwrap_or(80);
         let charge_limit_enabled = state.charge_limit.enabled;

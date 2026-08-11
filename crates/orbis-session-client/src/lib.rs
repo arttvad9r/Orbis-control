@@ -90,16 +90,24 @@ fn zbus_error_to_provider(error: zbus::Error) -> ProviderError {
 
 /// Wire→domain boundary между недоверенным D-Bus payload и доменной моделью.
 ///
-/// - canonical invariant: `percent_present == false` и `percent != 0` — ошибка
+/// - canonical invariants для configured/effective absent fields проверяются
+///   отдельно; несогласованный payload — ошибка
 ///   `Internal` (несогласованный payload не превращается молча в `None`);
 /// - malformed bounds/percent/step → `Internal` (remote service нарушил
 ///   contract — это не ошибка пользовательского запроса);
 /// - `enabled` сохраняется без преобразования.
 pub fn charge_limit_from_wire(info: ChargeLimitInfo) -> Result<ChargeLimit, ProviderError> {
-    if !info.percent_present && info.percent != 0 {
+    if !info.configured_percent_present && info.configured_percent != 0 {
         return Err(ProviderError::Internal(format!(
-            "session protocol: percent_present=false, но percent={} (нарушен canonical invariant)",
-            info.percent
+            "session protocol: configured_percent_present=false, но configured_percent={} (нарушен canonical invariant)",
+            info.configured_percent
+        )));
+    }
+
+    if !info.effective_percent_present && info.effective_percent != 0 {
+        return Err(ProviderError::Internal(format!(
+            "session protocol: effective_percent_present=false, но effective_percent={} (нарушен canonical invariant)",
+            info.effective_percent
         )));
     }
 
@@ -112,9 +120,20 @@ pub fn charge_limit_from_wire(info: ChargeLimitInfo) -> Result<ChargeLimit, Prov
         ));
     }
 
-    let percent = if info.percent_present {
-        Some(Percent::new(info.percent).map_err(|e| {
-            ProviderError::Internal(format!("session protocol: невалидный percent: {e}"))
+    let configured = if info.configured_percent_present {
+        Some(Percent::new(info.configured_percent).map_err(|e| {
+            ProviderError::Internal(format!(
+                "session protocol: невалидный configured percent: {e}"
+            ))
+        })?)
+    } else {
+        None
+    };
+    let effective = if info.effective_percent_present {
+        Some(Percent::new(info.effective_percent).map_err(|e| {
+            ProviderError::Internal(format!(
+                "session protocol: невалидный effective percent: {e}"
+            ))
         })?)
     } else {
         None
@@ -143,7 +162,7 @@ pub fn charge_limit_from_wire(info: ChargeLimitInfo) -> Result<ChargeLimit, Prov
         None
     };
 
-    ChargeLimit::new(info.enabled, percent, bounds).map_err(|e| {
+    ChargeLimit::new(info.enabled, configured, effective, bounds).map_err(|e| {
         ProviderError::Internal(format!(
             "session protocol: несогласованный wire payload: {e}"
         ))
@@ -889,10 +908,11 @@ mod tests {
 
     #[test]
     fn maps_wire_with_percent_to_domain() {
-        let info = ChargeLimitInfo::with_percent(true, 80, 40, 100, 5);
+        let info = ChargeLimitInfo::with_percent(true, 80, 80, 40, 100, 5);
         let limit = charge_limit_from_wire(info).expect("valid");
         assert!(limit.enabled);
-        assert_eq!(limit.percent.map(|p| p.get()), Some(80));
+        assert_eq!(limit.configured_percent.map(|p| p.get()), Some(80));
+        assert_eq!(limit.effective_percent.map(|p| p.get()), Some(80));
         let b = limit.bounds.expect("known bounds");
         assert_eq!(b.min.get(), 40);
         assert_eq!(b.max.get(), 100);
@@ -904,7 +924,8 @@ mod tests {
         let info = ChargeLimitInfo::without_percent(false, 40, 100, 5);
         let limit = charge_limit_from_wire(info).expect("valid");
         assert!(!limit.enabled);
-        assert_eq!(limit.percent, None);
+        assert_eq!(limit.configured_percent, None);
+        assert_eq!(limit.effective_percent, None);
         let b = limit.bounds.expect("known bounds");
         assert_eq!(b.min.get(), 40);
         assert_eq!(b.max.get(), 100);
@@ -915,8 +936,10 @@ mod tests {
     fn preserves_disabled_state_with_known_percent() {
         let info = ChargeLimitInfo {
             enabled: false,
-            percent_present: true,
-            percent: 80,
+            configured_percent_present: true,
+            configured_percent: 80,
+            effective_percent_present: true,
+            effective_percent: 100,
             bounds_present: true,
             min_percent: 40,
             max_percent: 100,
@@ -925,15 +948,18 @@ mod tests {
         let limit = charge_limit_from_wire(info).expect("valid");
         assert!(!limit.enabled);
         // Выключенная функция не означает отсутствие известного threshold.
-        assert_eq!(limit.percent.map(|p| p.get()), Some(80));
+        assert_eq!(limit.configured_percent.map(|p| p.get()), Some(80));
+        assert_eq!(limit.effective_percent.map(|p| p.get()), Some(100));
     }
 
     #[test]
     fn rejects_noncanonical_missing_percent() {
         let info = ChargeLimitInfo {
             enabled: true,
-            percent_present: false,
-            percent: 80,
+            configured_percent_present: false,
+            configured_percent: 80,
+            effective_percent_present: false,
+            effective_percent: 0,
             bounds_present: true,
             min_percent: 40,
             max_percent: 100,
@@ -946,19 +972,19 @@ mod tests {
     #[test]
     fn rejects_invalid_remote_bounds() {
         // min > max
-        let bad_range = ChargeLimitInfo::with_percent(true, 80, 100, 40, 5);
+        let bad_range = ChargeLimitInfo::with_percent(true, 80, 80, 100, 40, 5);
         assert!(matches!(
             charge_limit_from_wire(bad_range).expect_err("min > max"),
             ProviderError::Internal(_)
         ));
         // percent вне [min, max]
-        let bad_percent = ChargeLimitInfo::with_percent(true, 30, 40, 100, 5);
+        let bad_percent = ChargeLimitInfo::with_percent(true, 30, 30, 40, 100, 5);
         assert!(matches!(
             charge_limit_from_wire(bad_percent).expect_err("percent < min"),
             ProviderError::Internal(_)
         ));
         // step == 0
-        let bad_step = ChargeLimitInfo::with_percent(true, 80, 40, 100, 0);
+        let bad_step = ChargeLimitInfo::with_percent(true, 80, 80, 40, 100, 0);
         assert!(matches!(
             charge_limit_from_wire(bad_step).expect_err("step == 0"),
             ProviderError::Internal(_)
@@ -968,25 +994,25 @@ mod tests {
     #[tokio::test]
     async fn provider_reads_source_once() {
         let source = ScriptedSource::new(vec![ScriptedRead::Info(ChargeLimitInfo::with_percent(
-            true, 80, 40, 100, 5,
+            true, 80, 80, 40, 100, 5,
         ))]);
         let provider = SessionChargeLimitProvider::new(source);
         let limit = provider.charge_limit().await.expect("charge limit");
-        assert_eq!(limit.percent.map(|p| p.get()), Some(80));
+        assert_eq!(limit.configured_percent.map(|p| p.get()), Some(80));
         assert_eq!(provider.source.reads(), 1);
     }
 
     #[tokio::test]
     async fn provider_does_not_cache_wire_state() {
         let source = ScriptedSource::new(vec![
-            ScriptedRead::Info(ChargeLimitInfo::with_percent(true, 80, 40, 100, 5)),
-            ScriptedRead::Info(ChargeLimitInfo::with_percent(true, 60, 40, 100, 5)),
+            ScriptedRead::Info(ChargeLimitInfo::with_percent(true, 80, 80, 40, 100, 5)),
+            ScriptedRead::Info(ChargeLimitInfo::with_percent(true, 60, 60, 40, 100, 5)),
         ]);
         let provider = SessionChargeLimitProvider::new(source);
         let first = provider.charge_limit().await.expect("read1");
         let second = provider.charge_limit().await.expect("read2");
-        assert_eq!(first.percent.map(|p| p.get()), Some(80));
-        assert_eq!(second.percent.map(|p| p.get()), Some(60));
+        assert_eq!(first.configured_percent.map(|p| p.get()), Some(80));
+        assert_eq!(second.configured_percent.map(|p| p.get()), Some(60));
         assert_eq!(provider.source.reads(), 2);
     }
 
@@ -1001,7 +1027,7 @@ mod tests {
     #[tokio::test]
     async fn mutations_are_unsupported_without_source_access() {
         let source = ScriptedSource::new(vec![ScriptedRead::Info(ChargeLimitInfo::with_percent(
-            true, 80, 40, 100, 5,
+            true, 80, 80, 40, 100, 5,
         ))]);
         let provider = SessionChargeLimitProvider::new(source);
         assert!(matches!(
@@ -1024,7 +1050,7 @@ mod tests {
     #[test]
     fn validation_does_not_claim_write_support() {
         let source = ScriptedSource::new(vec![ScriptedRead::Info(ChargeLimitInfo::with_percent(
-            true, 80, 40, 100, 5,
+            true, 80, 80, 40, 100, 5,
         ))]);
         let provider = SessionChargeLimitProvider::new(source);
         assert!(!matches!(
@@ -1066,10 +1092,10 @@ mod tests {
     #[test]
     fn maps_wire_unknown_bounds_to_domain() {
         // current percent допустим при bounds=None.
-        let info = ChargeLimitInfo::with_percent_unknown_bounds(true, 80);
+        let info = ChargeLimitInfo::with_percent_unknown_bounds(true, 80, 80);
         let limit = charge_limit_from_wire(info).expect("valid");
         assert!(limit.enabled);
-        assert_eq!(limit.percent.map(|p| p.get()), Some(80));
+        assert_eq!(limit.configured_percent.map(|p| p.get()), Some(80));
         assert!(limit.bounds.is_none());
     }
 
@@ -1078,8 +1104,10 @@ mod tests {
         // bounds_present=false с ненулевыми min/max/step нарушает canonical form.
         let info = ChargeLimitInfo {
             enabled: true,
-            percent_present: true,
-            percent: 80,
+            configured_percent_present: true,
+            configured_percent: 80,
+            effective_percent_present: true,
+            effective_percent: 80,
             bounds_present: false,
             min_percent: 40,
             max_percent: 0,
@@ -1091,9 +1119,9 @@ mod tests {
 
     #[test]
     fn unknown_bounds_roundtrip_preserves_none() {
-        let info = ChargeLimitInfo::with_percent_unknown_bounds(true, 60);
+        let info = ChargeLimitInfo::with_percent_unknown_bounds(true, 60, 60);
         let limit = charge_limit_from_wire(info).expect("valid");
-        assert_eq!(limit.percent.map(|p| p.get()), Some(60));
+        assert_eq!(limit.configured_percent.map(|p| p.get()), Some(60));
         assert!(limit.bounds.is_none());
     }
 

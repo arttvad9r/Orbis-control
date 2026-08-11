@@ -35,6 +35,7 @@ pub enum BootstrapError {
 /// - helper не управляет lifecycle, reconnect и signal handling.
 pub async fn connect_upower_session_server(
     battery_object_path: zbus::zvariant::OwnedObjectPath,
+    battery_native_path: String,
 ) -> zbus::Result<zbus::Connection> {
     let upower_connection = zbus::Connection::system().await?;
     let session_builder = zbus::connection::Builder::session()?;
@@ -42,6 +43,7 @@ pub async fn connect_upower_session_server(
         session_builder,
         upower_connection,
         battery_object_path,
+        battery_native_path,
         GpuCapabilities::default(),
         None,
     )
@@ -52,8 +54,8 @@ pub async fn connect_upower_session_server(
 ///
 /// - открывается одна system bus Connection для UPower;
 /// - через ту же Connection выполняется read-only discovery батареи
-///   (`discover_battery_object_path`), ровно один раз при startup;
-/// - найденный path и та же UPower Connection передаются в
+///   (`discover_battery`), ровно один раз при startup;
+/// - найденный object path/native path и та же UPower Connection передаются в
 ///   существующий composition layer;
 /// - открывается session bus для Orbis service;
 /// - D-Bus startup failure и discovery failure сохраняются раздельно
@@ -64,8 +66,7 @@ pub async fn connect_upower_session_server(
 pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connection, BootstrapError>
 {
     let upower_connection = zbus::Connection::system().await?;
-    let battery_object_path =
-        crate::discovery::discover_battery_object_path(&upower_connection).await?;
+    let battery = crate::discovery::discover_battery(&upower_connection).await?;
     let session_builder = zbus::connection::Builder::session()?;
 
     // Read-only GPU capabilities:
@@ -93,7 +94,8 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
     Ok(build_upower_session_server(
         session_builder,
         upower_connection,
-        battery_object_path,
+        battery.object_path,
+        battery.native_path,
         gpu,
         Some(performance),
     )

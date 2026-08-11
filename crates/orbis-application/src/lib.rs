@@ -474,7 +474,7 @@ mod tests {
     async fn initial_charge_limit() {
         let (_provider, svc) = service();
         let cl = svc.charge_limit().await.unwrap();
-        assert_eq!(cl.percent, Some(Percent::new(80).unwrap()));
+        assert_eq!(cl.configured_percent, Some(Percent::new(80).unwrap()));
         assert!(cl.enabled);
         assert_eq!(cl.bounds.unwrap().min, Percent::new(40).unwrap());
         assert_eq!(cl.bounds.unwrap().max, Percent::new(100).unwrap());
@@ -485,7 +485,10 @@ mod tests {
         let (_provider, svc) = service();
         let outcome: ChargeLimitCommandOutcome = svc.set_charge_limit(40).await.unwrap();
         assert!(outcome.result.is_applied());
-        assert_eq!(outcome.state.percent, Some(Percent::new(40).unwrap()));
+        assert_eq!(
+            outcome.state.configured_percent,
+            Some(Percent::new(40).unwrap())
+        );
         // Остальные поля не повреждены.
         assert!(outcome.state.enabled);
         assert_eq!(outcome.state.bounds.unwrap().min, Percent::new(40).unwrap());
@@ -500,7 +503,10 @@ mod tests {
         let (_provider, svc) = service();
         svc.set_charge_limit(40).await.unwrap();
         let outcome = svc.set_charge_limit(100).await.unwrap();
-        assert_eq!(outcome.state.percent, Some(Percent::new(100).unwrap()));
+        assert_eq!(
+            outcome.state.configured_percent,
+            Some(Percent::new(100).unwrap())
+        );
     }
 
     #[tokio::test]
@@ -509,7 +515,10 @@ mod tests {
         let first = svc.set_charge_limit(100).await.unwrap();
         let second = svc.set_charge_limit(100).await.unwrap();
         assert!(second.result.is_applied());
-        assert_eq!(second.state.percent, Some(Percent::new(100).unwrap()));
+        assert_eq!(
+            second.state.configured_percent,
+            Some(Percent::new(100).unwrap())
+        );
         assert_eq!(second.state, first.state);
     }
 
@@ -521,7 +530,10 @@ mod tests {
         // AppService не нормализует и не округляет значение.
         let outcome = svc.set_charge_limit(83).await.unwrap();
         assert!(outcome.result.is_applied());
-        assert_eq!(outcome.state.percent, Some(Percent::new(83).unwrap()));
+        assert_eq!(
+            outcome.state.configured_percent,
+            Some(Percent::new(83).unwrap())
+        );
     }
 
     #[tokio::test]
@@ -539,7 +551,7 @@ mod tests {
 
         state.write().await.error_mode = MockErrorMode::None;
         let cl = svc.charge_limit().await.unwrap();
-        assert_eq!(cl.percent, Some(Percent::new(80).unwrap()));
+        assert_eq!(cl.configured_percent, Some(Percent::new(80).unwrap()));
     }
 
     #[tokio::test]
@@ -557,7 +569,7 @@ mod tests {
 
         state.write().await.error_mode = MockErrorMode::None;
         let cl = svc.charge_limit().await.unwrap();
-        assert_eq!(cl.percent, Some(Percent::new(80).unwrap()));
+        assert_eq!(cl.configured_percent, Some(Percent::new(80).unwrap()));
     }
 
     #[tokio::test]
@@ -566,7 +578,7 @@ mod tests {
         // Прямое изменение provider через trait (вне AppService).
         provider.set_charge_limit(60).await.unwrap();
         let cl = svc.charge_limit().await.unwrap();
-        assert_eq!(cl.percent, Some(Percent::new(60).unwrap()));
+        assert_eq!(cl.configured_percent, Some(Percent::new(60).unwrap()));
     }
 
     // -----------------------------------------------------------------------
@@ -736,6 +748,7 @@ mod tests {
             let p = *self.limit.read().await;
             Ok(ChargeLimit::new(
                 true,
+                Some(Percent::new(p).expect("range")),
                 Some(Percent::new(p).expect("range")),
                 Some(
                     ChargeLimitBounds::new(

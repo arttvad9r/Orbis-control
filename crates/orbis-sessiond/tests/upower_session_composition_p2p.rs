@@ -142,6 +142,7 @@ async fn connect_composition(
             session_server_builder,
             upower_client_conn.clone(),
             object_path,
+            "BAT1".to_string(),
             Default::default(),
             None,
         ),
@@ -172,9 +173,10 @@ async fn composition_serves_upower_charge_limit() {
         let info = proxy.charge_limit().await.expect("charge limit");
 
         assert!(!info.enabled);
-        assert!(info.percent_present);
-        assert_eq!(info.percent, 80);
-        assert_eq!(info.percent(), Some(80));
+        assert!(info.configured_percent_present);
+        assert_eq!(info.configured_percent, 80);
+        assert!(info.effective_percent_present);
+        assert_eq!(info.effective_percent, 100);
         // UPower не сообщает hardware bounds: на wire bounds отсутствуют.
         assert!(!info.bounds_present);
         assert_eq!(info.min_percent, 0);
@@ -210,7 +212,8 @@ async fn composition_reads_fresh_upower_values() {
 
         let first = proxy.charge_limit().await.expect("read1");
         assert!(first.enabled);
-        assert_eq!(first.percent, 80);
+        assert_eq!(first.configured_percent, 80);
+        assert_eq!(first.effective_percent, 100);
 
         {
             let mut st = state.lock().unwrap();
@@ -220,7 +223,8 @@ async fn composition_reads_fresh_upower_values() {
 
         let second = proxy.charge_limit().await.expect("read2");
         assert!(!second.enabled);
-        assert_eq!(second.percent, 60);
+        assert_eq!(second.configured_percent, 60);
+        assert_eq!(second.effective_percent, 100);
 
         let calls = state.lock().unwrap().calls.clone();
         assert_eq!(

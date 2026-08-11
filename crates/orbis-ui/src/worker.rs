@@ -658,6 +658,7 @@ mod tests {
             Ok(ChargeLimit::new(
                 true,
                 Some(Percent::new(80).expect("const")),
+                Some(Percent::new(80).expect("const")),
                 Some(
                     ChargeLimitBounds::new(
                         Percent::new(40).expect("const"),
@@ -1037,7 +1038,7 @@ mod tests {
         match event {
             WorkerEvent::ChargeLimit(Ok(outcome)) => {
                 assert_eq!(outcome.result, ApplyResult::Applied);
-                assert_eq!(outcome.state.percent.map(|p| p.get()), Some(40));
+                assert_eq!(outcome.state.configured_percent.map(|p| p.get()), Some(40));
                 assert!(outcome.state.enabled);
                 let b = outcome.state.bounds.expect("mock bounds");
                 assert_eq!(b.min.get(), 40);
@@ -1083,7 +1084,7 @@ mod tests {
         match event {
             WorkerEvent::ChargeLimit(Ok(outcome)) => {
                 assert_eq!(outcome.result, ApplyResult::Applied);
-                assert_eq!(outcome.state.percent.map(|p| p.get()), Some(83));
+                assert_eq!(outcome.state.configured_percent.map(|p| p.get()), Some(83));
             }
             other => panic!("ожидался Ok(ChargeLimit), получено: {other:?}"),
         }
@@ -1152,7 +1153,7 @@ mod tests {
             ) => {
                 assert_eq!(a.state.current, PerformanceProfile::Silent);
                 assert_eq!(g.state.requested, GpuMode::Optimized);
-                assert_eq!(c.state.percent.map(|p| p.get()), Some(40));
+                assert_eq!(c.state.configured_percent.map(|p| p.get()), Some(40));
                 assert_eq!(b.state.current, PerformanceProfile::Turbo);
             }
             other => panic!("ожидался порядок Perf(Gpu(Charge(Perf)), получено: {other:?}"),
@@ -1169,7 +1170,7 @@ mod tests {
                 .charge_limit()
                 .await
                 .unwrap()
-                .percent
+                .configured_percent
                 .map(|p| p.get()),
             Some(40)
         );
@@ -1235,7 +1236,7 @@ mod tests {
             .await
             .expect("charge limit unchanged");
         assert_eq!(after, before);
-        assert_ne!(after.percent.map(|p| p.get()), Some(40));
+        assert_ne!(after.configured_percent.map(|p| p.get()), Some(40));
 
         drop(tx);
         tokio::time::timeout(std::time::Duration::from_secs(5), worker)
@@ -1292,7 +1293,7 @@ mod tests {
         match event {
             WorkerEvent::ChargeLimit(Ok(outcome)) => {
                 assert_eq!(outcome.result, ApplyResult::Applied);
-                assert_eq!(outcome.state.percent.map(|p| p.get()), Some(50));
+                assert_eq!(outcome.state.configured_percent.map(|p| p.get()), Some(50));
             }
             other => panic!("ожидался Ok(ChargeLimit), получено: {other:?}"),
         }
@@ -1364,9 +1365,9 @@ mod tests {
                 WorkerEvent::Gpu(Ok(g)),
                 WorkerEvent::ChargeLimit(Ok(c2)),
             ) => {
-                assert_eq!(c1.state.percent.map(|p| p.get()), Some(45));
+                assert_eq!(c1.state.configured_percent.map(|p| p.get()), Some(45));
                 assert_eq!(g.state.requested, GpuMode::Optimized);
-                assert_eq!(c2.state.percent.map(|p| p.get()), Some(55));
+                assert_eq!(c2.state.configured_percent.map(|p| p.get()), Some(55));
             }
             other => panic!("ожидался порядок Charge(Gpu(Charge), получено: {other:?}"),
         }
@@ -1378,7 +1379,7 @@ mod tests {
                 .charge_limit()
                 .await
                 .unwrap()
-                .percent
+                .configured_percent
                 .map(|p| p.get()),
             Some(55)
         );
@@ -1427,9 +1428,9 @@ mod tests {
                 WorkerEvent::Performance(Ok(p)),
                 WorkerEvent::ChargeLimit(Ok(c2)),
             ) => {
-                assert_eq!(c1.state.percent.map(|p| p.get()), Some(40));
+                assert_eq!(c1.state.configured_percent.map(|p| p.get()), Some(40));
                 assert_eq!(p.state.current, PerformanceProfile::Silent);
-                assert_eq!(c2.state.percent.map(|p| p.get()), Some(45));
+                assert_eq!(c2.state.configured_percent.map(|p| p.get()), Some(45));
             }
             other => panic!("ожидался порядок Charge(Perf(Charge), получено: {other:?}"),
         }
@@ -1487,7 +1488,7 @@ mod tests {
         let event = result_rx.recv().await.expect("event");
         match event {
             WorkerEvent::ChargeLimitRefresh(Ok(limit)) => {
-                assert_eq!(limit.percent.map(|p| p.get()), Some(60));
+                assert_eq!(limit.configured_percent.map(|p| p.get()), Some(60));
                 assert!(limit.enabled);
             }
             other => panic!("ожидался Ok(ChargeLimitRefresh), получено: {other:?}"),
@@ -1590,9 +1591,9 @@ mod tests {
                 WorkerEvent::ChargeLimit(Ok(c2)),
             ) => {
                 // Первая adjacent группа coalesce-ится до 45 (last-wins).
-                assert_eq!(c1.state.percent.map(|p| p.get()), Some(45));
+                assert_eq!(c1.state.configured_percent.map(|p| p.get()), Some(45));
                 // После Refresh-барьера новая группа выполняется отдельно.
-                assert_eq!(c2.state.percent.map(|p| p.get()), Some(50));
+                assert_eq!(c2.state.configured_percent.map(|p| p.get()), Some(50));
             }
             other => panic!("ожидался порядок Charge(Refresh(Charge), получено: {other:?}"),
         }
@@ -1789,6 +1790,7 @@ mod tests {
             self.refresh_calls.fetch_add(1, Ordering::SeqCst);
             Ok(ChargeLimit::new(
                 true,
+                Some(Percent::new(*self.limit.read().await).expect("const")),
                 Some(Percent::new(*self.limit.read().await).expect("const")),
                 None,
             )

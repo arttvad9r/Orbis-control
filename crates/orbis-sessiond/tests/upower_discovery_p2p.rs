@@ -20,6 +20,7 @@ const UPOWER_ROOT_PATH: &str = "/org/freedesktop/UPower";
 enum FakeProp {
     Type,
     PowerSupply,
+    NativePath,
 }
 
 /// Состояние fake Device.
@@ -72,6 +73,13 @@ impl FakeDevice {
             ));
         }
         Ok(st.power_supply)
+    }
+
+    #[zbus(property, name = "NativePath")]
+    fn native_path(&self) -> zbus::fdo::Result<String> {
+        let mut st = self.state.lock().unwrap();
+        st.calls.push(FakeProp::NativePath);
+        Ok("BAT1".to_string())
     }
 }
 
@@ -165,7 +173,7 @@ async fn discovers_single_system_battery() {
         );
         assert_eq!(
             sys_state.lock().unwrap().calls,
-            vec![FakeProp::Type, FakeProp::PowerSupply]
+            vec![FakeProp::Type, FakeProp::PowerSupply, FakeProp::NativePath]
         );
     })
     .await
@@ -269,6 +277,7 @@ async fn reads_fresh_device_state() {
             vec![
                 FakeProp::Type,
                 FakeProp::PowerSupply,
+                FakeProp::NativePath,
                 FakeProp::Type,
                 FakeProp::PowerSupply
             ]

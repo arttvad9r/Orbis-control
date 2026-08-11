@@ -121,6 +121,7 @@ fn limit(enabled: bool, percent: Option<u8>, min: u8, max: u8, step: u8) -> Char
     ChargeLimit::new(
         enabled,
         percent.map(|p| Percent::new(p).expect("range")),
+        percent.map(|p| Percent::new(p).expect("range")),
         Some(
             ChargeLimitBounds::new(
                 Percent::new(min).expect("range"),
@@ -170,9 +171,10 @@ async fn server_helper_registers_protocol_service() {
         let info = proxy.charge_limit().await.expect("charge limit");
 
         assert!(info.enabled);
-        assert!(info.percent_present);
-        assert_eq!(info.percent, 80);
-        assert_eq!(info.percent(), Some(80));
+        assert!(info.configured_percent_present);
+        assert_eq!(info.configured_percent, 80);
+        assert!(info.effective_percent_present);
+        assert_eq!(info.effective_percent, 80);
         assert_eq!(info.min_percent, 40);
         assert_eq!(info.max_percent, 100);
         assert_eq!(info.step_percent, 5);
@@ -230,8 +232,8 @@ async fn server_helper_reads_fresh_values() {
         let first = proxy.charge_limit().await.expect("read1");
         let second = proxy.charge_limit().await.expect("read2");
 
-        assert_eq!(first.percent, 80);
-        assert_eq!(second.percent, 60);
+        assert_eq!(first.configured_percent, 80);
+        assert_eq!(second.configured_percent, 60);
         assert_eq!(provider.reads(), 2);
     })
     .await

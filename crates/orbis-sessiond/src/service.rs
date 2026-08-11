@@ -170,28 +170,26 @@ fn performance_mask_to_wire(available: &[PerformanceProfile]) -> u8 {
 
 /// Преобразовать domain `ChargeLimit` в canonical wire `ChargeLimitInfo`.
 ///
-/// Значения переносятся без clamp/округления/изменения шага; UI step не
-/// применяется; при `percent == None` wire payload канонизируется
-/// (`percent_present = false`, `percent = 0`).
+/// Значения configured/effective переносятся раздельно, без clamp/округления;
+/// отсутствующие значения канонизируются в payload.
 pub fn charge_limit_to_wire(value: ChargeLimit) -> ChargeLimitInfo {
-    match (value.percent, value.bounds) {
-        (Some(percent), Some(bounds)) => ChargeLimitInfo::with_percent(
-            value.enabled,
-            percent.get(),
-            bounds.min.get(),
-            bounds.max.get(),
-            bounds.step,
-        ),
-        (Some(percent), None) => {
-            ChargeLimitInfo::with_percent_unknown_bounds(value.enabled, percent.get())
-        }
-        (None, Some(bounds)) => ChargeLimitInfo::without_percent(
-            value.enabled,
-            bounds.min.get(),
-            bounds.max.get(),
-            bounds.step,
-        ),
-        (None, None) => ChargeLimitInfo::without_percent_unknown_bounds(value.enabled),
+    let bounds = value.bounds;
+    let (bounds_present, min_percent, max_percent, step_percent) = match bounds {
+        Some(bounds) => (true, bounds.min.get(), bounds.max.get(), bounds.step),
+        None => (false, 0, 0, 0),
+    };
+    let configured = value.configured_percent.map(|p| p.get());
+    let effective = value.effective_percent.map(|p| p.get());
+    ChargeLimitInfo {
+        enabled: value.enabled,
+        configured_percent_present: configured.is_some(),
+        configured_percent: configured.unwrap_or(0),
+        effective_percent_present: effective.is_some(),
+        effective_percent: effective.unwrap_or(0),
+        bounds_present,
+        min_percent,
+        max_percent,
+        step_percent,
     }
 }
 
@@ -212,20 +210,22 @@ fn provider_error_to_dbus(error: ProviderError) -> zbus::fdo::Error {
     }
 }
 
-/// Wire-кодирование `ChargeLimitInfo` в D-Bus tuple `(bbyyyy)`.
+/// Wire-кодирование `ChargeLimitInfo` в D-Bus tuple `(bbybybyyy)`.
 ///
 /// zbus 5.13.2 server-side interface macro требует `Value: From<T>` и `T: Type`
 /// для типа property; кастомный struct (`ChargeLimitInfo`) не конвертируется
-/// без impl в protocol crate (за пределами scope). Кортеж из шести полей имеет
-/// ту же D-Bus signature `(bbyyyy)`, что и `ChargeLimitInfo`, поэтому client
+/// без impl в protocol crate (за пределами scope). Кортеж из девяти полей имеет
+/// ту же D-Bus signature `(bbybybyyy)`, что и `ChargeLimitInfo`, поэтому client
 /// proxy остаётся без изменений.
-type ChargeLimitTuple = (bool, bool, u8, bool, u8, u8, u8);
+type ChargeLimitTuple = (bool, bool, u8, bool, u8, bool, u8, u8, u8);
 
 fn charge_limit_info_to_tuple(info: ChargeLimitInfo) -> ChargeLimitTuple {
     (
         info.enabled,
-        info.percent_present,
-        info.percent,
+        info.configured_percent_present,
+        info.configured_percent,
+        info.effective_percent_present,
+        info.effective_percent,
         info.bounds_present,
         info.min_percent,
         info.max_percent,
@@ -237,7 +237,7 @@ fn charge_limit_info_to_tuple(info: ChargeLimitInfo) -> ChargeLimitTuple {
 #[zbus::interface(name = "io.github.orbiscontrol.Session1")]
 impl SessionService {
     /// Текущий Battery Charge Limit (read-only property, wire signature
-    /// `(bbyyyy)`).
+    /// `(bbybybyyy)`).
     #[zbus(property)]
     async fn charge_limit(&self) -> zbus::fdo::Result<ChargeLimitTuple> {
         let info = self
@@ -404,6 +404,7 @@ mod tests {
         ChargeLimit::new(
             enabled,
             percent.map(|p| Percent::new(p).expect("range")),
+            percent.map(|p| Percent::new(p).expect("range")),
             Some(
                 ChargeLimitBounds::new(
                     Percent::new(min).expect("range"),
@@ -427,9 +428,10 @@ mod tests {
         let value = limit(true, Some(80), 40, 100, 5);
         let wire = charge_limit_to_wire(value);
         assert!(wire.enabled);
-        assert!(wire.percent_present);
-        assert_eq!(wire.percent, 80);
-        assert_eq!(wire.percent(), Some(80));
+        assert!(wire.configured_percent_present);
+        assert_eq!(wire.configured_percent, 80);
+        assert!(wire.effective_percent_present);
+        assert_eq!(wire.effective_percent, 80);
         assert_eq!(wire.min_percent, 40);
         assert_eq!(wire.max_percent, 100);
         assert_eq!(wire.step_percent, 5);
@@ -440,9 +442,10 @@ mod tests {
         let value = limit(false, None, 40, 100, 5);
         let wire = charge_limit_to_wire(value);
         assert!(!wire.enabled);
-        assert!(!wire.percent_present);
-        assert_eq!(wire.percent, 0);
-        assert_eq!(wire.percent(), None);
+        assert!(!wire.configured_percent_present);
+        assert_eq!(wire.configured_percent, 0);
+        assert!(!wire.effective_percent_present);
+        assert_eq!(wire.effective_percent, 0);
         assert_eq!(wire.min_percent, 40);
         assert_eq!(wire.max_percent, 100);
         assert_eq!(wire.step_percent, 5);
@@ -452,7 +455,8 @@ mod tests {
     async fn service_reads_provider_once() {
         let (svc, provider) = service(vec![ScriptedRead::Limit(limit(true, Some(80), 40, 100, 5))]);
         let wire = svc.read_charge_limit().await.expect("read");
-        assert_eq!(wire.percent, 80);
+        assert_eq!(wire.configured_percent, 80);
+        assert_eq!(wire.effective_percent, 80);
         assert_eq!(provider.reads(), 1);
     }
 
@@ -464,8 +468,8 @@ mod tests {
         ]);
         let first = svc.read_charge_limit().await.expect("read1");
         let second = svc.read_charge_limit().await.expect("read2");
-        assert_eq!(first.percent, 80);
-        assert_eq!(second.percent, 60);
+        assert_eq!(first.configured_percent, 80);
+        assert_eq!(second.configured_percent, 60);
         assert_eq!(provider.reads(), 2);
     }
 
@@ -515,8 +519,9 @@ mod tests {
         let (svc, provider) = service(vec![ScriptedRead::Limit(limit(true, Some(60), 40, 100, 5))]);
         // Прямой вызов async property getter (без ObjectServer).
         let wire = svc.charge_limit().await.expect("property");
-        // (enabled, percent_present, percent, bounds_present, min, max, step)
-        assert_eq!(wire, (true, true, 60, true, 40, 100, 5));
+        // (enabled, configured_present, configured, effective_present,
+        // effective, bounds_present, min, max, step)
+        assert_eq!(wire, (true, true, 60, true, 60, true, 40, 100, 5));
         assert_eq!(provider.reads(), 1);
     }
 

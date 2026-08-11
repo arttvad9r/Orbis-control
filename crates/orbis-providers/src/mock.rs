@@ -145,6 +145,7 @@ impl MockState {
             charge_limit: ChargeLimit::new(
                 true,
                 Some(Percent::new(80).expect("const")),
+                Some(Percent::new(80).expect("const")),
                 Some(
                     ChargeLimitBounds::new(
                         Percent::new(40).expect("const"),
@@ -493,6 +494,7 @@ impl BatteryProvider for MockProvider {
             s.charge_limit = ChargeLimit::new(
                 true,
                 Some(Percent::new(percent).expect("range")),
+                Some(Percent::new(percent).expect("range")),
                 s.charge_limit.bounds,
             )
             .expect("valid");
@@ -503,7 +505,9 @@ impl BatteryProvider for MockProvider {
 
     async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
         self.mutate(|s| {
-            s.charge_limit.percent = Some(s.charge_limit.bounds.expect("mock bounds").max);
+            let max = s.charge_limit.bounds.expect("mock bounds").max;
+            s.charge_limit.configured_percent = Some(max);
+            s.charge_limit.effective_percent = Some(max);
             Ok(ApplyResult::Applied)
         })
         .await

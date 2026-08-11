@@ -31,6 +31,19 @@ trait UPowerDeviceInfo {
     /// Является ли устройство системным источником питания.
     #[zbus(property)]
     fn power_supply(&self) -> zbus::Result<bool>;
+
+    /// Native power-supply name used to resolve the matching sysfs device.
+    #[zbus(property, name = "NativePath")]
+    fn native_path(&self) -> zbus::Result<String>;
+}
+
+/// Discovered system battery and its native power-supply identifier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredBattery {
+    /// UPower object path.
+    pub object_path: zbus::zvariant::OwnedObjectPath,
+    /// Native power-supply name, e.g. `BAT1`.
+    pub native_path: String,
 }
 
 /// Найти единственную системную батарею (Type=Battery, PowerSupply=true).
@@ -43,9 +56,9 @@ trait UPowerDeviceInfo {
 /// - один кандидат → его путь; кандидатов нет или несколько → `Unsupported`;
 ///   первый кандидат молча не выбирается;
 /// - D-Bus/proxy/property errors → `ProviderError::Dbus`.
-pub async fn discover_battery_object_path(
+pub async fn discover_battery(
     connection: &zbus::Connection,
-) -> Result<zbus::zvariant::OwnedObjectPath, ProviderError> {
+) -> Result<DiscoveredBattery, ProviderError> {
     let root = UPowerRootProxy::builder(connection)
         .destination(UPOWER_BUS_NAME)
         .map_err(|e| ProviderError::Dbus(e.to_string()))?
@@ -84,7 +97,14 @@ pub async fn discover_battery_object_path(
             .await
             .map_err(|e| ProviderError::Dbus(e.to_string()))?;
         if power_supply {
-            candidates.push(path);
+            let native_path = device
+                .native_path()
+                .await
+                .map_err(|e| ProviderError::Dbus(e.to_string()))?;
+            candidates.push(DiscoveredBattery {
+                object_path: path,
+                native_path,
+            });
         }
     }
 
@@ -97,4 +117,11 @@ pub async fn discover_battery_object_path(
             "{UPOWER_DEVICE_INTERFACE}: несколько системных батарей; автоматический выбор пока не поддерживается"
         ))),
     }
+}
+
+/// Backward-compatible object-path-only discovery helper.
+pub async fn discover_battery_object_path(
+    connection: &zbus::Connection,
+) -> Result<zbus::zvariant::OwnedObjectPath, ProviderError> {
+    Ok(discover_battery(connection).await?.object_path)
 }

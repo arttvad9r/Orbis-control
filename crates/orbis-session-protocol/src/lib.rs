@@ -26,7 +26,7 @@ pub const INTERFACE_NAME: &str = "io.github.orbiscontrol.Session1";
 ///
 /// Представление явное и стабильное: D-Bus не имеет универсального нативного
 /// `Option<u8>`, поэтому достоверность `percent` выражается отдельным флагом
-/// `percent_present`.
+/// configured/effective percent presence fields.
 #[derive(
     Debug,
     Clone,
@@ -41,10 +41,14 @@ pub const INTERFACE_NAME: &str = "io.github.orbiscontrol.Session1";
 pub struct ChargeLimitInfo {
     /// Активна ли функция ограничения заряда.
     pub enabled: bool,
-    /// Достоверно ли текущее значение `percent`.
-    pub percent_present: bool,
-    /// Текущий процент; при `percent_present == false` равен 0.
-    pub percent: u8,
+    /// Достоверно ли reported/configured значение.
+    pub configured_percent_present: bool,
+    /// Reported/configured end threshold; при отсутствии равен 0.
+    pub configured_percent: u8,
+    /// Достоверно ли effective hardware значение.
+    pub effective_percent_present: bool,
+    /// Effective kernel end threshold; при отсутствии равен 0.
+    pub effective_percent: u8,
     /// Известны ли hardware/backend constraints (min/max/step).
     pub bounds_present: bool,
     /// Нижняя поддерживаемая граница; при `bounds_present == false` равен 0.
@@ -63,15 +67,18 @@ impl ChargeLimitInfo {
     /// conversion (protocol crate не считает диапазон 40..=100 универсальным).
     pub const fn with_percent(
         enabled: bool,
-        percent: u8,
+        configured_percent: u8,
+        effective_percent: u8,
         min_percent: u8,
         max_percent: u8,
         step_percent: u8,
     ) -> Self {
         Self {
             enabled,
-            percent_present: true,
-            percent,
+            configured_percent_present: true,
+            configured_percent,
+            effective_percent_present: true,
+            effective_percent,
             bounds_present: true,
             min_percent,
             max_percent,
@@ -81,11 +88,17 @@ impl ChargeLimitInfo {
 
     /// Создать DTO с достоверным текущим значением процента и неизвестными
     /// bounds (`bounds_present = false`, min/max/step = 0).
-    pub const fn with_percent_unknown_bounds(enabled: bool, percent: u8) -> Self {
+    pub const fn with_percent_unknown_bounds(
+        enabled: bool,
+        configured_percent: u8,
+        effective_percent: u8,
+    ) -> Self {
         Self {
             enabled,
-            percent_present: true,
-            percent,
+            configured_percent_present: true,
+            configured_percent,
+            effective_percent_present: true,
+            effective_percent,
             bounds_present: false,
             min_percent: 0,
             max_percent: 0,
@@ -95,7 +108,7 @@ impl ChargeLimitInfo {
 
     /// Создать DTO без достоверного значения процента и с известными bounds.
     ///
-    /// Устанавливает `percent_present = false` и `percent = 0`.
+    /// Устанавливает configured/effective presence в false и значения в 0.
     pub const fn without_percent(
         enabled: bool,
         min_percent: u8,
@@ -104,8 +117,10 @@ impl ChargeLimitInfo {
     ) -> Self {
         Self {
             enabled,
-            percent_present: false,
-            percent: 0,
+            configured_percent_present: false,
+            configured_percent: 0,
+            effective_percent_present: false,
+            effective_percent: 0,
             bounds_present: true,
             min_percent,
             max_percent,
@@ -115,13 +130,15 @@ impl ChargeLimitInfo {
 
     /// Создать DTO без достоверного значения процента и с неизвестными bounds.
     ///
-    /// Устанавливает `percent_present = false`, `percent = 0`,
+    /// Устанавливает configured/effective presence в false и значения в 0,
     /// `bounds_present = false`, min/max/step = 0.
     pub const fn without_percent_unknown_bounds(enabled: bool) -> Self {
         Self {
             enabled,
-            percent_present: false,
-            percent: 0,
+            configured_percent_present: false,
+            configured_percent: 0,
+            effective_percent_present: false,
+            effective_percent: 0,
             bounds_present: false,
             min_percent: 0,
             max_percent: 0,
@@ -129,10 +146,19 @@ impl ChargeLimitInfo {
         }
     }
 
-    /// Текущий процент, если он достоверен.
-    pub const fn percent(self) -> Option<u8> {
-        if self.percent_present {
-            Some(self.percent)
+    /// Configured/reported процент, если он достоверен.
+    pub const fn configured_percent(self) -> Option<u8> {
+        if self.configured_percent_present {
+            Some(self.configured_percent)
+        } else {
+            None
+        }
+    }
+
+    /// Effective hardware процент, если он достоверен.
+    pub const fn effective_percent(self) -> Option<u8> {
+        if self.effective_percent_present {
+            Some(self.effective_percent)
         } else {
             None
         }
@@ -262,11 +288,12 @@ mod tests {
 
     #[test]
     fn charge_limit_with_percent() {
-        let info = ChargeLimitInfo::with_percent(true, 80, 40, 100, 5);
+        let info = ChargeLimitInfo::with_percent(true, 80, 80, 40, 100, 5);
         assert!(info.enabled);
-        assert!(info.percent_present);
-        assert_eq!(info.percent, 80);
-        assert_eq!(info.percent(), Some(80));
+        assert!(info.configured_percent_present);
+        assert_eq!(info.configured_percent, 80);
+        assert!(info.effective_percent_present);
+        assert_eq!(info.effective_percent, 80);
         assert!(info.bounds_present);
         assert_eq!(info.min_percent, 40);
         assert_eq!(info.max_percent, 100);
@@ -275,11 +302,12 @@ mod tests {
 
     #[test]
     fn charge_limit_with_percent_unknown_bounds() {
-        let info = ChargeLimitInfo::with_percent_unknown_bounds(true, 80);
+        let info = ChargeLimitInfo::with_percent_unknown_bounds(true, 80, 80);
         assert!(info.enabled);
-        assert!(info.percent_present);
-        assert_eq!(info.percent, 80);
-        assert_eq!(info.percent(), Some(80));
+        assert!(info.configured_percent_present);
+        assert_eq!(info.configured_percent, 80);
+        assert!(info.effective_percent_present);
+        assert_eq!(info.effective_percent, 80);
         assert!(!info.bounds_present);
         assert_eq!(info.min_percent, 0);
         assert_eq!(info.max_percent, 0);
@@ -290,9 +318,10 @@ mod tests {
     fn charge_limit_without_percent() {
         let info = ChargeLimitInfo::without_percent(false, 40, 100, 5);
         assert!(!info.enabled);
-        assert!(!info.percent_present);
-        assert_eq!(info.percent, 0);
-        assert_eq!(info.percent(), None);
+        assert!(!info.configured_percent_present);
+        assert_eq!(info.configured_percent, 0);
+        assert!(!info.effective_percent_present);
+        assert_eq!(info.effective_percent, 0);
         assert!(info.bounds_present);
         assert_eq!(info.min_percent, 40);
         assert_eq!(info.max_percent, 100);
@@ -303,9 +332,10 @@ mod tests {
     fn charge_limit_without_percent_unknown_bounds() {
         let info = ChargeLimitInfo::without_percent_unknown_bounds(false);
         assert!(!info.enabled);
-        assert!(!info.percent_present);
-        assert_eq!(info.percent, 0);
-        assert_eq!(info.percent(), None);
+        assert!(!info.configured_percent_present);
+        assert_eq!(info.configured_percent, 0);
+        assert!(!info.effective_percent_present);
+        assert_eq!(info.effective_percent, 0);
         assert!(!info.bounds_present);
         assert_eq!(info.min_percent, 0);
         assert_eq!(info.max_percent, 0);
@@ -314,14 +344,15 @@ mod tests {
 
     #[test]
     fn charge_limit_dbus_signature_is_stable() {
-        // bool(bool)u8 bool u8 u8 u8 -> "(bbybyyy)"
-        let expected: zbus::zvariant::Signature = "(bbybyyy)".try_into().expect("valid signature");
+        // bool configured bool/u8 effective bool/u8 bounds/u8/u8/u8.
+        let expected: zbus::zvariant::Signature =
+            "(bbybybyyy)".try_into().expect("valid signature");
         assert_eq!(*ChargeLimitInfo::SIGNATURE, expected);
     }
 
     #[test]
     fn charge_limit_serde_roundtrip() {
-        let info = ChargeLimitInfo::with_percent(true, 80, 40, 100, 5);
+        let info = ChargeLimitInfo::with_percent(true, 80, 80, 40, 100, 5);
         let ctx = zbus::zvariant::serialized::Context::new_dbus(zbus::zvariant::Endian::Little, 0);
         let data = zbus::zvariant::to_bytes(ctx, &info).expect("serialize");
         let (decoded, _): (ChargeLimitInfo, usize) = data.deserialize().expect("deserialize");

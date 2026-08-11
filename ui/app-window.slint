@@ -411,17 +411,42 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 spacing: 4px;
                 SectionHeader { title: "Battery Charge Limit"; }
-                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : ValueSlider {
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready && root.ui-state.charge-limit-enabled) : ValueSlider {
                     min: 40;
                     max: 100;
                     step: 5;
                     value: root.ui-state.charge-limit;
                     // Mutation control доступен только если backend действительно
                     // позволяет запись И функция включена. Read-only session
-                    // backend: writable=false -> slider disabled, значение видно.
-                    disabled: !root.ui-state.charge-limit-enabled || !root.ui-state.charge-limit-writable;
+                    // Read-only backend остаётся disabled; enabled=false имеет
+                    // отдельное явное Off представление ниже.
+                    disabled: !root.ui-state.charge-limit-writable;
                     changed(v) => {
                         root.charge-changed(v);
+                    }
+                }
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready && !root.ui-state.charge-limit-enabled) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-disabled;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: "Charge limit: Off";
+                            font-size: 12px;
+                            color: Palette.text-primary;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: "configured: " + root.ui-state.charge-limit + "%";
+                            font-size: 11px;
+                            color: Palette.text-secondary;
+                            vertical-alignment: center;
+                        }
                     }
                 }
                 if (root.ui-state.charge-limit-state == ChargeLimitState.Loading) : Rectangle {

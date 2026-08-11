@@ -37,16 +37,20 @@ impl ChargeLimitBounds {
 
 /// Лимит зарядки.
 ///
+/// - `configured_percent` — configured/reported backend value;
+/// - `effective_percent` — фактически действующее hardware value, если оно
+///   прочитано отдельным authoritative source;
 /// - `bounds = Some` — hardware/backend constraints действительно известны;
-/// - `bounds = None` — constraints неизвестны (current percent при этом
-///   допустим без выдуманного диапазона);
+/// - `bounds = None` — constraints неизвестны;
 /// - значения не clamp-ятся.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChargeLimit {
     /// Лимит включён.
     pub enabled: bool,
-    /// Целевой процент (при выключенном лимите — None).
-    pub percent: Option<Percent>,
+    /// Configured/reported end threshold.
+    pub configured_percent: Option<Percent>,
+    /// Effective end threshold из authoritative hardware source.
+    pub effective_percent: Option<Percent>,
     /// Известные hardware/backend constraints (None — неизвестны).
     pub bounds: Option<ChargeLimitBounds>,
 }
@@ -59,20 +63,29 @@ impl ChargeLimit {
     /// выдуманного диапазона.
     pub fn new(
         enabled: bool,
-        percent: Option<Percent>,
+        configured_percent: Option<Percent>,
+        effective_percent: Option<Percent>,
         bounds: Option<ChargeLimitBounds>,
     ) -> std::result::Result<Self, CoreError> {
-        if let (Some(p), Some(b)) = (percent, &bounds) {
-            if p < b.min || p > b.max {
-                return Err(CoreError::invariant(
-                    "ChargeLimit.percent",
-                    format!("percent {p} вне [{}, {}]", b.min, b.max),
-                ));
+        if let Some(b) = &bounds {
+            for (name, p) in [
+                ("ChargeLimit.configured_percent", configured_percent),
+                ("ChargeLimit.effective_percent", effective_percent),
+            ] {
+                if let Some(p) = p {
+                    if p < b.min || p > b.max {
+                        return Err(CoreError::invariant(
+                            name,
+                            format!("percent {p} вне [{}, {}]", b.min, b.max),
+                        ));
+                    }
+                }
             }
         }
         Ok(Self {
             enabled,
-            percent,
+            configured_percent,
+            effective_percent,
             bounds,
         })
     }
@@ -89,24 +102,26 @@ mod tests {
     #[test]
     fn valid_limit() {
         let bounds = ChargeLimitBounds::new(p(40), p(100), 1).unwrap();
-        let l = ChargeLimit::new(true, Some(p(80)), Some(bounds)).unwrap();
-        assert_eq!(l.percent.unwrap().get(), 80);
+        let l = ChargeLimit::new(true, Some(p(80)), Some(p(100)), Some(bounds)).unwrap();
+        assert_eq!(l.configured_percent.unwrap().get(), 80);
+        assert_eq!(l.effective_percent.unwrap().get(), 100);
         assert_eq!(l.bounds.unwrap().min.get(), 40);
     }
 
     #[test]
     fn disabled_without_percent() {
-        let l = ChargeLimit::new(false, None, None).unwrap();
+        let l = ChargeLimit::new(false, None, None, None).unwrap();
         assert!(!l.enabled);
-        assert!(l.percent.is_none());
+        assert!(l.configured_percent.is_none());
+        assert!(l.effective_percent.is_none());
         assert!(l.bounds.is_none());
     }
 
     #[test]
     fn percent_with_unknown_bounds_allowed() {
         // bounds=None: current percent допустим без выдуманного диапазона.
-        let l = ChargeLimit::new(true, Some(p(80)), None).unwrap();
-        assert_eq!(l.percent.unwrap().get(), 80);
+        let l = ChargeLimit::new(true, Some(p(80)), None, None).unwrap();
+        assert_eq!(l.configured_percent.unwrap().get(), 80);
         assert!(l.bounds.is_none());
     }
 
@@ -123,6 +138,6 @@ mod tests {
     #[test]
     fn percent_outside_range_rejected() {
         let bounds = ChargeLimitBounds::new(p(40), p(100), 1).unwrap();
-        assert!(ChargeLimit::new(true, Some(p(30)), Some(bounds)).is_err());
+        assert!(ChargeLimit::new(true, Some(p(30)), Some(p(30)), Some(bounds)).is_err());
     }
 }

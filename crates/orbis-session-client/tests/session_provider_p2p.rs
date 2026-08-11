@@ -130,6 +130,7 @@ fn limit(enabled: bool, percent: Option<u8>, min: u8, max: u8, step: u8) -> Char
     ChargeLimit::new(
         enabled,
         percent.map(|p| Percent::new(p).expect("range")),
+        percent.map(|p| Percent::new(p).expect("range")),
         Some(
             ChargeLimitBounds::new(
                 Percent::new(min).expect("range"),
@@ -187,7 +188,7 @@ async fn full_provider_path_reads_charge_limit() {
         let limit = client_provider.charge_limit().await.expect("charge limit");
 
         assert!(limit.enabled);
-        assert_eq!(limit.percent.map(|p| p.get()), Some(80));
+        assert_eq!(limit.configured_percent.map(|p| p.get()), Some(80));
         let b = limit.bounds.expect("known bounds");
         assert_eq!(b.min.get(), 40);
         assert_eq!(b.max.get(), 100);
@@ -211,7 +212,7 @@ async fn full_provider_path_preserves_disabled_known_threshold() {
         let limit = client_provider.charge_limit().await.expect("charge limit");
 
         assert!(!limit.enabled);
-        assert_eq!(limit.percent.map(|p| p.get()), Some(80));
+        assert_eq!(limit.configured_percent.map(|p| p.get()), Some(80));
         let b = limit.bounds.expect("known bounds");
         assert_eq!(b.min.get(), 40);
         assert_eq!(b.max.get(), 100);
@@ -235,7 +236,7 @@ async fn full_provider_path_preserves_missing_threshold() {
         let limit = client_provider.charge_limit().await.expect("charge limit");
 
         assert!(!limit.enabled);
-        assert_eq!(limit.percent, None);
+        assert_eq!(limit.configured_percent, None);
         let b = limit.bounds.expect("known bounds");
         assert_eq!(b.min.get(), 40);
         assert_eq!(b.max.get(), 100);
@@ -260,8 +261,8 @@ async fn full_provider_path_reads_fresh_values() {
         let first = client_provider.charge_limit().await.expect("read1");
         let second = client_provider.charge_limit().await.expect("read2");
 
-        assert_eq!(first.percent.map(|p| p.get()), Some(80));
-        assert_eq!(second.percent.map(|p| p.get()), Some(60));
+        assert_eq!(first.configured_percent.map(|p| p.get()), Some(80));
+        assert_eq!(second.configured_percent.map(|p| p.get()), Some(60));
         assert_eq!(server.reads(), 2);
     })
     .await

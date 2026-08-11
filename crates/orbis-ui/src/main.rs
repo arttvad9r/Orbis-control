@@ -452,14 +452,14 @@ fn apply_gpu_result(
 
 /// Применить authoritative Battery outcome к UI-состоянию.
 ///
-/// Обновляется только `charge_limit` (из `outcome.state.percent`, если он
+/// Обновляется только `charge_limit` (из `outcome.state.configured_percent`, если он
 /// присутствует); Performance/GPU и остальные поля сохраняются. При
 /// `percent == None` прежнее UI-значение сохраняется, пишется warning.
 fn apply_charge_limit_outcome(
     state: &mut controller::UiState,
     outcome: &ChargeLimitCommandOutcome,
 ) {
-    match outcome.state.percent {
+    match outcome.state.configured_percent {
         Some(percent) => {
             state.charge_limit = i32::from(percent.get());
             tracing::debug!("battery: лимит применён: percent={}", percent.get());
@@ -512,7 +512,7 @@ fn apply_charge_limit_refresh(
     result: Result<ChargeLimit, ProviderError>,
 ) {
     match result {
-        Ok(limit) => match limit.percent {
+        Ok(limit) => match limit.configured_percent {
             Some(percent) => {
                 state.charge_limit = i32::from(percent.get());
                 state.charge_limit_enabled = limit.enabled;
@@ -1060,6 +1060,7 @@ mod tests {
             state: ChargeLimit::new(
                 true,
                 percent.map(|p| Percent::new(p).expect("range")),
+                percent.map(|p| Percent::new(p).expect("range")),
                 Some(
                     ChargeLimitBounds::new(
                         Percent::new(40).expect("const"),
@@ -1418,7 +1419,7 @@ mod tests {
     fn authoritative_charge_value_is_not_sent_value() {
         let mut s = base_state();
         // "отправлено" одно значение, но authoritative read-back вернул 45:
-        // helper применяет outcome.state.percent, не входное значение.
+        // helper применяет outcome.state.configured_percent, не входное значение.
         apply_charge_limit_result(&mut s, Ok(charge_outcome(Some(45))));
         assert_eq!(s.charge_limit, 45);
     }
@@ -1476,6 +1477,7 @@ mod tests {
             Ok(ChargeLimit::new(
                 true,
                 Some(Percent::new(60).expect("range")),
+                Some(Percent::new(60).expect("range")),
                 None, // unknown bounds допустимы
             )
             .expect("valid")),
@@ -1484,6 +1486,28 @@ mod tests {
         assert_eq!(s.charge_limit_state, controller::ChargeLimitState::Ready);
         assert_eq!(s.charge_limit, 60);
         assert!(s.charge_limit_enabled);
+    }
+
+    #[test]
+    fn refresh_disabled_keeps_configured_value_but_marks_limit_off() {
+        let mut s = base_state();
+        s.charge_limit_state = controller::ChargeLimitState::Loading;
+        apply_charge_limit_refresh(
+            &mut s,
+            Ok(ChargeLimit::new(
+                false,
+                Some(Percent::new(80).expect("configured")),
+                Some(Percent::new(100).expect("effective")),
+                None,
+            )
+            .expect("valid")),
+        );
+
+        assert_eq!(s.charge_limit_state, controller::ChargeLimitState::Ready);
+        assert_eq!(s.charge_limit, 80);
+        assert!(!s.charge_limit_enabled);
+        // Slint renders the configured value only as secondary information and
+        // uses the enabled=false branch instead of an active slider.
     }
 
     #[test]
@@ -1496,7 +1520,7 @@ mod tests {
 
         apply_charge_limit_refresh(
             &mut s,
-            Ok(ChargeLimit::new(false, None, None).expect("valid")),
+            Ok(ChargeLimit::new(false, None, None, None).expect("valid")),
         );
 
         assert_eq!(
