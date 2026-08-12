@@ -103,7 +103,7 @@ rustPlatform.buildRustPackage {
     install -Dm644 ${./dbus/io.github.orbiscontrol.Hardware.conf} \
       $out/share/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf
 
-    # Polkit action: единственная capability — SetPerformanceProfile.
+    # Polkit actions: Performance и Battery mutation.
     install -Dm644 ${./polkit/io.github.orbiscontrol.hardware.policy} \
       $out/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy
   '';

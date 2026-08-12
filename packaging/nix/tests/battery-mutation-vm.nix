@@ -197,13 +197,15 @@ in
         requires = [ "orbis-control-test-fake-asusd.service" ];
         after = [ "orbis-control-test-fake-asusd.service" ];
         serviceConfig = {
-          TemporaryFileSystem = [ "/sys" ];
+          TemporaryFileSystem = [ "/sys/class/power_supply" ];
           BindReadOnlyPaths = [ "${fakePowerSupply}:${effectivePath}" ];
         };
       };
     };
 
   testScript = ''
+    import re
+
     start_all()
     machine.wait_for_unit("orbis-control-test-fake-asusd.service")
     machine.wait_for_unit("orbis-hardwared.service")
@@ -216,7 +218,7 @@ in
     ).strip()
     assert pid != "0"
     status = machine.succeed(f"cat /proc/{pid}/status")
-    assert "Uid:\\t0" in status
+    assert "Uid:\t0" in status
     assert machine.succeed(f"grep '^CapEff' /proc/{pid}/status").strip().endswith(
         "0000000000000000"
     )
@@ -234,9 +236,22 @@ in
     policy = machine.succeed(
         "pkaction --action-id io.github.orbiscontrol.hardware.set-charge-limit --verbose"
     )
-    assert "implicit active: yes" in policy
-    assert "implicit any: no" in policy
-    assert "implicit inactive: no" in policy
+    expected_policy = {"any": "no", "inactive": "no", "active": "yes"}
+    parsed_policy = {
+        name: value
+        for name, value in re.findall(
+            r"^\s*implicit (any|inactive|active):\s*(\S+)",
+            policy,
+            re.MULTILINE,
+        )
+    }
+    machine.log("pkaction raw output:\n" + policy)
+    machine.log("pkaction parsed values: " + repr(parsed_policy))
+    machine.log("pkaction expected values: " + repr(expected_policy))
+    assert parsed_policy == expected_policy, (
+        f"pkaction policy mismatch: expected={expected_policy!r}, "
+        f"actual={parsed_policy!r}\nraw={policy}"
+    )
 
     machine.wait_until_succeeds("test -f /run/orbis-control-test/battery-result")
     result = machine.succeed("cat /run/orbis-control-test/battery-result")

@@ -114,7 +114,7 @@ in
     # D-Bus system policy (root own + send_destination; авторизация — polkit)
     # устанавливается из share/dbus-1/system.d пакета через system.path.
 
-    # Polkit action (единственная: SetPerformanceProfile; active local user).
+    # Polkit actions (Performance и Battery; active local user).
     # /etc/polkit-1 — обычный каталог (не symlink), environment.etc работает.
     environment.etc."polkit-1/actions/io.github.orbiscontrol.hardware.policy".source =
       "${cfg.package}/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy";

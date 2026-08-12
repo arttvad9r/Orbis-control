@@ -92,5 +92,12 @@
           hostPkgs = pkgs;
           imports = [ ./packaging/nix/tests/performance-mutation-vm.nix ];
         };
+
+        # Targeted E2E Battery mutation through the original active local
+        # caller, using only fake asusd and fake power-supply files in the VM.
+        checks.battery-mutation-vm = lib.nixos.runTest {
+          hostPkgs = pkgs;
+          imports = [ ./packaging/nix/tests/battery-mutation-vm.nix ];
+        };
       });
 }
