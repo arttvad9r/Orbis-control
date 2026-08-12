@@ -12,14 +12,29 @@
 
 use std::error::Error;
 
-use orbis_hardwared::{Authorizer, DBUS_NAME, DBUS_OBJECT_PATH, HardwareService, PolkitAuthorizer};
+use orbis_hardwared::{
+    Authorizer, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, HardwareService,
+    PolkitAuthorizer,
+    battery::{AsusdBatteryMutationBackend, ZbusAsusdBatteryClient, discover_effective_reader},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let connection = zbus::connection::Builder::system()?.build().await?;
 
     let authorizer: Box<dyn Authorizer> = Box::new(PolkitAuthorizer::new(connection.clone()));
-    let service = HardwareService::new(authorizer);
+    let battery_client = ZbusAsusdBatteryClient::new(connection.clone());
+    let effective_reader = discover_effective_reader()?;
+    let battery_backend = AsusdBatteryMutationBackend::new(battery_client, effective_reader);
+    let battery_authorizer: Box<dyn Authorizer> = Box::new(PolkitAuthorizer::with_action(
+        connection.clone(),
+        BATTERY_POLKIT_ACTION,
+    ));
+    let service = HardwareService::with_battery_backend(
+        authorizer,
+        Box::new(battery_backend),
+        battery_authorizer,
+    );
     connection
         .object_server()
         .at(DBUS_OBJECT_PATH, service)

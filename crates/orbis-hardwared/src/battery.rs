@@ -10,34 +10,64 @@ use orbis_core::action::ApplyResult;
 use orbis_providers::error::ProviderError;
 use zbus::Connection;
 
-const ASUSD_BUS_NAME: &str = "xyz.ljones.Asusd";
-const ASUSD_OBJECT_PATH: &str = "/xyz/ljones";
-const ASUSD_INTERFACE: &str = "xyz.ljones.Platform";
-const EFFECTIVE_THRESHOLD_FILE: &str = "charge_control_end_threshold";
+pub const ASUSD_BUS_NAME: &str = "xyz.ljones.Asusd";
+pub const ASUSD_OBJECT_PATH: &str = "/xyz/ljones";
+pub const ASUSD_INTERFACE: &str = "xyz.ljones.Platform";
+pub const EFFECTIVE_THRESHOLD_FILE: &str = "charge_control_end_threshold";
 const MIN_CHARGE_LIMIT: u8 = 20;
 const MAX_CHARGE_LIMIT: u8 = 100;
 
+/// Validate the public Battery input without contacting any backend.
+pub fn validate_charge_limit(percent: u8) -> Result<(), ProviderError> {
+    if !(MIN_CHARGE_LIMIT..=MAX_CHARGE_LIMIT).contains(&percent) {
+        return Err(ProviderError::InvalidRequest(format!(
+            "battery charge limit must be {MIN_CHARGE_LIMIT}..={MAX_CHARGE_LIMIT}, got {percent}"
+        )));
+    }
+    Ok(())
+}
+
 /// Typed asusd operations required by the mutation algorithm.
 #[async_trait]
-pub(crate) trait AsusdBatteryClient: Send + Sync {
+pub trait AsusdBatteryClient: Send + Sync {
     async fn set_charge_control_end_threshold(&self, percent: u8) -> Result<(), ProviderError>;
     async fn get_charge_control_end_threshold(&self) -> Result<u8, ProviderError>;
 }
 
 /// Fresh read-only effective kernel threshold source.
 #[async_trait]
-pub(crate) trait BatteryEffectiveReader: Send + Sync {
+pub trait BatteryEffectiveReader: Send + Sync {
     async fn read_effective_threshold(&self) -> Result<u8, ProviderError>;
 }
 
 /// Read-only `/sys/class/power_supply/<native>/charge_control_end_threshold` reader.
-pub(crate) struct SysfsBatteryEffectiveReader {
+pub struct SysfsBatteryEffectiveReader {
     path: PathBuf,
+}
+
+/// Discover a power-supply battery exposing the effective threshold attribute.
+pub fn discover_effective_reader() -> Result<SysfsBatteryEffectiveReader, ProviderError> {
+    let entries = std::fs::read_dir("/sys/class/power_supply").map_err(ProviderError::Io)?;
+    for entry in entries {
+        let entry = entry.map_err(ProviderError::Io)?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let type_path = entry.path().join("type");
+        let threshold_path = entry.path().join(EFFECTIVE_THRESHOLD_FILE);
+        let is_battery = std::fs::read_to_string(type_path)
+            .map(|value| value.trim().eq_ignore_ascii_case("battery"))
+            .unwrap_or(false);
+        if is_battery && threshold_path.is_file() {
+            return SysfsBatteryEffectiveReader::from_native_path(&name);
+        }
+    }
+    Err(ProviderError::Unsupported(
+        "no battery effective threshold source discovered".into(),
+    ))
 }
 
 impl SysfsBatteryEffectiveReader {
     /// Production constructor from a validated udev/UPower native power-supply name.
-    pub(crate) fn from_native_path(native_path: &str) -> Result<Self, ProviderError> {
+    pub fn from_native_path(native_path: &str) -> Result<Self, ProviderError> {
         let component = Path::new(native_path);
         if native_path.is_empty()
             || component.components().count() != 1
@@ -93,13 +123,13 @@ trait AsusdPlatform {
 }
 
 /// Production typed client for the asusd compatibility backend.
-pub(crate) struct ZbusAsusdBatteryClient {
+pub struct ZbusAsusdBatteryClient {
     connection: Connection,
 }
 
 impl ZbusAsusdBatteryClient {
     /// Construct without performing a D-Bus call.
-    pub(crate) fn new(connection: Connection) -> Self {
+    pub fn new(connection: Connection) -> Self {
         Self { connection }
     }
 
@@ -131,21 +161,27 @@ impl AsusdBatteryClient for ZbusAsusdBatteryClient {
 
 /// Fresh result of an asusd mutation and its two backend read-backs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct BatteryMutationReadback {
+pub struct BatteryMutationReadback {
     pub requested_percent: u8,
     pub configured_percent: u8,
     pub effective_percent: u8,
     pub result: ApplyResult,
 }
 
+#[async_trait]
+pub trait BatteryMutationBackend: Send + Sync {
+    async fn set_charge_limit(&self, percent: u8)
+    -> Result<BatteryMutationReadback, ProviderError>;
+}
+
 /// Internal compatibility backend; it never writes the kernel directly.
-pub(crate) struct AsusdBatteryMutationBackend<A, E> {
+pub struct AsusdBatteryMutationBackend<A, E> {
     asusd: A,
     effective: E,
 }
 
 impl<A, E> AsusdBatteryMutationBackend<A, E> {
-    pub(crate) fn new(asusd: A, effective: E) -> Self {
+    pub fn new(asusd: A, effective: E) -> Self {
         Self { asusd, effective }
     }
 }
@@ -156,15 +192,11 @@ where
     E: BatteryEffectiveReader,
 {
     /// Validate, perform one asusd setter, then perform fresh read-backs.
-    pub(crate) async fn set_charge_limit(
+    pub async fn set_charge_limit(
         &self,
         percent: u8,
     ) -> Result<BatteryMutationReadback, ProviderError> {
-        if !(MIN_CHARGE_LIMIT..=MAX_CHARGE_LIMIT).contains(&percent) {
-            return Err(ProviderError::InvalidRequest(format!(
-                "battery charge limit must be {MIN_CHARGE_LIMIT}..={MAX_CHARGE_LIMIT}, got {percent}"
-            )));
-        }
+        validate_charge_limit(percent)?;
 
         // Exactly one mutation, owned by asusd. No retry and no sysfs fallback.
         self.asusd.set_charge_control_end_threshold(percent).await?;
@@ -185,6 +217,20 @@ where
             effective_percent: effective,
             result: ApplyResult::Applied,
         })
+    }
+}
+
+#[async_trait]
+impl<A, E> BatteryMutationBackend for AsusdBatteryMutationBackend<A, E>
+where
+    A: AsusdBatteryClient,
+    E: BatteryEffectiveReader,
+{
+    async fn set_charge_limit(
+        &self,
+        percent: u8,
+    ) -> Result<BatteryMutationReadback, ProviderError> {
+        self.set_charge_limit(percent).await
     }
 }
 

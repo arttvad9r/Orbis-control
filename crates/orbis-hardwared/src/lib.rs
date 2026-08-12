@@ -20,8 +20,9 @@ use orbis_core::action::ApplyResult;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 
-#[allow(dead_code)]
-mod battery;
+pub mod battery;
+
+use battery::{BatteryMutationBackend, BatteryMutationReadback};
 
 /// Фиксированный production path kernel ABI: current profile.
 pub const PLATFORM_PROFILE_PATH: &str = "/sys/firmware/acpi/platform_profile";
@@ -178,6 +179,8 @@ pub const DBUS_OBJECT_PATH: &str = "/io/github/orbiscontrol/Hardware";
 pub const DBUS_INTERFACE_NAME: &str = "io.github.orbiscontrol.Hardware1";
 /// Polkit action id для Performance mutation.
 pub const POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-performance-profile";
+/// Polkit action id for Battery charge-limit mutation.
+pub const BATTERY_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-charge-limit";
 
 /// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
 pub mod wire {
@@ -248,6 +251,11 @@ impl PolkitAuthorizer {
             connection,
             action: POLKIT_ACTION,
         }
+    }
+
+    /// Создать authorizer для отдельной typed capability action.
+    pub fn with_action(connection: zbus::Connection, action: &'static str) -> Self {
+        Self { connection, action }
     }
 }
 
@@ -347,6 +355,31 @@ where
     }
 }
 
+/// Обработка Battery mutation до публичного D-Bus boundary.
+pub async fn handle_set_charge_limit(
+    authorizer: &dyn Authorizer,
+    backend: &dyn BatteryMutationBackend,
+    percent: u8,
+    sender: &str,
+) -> zbus::fdo::Result<u8> {
+    battery::validate_charge_limit(percent).map_err(provider_error_to_dbus)?;
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+
+    let readback: BatteryMutationReadback = backend
+        .set_charge_limit(percent)
+        .await
+        .map_err(provider_error_to_dbus)?;
+    match readback.result {
+        ApplyResult::Applied => Ok(readback.configured_percent),
+        other => Err(zbus::fdo::Error::Failed(format!(
+            "hardwared: battery operation not confirmed: {other:?}"
+        ))),
+    }
+}
+
 /// Service object интерфейса `io.github.orbiscontrol.Hardware1`.
 ///
 /// Не generic: writer — production с фиксированными kernel paths; authorizer —
@@ -354,6 +387,8 @@ where
 pub struct HardwareService {
     authorizer: Box<dyn Authorizer>,
     writer: PlatformProfileWriter<StdProfileIo>,
+    battery_authorizer: Box<dyn Authorizer>,
+    battery_backend: Option<Box<dyn BatteryMutationBackend>>,
 }
 
 impl HardwareService {
@@ -362,7 +397,34 @@ impl HardwareService {
         Self {
             authorizer,
             writer: PlatformProfileWriter::default(),
+            battery_authorizer: Box::new(DisabledAuthorizer),
+            battery_backend: None,
         }
+    }
+
+    /// Создать production service с typed asusd Battery compatibility backend.
+    pub fn with_battery_backend(
+        authorizer: Box<dyn Authorizer>,
+        battery_backend: Box<dyn BatteryMutationBackend>,
+        battery_authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        Self {
+            authorizer,
+            writer: PlatformProfileWriter::default(),
+            battery_authorizer,
+            battery_backend: Some(battery_backend),
+        }
+    }
+}
+
+struct DisabledAuthorizer;
+
+#[async_trait]
+impl Authorizer for DisabledAuthorizer {
+    async fn authorize(&self, _sender: &str) -> Result<(), AuthorizeError> {
+        Err(AuthorizeError::Failed(
+            "battery backend not configured".into(),
+        ))
     }
 }
 
@@ -381,6 +443,24 @@ impl HardwareService {
             .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
         handle_set_performance_profile(self.authorizer.as_ref(), &self.writer, raw, &sender).await
     }
+
+    /// Установить Battery configured threshold; возвращает подтверждённый
+    /// configured percent, effective value остаётся отдельным read-model field.
+    async fn set_charge_limit(
+        &self,
+        percent: u8,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<u8> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self
+            .battery_backend
+            .as_deref()
+            .ok_or_else(|| zbus::fdo::Error::NotSupported("battery backend unavailable".into()))?;
+        handle_set_charge_limit(self.battery_authorizer.as_ref(), backend, percent, &sender).await
+    }
 }
 
 /// Client proxy контракта `io.github.orbiscontrol.Hardware1` (для sessiond).
@@ -395,6 +475,10 @@ impl HardwareService {
 pub trait Hardware1 {
     /// Установить Performance profile; возвращает подтверждённый wire profile.
     fn set_performance_profile(&self, profile: u8) -> zbus::Result<u8>;
+
+    /// Установить Battery configured threshold; возвращает подтверждённый
+    /// configured percent, effective value остаётся отдельным read-model field.
+    fn set_charge_limit(&self, percent: u8) -> zbus::Result<u8>;
 }
 
 #[cfg(test)]
@@ -720,6 +804,108 @@ mod tests {
         assert_eq!(confirmed, wire::SILENT);
         assert_eq!(w.io.writes(), 1);
         assert_eq!(w.io.profile(), "quiet\n");
+    }
+
+    struct FakeBatteryBackend {
+        calls: AtomicUsize,
+        outcome: Mutex<Result<BatteryMutationReadback, ProviderError>>,
+    }
+
+    #[async_trait]
+    impl BatteryMutationBackend for FakeBatteryBackend {
+        async fn set_charge_limit(
+            &self,
+            _percent: u8,
+        ) -> Result<BatteryMutationReadback, ProviderError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            match &*self.outcome.lock().unwrap() {
+                Ok(readback) => Ok(readback.clone()),
+                Err(error) => Err(ProviderError::Internal(error.to_string())),
+            }
+        }
+    }
+
+    fn battery_backend(configured: u8, effective: u8) -> FakeBatteryBackend {
+        FakeBatteryBackend {
+            calls: AtomicUsize::new(0),
+            outcome: Mutex::new(Ok(BatteryMutationReadback {
+                requested_percent: configured,
+                configured_percent: configured,
+                effective_percent: effective,
+                result: ApplyResult::Applied,
+            })),
+        }
+    }
+
+    #[tokio::test]
+    async fn battery_invalid_range_is_rejected_before_authorization_or_backend() {
+        for percent in [19, 101] {
+            let backend = battery_backend(80, 100);
+            let authorizer = FakeAuthorizer::new(AuthOutcome::Ok);
+            let error = handle_set_charge_limit(&authorizer, &backend, percent, ":1.90")
+                .await
+                .expect_err("invalid battery range");
+            assert!(matches!(error, zbus::fdo::Error::InvalidArgs(_)));
+            assert_eq!(authorizer.calls(), 0);
+            assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn battery_denied_challenge_and_auth_failure_do_not_mutate() {
+        for outcome in [AuthOutcome::Denied, AuthOutcome::Failed] {
+            let backend = battery_backend(80, 100);
+            let authorizer = FakeAuthorizer::new(outcome);
+            let error = handle_set_charge_limit(&authorizer, &backend, 80, ":1.91")
+                .await
+                .expect_err("authorization failure");
+            assert!(matches!(
+                (outcome, error),
+                (AuthOutcome::Denied, zbus::fdo::Error::AccessDenied(_))
+                    | (AuthOutcome::Failed, zbus::fdo::Error::Failed(_))
+            ));
+            assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn battery_authorized_returns_configured_for_20_and_100() {
+        for percent in [20, 100] {
+            let backend = battery_backend(percent, 100);
+            let authorizer = FakeAuthorizer::new(AuthOutcome::Ok);
+            let confirmed = handle_set_charge_limit(&authorizer, &backend, percent, ":1.92")
+                .await
+                .expect("authorized battery mutation");
+            assert_eq!(confirmed, percent);
+            assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(authorizer.last_sender(), Some(":1.92".into()));
+        }
+    }
+
+    #[tokio::test]
+    async fn battery_backend_error_maps_to_failed_without_retry() {
+        let backend = FakeBatteryBackend {
+            calls: AtomicUsize::new(0),
+            outcome: Mutex::new(Err(ProviderError::Dbus("asusd failed".into()))),
+        };
+        let authorizer = FakeAuthorizer::new(AuthOutcome::Ok);
+        let error = handle_set_charge_limit(&authorizer, &backend, 80, ":1.93")
+            .await
+            .expect_err("backend failure");
+        assert!(matches!(error, zbus::fdo::Error::Failed(_)));
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn battery_effective_divergence_is_not_boundary_failure() {
+        let backend = battery_backend(80, 100);
+        let authorizer = FakeAuthorizer::new(AuthOutcome::Ok);
+        assert_eq!(
+            handle_set_charge_limit(&authorizer, &backend, 80, ":1.94")
+                .await
+                .expect("configured read-back confirmed"),
+            80
+        );
     }
 
     #[tokio::test]
