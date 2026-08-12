@@ -18,14 +18,15 @@ allow = [
     "Zlib",
     "Unicode-3.0",
     "MPL-2.0",
-    "GPL-3.0",
+    # Slint's OR expression is accepted through this GPL-3.0-only branch;
+    # the custom Royalty-free and Software License branches remain disallowed.
+    "GPL-3.0-only",
     "GPL-3.0-or-later",
 ]
 private = { ignore = true }
 
 [bans]
-version = 2
-multiple-versions = true
+multiple-versions = "deny"
 skip = [
     # zbus 5 притягивает старые версии serde/инфраструктуры; допустимо на Этапе 2
     "serde",
@@ -36,6 +37,5 @@ skip-tree = [
 ]
 
 [sources]
-version = 2
 unknown-registry = "deny"
 unknown-git = "deny"
