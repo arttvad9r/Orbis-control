@@ -128,14 +128,17 @@ CPU, 8×(temp,pwm) GPU, enabled.
 | Приоритет | Backend | Интерфейс | Действия |
 |---|---|---|---|
 | 1 | UPower | `org.freedesktop.UPower` + `.Device` | state, %, energy-rate, capacity, cycles, source type |
-| 2 | asusd | `Platform.ChargeControlEndThreshold`, `OneShotFullCharge` | лимит зарядки |
-| 3 | kernel ABI | `/sys/class/power_supply/BAT*/charge_control_end_threshold` | лимит зарядки (fallback) |
+| 2 | asusd compatibility mutation backend | system D-Bus `xyz.ljones.Asusd`, `/xyz/ljones`, `xyz.ljones.Platform`, typed `ChargeControlEndThreshold(u8)` | будущая mutation, `20..=100`, step 1; asusd остаётся owner |
+| 3 | kernel ABI | `/sys/class/power_supply/BAT*/charge_control_end_threshold` | effective read; direct mutation запрещена при active asusd |
 | 4 | kernel ABI | power_supply sysfs | raw-показания (fallback) |
 
 Статус dated evidence на эталоне: current threshold 80 читался через UPower,
 asusd Platform и sysfs. Hardware min/max/step probe не доказал; текущий
 production UPower provider возвращает `bounds=None`. Исторический range 40–100
 в `expected-capabilities.json` не является production hardware constraint.
+
+Battery mutation не отмечается complete: Orbis не вызывает shell `asusctl`, не
+пишет sysfs напрямую и не смешивает `100` с disable. См. [ADR 0007](adr/0007-battery-mutation-backend.md).
 
 ---
 

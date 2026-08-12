@@ -108,6 +108,10 @@ trait или domain type не означает существование produc
   `orbis-sessiond`;
 - `SessionChargeLimitProvider` — read-only Battery provider над session D-Bus,
   используется production GUI как `battery_service` (live-validated);
+- Battery mutation остаётся `Unsupported`. Будущий compatibility path —
+  caller-preserving `Hardware1 → orbis-hardwared → typed asusd` D-Bus API;
+  shell `asusctl` и competing direct sysfs write не используются. См.
+  [ADR 0007](adr/0007-battery-mutation-backend.md);
 - runtime capability discovery общего назначения ещё не реализован;
   `orbis-capabilities` в основном собирает reports и читает dated fixtures.
 
@@ -122,18 +126,25 @@ Domain model:
 ```rust
 ChargeLimit {
     enabled: bool,
-    percent: Option<Percent>,
+    configured_percent: Option<Percent>,
+    effective_percent: Option<Percent>,
     bounds: Option<ChargeLimitBounds>,
 }
 ```
 
 `ChargeLimitBounds` содержит `min`, `max` и ненулевой `step`. Семантика:
 
-- `percent = None` — backend не сообщил достоверный current threshold;
+- `configured_percent` и `effective_percent` разделены по источнику;
 - `bounds = Some(...)` — конкретный backend действительно сообщил constraints;
 - `bounds = None` — hardware/backend constraints неизвестны;
 - unknown bounds не являются ошибкой и не запрещают показать известный current;
 - значения не clamp-ятся и не округляются в domain/application boundary.
+
+Будущий asusd compatibility setter принимает `u8` `20..=100` с шагом 1.
+`100` — обычный threshold, не implicit disable. `SetChargeLimit` не смешивает
+enable/disable semantics. Успех mutation требует fresh asusd configured,
+kernel effective и Session1 read-back; direct sysfs write при активном asusd
+запрещён как competing owner.
 
 UI presentation policy 40/100/5 и mock bounds не являются hardware facts. Их
 нельзя записывать в wire/domain state как constraints UPower или устройства.

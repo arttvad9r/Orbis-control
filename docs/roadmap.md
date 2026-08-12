@@ -203,7 +203,10 @@ read-only/disabled. Это **не** означает завершённость 
    kernel `platform_profile` через узкий `orbis-hardwared`, polkit и
    authoritative read-back; production GUI `Balanced → Silent → Balanced`
    подтвердил ровно два valid calls/writes;
-2. **Battery mutation** (Milestone 5; write-операция с доказанными bounds/owner);
+2. **Battery mutation** (Milestone 5; compatibility backend architecture
+   принята в [ADR 0007](adr/0007-battery-mutation-backend.md), реализация
+   pending; нужен единственный asusd owner и configured/effective/session
+   read-back);
 3. **GPU product policy/mutation** (Milestone 5; product GpuMode backend
    mapping всё ещё NOT PROVEN);
 4. **fan/telemetry** (Milestone 4, substeps 3–4; только по доказанным
