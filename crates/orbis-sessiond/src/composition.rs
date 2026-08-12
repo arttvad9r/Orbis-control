@@ -32,9 +32,37 @@ pub async fn build_upower_session_server(
     gpu: GpuCapabilities,
     performance: Option<Arc<dyn PerformanceProvider>>,
 ) -> zbus::Result<zbus::Connection> {
-    let upower_source = ZbusUPowerChargeLimitSource::new(upower_connection, battery_object_path);
     let effective_source = SysfsBatteryEndThresholdSource::from_native_path(&battery_native_path)
         .map_err(|e| zbus::Error::Failure(e.to_string()))?;
+    build_upower_session_server_with_effective_source(
+        session_builder,
+        upower_connection,
+        battery_object_path,
+        effective_source,
+        gpu,
+        performance,
+    )
+    .await
+}
+
+/// Вариант composition helper с injected effective-threshold source.
+///
+/// Production bootstrap использует [`build_upower_session_server`] и реальный
+/// sysfs source. Injection нужен для hermetic P2P/integration tests, где
+/// `/sys/class/power_supply` недоступен и не должен быть mock-ирован через
+/// реальную файловую систему.
+pub async fn build_upower_session_server_with_effective_source<E>(
+    session_builder: zbus::connection::Builder<'_>,
+    upower_connection: zbus::Connection,
+    battery_object_path: zbus::zvariant::OwnedObjectPath,
+    effective_source: E,
+    gpu: GpuCapabilities,
+    performance: Option<Arc<dyn PerformanceProvider>>,
+) -> zbus::Result<zbus::Connection>
+where
+    E: crate::upower::BatteryEffectiveSource + 'static,
+{
+    let upower_source = ZbusUPowerChargeLimitSource::new(upower_connection, battery_object_path);
     let source = CombinedChargeLimitSource::new(upower_source, effective_source);
     let provider = UPowerChargeLimitProvider::new(source);
     let battery: Arc<dyn BatteryProvider> = Arc::new(provider);

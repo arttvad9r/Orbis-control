@@ -10,14 +10,26 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use async_trait::async_trait;
+use orbis_providers::error::ProviderError;
 use orbis_session_protocol::Session1Proxy;
-use orbis_sessiond::composition::build_upower_session_server;
+use orbis_sessiond::composition::build_upower_session_server_with_effective_source;
+use orbis_sessiond::upower::BatteryEffectiveSource;
 use zbus::connection::Builder;
 use zbus::proxy::CacheProperties;
 
 /// Test-only UPower constants.
 const UPOWER_BUS_NAME: &str = "org.freedesktop.UPower";
 const BATTERY_OBJECT_PATH: &str = "/org/freedesktop/UPower/devices/battery_BAT1";
+
+struct FakeEffectiveSource;
+
+#[async_trait]
+impl BatteryEffectiveSource for FakeEffectiveSource {
+    async fn read_effective_end_threshold(&self) -> Result<u8, ProviderError> {
+        Ok(100)
+    }
+}
 
 /// Идентификатор property для call log и fail_at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,11 +150,11 @@ async fn connect_composition(
         .try_into()
         .expect("valid object path");
     let (session_server_conn, session_client_conn) = tokio::try_join!(
-        build_upower_session_server(
+        build_upower_session_server_with_effective_source(
             session_server_builder,
             upower_client_conn.clone(),
             object_path,
-            "BAT1".to_string(),
+            FakeEffectiveSource,
             Default::default(),
             None,
         ),

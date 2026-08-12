@@ -143,6 +143,9 @@ where
 {
     async fn read_charge_limit(&self) -> Result<UPowerChargeLimitSnapshot, ProviderError> {
         let mut snapshot = self.upower.read_charge_limit().await?;
+        if !snapshot.supported {
+            return Ok(snapshot);
+        }
         snapshot.effective_end_threshold =
             Some(self.effective.read_effective_end_threshold().await?);
         Ok(snapshot)
