@@ -59,6 +59,14 @@ Rust workspace (`resolver = 3`, edition 2024, MSRV 1.85). Crates:
   supergfxd, an external D-Bus daemon, Docker, Podman or a VM without a direct
   instruction. Do not touch the real system/session bus in tests; use private
   P2P transport for D-Bus integration tests by default.
+- VM tests using fake sysfs/D-Bus state are safe only within the relevant
+  targeted validation tier. Do not run `cargo test -- --ignored` broadly:
+  classify ignored/live tests first and run a specific one only when the task
+  explicitly requires and permits real-device interaction.
+- Battery charge-limit, performance-profile, GPU/MUX/power mutations, direct
+  real sysfs writes, real D-Bus mutation methods, and live ASUS hardware
+  manipulation require explicit permission from the task. VM tests do not
+  prove real hardware behaviour.
 - Do not add `unsafe`; keep existing `forbid`/`deny unsafe_code` lints. Do not
   weaken lint policy or tests to make a check pass.
 
@@ -73,6 +81,20 @@ Rust workspace (`resolver = 3`, edition 2024, MSRV 1.85). Crates:
 - If a task requires a forbidden file or API change, stop and report the exact
   reason. Do not bypass the production path with a test-only shortcut.
 
+## Development environment
+
+- The project development environment is the flake `devShell`. In normal
+  interactive work, entering this repository through the approved `.envrc`
+  activates it automatically via `direnv` and `nix-direnv`.
+- `.envrc` is part of the project contract and must remain exactly `use flake`.
+  Do not put secrets, credentials, manual `PATH` changes, duplicated toolchain
+  setup, or project commands there. `.direnv/` is local cache state and is not
+  committed.
+- `rustc`, `cargo`, `rustfmt`, `clippy`, `rust-analyzer`, `slint-lsp`, and
+  native build dependencies come from the project devShell, not the global
+  workstation environment. OpenCode is global, but inherits this environment
+  when started from the repository after direnv activation.
+
 ## Build / check / test commands
 
 Verification tiers: выбирай минимальный tier, который реально покрывает
@@ -80,6 +102,9 @@ Verification tiers: выбирай минимальный tier, который �
 а не для экономии.
 
 ### FAST — default для обычного изменения одного crate
+
+Используй targeted checks, если изменение действительно локализовано в одном
+crate; для cross-crate или boundary changes переходи к INTEGRATION.
 
 ```bash
 cargo fmt --all -- --check
@@ -107,6 +132,25 @@ INTEGRATION + (при необходимости) тяжёлые Nix commands:
 ```bash
 nix build .#orbis-control --max-jobs 1 --cores 4
 nix flake check --max-jobs 1 --cores 4
+```
+
+Для Rust-only изменений полный `nix flake check` не обязателен: он включает
+build-heavy Nix derivations и VM checks. Для изменений в `flake.nix`,
+`packaging/nix`, systemd, polkit или D-Bus сначала выполни подходящий Cargo
+tier, затем targeted Nix validation:
+
+```bash
+nix build .#orbis-control --max-jobs 1 --cores 4
+nix flake check --no-build --system x86_64-linux
+```
+
+Для system integration выбирай соответствующий существующей boundary VM check,
+а не запускай все VM checks без необходимости:
+
+```text
+checks.x86_64-linux.hardwared-lifecycle
+checks.x86_64-linux.performance-mutation-vm
+checks.x86_64-linux.battery-mutation-vm
 ```
 
 ### Docs-only
