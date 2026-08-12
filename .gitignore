@@ -1,5 +1,6 @@
 # Build
 /target
+.direnv/
 **/*.rs.bk
 
 # Local config/state/cache (XDG)
