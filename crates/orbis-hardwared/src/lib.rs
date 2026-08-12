@@ -20,6 +20,9 @@ use orbis_core::action::ApplyResult;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 
+#[allow(dead_code)]
+mod battery;
+
 /// Фиксированный production path kernel ABI: current profile.
 pub const PLATFORM_PROFILE_PATH: &str = "/sys/firmware/acpi/platform_profile";
 /// Фиксированный production path kernel ABI: доступные профили.
