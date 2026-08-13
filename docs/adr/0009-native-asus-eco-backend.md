@@ -43,6 +43,10 @@ Preflight классифицирует только:
 Проверяются Armoury ABI, MUX/access, PCI/NVIDIA state, `/proc` FD и mappings,
 DRM/I²C users, module refcounts и read-only supergfxd coordination. Library-only
 mapping и aggregate module refcount являются evidence, а не автоматическими
-hard blockers. Compositor/device release должен быть подтверждён до появления
-mutation executor. Никаких hardware writes, process kills, service actions или
-driver/PCI operations.
+hard blockers. При этом загруженный NVIDIA module stack является отдельной
+release lifecycle stage: zero userspace holders не доказывает unloadability,
+а module unload fallible и требует read-back verification. Firmware disable не
+может начинаться до доказанного release. На текущем host exact ownership
+NVIDIA UVM busy reference остаётся unresolved. Compositor/device release должен
+быть подтверждён до появления mutation executor. Никаких hardware writes,
+process kills, service actions или driver/PCI operations.

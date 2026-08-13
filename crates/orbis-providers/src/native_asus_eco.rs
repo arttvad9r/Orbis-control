@@ -61,6 +61,8 @@ pub enum EcoLiveBlocker {
     NvidiaMappedLibrary,
     /// NVIDIA kernel module cannot currently be unloaded.
     NvidiaModuleBusy,
+    /// The NVIDIA module stack is still loaded and must be released.
+    NvidiaModulesLoaded,
     /// No non-NVIDIA DRM device remains for the display stack.
     MissingIntegratedDrm,
     /// MUX is in dGPU display mode.
@@ -84,6 +86,8 @@ pub enum EcoReleaseRequirement {
     VerifyNvidiaUsers,
     /// Verify that the NVIDIA module family can be unloaded.
     VerifyNvidiaModuleUnload,
+    /// Unload the loaded NVIDIA module family.
+    UnloadNvidiaModules,
     /// Verify that the compositor released the secondary device.
     VerifyCompositorRelease,
 }
@@ -168,6 +172,9 @@ pub struct EcoLivePreflightSnapshot {
     pub nvidia_module_refcount: Option<u64>,
     /// Whether module state is known busy.
     pub nvidia_module_busy: Option<bool>,
+    /// Whether a prior, authoritative unload-feasibility result exists.
+    /// `None` means no unload was attempted or the result is unavailable.
+    pub nvidia_module_unload_feasible: Option<bool>,
     /// Holder summaries.
     pub holders: Vec<NvidiaHolderEvidence>,
     /// A non-NVIDIA DRM card/render device exists.
@@ -360,6 +367,23 @@ pub fn plan_native_asus_eco(snapshot: &EcoLivePreflightSnapshot) -> EcoLiveAsses
             ),
         ));
     }
+    if snapshot.nvidia_modules_loaded {
+        release_required.push(evidence(
+            EcoEvidenceSeverity::ReleaseRequired,
+            EcoLiveBlocker::NvidiaModulesLoaded,
+            "NVIDIA module stack is loaded; unload and verify before firmware transition".into(),
+        ));
+    }
+    if snapshot.nvidia_modules_loaded && snapshot.nvidia_module_unload_feasible != Some(true) {
+        unknown.push(evidence(
+            EcoEvidenceSeverity::Unknown,
+            EcoLiveBlocker::Unknown,
+            format!(
+                "NVIDIA module unload feasibility is unresolved: {:?}",
+                snapshot.nvidia_module_unload_feasible
+            ),
+        ));
+    }
     if snapshot.mux == Some(GpuMuxState::Discrete) {
         hard_blockers.push(evidence(
             EcoEvidenceSeverity::HardBlocker,
@@ -414,6 +438,12 @@ pub fn plan_native_asus_eco(snapshot: &EcoLivePreflightSnapshot) -> EcoLiveAsses
         .any(|e| e.category == EcoLiveBlocker::NvidiaDrmUser)
     {
         requirements.push(EcoReleaseRequirement::ReleaseSecondaryDrmDevice);
+    }
+    if release_required
+        .iter()
+        .any(|e| e.category == EcoLiveBlocker::NvidiaModulesLoaded)
+    {
+        requirements.push(EcoReleaseRequirement::UnloadNvidiaModules);
     }
     if !release_required.is_empty() {
         requirements.push(EcoReleaseRequirement::VerifyNvidiaUsers);
@@ -707,6 +737,7 @@ impl NativeAsusEcoPreflightSource for SystemNativeAsusEcoPreflightSource {
             nvidia_modules_loaded: modules_loaded,
             nvidia_module_refcount: refcount,
             nvidia_module_busy: refcount.map(|v| v != 0),
+            nvidia_module_unload_feasible: None,
             holders,
             integrated_drm_present: integrated_drm,
             compositor_release_supported: None,
@@ -728,9 +759,10 @@ mod tests {
             access: Some(GpuAccessPolicy::Unblocked),
             nvidia_pci_present: true,
             nvidia_runtime_status: vec!["suspended".into()],
-            nvidia_modules_loaded: true,
-            nvidia_module_refcount: Some(0),
+            nvidia_modules_loaded: false,
+            nvidia_module_refcount: None,
             nvidia_module_busy: Some(false),
+            nvidia_module_unload_feasible: None,
             holders: vec![],
             integrated_drm_present: true,
             compositor_release_supported: None,
@@ -773,10 +805,65 @@ mod tests {
         ));
 
         let mut s = base();
+        s.nvidia_modules_loaded = true;
         s.nvidia_module_busy = Some(true);
         s.nvidia_module_refcount = Some(152);
         let assessment = plan_native_asus_eco(&s);
         assert!(assessment.hard_blockers.is_empty());
+        assert!(
+            assessment
+                .informational
+                .iter()
+                .any(|e| e.category == EcoLiveBlocker::NvidiaModuleBusy)
+        );
+        assert!(matches!(
+            assessment.plan,
+            EcoTransitionPlan::CanBecomeReady { .. }
+        ));
+        assert!(
+            assessment
+                .release_required
+                .iter()
+                .any(|e| e.category == EcoLiveBlocker::NvidiaModulesLoaded)
+        );
+    }
+    #[test]
+    fn loaded_modules_require_unload_even_with_zero_refcount() {
+        let mut s = base();
+        s.nvidia_modules_loaded = true;
+        s.nvidia_module_refcount = Some(0);
+        s.nvidia_module_busy = Some(false);
+        let assessment = plan_native_asus_eco(&s);
+        assert!(matches!(
+            assessment.plan,
+            EcoTransitionPlan::CanBecomeReady { .. }
+        ));
+        let plan = match assessment.plan {
+            EcoTransitionPlan::CanBecomeReady {
+                release_requirements,
+                ..
+            } => release_requirements,
+            _ => unreachable!(),
+        };
+        assert_eq!(plan[0], EcoReleaseRequirement::UnloadNvidiaModules);
+        assert_eq!(plan[1], EcoReleaseRequirement::VerifyNvidiaUsers);
+        assert_eq!(plan[2], EcoReleaseRequirement::VerifyNvidiaModuleUnload);
+    }
+    #[test]
+    fn unload_feasibility_unknown_is_fail_closed() {
+        let mut s = base();
+        s.nvidia_modules_loaded = true;
+        s.nvidia_module_unload_feasible = None;
+        let assessment = plan_native_asus_eco(&s);
+        assert!(!assessment.unknown.is_empty());
+        assert!(!matches!(
+            assessment.plan,
+            EcoTransitionPlan::ReadyImmediately
+        ));
+    }
+    #[test]
+    fn absent_modules_allow_immediate_ready() {
+        let assessment = plan_native_asus_eco(&base());
         assert!(matches!(
             assessment.plan,
             EcoTransitionPlan::ReadyImmediately
