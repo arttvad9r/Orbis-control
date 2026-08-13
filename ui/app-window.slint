@@ -411,43 +411,24 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 spacing: 4px;
                 SectionHeader { title: "Battery Charge Limit"; }
-                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready && root.ui-state.charge-limit-enabled) : ValueSlider {
-                    min: 40;
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : ValueSlider {
+                    min: 20;
                     max: 100;
-                    step: 5;
+                    step: 1;
                     value: root.ui-state.charge-limit;
-                    // Mutation control доступен только если backend действительно
-                    // позволяет запись И функция включена. Read-only session
-                    // Read-only backend остаётся disabled; enabled=false имеет
-                    // отдельное явное Off представление ниже.
                     disabled: !root.ui-state.charge-limit-writable;
                     changed(v) => {
                         root.charge-changed(v);
                     }
                 }
-                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready && !root.ui-state.charge-limit-enabled) : Rectangle {
-                    height: 30px;
-                    border-radius: 4px;
-                    background: Palette.surface-disabled;
-                    border-width: 1px;
-                    border-color: Palette.border-default;
-                    HorizontalLayout {
-                        padding-left: 8px;
-                        padding-right: 8px;
-                        alignment: center;
-                        Text {
-                            text: "Charge limit: Off";
-                            font-size: 12px;
-                            color: Palette.text-primary;
-                            vertical-alignment: center;
-                        }
-                        Text {
-                            text: "configured: " + root.ui-state.charge-limit + "%";
-                            font-size: 11px;
-                            color: Palette.text-secondary;
-                            vertical-alignment: center;
-                        }
-                    }
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : Text {
+                    text: root.ui-state.charge-limit-enabled
+                        ? "UPower threshold policy: On"
+                        : "UPower threshold policy: Off";
+                    height: 18px;
+                    font-size: 11px;
+                    color: Palette.text-secondary;
+                    vertical-alignment: center;
                 }
                 if (root.ui-state.charge-limit-state == ChargeLimitState.Loading) : Rectangle {
                     height: 30px;

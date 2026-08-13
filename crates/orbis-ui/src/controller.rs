@@ -110,12 +110,12 @@ pub struct UiState {
     pub gpu_mode_writable: bool,
     /// Configured/reported charge threshold, % (не показывать при state != Ready).
     pub charge_limit: i32,
-    /// Функция Battery Charge Limit доступна (из mock-состояния).
+    /// Состояние UPower `ChargeThresholdEnabled`.
     pub charge_limit_enabled: bool,
     /// Можно ли применять Battery Charge Limit (write-capability).
     ///
-    /// Отдельно от `charge_limit_enabled` (hardware/backend state): read-only
-    /// session backend при `enabled=true` всё равно не позволяет запись.
+    /// Отдельно от `charge_limit_writable`: `false` не запрещает asusd/kernel
+    /// mutation, поскольку это независимая UPower policy state.
     pub charge_limit_writable: bool,
     /// Состояние готовности/доступности Battery Charge Limit.
     pub charge_limit_state: ChargeLimitState,
@@ -312,11 +312,7 @@ pub fn apply(state: &mut UiState, action: UiAction) {
             // лимит заряда не применяется (временный in-process срез).
             let iv = v.round() as i32;
             let integral = (v - iv as f32).abs() < 1e-3;
-            if integral
-                && state.charge_limit_enabled
-                && (40..=100).contains(&iv)
-                && (iv - 40) % 5 == 0
-            {
+            if integral && (20..=100).contains(&iv) {
                 state.charge_limit = iv;
             }
         }
@@ -571,16 +567,16 @@ mod tests {
     }
 
     #[test]
-    fn charge_80_to_40() {
+    fn charge_80_to_20() {
         let mut s = UiState::from_mock_profile("zephyrus-full");
-        apply(&mut s, UiAction::Charge(40.0));
-        assert_eq!(s.charge_limit, 40);
+        apply(&mut s, UiAction::Charge(20.0));
+        assert_eq!(s.charge_limit, 20);
     }
 
     #[test]
-    fn charge_40_to_100() {
+    fn charge_20_to_100() {
         let mut s = UiState::from_mock_profile("zephyrus-full");
-        apply(&mut s, UiAction::Charge(40.0));
+        apply(&mut s, UiAction::Charge(20.0));
         apply(&mut s, UiAction::Charge(100.0));
         assert_eq!(s.charge_limit, 100);
     }
@@ -607,8 +603,7 @@ mod tests {
     fn charge_below_minimum_rejected() {
         let mut s = UiState::from_mock_profile("zephyrus-full");
         let before = s.clone();
-        apply(&mut s, UiAction::Charge(35.0));
-        apply(&mut s, UiAction::Charge(39.0));
+        apply(&mut s, UiAction::Charge(19.0));
         assert_eq!(s, before);
     }
 
@@ -622,22 +617,19 @@ mod tests {
     }
 
     #[test]
-    fn charge_off_step_rejected() {
+    fn charge_integer_values_are_accepted() {
         let mut s = UiState::from_mock_profile("zephyrus-full");
-        let before = s.clone();
-        apply(&mut s, UiAction::Charge(41.0));
+        apply(&mut s, UiAction::Charge(21.0));
         apply(&mut s, UiAction::Charge(83.0));
-        assert_eq!(s, before);
+        assert_eq!(s.charge_limit, 83);
     }
 
     #[test]
-    fn charge_disabled_rejected() {
+    fn charge_disabled_does_not_block_mutation() {
         let mut s = UiState::from_mock_profile("zephyrus-full");
         s.charge_limit_enabled = false;
-        let before = s.clone();
         apply(&mut s, UiAction::Charge(60.0));
-        assert_eq!(s, before);
-        assert_eq!(s.charge_limit, 80);
+        assert_eq!(s.charge_limit, 60);
     }
 
     #[test]

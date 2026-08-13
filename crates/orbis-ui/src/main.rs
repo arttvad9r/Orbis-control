@@ -274,6 +274,19 @@ fn performance_write_available(name_has_owner: Option<bool>) -> bool {
     name_has_owner == Some(true)
 }
 
+/// Battery mutation requires the existing Hardware1 owner capability plus a
+/// Ready read with both configured and effective values.
+fn battery_write_available(
+    hardware_owner: bool,
+    state: controller::ChargeLimitState,
+    limit: &ChargeLimit,
+) -> bool {
+    hardware_owner
+        && state == controller::ChargeLimitState::Ready
+        && limit.configured_percent.is_some()
+        && limit.effective_percent.is_some()
+}
+
 /// Rust-side guard matching the Slint Performance card `disabled` bindings.
 /// Invalid indices, unavailable profiles, non-ready reads and absent write
 /// capability must not reach the worker.
@@ -365,13 +378,13 @@ fn gpu_selected_index(mode: GpuMode) -> i32 {
 /// UI-boundary: преобразование Slint slider value в доменный `u8` percent.
 ///
 /// Callback приходит как float. Допускаются только конечные целые значения в
-/// диапазоне 40..=100 (шаг 5 — политика Slint slider, здесь не проверяется;
-/// 83 допустимо на Rust boundary). NaN/infinity/дробные/вне диапазона -> None.
+/// диапазоне 20..=100. Шаг равен 1, поэтому дополнительных modulo checks нет.
+/// NaN/infinity/дробные/вне диапазона -> None.
 fn charge_limit_from_ui(value: f32) -> Option<u8> {
     if !value.is_finite() || value.fract() != 0.0 {
         return None;
     }
-    if !(40.0..=100.0).contains(&value) {
+    if !(20.0..=100.0).contains(&value) {
         return None;
     }
     // Значение целое и в диапазоне: преобразование в u8 безопасно.
@@ -518,6 +531,11 @@ fn apply_charge_limit_refresh(
                 state.charge_limit = i32::from(percent.get());
                 state.charge_limit_enabled = limit.enabled;
                 state.charge_limit_state = controller::ChargeLimitState::Ready;
+                state.charge_limit_writable = battery_write_available(
+                    state.charge_limit_writable,
+                    controller::ChargeLimitState::Ready,
+                    &limit,
+                );
                 tracing::debug!(
                     "battery: refresh OK, percent={}, enabled={}",
                     percent.get(),
@@ -526,6 +544,7 @@ fn apply_charge_limit_refresh(
             }
             None => {
                 state.charge_limit_state = controller::ChargeLimitState::Unavailable;
+                state.charge_limit_writable = false;
                 tracing::warn!(
                     "battery: refresh OK, но authoritative percent отсутствует (None); не подставляю fixture/default"
                 );
@@ -533,6 +552,7 @@ fn apply_charge_limit_refresh(
         },
         Err(e) => {
             state.charge_limit_state = controller::ChargeLimitState::Unavailable;
+            state.charge_limit_writable = false;
             tracing::warn!("battery: refresh недоступен: {e:?}");
         }
     }
@@ -925,9 +945,8 @@ fn main() -> anyhow::Result<()> {
     state.charge_limit_state = controller::ChargeLimitState::Loading;
 
     // Production Battery provider uses Session1 reads and a direct Hardware1
-    // mutation source. The UI control remains disabled independently of the
-    // provider wiring until the separate UI contract step.
-    state.charge_limit_writable = false;
+    // mutation source. The control is enabled only after the authoritative
+    // Battery refresh confirms both configured and effective values.
 
     // Честный initial Performance state: fixture-профиль уже дал mock current
     // (Balanced), но в интерактивном запуске он НЕ должен быть видим как
@@ -960,7 +979,9 @@ fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
     // Read-only capability probe: the UI becomes writable only when the
     // production Hardware1 name is already owned. No mutation or polling.
-    state.perf_writable = runtime.block_on(hardware1_write_available(&system_connection));
+    let hardware_owner = runtime.block_on(hardware1_write_available(&system_connection));
+    state.perf_writable = hardware_owner;
+    state.charge_limit_writable = hardware_owner;
     let battery_read_source = ZbusSessionChargeLimitSource::new(session_connection.clone());
     let battery_read_provider = SessionChargeLimitProvider::new(battery_read_source);
     let battery_provider = SessionHardwareBatteryProvider::new(
@@ -1390,16 +1411,56 @@ mod tests {
 
     #[test]
     fn charge_limit_ui_mapping() {
-        assert_eq!(charge_limit_from_ui(40.0), Some(40));
+        assert_eq!(charge_limit_from_ui(19.0), None);
+        assert_eq!(charge_limit_from_ui(20.0), Some(20));
+        assert_eq!(charge_limit_from_ui(21.0), Some(21));
         assert_eq!(charge_limit_from_ui(80.0), Some(80));
+        assert_eq!(charge_limit_from_ui(99.0), Some(99));
         assert_eq!(charge_limit_from_ui(100.0), Some(100));
         assert_eq!(charge_limit_from_ui(83.0), Some(83));
         assert_eq!(charge_limit_from_ui(-1.0), None);
-        assert_eq!(charge_limit_from_ui(39.0), None);
         assert_eq!(charge_limit_from_ui(101.0), None);
         assert_eq!(charge_limit_from_ui(f32::NAN), None);
         assert_eq!(charge_limit_from_ui(f32::INFINITY), None);
         assert_eq!(charge_limit_from_ui(80.5), None); // дробное не усекается
+    }
+
+    #[test]
+    fn battery_writable_requires_owner_ready_and_both_values() {
+        let limit = ChargeLimit::new(
+            false,
+            Some(orbis_core::newtypes::Percent::new(80).unwrap()),
+            Some(orbis_core::newtypes::Percent::new(100).unwrap()),
+            None,
+        )
+        .unwrap();
+        assert!(battery_write_available(
+            true,
+            controller::ChargeLimitState::Ready,
+            &limit
+        ));
+        assert!(!battery_write_available(
+            false,
+            controller::ChargeLimitState::Ready,
+            &limit
+        ));
+        assert!(!battery_write_available(
+            true,
+            controller::ChargeLimitState::Loading,
+            &limit
+        ));
+        let missing_effective = ChargeLimit::new(
+            false,
+            Some(orbis_core::newtypes::Percent::new(80).unwrap()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(!battery_write_available(
+            true,
+            controller::ChargeLimitState::Ready,
+            &missing_effective
+        ));
     }
 
     #[test]
