@@ -14,6 +14,7 @@
 #![warn(missing_docs)]
 
 pub mod error;
+pub mod supergfxd;
 pub mod traits;
 
 #[cfg(feature = "mock")]
