@@ -17,6 +17,15 @@ pub const SUPERGFXD_BUS_NAME: &str = "org.supergfxctl.Daemon";
 pub const SUPERGFXD_OBJECT_PATH: &str = "/org/supergfxctl/Gfx";
 pub const SUPERGFXD_INTERFACE: &str = "org.supergfxctl.Daemon";
 
+/// Internal mutation operation consumed by the Hardware1 boundary.
+#[async_trait]
+pub trait SupergfxdMutationOperation: Send + Sync {
+    async fn request_mode(
+        &self,
+        requested: SupergfxdMode,
+    ) -> Result<MutationObservation, ProviderError>;
+}
+
 /// Узкий typed-контракт mutation backend-а.
 #[async_trait]
 pub trait SupergfxdMutationClient: Send + Sync {
@@ -98,6 +107,19 @@ where
             power,
             supported_modes,
         })
+    }
+}
+
+#[async_trait]
+impl<C> SupergfxdMutationOperation for SupergfxdMutationBackend<C>
+where
+    C: SupergfxdMutationClient,
+{
+    async fn request_mode(
+        &self,
+        requested: SupergfxdMode,
+    ) -> Result<MutationObservation, ProviderError> {
+        Self::request_mode(self, requested).await
     }
 }
 

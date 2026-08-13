@@ -13,6 +13,7 @@ name = "orbis-hardwared"
 path = "src/main.rs"
 
 [dependencies]
+serde = { workspace = true }
 orbis-core = { workspace = true }
 orbis-providers = { workspace = true }
 zbus = { workspace = true }

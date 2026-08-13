@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
+use orbis_providers::supergfxd::{SupergfxdMode, SupergfxdStagedState, SupergfxdUserAction};
 
 pub mod battery;
 pub mod supergfxd;
@@ -182,6 +183,8 @@ pub const DBUS_INTERFACE_NAME: &str = "io.github.orbiscontrol.Hardware1";
 pub const POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-performance-profile";
 /// Polkit action id for Battery charge-limit mutation.
 pub const BATTERY_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-charge-limit";
+/// Polkit action id for the injectable GPU mutation boundary.
+pub const GPU_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-gpu-mode";
 
 /// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
 pub mod wire {
@@ -382,6 +385,116 @@ pub async fn handle_set_charge_limit(
     }
 }
 
+/// Stable wire DTO for one staged backend-mode observation.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    zbus::zvariant::Type,
+    zbus::zvariant::OwnedValue,
+)]
+pub struct GpuMutationResult {
+    /// Requested supergfxd backend mode.
+    pub requested_mode: u32,
+    /// Action returned directly by SetMode.
+    pub returned_user_action: u32,
+    /// Fresh current supergfxd backend mode.
+    pub current_mode: u32,
+    /// Fresh pending supergfxd backend mode.
+    pub pending_mode: u32,
+    /// Fresh pending user action.
+    pub pending_user_action: u32,
+    /// Classified outcome: 0 Applied, 1 Pending, 2 RequiresUserAction, 3 Inconsistent.
+    pub outcome: u32,
+}
+
+const GPU_OUTCOME_APPLIED: u32 = 0;
+const GPU_OUTCOME_PENDING: u32 = 1;
+const GPU_OUTCOME_REQUIRES_USER_ACTION: u32 = 2;
+const GPU_OUTCOME_INCONSISTENT: u32 = 3;
+
+fn backend_mode_from_wire(raw: u32) -> Result<SupergfxdMode, ProviderError> {
+    match SupergfxdMode::from_wire(raw) {
+        mode @ (SupergfxdMode::Hybrid
+        | SupergfxdMode::Integrated
+        | SupergfxdMode::NvidiaNoModeset
+        | SupergfxdMode::Vfio
+        | SupergfxdMode::AsusEgpu
+        | SupergfxdMode::AsusMuxDgpu) => Ok(mode),
+        SupergfxdMode::None | SupergfxdMode::Unknown(_) => Err(ProviderError::InvalidRequest(
+            format!("unknown or invalid supergfxd GPU mode wire value {raw}"),
+        )),
+    }
+}
+
+fn backend_mode_to_wire(mode: SupergfxdMode) -> u32 {
+    match mode {
+        SupergfxdMode::Hybrid => 0,
+        SupergfxdMode::Integrated => 1,
+        SupergfxdMode::NvidiaNoModeset => 2,
+        SupergfxdMode::Vfio => 3,
+        SupergfxdMode::AsusEgpu => 4,
+        SupergfxdMode::AsusMuxDgpu => 5,
+        SupergfxdMode::None => 6,
+        SupergfxdMode::Unknown(raw) => raw,
+    }
+}
+
+fn user_action_to_wire(action: SupergfxdUserAction) -> u32 {
+    match action {
+        SupergfxdUserAction::Logout => 0,
+        SupergfxdUserAction::Reboot => 1,
+        SupergfxdUserAction::SwitchToIntegrated => 2,
+        SupergfxdUserAction::AsusEgpuDisable => 3,
+        SupergfxdUserAction::Nothing => 4,
+        SupergfxdUserAction::Unknown(raw) => raw,
+    }
+}
+
+fn staged_state_to_wire(state: SupergfxdStagedState) -> u32 {
+    match state {
+        SupergfxdStagedState::Applied => GPU_OUTCOME_APPLIED,
+        SupergfxdStagedState::Pending => GPU_OUTCOME_PENDING,
+        SupergfxdStagedState::RequiresUserAction(_) => GPU_OUTCOME_REQUIRES_USER_ACTION,
+        SupergfxdStagedState::Inconsistent => GPU_OUTCOME_INCONSISTENT,
+    }
+}
+
+/// Обработка GPU mutation до публичного D-Bus boundary.
+pub async fn handle_set_gpu_mode(
+    authorizer: &dyn Authorizer,
+    backend: Option<&dyn supergfxd::SupergfxdMutationOperation>,
+    raw: u32,
+    sender: &str,
+) -> zbus::fdo::Result<GpuMutationResult> {
+    let requested = backend_mode_from_wire(raw).map_err(provider_error_to_dbus)?;
+    authorizer
+        .authorize(sender)
+        .await
+        .map_err(|error| match error {
+            AuthorizeError::Denied(message) => zbus::fdo::Error::AccessDenied(message),
+            AuthorizeError::Failed(message) => zbus::fdo::Error::Failed(message),
+        })?;
+    let backend =
+        backend.ok_or_else(|| zbus::fdo::Error::NotSupported("GPU backend unavailable".into()))?;
+    let observation = backend
+        .request_mode(requested)
+        .await
+        .map_err(provider_error_to_dbus)?;
+    Ok(GpuMutationResult {
+        requested_mode: backend_mode_to_wire(observation.requested),
+        returned_user_action: user_action_to_wire(observation.returned_action),
+        current_mode: backend_mode_to_wire(observation.snapshot.current_mode),
+        pending_mode: backend_mode_to_wire(observation.snapshot.pending_mode),
+        pending_user_action: user_action_to_wire(observation.snapshot.pending_user_action),
+        outcome: staged_state_to_wire(observation.state),
+    })
+}
+
 /// Service object интерфейса `io.github.orbiscontrol.Hardware1`.
 ///
 /// Не generic: writer — production с фиксированными kernel paths; authorizer —
@@ -391,6 +504,9 @@ pub struct HardwareService {
     writer: PlatformProfileWriter<StdProfileIo>,
     battery_authorizer: Box<dyn Authorizer>,
     battery_backend: Option<Box<dyn BatteryMutationBackend>>,
+    gpu_authorizer: Box<dyn Authorizer>,
+    gpu_backend: Option<Box<dyn supergfxd::SupergfxdMutationOperation>>,
+    gpu_sender_fallback: Option<String>,
 }
 
 impl HardwareService {
@@ -401,6 +517,9 @@ impl HardwareService {
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
+            gpu_authorizer: Box::new(DisabledAuthorizer),
+            gpu_backend: None,
+            gpu_sender_fallback: None,
         }
     }
 
@@ -415,6 +534,31 @@ impl HardwareService {
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
+            gpu_authorizer: Box::new(DisabledAuthorizer),
+            gpu_backend: None,
+            gpu_sender_fallback: None,
+        }
+    }
+
+    /// Test/injection construction for the GPU Hardware1 boundary. Production
+    /// wiring intentionally does not call this constructor yet.
+    pub fn with_gpu_backend(
+        authorizer: Box<dyn Authorizer>,
+        gpu_authorizer: Box<dyn Authorizer>,
+        gpu_backend: Box<dyn supergfxd::SupergfxdMutationOperation>,
+        p2p_sender: Option<String>,
+    ) -> Self {
+        Self {
+            authorizer,
+            writer: PlatformProfileWriter::default(),
+            battery_authorizer: Box::new(DisabledAuthorizer),
+            battery_backend: None,
+            gpu_authorizer,
+            gpu_backend: Some(gpu_backend),
+            // Peer-to-peer D-Bus has no unique bus sender in its method header;
+            // tests inject the original caller identity explicitly. Production
+            // constructors leave it absent and require the real message sender.
+            gpu_sender_fallback: p2p_sender,
         }
     }
 }
@@ -463,6 +607,26 @@ impl HardwareService {
             .ok_or_else(|| zbus::fdo::Error::NotSupported("battery backend unavailable".into()))?;
         handle_set_charge_limit(self.battery_authorizer.as_ref(), backend, percent, &sender).await
     }
+
+    /// Set one supergfxd backend mode and return fresh staged observation.
+    async fn set_gpu_mode(
+        &self,
+        raw: u32,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<GpuMutationResult> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .or_else(|| self.gpu_sender_fallback.clone())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        handle_set_gpu_mode(
+            self.gpu_authorizer.as_ref(),
+            self.gpu_backend.as_deref(),
+            raw,
+            &sender,
+        )
+        .await
+    }
 }
 
 /// Client proxy контракта `io.github.orbiscontrol.Hardware1` (для sessiond).
@@ -481,6 +645,9 @@ pub trait Hardware1 {
     /// Установить Battery configured threshold; возвращает подтверждённый
     /// configured percent, effective value остаётся отдельным read-model field.
     fn set_charge_limit(&self, percent: u8) -> zbus::Result<u8>;
+
+    /// Set one supergfxd backend mode and return staged observation.
+    fn set_gpu_mode(&self, requested_mode: u32) -> zbus::Result<GpuMutationResult>;
 }
 
 #[cfg(test)]
