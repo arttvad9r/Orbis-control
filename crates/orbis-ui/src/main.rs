@@ -31,8 +31,9 @@ use orbis_providers::error::ProviderError;
 use orbis_providers::mock::MockProvider;
 use orbis_session_client::{
     SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
-    SessionGpuPowerProvider, SessionHardwarePerformanceProvider, ZbusHardwarePerformanceSource,
-    ZbusSessionChargeLimitSource, ZbusSessionGpuSource, ZbusSessionPerformanceSource,
+    SessionGpuPowerProvider, SessionHardwareBatteryProvider, SessionHardwarePerformanceProvider,
+    ZbusHardwareBatterySource, ZbusHardwarePerformanceSource, ZbusSessionChargeLimitSource,
+    ZbusSessionGpuSource, ZbusSessionPerformanceSource,
 };
 use orbis_test_support::devices::build_state_arc;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker};
@@ -923,9 +924,9 @@ fn main() -> anyhow::Result<()> {
     // Loading; первый RefreshChargeLimit (ниже) переведёт в Ready/Unavailable.
     state.charge_limit_state = controller::ChargeLimitState::Loading;
 
-    // Production Battery backend — read-only session client (SessionChargeLimitProvider
-    // возвращает Unsupported для set_charge_limit): mutation control не должен
-    // выглядеть рабочим. Это независимо от charge_limit_enabled (hardware state).
+    // Production Battery provider uses Session1 reads and a direct Hardware1
+    // mutation source. The UI control remains disabled independently of the
+    // provider wiring until the separate UI contract step.
     state.charge_limit_writable = false;
 
     // Честный initial Performance state: fixture-профиль уже дал mock current
@@ -960,8 +961,12 @@ fn main() -> anyhow::Result<()> {
     // Read-only capability probe: the UI becomes writable only when the
     // production Hardware1 name is already owned. No mutation or polling.
     state.perf_writable = runtime.block_on(hardware1_write_available(&system_connection));
-    let battery_source = ZbusSessionChargeLimitSource::new(session_connection.clone());
-    let battery_provider = SessionChargeLimitProvider::new(battery_source);
+    let battery_read_source = ZbusSessionChargeLimitSource::new(session_connection.clone());
+    let battery_read_provider = SessionChargeLimitProvider::new(battery_read_source);
+    let battery_provider = SessionHardwareBatteryProvider::new(
+        battery_read_provider,
+        ZbusHardwareBatterySource::new(system_connection.clone()),
+    );
     let battery_service = AppService::new(Arc::new(battery_provider));
 
     // Read-only GPU hardware capabilities через тот же session connection
