@@ -181,8 +181,9 @@ git diff --check
 - Do not create a commit unless the task prompt explicitly asks for it.
 - Do not amend, rebase, reset, force push or remove others' changes without
   direct permission.
-- After a commit, verify the working tree is clean and the commit contains
-  exactly the intended files.
+- After a commit, verify the commit contains exactly the intended files and
+  pre-existing baseline paths remain unchanged; unrelated baseline changes may
+  remain in the working tree.
 - Commit messages: `<scope>: <imperative summary>` (scopes like `ui:`,
   `session:`, `sessiond:`).
 

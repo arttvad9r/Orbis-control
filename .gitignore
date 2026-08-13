@@ -1,5 +1,6 @@
 # Build
 /target
+/result
 .direnv/
 **/*.rs.bk
 
