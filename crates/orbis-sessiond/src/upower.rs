@@ -73,6 +73,13 @@ pub trait BatteryEffectiveSource: Send + Sync {
     async fn read_effective_end_threshold(&self) -> Result<u8, ProviderError>;
 }
 
+/// Read-only configured threshold source owned by asusd.
+#[async_trait]
+pub trait AsusdConfiguredSource: Send + Sync {
+    /// Прочитать сохранённый configured threshold свежим getter-вызовом.
+    async fn read_configured_threshold(&self) -> Result<u8, ProviderError>;
+}
+
 /// Read-only sysfs source для уже обнаруженного power-supply.
 pub struct SysfsBatteryEndThresholdSource {
     path: PathBuf,
@@ -216,6 +223,102 @@ pub struct UPowerChargeLimitProvider<S> {
     source: S,
 }
 
+/// Production configured source: UPower supplies enabled/reported state,
+/// while asusd supplies the mutation-owned configured threshold.
+pub struct AsusdBatteryChargeLimitProvider<U, A, E> {
+    upower: U,
+    asusd: A,
+    effective: E,
+}
+
+impl<U, A, E> AsusdBatteryChargeLimitProvider<U, A, E> {
+    /// Создать provider с раздельными authoritative sources.
+    pub fn new(upower: U, asusd: A, effective: E) -> Self {
+        Self {
+            upower,
+            asusd,
+            effective,
+        }
+    }
+}
+
+impl<U, A, E> Provider for AsusdBatteryChargeLimitProvider<U, A, E>
+where
+    U: Send + Sync,
+    A: Send + Sync,
+    E: Send + Sync,
+{
+    fn id(&self) -> &'static str {
+        "asusd-charge-limit"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("asusd-charge-limit")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("asusd charge-limit backend: функция '{feature}' недоступна")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.asusd-charge-limit",
+            "read-only UPower enabled + asusd configured + kernel effective battery backend",
+        )]
+    }
+}
+
+#[async_trait]
+impl<U, A, E> BatteryProvider for AsusdBatteryChargeLimitProvider<U, A, E>
+where
+    U: UPowerChargeLimitSource,
+    A: AsusdConfiguredSource,
+    E: BatteryEffectiveSource,
+{
+    async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
+        let snapshot = self.upower.read_charge_limit().await?;
+        if !snapshot.supported {
+            return Err(ProviderError::Unsupported(
+                "UPower: charge threshold не поддерживается устройством".into(),
+            ));
+        }
+        let configured =
+            Percent::new(self.asusd.read_configured_threshold().await?).map_err(|e| {
+                ProviderError::Internal(format!("asusd: невалидный configured threshold: {e}"))
+            })?;
+        let effective = Percent::new(self.effective.read_effective_end_threshold().await?)
+            .map_err(|e| {
+                ProviderError::Internal(format!("kernel: невалидный effective threshold: {e}"))
+            })?;
+        ChargeLimit::new(snapshot.enabled, Some(configured), Some(effective), None)
+            .map_err(|e| ProviderError::Internal(format!("Battery threshold невалиден: {e}")))
+    }
+
+    async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "sessiond Battery provider is read-only".into(),
+        ))
+    }
+
+    async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "sessiond Battery provider is read-only".into(),
+        ))
+    }
+
+    fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
+        ValidationResult::invalid("sessiond Battery provider is read-only")
+    }
+}
+
 impl<S> UPowerChargeLimitProvider<S> {
     /// Создать provider над source.
     ///
@@ -223,6 +326,42 @@ impl<S> UPowerChargeLimitProvider<S> {
     /// hardware min/max/step, поэтому provider не принимает injected bounds.
     pub fn new(source: S) -> Self {
         Self { source }
+    }
+}
+
+#[zbus::proxy(
+    interface = "xyz.ljones.Platform",
+    default_service = "xyz.ljones.Asusd",
+    default_path = "/xyz/ljones"
+)]
+trait AsusdPlatformReadOnly {
+    #[zbus(property)]
+    fn charge_control_end_threshold(&self) -> zbus::Result<u8>;
+}
+
+/// Typed read-only client for the asusd configured threshold.
+pub struct ZbusAsusdConfiguredSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusAsusdConfiguredSource {
+    /// Создать client без D-Bus I/O.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl AsusdConfiguredSource for ZbusAsusdConfiguredSource {
+    async fn read_configured_threshold(&self) -> Result<u8, ProviderError> {
+        AsusdPlatformReadOnlyProxy::builder(&self.connection)
+            .cache_properties(zbus::proxy::CacheProperties::No)
+            .build()
+            .await
+            .map_err(|e| ProviderError::Dbus(format!("asusd proxy: {e}")))?
+            .charge_control_end_threshold()
+            .await
+            .map_err(|e| ProviderError::Dbus(format!("asusd configured read: {e}")))
     }
 }
 
@@ -330,6 +469,28 @@ mod tests {
         reads: AtomicUsize,
     }
 
+    struct ScriptedAsusdSource {
+        values: std::sync::Mutex<Vec<Result<u8, ProviderError>>>,
+    }
+
+    #[async_trait]
+    impl AsusdConfiguredSource for ScriptedAsusdSource {
+        async fn read_configured_threshold(&self) -> Result<u8, ProviderError> {
+            self.values.lock().unwrap().remove(0)
+        }
+    }
+
+    struct ScriptedEffectiveSource {
+        values: std::sync::Mutex<Vec<u8>>,
+    }
+
+    #[async_trait]
+    impl BatteryEffectiveSource for ScriptedEffectiveSource {
+        async fn read_effective_end_threshold(&self) -> Result<u8, ProviderError> {
+            Ok(self.values.lock().unwrap().remove(0))
+        }
+    }
+
     impl ScriptedSource {
         fn new(outcome: ScriptedOutcome) -> Self {
             Self {
@@ -356,6 +517,84 @@ mod tests {
 
     fn provider(outcome: ScriptedOutcome) -> UPowerChargeLimitProvider<ScriptedSource> {
         UPowerChargeLimitProvider::new(ScriptedSource::new(outcome))
+    }
+
+    fn asusd_provider(
+        upower: UPowerChargeLimitSnapshot,
+        configured: Vec<Result<u8, ProviderError>>,
+        effective: u8,
+    ) -> AsusdBatteryChargeLimitProvider<ScriptedSource, ScriptedAsusdSource, ScriptedEffectiveSource>
+    {
+        AsusdBatteryChargeLimitProvider::new(
+            ScriptedSource::new(ScriptedOutcome::Snapshot(upower)),
+            ScriptedAsusdSource {
+                values: std::sync::Mutex::new(configured),
+            },
+            ScriptedEffectiveSource {
+                values: std::sync::Mutex::new(vec![effective]),
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn asusd_configured_value_wins_over_upower_reported_value() {
+        let p = asusd_provider(
+            UPowerChargeLimitSnapshot {
+                supported: true,
+                enabled: false,
+                end_threshold: 80,
+                effective_end_threshold: None,
+            },
+            vec![Ok(100)],
+            100,
+        );
+        let limit = p.charge_limit().await.expect("charge limit");
+        assert!(!limit.enabled);
+        assert_eq!(limit.configured_percent.map(|x| x.get()), Some(100));
+        assert_eq!(limit.effective_percent.map(|x| x.get()), Some(100));
+    }
+
+    #[tokio::test]
+    async fn asusd_configured_value_supports_mutation_and_rollback_reads() {
+        let p = AsusdBatteryChargeLimitProvider::new(
+            ScriptedSource::new(ScriptedOutcome::Snapshot(UPowerChargeLimitSnapshot {
+                supported: true,
+                enabled: true,
+                end_threshold: 55,
+                effective_end_threshold: None,
+            })),
+            ScriptedAsusdSource {
+                values: std::sync::Mutex::new(vec![Ok(80), Ok(100)]),
+            },
+            ScriptedEffectiveSource {
+                values: std::sync::Mutex::new(vec![80, 100]),
+            },
+        );
+        let first = p.charge_limit().await.expect("80 read");
+        assert_eq!(first.configured_percent.map(|x| x.get()), Some(80));
+        assert_eq!(first.effective_percent.map(|x| x.get()), Some(80));
+        let second = p.charge_limit().await.expect("100 read");
+        assert_eq!(second.configured_percent.map(|x| x.get()), Some(100));
+        assert_eq!(second.effective_percent.map(|x| x.get()), Some(100));
+        assert!(second.enabled);
+    }
+
+    #[tokio::test]
+    async fn asusd_configured_read_error_does_not_fallback_to_upower() {
+        let p = asusd_provider(
+            UPowerChargeLimitSnapshot {
+                supported: true,
+                enabled: false,
+                end_threshold: 80,
+                effective_end_threshold: None,
+            },
+            vec![Err(ProviderError::Dbus("asusd unavailable".into()))],
+            100,
+        );
+        assert!(matches!(
+            p.charge_limit().await,
+            Err(ProviderError::Dbus(message)) if message == "asusd unavailable"
+        ));
     }
 
     #[tokio::test]

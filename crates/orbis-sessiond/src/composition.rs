@@ -7,7 +7,7 @@ use orbis_providers::traits::{BatteryProvider, PerformanceProvider};
 
 use crate::server::{GpuCapabilities, build_session_server};
 use crate::upower::{
-    CombinedChargeLimitSource, SysfsBatteryEndThresholdSource, UPowerChargeLimitProvider,
+    AsusdBatteryChargeLimitProvider, SysfsBatteryEndThresholdSource, ZbusAsusdConfiguredSource,
     ZbusUPowerChargeLimitSource,
 };
 
@@ -34,10 +34,12 @@ pub async fn build_upower_session_server(
 ) -> zbus::Result<zbus::Connection> {
     let effective_source = SysfsBatteryEndThresholdSource::from_native_path(&battery_native_path)
         .map_err(|e| zbus::Error::Failure(e.to_string()))?;
+    let asusd_source = ZbusAsusdConfiguredSource::new(upower_connection.clone());
     build_upower_session_server_with_effective_source(
         session_builder,
         upower_connection,
         battery_object_path,
+        asusd_source,
         effective_source,
         gpu,
         performance,
@@ -55,6 +57,7 @@ pub async fn build_upower_session_server_with_effective_source<E>(
     session_builder: zbus::connection::Builder<'_>,
     upower_connection: zbus::Connection,
     battery_object_path: zbus::zvariant::OwnedObjectPath,
+    asusd_source: impl crate::upower::AsusdConfiguredSource + 'static,
     effective_source: E,
     gpu: GpuCapabilities,
     performance: Option<Arc<dyn PerformanceProvider>>,
@@ -63,8 +66,8 @@ where
     E: crate::upower::BatteryEffectiveSource + 'static,
 {
     let upower_source = ZbusUPowerChargeLimitSource::new(upower_connection, battery_object_path);
-    let source = CombinedChargeLimitSource::new(upower_source, effective_source);
-    let provider = UPowerChargeLimitProvider::new(source);
+    let provider =
+        AsusdBatteryChargeLimitProvider::new(upower_source, asusd_source, effective_source);
     let battery: Arc<dyn BatteryProvider> = Arc::new(provider);
     build_session_server(session_builder, battery, gpu, performance).await
 }

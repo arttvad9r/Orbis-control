@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use orbis_providers::error::ProviderError;
 use orbis_session_protocol::Session1Proxy;
 use orbis_sessiond::composition::build_upower_session_server_with_effective_source;
-use orbis_sessiond::upower::BatteryEffectiveSource;
+use orbis_sessiond::upower::{AsusdConfiguredSource, BatteryEffectiveSource};
 use zbus::connection::Builder;
 use zbus::proxy::CacheProperties;
 
@@ -28,6 +28,15 @@ struct FakeEffectiveSource;
 impl BatteryEffectiveSource for FakeEffectiveSource {
     async fn read_effective_end_threshold(&self) -> Result<u8, ProviderError> {
         Ok(100)
+    }
+}
+
+struct FakeAsusdSource(u8);
+
+#[async_trait]
+impl AsusdConfiguredSource for FakeAsusdSource {
+    async fn read_configured_threshold(&self) -> Result<u8, ProviderError> {
+        Ok(self.0)
     }
 }
 
@@ -154,6 +163,7 @@ async fn connect_composition(
             session_server_builder,
             upower_client_conn.clone(),
             object_path,
+            FakeAsusdSource(100),
             FakeEffectiveSource,
             Default::default(),
             None,
@@ -186,7 +196,7 @@ async fn composition_serves_upower_charge_limit() {
 
         assert!(!info.enabled);
         assert!(info.configured_percent_present);
-        assert_eq!(info.configured_percent, 80);
+        assert_eq!(info.configured_percent, 100);
         assert!(info.effective_percent_present);
         assert_eq!(info.effective_percent, 100);
         // UPower не сообщает hardware bounds: на wire bounds отсутствуют.
@@ -224,7 +234,7 @@ async fn composition_reads_fresh_upower_values() {
 
         let first = proxy.charge_limit().await.expect("read1");
         assert!(first.enabled);
-        assert_eq!(first.configured_percent, 80);
+        assert_eq!(first.configured_percent, 100);
         assert_eq!(first.effective_percent, 100);
 
         {
@@ -235,7 +245,7 @@ async fn composition_reads_fresh_upower_values() {
 
         let second = proxy.charge_limit().await.expect("read2");
         assert!(!second.enabled);
-        assert_eq!(second.configured_percent, 60);
+        assert_eq!(second.configured_percent, 100);
         assert_eq!(second.effective_percent, 100);
 
         let calls = state.lock().unwrap().calls.clone();
