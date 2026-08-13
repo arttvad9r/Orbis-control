@@ -1,6 +1,6 @@
 # ADR 0007: Battery Mutation Backend
 
-- Статус: **Принято как архитектурный контракт; реализация не начата**
+- Статус: **Принято как архитектурный контракт; backend LIVE-VALIDATED**
 - Дата: 2026-08-13
 
 ## Context
@@ -36,9 +36,9 @@ setter напрямую.
 
 ## Decision
 
-1. Текущий production Battery mutation остаётся `Unsupported`; этот ADR не
-   включает hardware write.
-2. Будущий compatibility backend называется концептуально
+1. Production Battery mutation backend реализован и live-validated; GUI Battery
+   mutation control этим ADR не включается и отдельно не live-tested.
+2. Compatibility backend называется концептуально
    `AsusdBatteryMutationBackend` и вызывает только typed D-Bus API `asusd`.
 3. Shell `asusctl` не является runtime dependency и не используется как
    backend.
@@ -127,11 +127,21 @@ AppService semantics или Session1 read model. Native backend обязан д�
 До выполнения этих обязанностей direct native write при активном asusd
 запрещён.
 
+## Live validation
+
+Controlled production cycle `100 → 80 → 100` через `Hardware1.SetChargeLimit`
+успешно подтвердил asusd configured и kernel effective read-back; финальный
+hardware state совпал с начальным. Session1 после rollback показал
+`configured/effective=100/100`. UPower `ChargeEndThreshold=80` не является
+authoritative configured value: `enabled` читается из UPower, configured — из
+asusd, effective — из kernel.
+
 ## Consequences
 
 - `asusd` — compatibility backend, не permanent domain/UI dependency.
-- Battery mutation потребует отдельной узкой capability в hardwared и отдельной
+- Battery mutation использует отдельную узкую capability в hardwared и отдельную
   authorization action, как Performance в ADR 0006.
 - UPower остаётся generic read/policy integration, но не смешивается с
   asusd-owned configured state без явной ownership detection.
-- Battery mutation не объявляется completed этим ADR.
+- Battery backend объявляется **COMPLETED / LIVE-VALIDATED**; Battery GUI
+  mutation остаётся отдельной незавершённой задачей.

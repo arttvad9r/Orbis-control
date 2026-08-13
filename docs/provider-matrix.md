@@ -128,7 +128,7 @@ CPU, 8×(temp,pwm) GPU, enabled.
 | Приоритет | Backend | Интерфейс | Действия |
 |---|---|---|---|
 | 1 | UPower | `org.freedesktop.UPower` + `.Device` | state, %, energy-rate, capacity, cycles, source type |
-| 2 | asusd compatibility mutation backend | system D-Bus `xyz.ljones.Asusd`, `/xyz/ljones`, `xyz.ljones.Platform`, typed `ChargeControlEndThreshold(u8)` | будущая mutation, `20..=100`, step 1; asusd остаётся owner |
+| 2 | asusd compatibility mutation backend | system D-Bus `xyz.ljones.Asusd`, `/xyz/ljones`, `xyz.ljones.Platform`, typed `ChargeControlEndThreshold(u8)` | mutation `20..=100`, step 1; asusd остаётся owner; **LIVE-VALIDATED** |
 | 3 | kernel ABI | `/sys/class/power_supply/BAT*/charge_control_end_threshold` | effective read; direct mutation запрещена при active asusd |
 | 4 | kernel ABI | power_supply sysfs | raw-показания (fallback) |
 
@@ -137,8 +137,16 @@ asusd Platform и sysfs. Hardware min/max/step probe не доказал; тек
 production UPower provider возвращает `bounds=None`. Исторический range 40–100
 в `expected-capabilities.json` не является production hardware constraint.
 
-Battery mutation не отмечается complete: Orbis не вызывает shell `asusctl`, не
-пишет sysfs напрямую и не смешивает `100` с disable. См. [ADR 0007](adr/0007-battery-mutation-backend.md).
+Battery backend: **COMPLETED / LIVE-VALIDATED**. Controlled
+`Hardware1.SetChargeLimit` cycle `100 → 80 → 100` подтвердил asusd configured и
+kernel effective read-back. Orbis не вызывает shell `asusctl`, не пишет sysfs
+напрямую и не смешивает `100` с disable. См. [ADR 0007](adr/0007-battery-mutation-backend.md).
+
+Read semantics: `enabled` берётся из UPower `ChargeThresholdEnabled`,
+`configured_percent` — из asusd `ChargeControlEndThreshold`, а
+`effective_percent` — из kernel `charge_control_end_threshold`. UPower
+`ChargeEndThreshold=80` — независимая policy/reporting semantics, не
+authoritative configured value.
 
 ---
 

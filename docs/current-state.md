@@ -15,6 +15,18 @@
 
 ## Summary
 
+Battery backend: **COMPLETED / LIVE-VALIDATED**. Read semantics are:
+
+- `enabled` ← UPower `ChargeThresholdEnabled`;
+- `configured_percent` ← asusd `ChargeControlEndThreshold`;
+- `effective_percent` ← kernel `charge_control_end_threshold`.
+
+Controlled production cycle `100 → 80 → 100` through `Hardware1.SetChargeLimit`
+passed asusd/kernel read-back and restored the initial state. UPower
+`ChargeEndThreshold=80` remains independent policy/reporting semantics and is
+not the authoritative configured value. The Battery GUI mutation control is
+still not enabled or live-tested.
+
 Первый **read-only MVP** и первый узкий production mutation path завершены и
 live-validated: production GUI реально показывает Battery Charge Limit,
 Performance Mode, GPU Power, GPU MUX и GPU Access через session path:
@@ -117,8 +129,8 @@ Live MVP validation (packaged GUI + packaged sessiond):
 | Session client | IMPLEMENTED | Fresh Session1 reads, validation и direct Hardware1 Performance client |
 | sessiond | LIVE-VALIDATED | Discovery, UPower read, server, runtime, signals, Nix user service |
 | CLI | NOT IMPLEMENTED | `orbisctl` binary — stub |
-| Production mutations | PARTIAL | Performance LIVE-VALIDATED; Battery/GPU mutations не реализованы |
-| Privileged helper | LIVE-VALIDATED | Узкий `orbis-hardwared` для Performance; не generic writer |
+| Production mutations | PARTIAL | Performance и Battery backend LIVE-VALIDATED; GPU mutation не реализована |
+| Privileged helper | LIVE-VALIDATED | Узкий `orbis-hardwared` для Performance и Battery; не generic writer |
 
 ## Battery Charge Limit
 
@@ -166,7 +178,20 @@ ChargeLimit { enabled, percent: Option<Percent>, bounds: Option<ChargeLimitBound
 - P2P tests покрывают protocol, service/server, client и composed path без real
   system/session bus.
 
-### LIVE-VALIDATED (2026-08-09)
+### LIVE-VALIDATED (2026-08-13)
+
+Battery mutation path:
+
+```text
+application caller → Hardware1.SetChargeLimit → Orbis polkit
+→ orbis-hardwared → typed asusd D-Bus API → asusd → kernel + persistence/restore
+```
+
+Direct sysfs, `asusctl`, UPower setters и sessiond mutation delegation не
+используются. Live evidence: `100 → 80 → 100`, configured/effective read-back
+`100/100 → 80/80 → 100/100`; final Session1 configured/effective также `100/100`.
+
+### Earlier read-only LIVE-VALIDATED (2026-08-09)
 
 Packaged GUI + packaged sessiond (direct binaries, без systemd):
 
@@ -205,8 +230,8 @@ released, процесс отсутствует.
 ### Gaps
 
 - Performance/GPU production backends остаются mock (см. ниже).
-- Production `set_charge_limit` и one-shot full charge — **NOT IMPLEMENTED**.
-- asusd write provider — **NOT IMPLEMENTED**.
+- Battery mutation backend — **COMPLETED / LIVE-VALIDATED**.
+- Battery GUI mutation control — **NOT IMPLEMENTED / NOT LIVE-TESTED**.
 - sysfs fallback/write provider — **NOT IMPLEMENTED**.
 - Hardware charge min/max/step на FA707NV — **UNKNOWN**. UI/mock policy 40/100/5
   не является hardware evidence.

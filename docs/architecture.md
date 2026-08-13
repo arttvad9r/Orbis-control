@@ -108,10 +108,11 @@ trait или domain type не означает существование produc
   `orbis-sessiond`;
 - `SessionChargeLimitProvider` — read-only Battery provider над session D-Bus,
   используется production GUI как `battery_service` (live-validated);
-- Battery mutation остаётся `Unsupported`. Будущий compatibility path —
+- Battery mutation backend — **COMPLETED / LIVE-VALIDATED** через
   caller-preserving `Hardware1 → orbis-hardwared → typed asusd` D-Bus API;
   shell `asusctl` и competing direct sysfs write не используются. См.
-  [ADR 0007](adr/0007-battery-mutation-backend.md);
+  [ADR 0007](adr/0007-battery-mutation-backend.md). Production GUI control
+  остаётся не включённым и не live-tested;
 - runtime capability discovery общего назначения ещё не реализован;
   `orbis-capabilities` в основном собирает reports и читает dated fixtures.
 
@@ -135,6 +136,9 @@ ChargeLimit {
 `ChargeLimitBounds` содержит `min`, `max` и ненулевой `step`. Семантика:
 
 - `configured_percent` и `effective_percent` разделены по источнику;
+- `enabled` authoritative source — UPower `ChargeThresholdEnabled`;
+- `configured_percent` authoritative source — asusd `ChargeControlEndThreshold`;
+- `effective_percent` authoritative source — kernel `charge_control_end_threshold`;
 - `bounds = Some(...)` — конкретный backend действительно сообщил constraints;
 - `bounds = None` — hardware/backend constraints неизвестны;
 - unknown bounds не являются ошибкой и не запрещают показать известный current;
@@ -178,14 +182,14 @@ UPower и session-client proxies используют `CacheProperties::No`: к�
 authoritative read выполняет новый property Get. Fresh-read semantics проверены
 последовательными отличающимися значениями. UPower сообщает current threshold и
 enabled/support flags, но не hardware min/max/step, поэтому provider возвращает
-`bounds=None`.
+`bounds=None`. Session1 Battery read model остаётся fresh read-back и не
+делегирует mutation.
 
 NixOS module создаёт systemd user service с `Type=dbus`,
 `BusName=io.github.orbiscontrol.Session`, Nix-store `ExecStart`,
 `Restart=on-failure` и `PartOf/WantedBy=graphical-session.target`. `Type=dbus`
 считает daemon ready только после захвата имени. Session1 Performance остаётся
-getter-only в final mutation architecture; production Battery mutations
-возвращают `Unsupported`.
+getter-only в final mutation architecture.
 
 ## 7. Privilege boundary
 

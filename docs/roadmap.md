@@ -203,10 +203,10 @@ read-only/disabled. Это **не** означает завершённость 
    kernel `platform_profile` через узкий `orbis-hardwared`, polkit и
    authoritative read-back; production GUI `Balanced → Silent → Balanced`
    подтвердил ровно два valid calls/writes;
-2. **Battery mutation** (Milestone 5; compatibility backend architecture
-   принята в [ADR 0007](adr/0007-battery-mutation-backend.md), реализация
-   pending; нужен единственный asusd owner и configured/effective/session
-   read-back);
+2. **Battery mutation** (Milestone 5) — **COMPLETED / LIVE-VALIDATED**:
+   compatibility backend через единственного asusd owner, configured/effective/
+   Session1 read-back и controlled `100 → 80 → 100` подтверждены; GUI control
+   остаётся pending. Архитектура зафиксирована в [ADR 0007](adr/0007-battery-mutation-backend.md);
 3. **GPU product policy/mutation** (Milestone 5; product GpuMode backend
    mapping всё ещё NOT PROVEN);
 4. **fan/telemetry** (Milestone 4, substeps 3–4; только по доказанным
@@ -215,8 +215,8 @@ read-only/disabled. Это **не** означает завершённость 
 
 ## Milestone 5 — Controlled mutation foundations
 
-**Status: ACTIVE — Performance substep COMPLETED / LIVE-VALIDATED; Battery/GPU
-mutation pending.**
+**Status: ACTIVE — Performance и Battery substeps COMPLETED / LIVE-VALIDATED;
+GPU mutation pending.**
 
 **Goal:** реализовать первый узкий production write path только для операции с
 доказанными capability, range/semantics и privilege boundary.
@@ -234,8 +234,9 @@ mutation pending.**
 - controlled live GUI validation PASS: ровно `wire 0` и `wire 1`, final state
   равен initial.
 
-Battery mutation, GPU mutation, fan control, real telemetry и broader UX polish
-не отмечаются как completed и остаются отдельными следующими этапами.
+GPU mutation, fan control, real telemetry и broader UX polish не отмечаются как
+completed и остаются отдельными следующими этапами. Battery GUI mutation также
+остаётся pending и не считается live-tested.
 
 **Architecture:** принята в [ADR 0006](adr/0006-privileged-performance-write.md)
 (Performance profile через kernel `platform_profile` + узкий `orbis-hardwared`;
