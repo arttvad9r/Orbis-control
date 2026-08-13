@@ -108,11 +108,10 @@ trait или domain type не означает существование produc
   `orbis-sessiond`;
 - `SessionChargeLimitProvider` — read-only Battery provider над session D-Bus,
   используется production GUI как `battery_service` (live-validated);
-- Battery mutation backend — **COMPLETED / LIVE-VALIDATED** через
-  caller-preserving `Hardware1 → orbis-hardwared → typed asusd` D-Bus API;
-  shell `asusctl` и competing direct sysfs write не используются. См.
-  [ADR 0007](adr/0007-battery-mutation-backend.md). Production GUI control
-  остаётся не включённым и не live-tested;
+- Battery mutation backend, application routing и production GUI control —
+  **COMPLETED / LIVE-VALIDATED** через caller-preserving
+  `Hardware1 → orbis-hardwared → typed asusd` D-Bus API; shell `asusctl` и
+  competing direct sysfs write не используются. См. [ADR 0007](adr/0007-battery-mutation-backend.md).
 - runtime capability discovery общего назначения ещё не реализован;
   `orbis-capabilities` в основном собирает reports и читает dated fixtures.
 
@@ -144,14 +143,15 @@ ChargeLimit {
 - unknown bounds не являются ошибкой и не запрещают показать известный current;
 - значения не clamp-ятся и не округляются в domain/application boundary.
 
-Будущий asusd compatibility setter принимает `u8` `20..=100` с шагом 1.
+Asusd compatibility setter принимает `u8` `20..=100` с шагом 1.
 `100` — обычный threshold, не implicit disable. `SetChargeLimit` не смешивает
 enable/disable semantics. Успех mutation требует fresh asusd configured,
 kernel effective и Session1 read-back; direct sysfs write при активном asusd
 запрещён как competing owner.
 
-UI presentation policy 40/100/5 и mock bounds не являются hardware facts. Их
-нельзя записывать в wire/domain state как constraints UPower или устройства.
+Production GUI Battery slider uses `20..=100`, step `1`; this UI contract and
+mock bounds are distinct from authoritative hardware facts. Их нельзя
+записывать в wire/domain state как constraints UPower или устройства.
 
 Session wire DTO имеет D-Bus signature `(bbybyyy)`:
 

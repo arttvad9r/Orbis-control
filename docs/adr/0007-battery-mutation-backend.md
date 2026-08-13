@@ -36,8 +36,8 @@ setter напрямую.
 
 ## Decision
 
-1. Production Battery mutation backend реализован и live-validated; GUI Battery
-   mutation control этим ADR не включается и отдельно не live-tested.
+1. Production Battery mutation backend и GUI Battery mutation control реализованы
+   и live-validated.
 2. Compatibility backend называется концептуально
    `AsusdBatteryMutationBackend` и вызывает только typed D-Bus API `asusd`.
 3. Shell `asusctl` не является runtime dependency и не используется как
@@ -135,6 +135,9 @@ hardware state совпал с начальным. Session1 после rollback 
 `configured/effective=100/100`. UPower `ChargeEndThreshold=80` не является
 authoritative configured value: `enabled` читается из UPower, configured — из
 asusd, effective — из kernel.
+Production GUI использует slider `20..=100`, step `1`; один drag даёт максимум
+один commit на release. Hardware1 accounting подтвердил ровно sequence
+`[80, 100]`, total `2`, без других Battery values и retries.
 
 ## Consequences
 
@@ -143,5 +146,4 @@ asusd, effective — из kernel.
   authorization action, как Performance в ADR 0006.
 - UPower остаётся generic read/policy integration, но не смешивается с
   asusd-owned configured state без явной ownership detection.
-- Battery backend объявляется **COMPLETED / LIVE-VALIDATED**; Battery GUI
-  mutation остаётся отдельной незавершённой задачей.
+- Battery backend и Battery GUI mutation объявляются **COMPLETED / LIVE-VALIDATED**.

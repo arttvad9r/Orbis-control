@@ -137,10 +137,12 @@ asusd Platform и sysfs. Hardware min/max/step probe не доказал; тек
 production UPower provider возвращает `bounds=None`. Исторический range 40–100
 в `expected-capabilities.json` не является production hardware constraint.
 
-Battery backend: **COMPLETED / LIVE-VALIDATED**. Controlled
-`Hardware1.SetChargeLimit` cycle `100 → 80 → 100` подтвердил asusd configured и
-kernel effective read-back. Orbis не вызывает shell `asusctl`, не пишет sysfs
-напрямую и не смешивает `100` с disable. См. [ADR 0007](adr/0007-battery-mutation-backend.md).
+Battery backend, application routing и production GUI mutation: **COMPLETED /
+LIVE-VALIDATED**. Controlled `Hardware1.SetChargeLimit` cycle `100 → 80 → 100`
+подтвердил asusd configured и kernel effective read-back; exact Hardware1
+sequence `[80, 100]`, total `2`, без других values или retries. Orbis не вызывает
+shell `asusctl`, не пишет sysfs напрямую и не смешивает `100` с disable. См.
+[ADR 0007](adr/0007-battery-mutation-backend.md).
 
 Read semantics: `enabled` берётся из UPower `ChargeThresholdEnabled`,
 `configured_percent` — из asusd `ChargeControlEndThreshold`, а

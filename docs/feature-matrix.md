@@ -139,7 +139,7 @@ engineering в стабильной версии.
 
 | Функция | Статус | Linux-реализация | Backend |
 |---|---|---|---|
-| Ползунок лимита (40–100 или фактические min/max/step) | ✅ | asusd `ChargeControlEndThreshold` → `charge_control_end_threshold` | asusd / kernel |
+| Ползунок лимита (20–100, step 1) | ✅ | asusd `ChargeControlEndThreshold` → `charge_control_end_threshold` | asusd / kernel |
 | Текущее значение, состояние, мощность | ✅ | UPower `State/EnergyRate/Percentage` | UPower |
 | Здоровье батареи | ✅ | UPower `Capacity` | UPower |
 | Циклы (если доступны) | 🟡 | UPower `ChargeCycles` (N/A на части моделей) | UPower |

@@ -21,11 +21,10 @@ Battery backend: **COMPLETED / LIVE-VALIDATED**. Read semantics are:
 - `configured_percent` ← asusd `ChargeControlEndThreshold`;
 - `effective_percent` ← kernel `charge_control_end_threshold`.
 
-Controlled production cycle `100 → 80 → 100` through `Hardware1.SetChargeLimit`
-passed asusd/kernel read-back and restored the initial state. UPower
-`ChargeEndThreshold=80` remains independent policy/reporting semantics and is
-not the authoritative configured value. The Battery GUI mutation control is
-still not enabled or live-tested.
+Controlled production GUI cycle `100 → 80 → 100` through
+`Hardware1.SetChargeLimit` passed asusd/kernel/Session1 read-back and restored
+the initial state. UPower `ChargeEndThreshold=80` remains independent
+policy/reporting semantics and is not the authoritative configured value.
 
 Первый **read-only MVP** и первый узкий production mutation path завершены и
 live-validated: production GUI реально показывает Battery Charge Limit,
@@ -46,8 +45,7 @@ GUI/application caller → Hardware1 → orbis-hardwared → polkit
 
 - все real sections имеют честные `Loading` / `Ready` / `Unavailable`;
 - mock fallback отсутствует; sessiond absent → честный `Unavailable`;
-- Battery slider и GPU Eco/Standard/Ultimate/Optimized остаются
-  read-only/disabled;
+- GPU Eco/Standard/Ultimate/Optimized остаются read-only/disabled;
 - Performance mutation controls enabled только после успешного Hardware1 owner
   probe; optimistic selection не используется;
 - production Performance mutation live-validated ровно двумя разрешёнными
@@ -92,7 +90,8 @@ Unavailable, GUI остаётся usable.
 
 Mutation controls в production:
 
-- Battery slider (`charge_limit_writable=false`);
+- Battery slider enabled only when Battery is Ready, configured/effective values
+  are present, and the Hardware1 owner probe succeeds;
 - Performance cards enabled только при успешном Hardware1 owner probe
   (`perf_writable=true`); при отсутствии owner остаются read-only/disabled;
 - GPU Eco/Standard/Ultimate/Optimized (`gpu_mode_writable=false`,
@@ -158,9 +157,9 @@ UI Battery state semantics:
   `RefreshChargeLimit` при startup через `battery_service.charge_limit()`;
 - daemon absent → session-client error → Unavailable **без mock fallback**;
 - daemon present → Ready с фактическим значением из sessiond;
-- `charge_limit_writable=false` для production session backend; mutation
-  control disabled; `charge_limit_enabled` остаётся hardware state и не
-  используется как writability.
+- `charge_limit_writable` is capability-driven; `charge_limit_enabled` остаётся
+  hardware state и не используется как writability. UPower disabled policy не
+  блокирует Battery mutation control.
 
 Domain model:
 
@@ -190,6 +189,17 @@ application caller → Hardware1.SetChargeLimit → Orbis polkit
 Direct sysfs, `asusctl`, UPower setters и sessiond mutation delegation не
 используются. Live evidence: `100 → 80 → 100`, configured/effective read-back
 `100/100 → 80/80 → 100/100`; final Session1 configured/effective также `100/100`.
+
+Production GUI gesture contract: pointer down/move дают только transient
+preview, pointer up делает максимум один commit, cancel не делает commit.
+Battery slider range is `20..=100`, step `1`; one drag therefore produces at
+most one Battery mutation request. Final Hardware1 accounting was exactly
+`[80, 100]`, total `2`, with no other Battery values or retries.
+
+Mutation observability: GUI commit is logged at DEBUG with target
+`orbis_control` (`RUST_LOG=orbis_control=debug`), while the hardwared ingress
+event is logged at INFO after validation and before authorization/backend. The
+hardwared default filter is `warn,orbis_hardwared=info`.
 
 ### Earlier read-only LIVE-VALIDATED (2026-08-09)
 
@@ -231,10 +241,10 @@ released, процесс отсутствует.
 
 - Performance/GPU production backends остаются mock (см. ниже).
 - Battery mutation backend — **COMPLETED / LIVE-VALIDATED**.
-- Battery GUI mutation control — **NOT IMPLEMENTED / NOT LIVE-TESTED**.
+- Battery GUI mutation control — **COMPLETED / LIVE-VALIDATED**.
 - sysfs fallback/write provider — **NOT IMPLEMENTED**.
-- Hardware charge min/max/step на FA707NV — **UNKNOWN**. UI/mock policy 40/100/5
-  не является hardware evidence.
+- Hardware charge min/max/step на FA707NV — **UNKNOWN**; unknown backend bounds
+  remain distinct from the production UI contract `20..=100`, step `1`.
 
 ## Performance
 
@@ -462,6 +472,9 @@ automation engine и остальные feature APIs из историческо
 - `RUST_LOG` обрабатывается стандартным EnvFilter; `RUST_LOG=debug`
   live-validated (реально исполняемые winit/sctk DEBUG события и Battery WARN
   видны);
+- GUI Battery commit event target is `orbis_control`; use
+  `RUST_LOG=orbis_control=debug` to capture it. Hardwared Battery ingress is an
+  INFO event under the default `warn,orbis_hardwared=info` filter.
 - duplicate global initialization использует non-panicking `try_init()`;
 - существующие `tracing::*` callsites не переписывались;
 - отсутствие sessiond диагностируется через stderr: live packaged GUI показал

@@ -39,7 +39,8 @@ offscreen screenshots.
 - targeted UI/client tests и relevant workspace checks green;
 - live-validated: daemon absent → Unavailable без mock fallback; daemon present →
   Ready со значением, совпадающим с authoritative D-Bus baseline; read-only
-  slider доказан pixel analysis + `charge_limit_writable=false`.
+  slider behavior зафиксирован исторически, а production mutation control
+  закрыт отдельным Battery GUI milestone.
 
 **Result/notes:** split composition `run_worker<M, B, F>` реализован
 (Performance/GPU → MockProvider; Battery → SessionChargeLimitProvider; один
@@ -205,8 +206,9 @@ read-only/disabled. Это **не** означает завершённость 
    подтвердил ровно два valid calls/writes;
 2. **Battery mutation** (Milestone 5) — **COMPLETED / LIVE-VALIDATED**:
    compatibility backend через единственного asusd owner, configured/effective/
-   Session1 read-back и controlled `100 → 80 → 100` подтверждены; GUI control
-   остаётся pending. Архитектура зафиксирована в [ADR 0007](adr/0007-battery-mutation-backend.md);
+   Session1 read-back и controlled GUI `100 → 80 → 100` подтверждены; exact
+   Hardware1 sequence `[80, 100]`, total `2`, без retries. Архитектура зафиксирована
+   в [ADR 0007](adr/0007-battery-mutation-backend.md);
 3. **GPU product policy/mutation** (Milestone 5; product GpuMode backend
    mapping всё ещё NOT PROVEN);
 4. **fan/telemetry** (Milestone 4, substeps 3–4; только по доказанным
@@ -235,8 +237,9 @@ GPU mutation pending.**
   равен initial.
 
 GPU mutation, fan control, real telemetry и broader UX polish не отмечаются как
-completed и остаются отдельными следующими этапами. Battery GUI mutation также
-остаётся pending и не считается live-tested.
+completed и остаются отдельными следующими этапами. Battery GUI mutation
+completed; отдельными pending scopes остаются GPU mutation, fan control,
+telemetry и UX polish.
 
 **Architecture:** принята в [ADR 0006](adr/0006-privileged-performance-write.md)
 (Performance profile через kernel `platform_profile` + узкий `orbis-hardwared`;
