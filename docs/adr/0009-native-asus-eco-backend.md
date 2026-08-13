@@ -18,7 +18,9 @@ I²C, module и compositor state он может оставить GPU lifecycle 
 состоянии.
 
 Native live Eco будет отдельным будущим backend/capability. Сначала Orbis
-реализует только read-only preflight и typed evidence. Native backend не
+реализует только read-only preflight, typed evidence и pure release planning.
+Readiness означает возможность построить безопасный план, а не немедленную
+возможность записи. Native backend не
 подменяет и не меняет текущий supergfxd backend.
 
 Одновременное владение одной GPU lifecycle state со стороны supergfxd и native
@@ -33,10 +35,14 @@ Current production supergfxd path и ownership остаются неизменн
 Preflight классифицирует только:
 
 - `Ready`;
-- typed `Blocked` с причиной и diagnostic evidence;
+- typed `CanBecomeReady` с release requirements и unresolved verification;
+- severity buckets `HardBlocker`, `ReleaseRequired`, `Informational`, `Unknown`;
 - `Unsupported`;
 - `Inconsistent`.
 
 Проверяются Armoury ABI, MUX/access, PCI/NVIDIA state, `/proc` FD и mappings,
-DRM/I²C users, module refcounts и read-only supergfxd coordination. Никаких
-hardware writes, process kills, service actions или driver/PCI operations.
+DRM/I²C users, module refcounts и read-only supergfxd coordination. Library-only
+mapping и aggregate module refcount являются evidence, а не автоматическими
+hard blockers. Compositor/device release должен быть подтверждён до появления
+mutation executor. Никаких hardware writes, process kills, service actions или
+driver/PCI operations.

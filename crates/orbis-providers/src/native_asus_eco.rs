@@ -35,7 +35,20 @@ fn power_from_wire(raw: u32) -> orbis_core::gpu::GpuPowerState {
     }
 }
 
-/// Why a native live Eco transition is blocked.
+/// Severity of read-only evidence for a native live Eco transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EcoEvidenceSeverity {
+    /// The observed state makes the transition unsafe or impossible.
+    HardBlocker,
+    /// A typed release/verification phase is required before the transition.
+    ReleaseRequired,
+    /// Evidence is useful but does not prevent a transition by itself.
+    Informational,
+    /// The evidence needed to make a safe decision is unavailable.
+    Unknown,
+}
+
+/// Why a native live Eco transition is blocked or needs release work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EcoLiveBlocker {
     /// A process owns an NVIDIA character device.
@@ -60,9 +73,48 @@ pub enum EcoLiveBlocker {
     Unknown,
 }
 
+/// Typed operation required by a pure native Eco transition plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EcoReleaseRequirement {
+    /// Release userspace processes with an NVIDIA device workload.
+    ReleaseApplicationGpuUsers,
+    /// Release a secondary NVIDIA DRM card/render reference.
+    ReleaseSecondaryDrmDevice,
+    /// Re-scan users and verify that no NVIDIA users remain.
+    VerifyNvidiaUsers,
+    /// Verify that the NVIDIA module family can be unloaded.
+    VerifyNvidiaModuleUnload,
+    /// Verify that the compositor released the secondary device.
+    VerifyCompositorRelease,
+}
+
+/// Pure transition plan. It contains capabilities, never shell commands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EcoTransitionPlan {
+    /// No release or unresolved verification is present in the snapshot.
+    ReadyImmediately,
+    /// The state can be prepared by a future release executor.
+    CanBecomeReady {
+        /// Typed release/verification requirements.
+        release_requirements: Vec<EcoReleaseRequirement>,
+        /// Evidence that must be resolved before mutation is allowed.
+        unresolved: Vec<String>,
+    },
+    /// The graphical session must be ended before proceeding.
+    RequiresLogout(String),
+    /// The transition cannot be completed until reboot.
+    RequiresReboot(String),
+    /// The required capability is absent.
+    Unsupported(Vec<String>),
+    /// Hardware/backend sources contradict one another.
+    Inconsistent(Vec<String>),
+}
+
 /// Read-only diagnostic evidence kept separate from the domain verdict.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EcoDiagnosticEvidence {
+    /// Severity assigned by the pure planner.
+    pub severity: EcoEvidenceSeverity,
     /// Stable category.
     pub category: EcoLiveBlocker,
     /// Human-readable, non-UI-contract detail.
@@ -120,6 +172,9 @@ pub struct EcoLivePreflightSnapshot {
     pub holders: Vec<NvidiaHolderEvidence>,
     /// A non-NVIDIA DRM card/render device exists.
     pub integrated_drm_present: bool,
+    /// Whether the current compositor can release a secondary NVIDIA DRM
+    /// device live. `None` is intentionally unresolved, not success.
+    pub compositor_release_supported: Option<bool>,
     /// Fresh supergfxd snapshot.
     pub supergfxd: Option<SupergfxdSnapshot>,
     /// Read errors and unknown evidence.
@@ -144,6 +199,21 @@ pub enum EcoLiveReadiness {
     Inconsistent(Vec<String>),
 }
 
+/// Pure assessment containing severity buckets and the resulting plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EcoLiveAssessment {
+    /// Hard blockers.
+    pub hard_blockers: Vec<EcoDiagnosticEvidence>,
+    /// Release work required before mutation.
+    pub release_required: Vec<EcoDiagnosticEvidence>,
+    /// Non-blocking observations.
+    pub informational: Vec<EcoDiagnosticEvidence>,
+    /// Missing critical evidence.
+    pub unknown: Vec<EcoDiagnosticEvidence>,
+    /// Pure transition result.
+    pub plan: EcoTransitionPlan,
+}
+
 fn push_unique<T: PartialEq>(items: &mut Vec<T>, item: T) {
     if !items.contains(&item) {
         items.push(item);
@@ -152,16 +222,94 @@ fn push_unique<T: PartialEq>(items: &mut Vec<T>, item: T) {
 
 /// Pure, conservative classification of a read-only snapshot.
 pub fn classify_native_asus_eco(snapshot: &EcoLivePreflightSnapshot) -> EcoLiveReadiness {
+    let assessment = plan_native_asus_eco(snapshot);
+    if let EcoTransitionPlan::Unsupported(reasons) = &assessment.plan {
+        return EcoLiveReadiness::Unsupported(reasons.clone());
+    }
+    if let EcoTransitionPlan::Inconsistent(reasons) = &assessment.plan {
+        return EcoLiveReadiness::Inconsistent(reasons.clone());
+    }
+    let mut reasons = Vec::new();
+    let mut evidence = Vec::new();
+    for item in assessment
+        .hard_blockers
+        .iter()
+        .chain(assessment.release_required.iter())
+    {
+        let category = item.category;
+        push_unique(&mut reasons, category);
+        evidence.push(item.clone());
+    }
+    if reasons.is_empty() && assessment.unknown.is_empty() {
+        EcoLiveReadiness::Ready
+    } else {
+        evidence.extend(assessment.unknown);
+        EcoLiveReadiness::Blocked { reasons, evidence }
+    }
+}
+
+/// Purely classify evidence and derive a transition plan.
+pub fn plan_native_asus_eco(snapshot: &EcoLivePreflightSnapshot) -> EcoLiveAssessment {
+    let mut hard_blockers = Vec::new();
+    let mut release_required = Vec::new();
+    let mut informational = Vec::new();
+    let mut unknown = Vec::new();
+    let mut inconsistent = snapshot.unknown.clone();
+
+    let evidence = |severity, category, detail: String| EcoDiagnosticEvidence {
+        severity,
+        category,
+        detail,
+    };
+    let add_holder = |holder: &NvidiaHolderEvidence,
+                      release_required: &mut Vec<EcoDiagnosticEvidence>,
+                      informational: &mut Vec<EcoDiagnosticEvidence>| {
+        if holder.count == 0 {
+            return;
+        }
+        let category = match holder.kind {
+            NvidiaHolderKind::Device => EcoLiveBlocker::NvidiaDeviceUser,
+            NvidiaHolderKind::Drm => EcoLiveBlocker::NvidiaDrmUser,
+            NvidiaHolderKind::I2c => EcoLiveBlocker::NvidiaI2cUser,
+            NvidiaHolderKind::MappedLibrary => EcoLiveBlocker::NvidiaMappedLibrary,
+        };
+        let detail = format!("{} holder(s): {:?}", holder.count, holder.details);
+        match holder.kind {
+            NvidiaHolderKind::MappedLibrary => informational.push(evidence(
+                EcoEvidenceSeverity::Informational,
+                category,
+                detail,
+            )),
+            NvidiaHolderKind::Device | NvidiaHolderKind::Drm | NvidiaHolderKind::I2c => {
+                release_required.push(evidence(
+                    EcoEvidenceSeverity::ReleaseRequired,
+                    category,
+                    detail,
+                ));
+            }
+        }
+    };
+
     if !snapshot.armoury_supported {
-        return EcoLiveReadiness::Unsupported(vec![
-            "ASUS Armoury dgpu_disable/gpu_mux_mode ABI".into(),
-        ]);
+        return EcoLiveAssessment {
+            hard_blockers,
+            release_required,
+            informational,
+            unknown,
+            plan: EcoTransitionPlan::Unsupported(vec![
+                "ASUS Armoury dgpu_disable/gpu_mux_mode ABI".into(),
+            ]),
+        };
     }
     if snapshot.dgpu_disable_values.as_deref() != Some(&[0, 1]) {
-        return EcoLiveReadiness::Unsupported(vec!["dgpu_disable enumeration 0;1".into()]);
+        return EcoLiveAssessment {
+            hard_blockers,
+            release_required,
+            informational,
+            unknown,
+            plan: EcoTransitionPlan::Unsupported(vec!["dgpu_disable enumeration 0;1".into()]),
+        };
     }
-
-    let mut inconsistent = snapshot.unknown.clone();
     if snapshot.dgpu_disabled.is_none() || snapshot.mux.is_none() || snapshot.access.is_none() {
         inconsistent.push("Armoury primitive read is incomplete".into());
     }
@@ -178,17 +326,14 @@ pub fn classify_native_asus_eco(snapshot: &EcoLivePreflightSnapshot) -> EcoLiveR
         if supergfxd.pending_mode != SupergfxdMode::None
             || supergfxd.pending_user_action != SupergfxdUserAction::Nothing
         {
-            let mut reasons = vec![EcoLiveBlocker::PendingGpuMutation];
-            return EcoLiveReadiness::Blocked {
-                reasons: std::mem::take(&mut reasons),
-                evidence: vec![EcoDiagnosticEvidence {
-                    category: EcoLiveBlocker::PendingGpuMutation,
-                    detail: format!(
-                        "supergfxd pending={:?} action={:?}",
-                        supergfxd.pending_mode, supergfxd.pending_user_action
-                    ),
-                }],
-            };
+            hard_blockers.push(evidence(
+                EcoEvidenceSeverity::HardBlocker,
+                EcoLiveBlocker::PendingGpuMutation,
+                format!(
+                    "supergfxd pending={:?} action={:?}",
+                    supergfxd.pending_mode, supergfxd.pending_user_action
+                ),
+            ));
         }
         if (supergfxd.current_mode == SupergfxdMode::Integrated
             && snapshot.dgpu_disabled == Some(false))
@@ -200,68 +345,112 @@ pub fn classify_native_asus_eco(snapshot: &EcoLivePreflightSnapshot) -> EcoLiveR
     } else {
         inconsistent.push("supergfxd snapshot unavailable".into());
     }
-    if !inconsistent.is_empty() {
-        return EcoLiveReadiness::Inconsistent(inconsistent);
-    }
-
-    let mut reasons = Vec::new();
-    let mut evidence = Vec::new();
     for holder in &snapshot.holders {
-        if holder.count == 0 {
-            continue;
-        }
-        let category = match holder.kind {
-            NvidiaHolderKind::Device => EcoLiveBlocker::NvidiaDeviceUser,
-            NvidiaHolderKind::Drm => EcoLiveBlocker::NvidiaDrmUser,
-            NvidiaHolderKind::I2c => EcoLiveBlocker::NvidiaI2cUser,
-            NvidiaHolderKind::MappedLibrary => EcoLiveBlocker::NvidiaMappedLibrary,
-        };
-        push_unique(&mut reasons, category);
-        evidence.push(EcoDiagnosticEvidence {
-            category,
-            detail: format!("{} holder(s): {:?}", holder.count, holder.details),
-        });
+        add_holder(holder, &mut release_required, &mut informational);
     }
-    if snapshot.nvidia_module_busy != Some(false) {
-        reasons.push(EcoLiveBlocker::NvidiaModuleBusy);
-        evidence.push(EcoDiagnosticEvidence {
-            category: EcoLiveBlocker::NvidiaModuleBusy,
-            detail: format!(
+    if snapshot.nvidia_module_refcount.is_some() || snapshot.nvidia_modules_loaded {
+        informational.push(evidence(
+            EcoEvidenceSeverity::Informational,
+            EcoLiveBlocker::NvidiaModuleBusy,
+            format!(
                 "loaded={} refcount={:?} busy={:?}",
                 snapshot.nvidia_modules_loaded,
                 snapshot.nvidia_module_refcount,
                 snapshot.nvidia_module_busy
             ),
-        });
+        ));
     }
     if snapshot.mux == Some(GpuMuxState::Discrete) {
-        reasons.push(EcoLiveBlocker::MuxDiscrete);
-        evidence.push(EcoDiagnosticEvidence {
-            category: EcoLiveBlocker::MuxDiscrete,
-            detail: "MUX is routed to the dGPU".into(),
-        });
+        hard_blockers.push(evidence(
+            EcoEvidenceSeverity::HardBlocker,
+            EcoLiveBlocker::MuxDiscrete,
+            "MUX is routed to the dGPU".into(),
+        ));
     }
     if !snapshot.integrated_drm_present {
-        reasons.push(EcoLiveBlocker::MissingIntegratedDrm);
-        evidence.push(EcoDiagnosticEvidence {
-            category: EcoLiveBlocker::MissingIntegratedDrm,
-            detail: "no non-NVIDIA DRM device detected".into(),
-        });
+        hard_blockers.push(evidence(
+            EcoEvidenceSeverity::HardBlocker,
+            EcoLiveBlocker::MissingIntegratedDrm,
+            "no non-NVIDIA DRM device detected".into(),
+        ));
     }
     if snapshot.access != Some(GpuAccessPolicy::Unblocked) || !snapshot.nvidia_pci_present {
-        reasons.push(EcoLiveBlocker::BackendStateConflict);
-        evidence.push(EcoDiagnosticEvidence {
-            category: EcoLiveBlocker::BackendStateConflict,
-            detail: format!(
+        hard_blockers.push(evidence(
+            EcoEvidenceSeverity::HardBlocker,
+            EcoLiveBlocker::BackendStateConflict,
+            format!(
                 "access={:?} nvidia_pci_present={}",
                 snapshot.access, snapshot.nvidia_pci_present
             ),
-        });
+        ));
     }
-    if reasons.is_empty() {
-        EcoLiveReadiness::Ready
+
+    if snapshot.compositor_release_supported != Some(true) && !release_required.is_empty() {
+        unknown.push(evidence(
+            EcoEvidenceSeverity::Unknown,
+            EcoLiveBlocker::Unknown,
+            "supported live compositor DRM release is unresolved".into(),
+        ));
+    }
+
+    if !inconsistent.is_empty() {
+        return EcoLiveAssessment {
+            hard_blockers,
+            release_required,
+            informational,
+            unknown,
+            plan: EcoTransitionPlan::Inconsistent(inconsistent),
+        };
+    }
+    let mut requirements = Vec::new();
+    if release_required
+        .iter()
+        .any(|e| e.category == EcoLiveBlocker::NvidiaDeviceUser)
+    {
+        requirements.push(EcoReleaseRequirement::ReleaseApplicationGpuUsers);
+    }
+    if release_required
+        .iter()
+        .any(|e| e.category == EcoLiveBlocker::NvidiaDrmUser)
+    {
+        requirements.push(EcoReleaseRequirement::ReleaseSecondaryDrmDevice);
+    }
+    if !release_required.is_empty() {
+        requirements.push(EcoReleaseRequirement::VerifyNvidiaUsers);
+        requirements.push(EcoReleaseRequirement::VerifyNvidiaModuleUnload);
+    }
+    if !unknown.is_empty() {
+        requirements.push(EcoReleaseRequirement::VerifyCompositorRelease);
+    }
+    let plan = if hard_blockers
+        .iter()
+        .any(|e| e.category == EcoLiveBlocker::MuxDiscrete)
+    {
+        EcoTransitionPlan::RequiresReboot("MUX is routed to the dGPU".into())
+    } else if hard_blockers
+        .iter()
+        .any(|e| e.category == EcoLiveBlocker::MissingIntegratedDrm)
+    {
+        EcoTransitionPlan::Unsupported(vec!["no non-NVIDIA DRM device detected".into()])
+    } else if !hard_blockers.is_empty() {
+        EcoTransitionPlan::CanBecomeReady {
+            release_requirements: requirements,
+            unresolved: hard_blockers.iter().map(|e| e.detail.clone()).collect(),
+        }
+    } else if release_required.is_empty() && unknown.is_empty() {
+        EcoTransitionPlan::ReadyImmediately
     } else {
-        EcoLiveReadiness::Blocked { reasons, evidence }
+        EcoTransitionPlan::CanBecomeReady {
+            release_requirements: requirements,
+            unresolved: unknown.iter().map(|e| e.detail.clone()).collect(),
+        }
+    };
+    EcoLiveAssessment {
+        hard_blockers,
+        release_required,
+        informational,
+        unknown,
+        plan,
     }
 }
 
@@ -520,6 +709,7 @@ impl NativeAsusEcoPreflightSource for SystemNativeAsusEcoPreflightSource {
             nvidia_module_busy: refcount.map(|v| v != 0),
             holders,
             integrated_drm_present: integrated_drm,
+            compositor_release_supported: None,
             supergfxd: Some(supergfxd),
             unknown: vec![],
         })
@@ -543,6 +733,7 @@ mod tests {
             nvidia_module_busy: Some(false),
             holders: vec![],
             integrated_drm_present: true,
+            compositor_release_supported: None,
             supergfxd: Some(SupergfxdSnapshot {
                 current_mode: SupergfxdMode::Hybrid,
                 pending_mode: SupergfxdMode::None,
@@ -556,24 +747,54 @@ mod tests {
     #[test]
     fn ready() {
         assert_eq!(classify_native_asus_eco(&base()), EcoLiveReadiness::Ready);
+        assert!(matches!(
+            plan_native_asus_eco(&base()).plan,
+            EcoTransitionPlan::ReadyImmediately
+        ));
+    }
+    fn with_holder(kind: NvidiaHolderKind) -> EcoLivePreflightSnapshot {
+        let mut s = base();
+        s.holders = vec![NvidiaHolderEvidence {
+            kind,
+            count: 1,
+            details: vec!["p".into()],
+        }];
+        s
     }
     #[test]
-    fn each_holder_blocks() {
+    fn library_and_module_evidence_are_not_hard_blockers() {
+        let s = with_holder(NvidiaHolderKind::MappedLibrary);
+        let assessment = plan_native_asus_eco(&s);
+        assert!(assessment.hard_blockers.is_empty());
+        assert!(assessment.release_required.is_empty());
+        assert!(matches!(
+            assessment.plan,
+            EcoTransitionPlan::ReadyImmediately
+        ));
+
+        let mut s = base();
+        s.nvidia_module_busy = Some(true);
+        s.nvidia_module_refcount = Some(152);
+        let assessment = plan_native_asus_eco(&s);
+        assert!(assessment.hard_blockers.is_empty());
+        assert!(matches!(
+            assessment.plan,
+            EcoTransitionPlan::ReadyImmediately
+        ));
+    }
+    #[test]
+    fn users_require_release() {
         for kind in [
             NvidiaHolderKind::Device,
             NvidiaHolderKind::Drm,
             NvidiaHolderKind::I2c,
-            NvidiaHolderKind::MappedLibrary,
         ] {
-            let mut s = base();
-            s.holders = vec![NvidiaHolderEvidence {
-                kind,
-                count: 1,
-                details: vec!["p".into()],
-            }];
+            let assessment = plan_native_asus_eco(&with_holder(kind));
+            assert!(assessment.hard_blockers.is_empty());
+            assert!(!assessment.release_required.is_empty());
             assert!(matches!(
-                classify_native_asus_eco(&s),
-                EcoLiveReadiness::Blocked { .. }
+                assessment.plan,
+                EcoTransitionPlan::CanBecomeReady { .. }
             ));
         }
     }
@@ -581,10 +802,7 @@ mod tests {
     fn module_mux_display_pending_and_conflict_block_or_inconsistent() {
         let mut s = base();
         s.nvidia_module_busy = Some(true);
-        assert!(matches!(
-            classify_native_asus_eco(&s),
-            EcoLiveReadiness::Blocked { .. }
-        ));
+        assert_eq!(classify_native_asus_eco(&s), EcoLiveReadiness::Ready);
         let mut s = base();
         s.mux = Some(GpuMuxState::Discrete);
         assert!(matches!(
@@ -595,7 +813,7 @@ mod tests {
         s.integrated_drm_present = false;
         assert!(matches!(
             classify_native_asus_eco(&s),
-            EcoLiveReadiness::Blocked { .. }
+            EcoLiveReadiness::Unsupported(_)
         ));
         let mut s = base();
         s.supergfxd.as_mut().unwrap().pending_mode = SupergfxdMode::Integrated;
@@ -608,6 +826,17 @@ mod tests {
         assert!(matches!(
             classify_native_asus_eco(&s),
             EcoLiveReadiness::Inconsistent(_)
+        ));
+    }
+    #[test]
+    fn unknown_compositor_release_is_not_immediate_ready() {
+        let mut s = with_holder(NvidiaHolderKind::Drm);
+        s.compositor_release_supported = None;
+        let assessment = plan_native_asus_eco(&s);
+        assert!(!assessment.unknown.is_empty());
+        assert!(matches!(
+            assessment.plan,
+            EcoTransitionPlan::CanBecomeReady { .. }
         ));
     }
     #[test]
