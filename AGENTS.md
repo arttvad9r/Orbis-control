@@ -55,18 +55,14 @@ Rust workspace (`resolver = 3`, edition 2024, MSRV 1.85). Crates:
   are forbidden without explicit permission from the specific task.
 - Read-only capability must never be presented as write capability.
 - Unsupported mutations return `Unsupported` honestly; never simulate success.
-- Do not use `sudo`. Do not run `systemctl`, `busctl`, real UPower/asusd/
-  supergfxd, an external D-Bus daemon, Docker, Podman or a VM without a direct
-  instruction. Do not touch the real system/session bus in tests; use private
-  P2P transport for D-Bus integration tests by default.
-- VM tests using fake sysfs/D-Bus state are safe only within the relevant
-  targeted validation tier. Do not run `cargo test -- --ignored` broadly:
-  classify ignored/live tests first and run a specific one only when the task
-  explicitly requires and permits real-device interaction.
+- Do not use `sudo` or real system/session bus in tests without explicit task
+  permission.
+- Do not run real UPower/asusd/supergfxd, external D-Bus daemons, Docker,
+  Podman, VMs, or broad ignored tests without explicit task permission.
 - Battery charge-limit, performance-profile, GPU/MUX/power mutations, direct
   real sysfs writes, real D-Bus mutation methods, and live ASUS hardware
-  manipulation require explicit permission from the task. VM tests do not
-  prove real hardware behaviour.
+  manipulation require explicit permission. VM/fake-system validation does not
+  prove real hardware behavior.
 - Do not add `unsafe`; keep existing `forbid`/`deny unsafe_code` lints. Do not
   weaken lint policy or tests to make a check pass.
 
@@ -214,5 +210,7 @@ bus bootstrap, and migration or dependency-resolution issues.
 ## Skills
 
 Project-specific procedures live in `.opencode/skills/`:
-`orbis-slint-ui` and `orbis-hardware-safety`. Load one only when the task
-matches its scope; ordinary Rust work follows this file directly.
+`orbis-slint-ui`, `orbis-hardware-safety`, and `orbis-system-integration`.
+Load UI or system-integration guidance only when the task matches its scope;
+load hardware-safety as well when system-integration work changes hardware
+semantics. Ordinary Rust/domain work follows this file directly.
