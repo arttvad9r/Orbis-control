@@ -14,6 +14,7 @@
 #![warn(missing_docs)]
 
 pub mod error;
+pub mod native_asus_eco;
 pub mod supergfxd;
 pub mod traits;
 
@@ -21,6 +22,7 @@ pub mod traits;
 pub mod mock;
 
 pub use error::{OperationId, ProviderError, ValidationResult};
+pub use native_asus_eco::*;
 pub use traits::*;
 
 #[cfg(feature = "mock")]

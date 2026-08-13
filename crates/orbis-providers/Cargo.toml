@@ -15,6 +15,7 @@ thiserror = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+zbus = { workspace = true }
 orbis-core = { workspace = true }
 orbis-capabilities = { workspace = true }
 
