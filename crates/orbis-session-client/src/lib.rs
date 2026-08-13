@@ -1,11 +1,11 @@
 //! # orbis-session-client
 //!
-//! Client-side read-only Battery Charge Limit provider поверх D-Bus protocol
+//! Client-side Battery Charge Limit providers поверх D-Bus protocol
 //! `orbis-session-protocol` (generated `Session1Proxy`).
 //!
 //! - source получает готовую `zbus::Connection` извне; crate не открывает
 //!   session/system bus, не создаёт runtime и не выполняет hardware access;
-//! - mutation-методы BatteryProvider возвращают `ProviderError::Unsupported`;
+//! - read path идёт через `Session1`, mutation path — напрямую через `Hardware1`;
 //! - каждый вызов `charge_limit()` выполняет новый authoritative property Get
 //!   (кэш отсутствует).
 
@@ -22,6 +22,7 @@ use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::Percent;
 use orbis_core::profile::PerformanceProfile;
+use orbis_hardwared::battery::validate_charge_limit;
 use orbis_hardwared::{DBUS_OBJECT_PATH, Hardware1Proxy};
 use orbis_providers::error::{ProviderError, ValidationResult};
 use orbis_providers::traits::{
@@ -597,6 +598,45 @@ pub trait HardwarePerformanceSource: Send + Sync {
     async fn set_performance(&self, profile: u8) -> Result<u8, ProviderError>;
 }
 
+/// Testable direct system-bus source для Battery mutation через Hardware1.
+#[async_trait]
+pub trait HardwareBatterySource: Send + Sync {
+    /// Установить threshold и вернуть подтверждённый wire value.
+    async fn set_charge_limit(&self, percent: u8) -> Result<u8, ProviderError>;
+}
+
+/// Реальный direct system-bus источник Battery mutation через Hardware1.
+///
+/// Connection создаётся и хранится в application/GUI process; sessiond в этот
+/// путь не входит и sender Hardware1 остаётся исходным caller process.
+pub struct ZbusHardwareBatterySource {
+    connection: zbus::Connection,
+}
+
+impl ZbusHardwareBatterySource {
+    /// Создать источник над готовой system-bus Connection.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl HardwareBatterySource for ZbusHardwareBatterySource {
+    async fn set_charge_limit(&self, percent: u8) -> Result<u8, ProviderError> {
+        let proxy = Hardware1Proxy::builder(&self.connection)
+            .path(DBUS_OBJECT_PATH)
+            .expect("valid hardware object path")
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .set_charge_limit(percent)
+            .await
+            .map_err(zbus_error_to_provider)
+    }
+}
+
 /// Реальный zbus источник Performance через generated `Session1Proxy`.
 ///
 /// Хранит переданную извне готовую `Connection`; I/O начинается только в
@@ -750,6 +790,89 @@ where
 pub struct SessionHardwarePerformanceProvider<S, H> {
     session: S,
     hardware: H,
+}
+
+/// Composed Battery provider: authoritative reads через Session1, mutation
+/// напрямую через Hardware1 из application/GUI process.
+pub struct SessionHardwareBatteryProvider<S, H> {
+    session: S,
+    hardware: H,
+}
+
+impl<S, H> SessionHardwareBatteryProvider<S, H> {
+    /// Создать composed provider без I/O на construction.
+    pub fn new(session: S, hardware: H) -> Self {
+        Self { session, hardware }
+    }
+}
+
+impl<S, H> Provider for SessionHardwareBatteryProvider<S, H>
+where
+    S: BatteryProvider,
+    H: HardwareBatterySource,
+{
+    fn id(&self) -> &'static str {
+        "session-hardware-battery"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("session-hardware-battery")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("session + hardware Battery backend: функция '{feature}' недоступна")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.session-hardware-battery",
+            "Session1 read + direct Hardware1 Battery backend",
+        )]
+    }
+}
+
+#[async_trait]
+impl<S, H> BatteryProvider for SessionHardwareBatteryProvider<S, H>
+where
+    S: BatteryProvider,
+    H: HardwareBatterySource,
+{
+    async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
+        self.session.charge_limit().await
+    }
+
+    async fn set_charge_limit(&self, percent: u8) -> Result<ApplyResult, ProviderError> {
+        validate_charge_limit(percent)?;
+        let confirmed = self.hardware.set_charge_limit(percent).await?;
+        if confirmed != percent {
+            return Err(ProviderError::Internal(format!(
+                "hardware protocol: подтверждён другой Battery threshold: requested={percent}, confirmed={confirmed}"
+            )));
+        }
+        Ok(ApplyResult::Applied)
+    }
+
+    async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "Hardware1 Battery provider: one_shot_full_charge недоступна".into(),
+        ))
+    }
+
+    fn validate_charge_limit(&self, percent: u8) -> ValidationResult {
+        match validate_charge_limit(percent) {
+            Ok(()) => ValidationResult::ok(),
+            Err(ProviderError::InvalidRequest(message)) => ValidationResult::invalid(message),
+            Err(error) => ValidationResult::invalid(error.to_string()),
+        }
+    }
 }
 
 impl<S, H> SessionHardwarePerformanceProvider<S, H> {
