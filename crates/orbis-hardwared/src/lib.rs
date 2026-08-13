@@ -363,7 +363,7 @@ pub async fn handle_set_charge_limit(
     sender: &str,
 ) -> zbus::fdo::Result<u8> {
     battery::validate_charge_limit(percent).map_err(provider_error_to_dbus)?;
-    tracing::debug!(requested_percent = percent, "battery Hardware1 request");
+    tracing::info!(requested_percent = percent, "battery Hardware1 request");
     authorizer.authorize(sender).await.map_err(|e| match e {
         AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
         AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),

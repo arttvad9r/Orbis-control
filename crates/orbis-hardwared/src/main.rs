@@ -18,8 +18,15 @@ use orbis_hardwared::{
     battery::{AsusdBatteryMutationBackend, ZbusAsusdBatteryClient, discover_effective_reader},
 };
 
+fn init_tracing() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,orbis_hardwared=info"));
+    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    init_tracing();
     let connection = zbus::connection::Builder::system()?.build().await?;
 
     let authorizer: Box<dyn Authorizer> = Box::new(PolkitAuthorizer::new(connection.clone()));
