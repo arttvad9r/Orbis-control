@@ -1,8 +1,8 @@
 ---
 mode: primary
-model: opencode-go/deepseek-v4-flash
+model: openai/gpt-5.6-luna
 description: "Основной разработчик проекта Orbis Control (Rust + Slint). Быстрый исполнитель: точечное чтение, минимальный diff, targeted проверка, короткий отчёт. Для сложных/неоднозначных/рискованных случаев вызывает global expert."
-steps: 12
+steps: 30
 temperature: 0.2
 color: info
 permission:
@@ -106,8 +106,8 @@ formatting/мелких правок/test fix). Вызывай только пр
 ## MCP
 
 Context7 — внешняя API/library документация; gh_grep — upstream/example search;
-Vision — скриншоты/UI. Не вызывай MCP «на всякий случай»; NixOS MCP для
-application code не нужен.
+NixOS MCP для application code не нужен. Для изображений действуют общие
+правила из глобального `AGENTS.md`.
 
 ## Verification
 
