@@ -30,11 +30,154 @@ use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{GpuPowerProvider, Provider, ProviderHealth};
 use zbus::proxy::CacheProperties;
 
+/// Typed supergfxd 5.2.7 graphics mode, kept separate from product `GpuMode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupergfxdMode {
+    /// Hybrid/Optimus mode.
+    Hybrid,
+    /// Integrated GPU mode.
+    Integrated,
+    /// NVIDIA without modeset.
+    NvidiaNoModeset,
+    /// VFIO mode.
+    Vfio,
+    /// ASUS eGPU mode.
+    AsusEgpu,
+    /// ASUS MUX discrete GPU mode.
+    AsusMuxDgpu,
+    /// No current/pending mode.
+    None,
+    /// A future wire value not known by this version.
+    Unknown(u32),
+}
+
+impl SupergfxdMode {
+    /// Decode the exact supergfxd 5.2.7 wire discriminant.
+    pub fn from_wire(raw: u32) -> Self {
+        match raw {
+            0 => Self::Hybrid,
+            1 => Self::Integrated,
+            2 => Self::NvidiaNoModeset,
+            3 => Self::Vfio,
+            4 => Self::AsusEgpu,
+            5 => Self::AsusMuxDgpu,
+            6 => Self::None,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
+/// Typed supergfxd 5.2.7 user action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupergfxdUserAction {
+    /// Logout is required.
+    Logout,
+    /// Reboot is required.
+    Reboot,
+    /// Switch to Integrated first.
+    SwitchToIntegrated,
+    /// Disable ASUS eGPU.
+    AsusEgpuDisable,
+    /// No user action is required.
+    Nothing,
+    /// A future wire value not known by this version.
+    Unknown(u32),
+}
+
+impl SupergfxdUserAction {
+    /// Decode the exact supergfxd 5.2.7 wire discriminant.
+    pub fn from_wire(raw: u32) -> Self {
+        match raw {
+            0 => Self::Logout,
+            1 => Self::Reboot,
+            2 => Self::SwitchToIntegrated,
+            3 => Self::AsusEgpuDisable,
+            4 => Self::Nothing,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
+/// Read-only supergfxd state required to classify a staged request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SupergfxdSnapshot {
+    /// Current backend mode.
+    pub current_mode: SupergfxdMode,
+    /// Pending backend mode, or `None` when no mode is pending.
+    pub pending_mode: SupergfxdMode,
+    /// Pending user action, or `Nothing` when none is pending.
+    pub pending_user_action: SupergfxdUserAction,
+    /// Current dGPU power state.
+    pub power: GpuPowerState,
+    /// Supported backend modes.
+    pub supported_modes: Vec<SupergfxdMode>,
+}
+
+/// Classification of a fresh staged supergfxd snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupergfxdStagedState {
+    /// The requested mode is applied and no staged state remains.
+    Applied,
+    /// The requested mode is still staged without a user action.
+    Pending,
+    /// The requested mode is staged and requires this user action.
+    RequiresUserAction(SupergfxdUserAction),
+    /// The snapshot cannot honestly be classified as success.
+    Inconsistent,
+}
+
+/// Classify a requested backend mode against one fresh snapshot.
+pub fn classify_supergfxd_state(
+    requested: SupergfxdMode,
+    snapshot: &SupergfxdSnapshot,
+) -> SupergfxdStagedState {
+    let mode_values_are_known = !matches!(requested, SupergfxdMode::Unknown(_))
+        && !matches!(snapshot.current_mode, SupergfxdMode::Unknown(_))
+        && !matches!(snapshot.pending_mode, SupergfxdMode::Unknown(_));
+    let pending_matches = snapshot.pending_mode == requested;
+    let pending_is_none = snapshot.pending_mode == SupergfxdMode::None;
+    let action_is_nothing = snapshot.pending_user_action == SupergfxdUserAction::Nothing;
+    let action_is_known = !matches!(
+        snapshot.pending_user_action,
+        SupergfxdUserAction::Unknown(_)
+    );
+
+    if !mode_values_are_known
+        || !action_is_known
+        || (snapshot.pending_user_action != SupergfxdUserAction::Nothing && pending_is_none)
+        || (!pending_is_none && !pending_matches)
+        || (snapshot.current_mode == requested && !pending_is_none)
+    {
+        return SupergfxdStagedState::Inconsistent;
+    }
+
+    if snapshot.current_mode == requested && pending_is_none && action_is_nothing {
+        return SupergfxdStagedState::Applied;
+    }
+
+    if pending_matches {
+        return if action_is_nothing {
+            SupergfxdStagedState::Pending
+        } else {
+            SupergfxdStagedState::RequiresUserAction(snapshot.pending_user_action)
+        };
+    }
+
+    SupergfxdStagedState::Inconsistent
+}
+
 /// Testable источник raw dGPU power state через supergfxd.
 #[async_trait]
 pub trait SupergfxdGpuPowerSource: Send + Sync {
     /// Прочитать authoritative raw power value (u32, без domain conversion).
     async fn read_power(&self) -> Result<u32, ProviderError>;
+}
+
+/// Read-only source for the complete supergfxd staged snapshot.
+#[async_trait]
+pub trait SupergfxdGpuSnapshotSource: Send + Sync {
+    /// Read all staged-contract fields from fresh D-Bus calls.
+    async fn read_snapshot(&self) -> Result<SupergfxdSnapshot, ProviderError>;
 }
 
 /// Реальный zbus источник через `org.supergfxctl.Daemon.Power()`.
@@ -59,22 +202,78 @@ impl ZbusSupergfxdGpuPowerSource {
     default_path = "/org/supergfxctl/Gfx"
 )]
 trait SupergfxdDaemon {
+    /// Current backend mode.
+    fn mode(&self) -> zbus::Result<u32>;
+    /// Pending backend mode.
+    fn pending_mode(&self) -> zbus::Result<u32>;
+    /// Pending user action.
+    fn pending_user_action(&self) -> zbus::Result<u32>;
     /// Текущий power state dGPU (read-only; не будит GPU).
     fn power(&self) -> zbus::Result<u32>;
+    /// Supported backend modes.
+    fn supported(&self) -> zbus::Result<Vec<u32>>;
+}
+
+fn zbus_error_to_provider(error: zbus::Error) -> ProviderError {
+    if let zbus::Error::FDO(boxed) = &error {
+        return match &**boxed {
+            zbus::fdo::Error::NotSupported(msg) => ProviderError::Unsupported(msg.clone()),
+            zbus::fdo::Error::AccessDenied(msg) => ProviderError::PermissionDenied(msg.clone()),
+            zbus::fdo::Error::InvalidArgs(msg) => ProviderError::InvalidRequest(msg.clone()),
+            _ => ProviderError::Dbus(error.to_string()),
+        };
+    }
+    ProviderError::Dbus(error.to_string())
+}
+
+impl ZbusSupergfxdGpuPowerSource {
+    async fn proxy(&self) -> Result<SupergfxdDaemonProxy<'_>, ProviderError> {
+        SupergfxdDaemonProxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)
+    }
 }
 
 #[async_trait]
 impl SupergfxdGpuPowerSource for ZbusSupergfxdGpuPowerSource {
     async fn read_power(&self) -> Result<u32, ProviderError> {
-        let proxy = SupergfxdDaemonProxy::builder(&self.connection)
-            .cache_properties(CacheProperties::No)
-            .build()
+        let proxy = self.proxy().await?;
+        proxy.power().await.map_err(zbus_error_to_provider)
+    }
+}
+
+#[async_trait]
+impl SupergfxdGpuSnapshotSource for ZbusSupergfxdGpuPowerSource {
+    async fn read_snapshot(&self) -> Result<SupergfxdSnapshot, ProviderError> {
+        let proxy = self.proxy().await?;
+        let current_mode =
+            SupergfxdMode::from_wire(proxy.mode().await.map_err(zbus_error_to_provider)?);
+        let pending_mode =
+            SupergfxdMode::from_wire(proxy.pending_mode().await.map_err(zbus_error_to_provider)?);
+        let pending_user_action = SupergfxdUserAction::from_wire(
+            proxy
+                .pending_user_action()
+                .await
+                .map_err(zbus_error_to_provider)?,
+        );
+        let power = power_from_raw(proxy.power().await.map_err(zbus_error_to_provider)?);
+        let supported_modes = proxy
+            .supported()
             .await
-            .map_err(|e| ProviderError::Dbus(e.to_string()))?;
-        proxy
-            .power()
-            .await
-            .map_err(|e| ProviderError::Dbus(e.to_string()))
+            .map_err(zbus_error_to_provider)?
+            .into_iter()
+            .map(SupergfxdMode::from_wire)
+            .collect();
+
+        Ok(SupergfxdSnapshot {
+            current_mode,
+            pending_mode,
+            pending_user_action,
+            power,
+            supported_modes,
+        })
     }
 }
 
@@ -242,5 +441,159 @@ mod tests {
         );
         // Каждый вызов делает новый source call; кэш отсутствует.
         assert_eq!(p.source.reads(), 2);
+    }
+
+    fn snapshot(
+        current_mode: SupergfxdMode,
+        pending_mode: SupergfxdMode,
+        pending_user_action: SupergfxdUserAction,
+    ) -> SupergfxdSnapshot {
+        SupergfxdSnapshot {
+            current_mode,
+            pending_mode,
+            pending_user_action,
+            power: GpuPowerState::Suspended,
+            supported_modes: vec![
+                SupergfxdMode::Hybrid,
+                SupergfxdMode::Integrated,
+                SupergfxdMode::AsusMuxDgpu,
+            ],
+        }
+    }
+
+    #[test]
+    fn decodes_exact_modes_and_actions_without_panicking() {
+        assert_eq!(SupergfxdMode::from_wire(0), SupergfxdMode::Hybrid);
+        assert_eq!(SupergfxdMode::from_wire(1), SupergfxdMode::Integrated);
+        assert_eq!(SupergfxdMode::from_wire(2), SupergfxdMode::NvidiaNoModeset);
+        assert_eq!(SupergfxdMode::from_wire(3), SupergfxdMode::Vfio);
+        assert_eq!(SupergfxdMode::from_wire(4), SupergfxdMode::AsusEgpu);
+        assert_eq!(SupergfxdMode::from_wire(5), SupergfxdMode::AsusMuxDgpu);
+        assert_eq!(SupergfxdMode::from_wire(6), SupergfxdMode::None);
+        assert_eq!(SupergfxdMode::from_wire(99), SupergfxdMode::Unknown(99));
+        assert_eq!(
+            SupergfxdUserAction::from_wire(0),
+            SupergfxdUserAction::Logout
+        );
+        assert_eq!(
+            SupergfxdUserAction::from_wire(1),
+            SupergfxdUserAction::Reboot
+        );
+        assert_eq!(
+            SupergfxdUserAction::from_wire(2),
+            SupergfxdUserAction::SwitchToIntegrated
+        );
+        assert_eq!(
+            SupergfxdUserAction::from_wire(3),
+            SupergfxdUserAction::AsusEgpuDisable
+        );
+        assert_eq!(
+            SupergfxdUserAction::from_wire(4),
+            SupergfxdUserAction::Nothing
+        );
+        assert_eq!(
+            SupergfxdUserAction::from_wire(99),
+            SupergfxdUserAction::Unknown(99)
+        );
+    }
+
+    #[test]
+    fn classifies_staged_contract_without_product_mode_mapping() {
+        assert_eq!(
+            classify_supergfxd_state(
+                SupergfxdMode::Integrated,
+                &snapshot(
+                    SupergfxdMode::Integrated,
+                    SupergfxdMode::None,
+                    SupergfxdUserAction::Nothing,
+                ),
+            ),
+            SupergfxdStagedState::Applied
+        );
+        assert_eq!(
+            classify_supergfxd_state(
+                SupergfxdMode::Integrated,
+                &snapshot(
+                    SupergfxdMode::Hybrid,
+                    SupergfxdMode::Integrated,
+                    SupergfxdUserAction::Logout,
+                ),
+            ),
+            SupergfxdStagedState::RequiresUserAction(SupergfxdUserAction::Logout)
+        );
+        assert_eq!(
+            classify_supergfxd_state(
+                SupergfxdMode::AsusMuxDgpu,
+                &snapshot(
+                    SupergfxdMode::Hybrid,
+                    SupergfxdMode::AsusMuxDgpu,
+                    SupergfxdUserAction::Reboot,
+                ),
+            ),
+            SupergfxdStagedState::RequiresUserAction(SupergfxdUserAction::Reboot)
+        );
+        assert_eq!(
+            classify_supergfxd_state(
+                SupergfxdMode::Hybrid,
+                &snapshot(
+                    SupergfxdMode::Integrated,
+                    SupergfxdMode::Hybrid,
+                    SupergfxdUserAction::Nothing,
+                ),
+            ),
+            SupergfxdStagedState::Pending
+        );
+    }
+
+    #[test]
+    fn rejects_contradictory_staged_snapshots() {
+        let cases = [
+            (
+                SupergfxdMode::Integrated,
+                snapshot(
+                    SupergfxdMode::Hybrid,
+                    SupergfxdMode::AsusMuxDgpu,
+                    SupergfxdUserAction::Nothing,
+                ),
+            ),
+            (
+                SupergfxdMode::Integrated,
+                snapshot(
+                    SupergfxdMode::Hybrid,
+                    SupergfxdMode::None,
+                    SupergfxdUserAction::Logout,
+                ),
+            ),
+            (
+                SupergfxdMode::Integrated,
+                snapshot(
+                    SupergfxdMode::Integrated,
+                    SupergfxdMode::Hybrid,
+                    SupergfxdUserAction::Nothing,
+                ),
+            ),
+            (
+                SupergfxdMode::Integrated,
+                snapshot(
+                    SupergfxdMode::Hybrid,
+                    SupergfxdMode::Integrated,
+                    SupergfxdUserAction::Unknown(9),
+                ),
+            ),
+            (
+                SupergfxdMode::Unknown(9),
+                snapshot(
+                    SupergfxdMode::Unknown(9),
+                    SupergfxdMode::None,
+                    SupergfxdUserAction::Nothing,
+                ),
+            ),
+        ];
+        for (requested, state) in cases {
+            assert_eq!(
+                classify_supergfxd_state(requested, &state),
+                SupergfxdStagedState::Inconsistent
+            );
+        }
     }
 }
