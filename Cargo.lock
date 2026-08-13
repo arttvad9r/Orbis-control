@@ -3546,6 +3546,7 @@ dependencies = [
  "orbis-core",
  "orbis-providers",
  "tokio",
+ "tracing",
  "zbus",
  "zbus_polkit",
 ]

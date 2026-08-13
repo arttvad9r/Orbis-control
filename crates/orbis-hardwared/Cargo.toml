@@ -19,3 +19,4 @@ zbus = { workspace = true }
 zbus_polkit = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }

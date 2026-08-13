@@ -801,6 +801,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             };
             match &worker_tx {
                 Some(tx) => {
+                    tracing::debug!(requested_percent = percent, "battery GUI commit");
                     if let Err(e) = tx.send(WorkerCommand::SetChargeLimit { percent }) {
                         tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
                     }
