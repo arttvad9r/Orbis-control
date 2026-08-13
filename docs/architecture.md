@@ -205,6 +205,9 @@ getter-only в final mutation architecture.
   Его allowlist, validation, authorization и sandboxing live-validated; hardwared
   НЕ является generic sysfs writer, каждая новая privileged capability
   добавляется отдельно. См. [ADR 0006](adr/0006-privileged-performance-write.md).
+- GPU mutation через supergfxd следует staged lifecycle contract из [ADR 0008](adr/0008-supergfxd-staged-gpu-mutation.md):
+  supergfxd остаётся single lifecycle owner, а будущий GPU `Hardware1` должен
+  добавлять узкую polkit authorization и не переисполнять lifecycle sequencing.
 
 ### Performance mutation authorization
 
@@ -306,5 +309,7 @@ asusd/sysfs writes.
   capabilities по hardware concepts.
 - [ADR 0006](adr/0006-privileged-performance-write.md) — привилегированный
   write path Performance profile (первая controlled mutation).
+- [ADR 0008](adr/0008-supergfxd-staged-gpu-mutation.md) — staged GPU mutation
+  contract и lifecycle ownership через supergfxd; implementation pending.
 - [`research-report.md`](research-report.md) и hardware fixtures — dated evidence,
   не current implementation status.

@@ -209,8 +209,10 @@ read-only/disabled. Это **не** означает завершённость 
    Session1 read-back и controlled GUI `100 → 80 → 100` подтверждены; exact
    Hardware1 sequence `[80, 100]`, total `2`, без retries. Архитектура зафиксирована
    в [ADR 0007](adr/0007-battery-mutation-backend.md);
-3. **GPU product policy/mutation** (Milestone 5; product GpuMode backend
-   mapping всё ещё NOT PROVEN);
+3. **GPU staged mutation contract** (Milestone 5; [ADR 0008](adr/0008-supergfxd-staged-gpu-mutation.md)
+    принят; `Hybrid ↔ Integrated` READ/CONTRACT layer и private P2P fake tests
+    pending; live mutation не разрешена). Product GpuMode backend mapping всё
+    ещё NOT PROVEN;
 4. **fan/telemetry** (Milestone 4, substeps 3–4; только по доказанным
    источникам);
 5. **UX/polish** (Milestone 7 — error/status UX, CLI diagnostics).
@@ -236,9 +238,10 @@ GPU mutation pending.**
 - controlled live GUI validation PASS: ровно `wire 0` и `wire 1`, final state
   равен initial.
 
-GPU mutation, fan control, real telemetry и broader UX polish не отмечаются как
+GPU live mutation, fan control, real telemetry и broader UX polish не отмечаются как
 completed и остаются отдельными следующими этапами. Battery GUI mutation
-completed; отдельными pending scopes остаются GPU mutation, fan control,
+completed; отдельными pending scopes остаются GPU contract implementation/live
+mutation, fan control,
 telemetry и UX polish.
 
 **Architecture:** принята в [ADR 0006](adr/0006-privileged-performance-write.md)

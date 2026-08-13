@@ -430,6 +430,14 @@ Eco / Standard / Ultimate / Optimized backend mapping — **NOT PROVEN**.
 GpuMode автоматически. Optimized остаётся product/session policy, не raw
 backend state.
 
+### GPU mutation architecture
+
+[ADR 0008](adr/0008-supergfxd-staged-gpu-mutation.md) принят: supergfxd 5.2.7
+является owner полного staged GPU lifecycle. Первый технический slice —
+`Hybrid ↔ Integrated`; product mapping `Eco/Standard` не принят, production
+GPU cards disabled, live GPU mutation не реализована. До live mutation
+обязательны private P2P `FakeSupergfxd` contract/read-back tests.
+
 ## Fans, power limits, lighting and display
 
 | Area | Status | Notes |

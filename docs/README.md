@@ -77,7 +77,10 @@ Accepted ADR:
 - [`0004-authoritative-read-only-session.md`](adr/0004-authoritative-read-only-session.md)
   — read-only session semantics, unknown bounds, no-cache reads и lifecycle;
 - [`0005-split-gpu-provider-capabilities.md`](adr/0005-split-gpu-provider-capabilities.md)
-  — split GPU provider capabilities по hardware concepts.
+  — split GPU provider capabilities по hardware concepts;
+- [`0008-supergfxd-staged-gpu-mutation.md`](adr/0008-supergfxd-staged-gpu-mutation.md)
+  — staged GPU mutation contract через supergfxd; live mutation ещё не
+  реализована.
 
 Hardware fixtures FA707NV собраны 2026-08-06 read-only. В частности, наличие
 `xyz.ljones.Platform` и `xyz.ljones.FanCurves` доказано introspection evidence.

@@ -240,8 +240,9 @@ Product `GpuMode` (Eco/Standard/Ultimate/Optimized) остаётся MOCK-ONLY.
   LIVE-VALIDATED** (kernel ASUS Armoury, `ArmouryGpuProvider`);
 - product `GpuMode` (Eco/Standard/Ultimate/Optimized): no proven backend
   mapping;
-- supergfxd pending/user-action enums proven как evidence, но provider ещё не
-  реализован.
+- supergfxd pending/user-action enums и staged mutation contract proven;
+  [ADR 0008](adr/0008-supergfxd-staged-gpu-mutation.md) принят, но provider
+  READ/CONTRACT layer и private P2P fake tests ещё не реализованы.
 
 Provider ownership (ADR 0005): `ArmouryGpuProvider` owns MUX + access
 capabilities только; `SupergfxdGpuPowerProvider` owns runtime power только;
