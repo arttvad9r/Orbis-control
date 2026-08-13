@@ -18,7 +18,11 @@ export component ValueSlider inherits Rectangle {
     height: 30px;
     background: transparent;
 
-    property <float> internal-value: root.value;
+    // During a gesture this is only a local preview. The externally supplied
+    // value remains authoritative and is never changed by this component.
+    property <bool> gesture-active: false;
+    property <float> preview-value: root.value;
+    property <float> internal-value: root.gesture-active ? root.preview-value : root.value;
     // доля диапазона [min, max], 0..1
     property <float> frac: (root.internal-value - root.min) / (root.max - root.min);
 
@@ -80,13 +84,27 @@ export component ValueSlider inherits Rectangle {
                 y: (parent.height - 22px) / 2;
                 enabled: !root.disabled;
                 pointer-event(ev) => {
-                    // Только при нажатии или перетаскивании (не при hover-движении).
-                    if (ev.kind == PointerEventKind.down
-                        || (ev.kind == PointerEventKind.move && self.pressed)) {
+                    if (ev.kind == PointerEventKind.down) {
+                        root.gesture-active = true;
+                        root.preview-value = root.snap(root.min
+                            + (self.mouse-x / parent.width) * (root.max - root.min));
+                    } else if (ev.kind == PointerEventKind.move && self.pressed) {
                         let raw = root.min + (self.mouse-x / parent.width) * (root.max - root.min);
-                        // Значение отправляется в controller; отображаемое значение
-                        // возвращается из ui-state через root.value (единый источник).
-                        root.changed(root.snap(raw));
+                        // Move updates only the local preview; no mutation callback.
+                        root.preview-value = root.snap(raw);
+                    } else if (ev.kind == PointerEventKind.up && root.gesture-active) {
+                        let raw = root.min + (self.mouse-x / parent.width) * (root.max - root.min);
+                        let final-value = root.snap(raw);
+                        root.gesture-active = false;
+                        root.preview-value = root.value;
+                        // The callback is the single commit boundary. The
+                        // authoritative value remains supplied by the parent.
+                        if (final-value != root.value) {
+                            root.changed(final-value);
+                        }
+                    } else if (ev.kind == PointerEventKind.cancel) {
+                        root.gesture-active = false;
+                        root.preview-value = root.value;
                     }
                 }
             }
