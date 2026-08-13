@@ -540,8 +540,26 @@ impl HardwareService {
         }
     }
 
-    /// Test/injection construction for the GPU Hardware1 boundary. Production
-    /// wiring intentionally does not call this constructor yet.
+    /// Создать production service с optional typed GPU backend.
+    pub fn with_battery_and_gpu_backends(
+        authorizer: Box<dyn Authorizer>,
+        battery_backend: Box<dyn BatteryMutationBackend>,
+        battery_authorizer: Box<dyn Authorizer>,
+        gpu_backend: Box<dyn supergfxd::SupergfxdMutationOperation>,
+        gpu_authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        Self {
+            authorizer,
+            writer: PlatformProfileWriter::default(),
+            battery_authorizer,
+            battery_backend: Some(battery_backend),
+            gpu_authorizer,
+            gpu_backend: Some(gpu_backend),
+            gpu_sender_fallback: None,
+        }
+    }
+
+    /// Test/injection construction for the GPU Hardware1 boundary.
     pub fn with_gpu_backend(
         authorizer: Box<dyn Authorizer>,
         gpu_authorizer: Box<dyn Authorizer>,

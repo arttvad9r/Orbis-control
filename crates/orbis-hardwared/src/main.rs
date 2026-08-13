@@ -13,9 +13,10 @@
 use std::error::Error;
 
 use orbis_hardwared::{
-    Authorizer, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, HardwareService,
-    PolkitAuthorizer,
+    Authorizer, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, GPU_POLKIT_ACTION,
+    HardwareService, PolkitAuthorizer,
     battery::{AsusdBatteryMutationBackend, ZbusAsusdBatteryClient, discover_effective_reader},
+    supergfxd::{SupergfxdMutationBackend, ZbusSupergfxdMutationClient},
 };
 
 fn init_tracing() {
@@ -37,10 +38,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         connection.clone(),
         BATTERY_POLKIT_ACTION,
     ));
-    let service = HardwareService::with_battery_backend(
+    let gpu_backend =
+        SupergfxdMutationBackend::new(ZbusSupergfxdMutationClient::new(connection.clone()));
+    let gpu_authorizer: Box<dyn Authorizer> = Box::new(PolkitAuthorizer::with_action(
+        connection.clone(),
+        GPU_POLKIT_ACTION,
+    ));
+    let service = HardwareService::with_battery_and_gpu_backends(
         authorizer,
         Box::new(battery_backend),
         battery_authorizer,
+        Box::new(gpu_backend),
+        gpu_authorizer,
     );
     connection
         .object_server()

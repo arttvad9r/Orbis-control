@@ -26,4 +26,15 @@
       <allow_active>yes</allow_active>
     </defaults>
   </action>
+  <action id="io.github.orbiscontrol.hardware.set-gpu-mode">
+    <description>Change the Orbis Control GPU backend mode</description>
+    <description xml:lang="ru">Изменить backend-режим GPU Orbis Control</description>
+    <message>Authentication is required to change the GPU backend mode</message>
+    <message xml:lang="ru">Требуется аутентификация для изменения backend-режима GPU</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
 </policyconfig>
