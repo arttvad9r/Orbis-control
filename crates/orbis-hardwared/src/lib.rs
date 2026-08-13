@@ -21,6 +21,7 @@ use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 
 pub mod battery;
+pub mod supergfxd;
 
 use battery::{BatteryMutationBackend, BatteryMutationReadback};
 
