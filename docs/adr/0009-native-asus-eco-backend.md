@@ -78,3 +78,36 @@ LACT/UVM — отдельная lifecycle stage: LACT direct `/dev/nvidia-uvm` h
 сопровождались `nvidia_uvm refcount=4`; LACT teardown дал holders `0` и
 refcount `0`, после чего отдельный live `modprobe -r nvidia_uvm` прошёл.
 Это evidence не смешивается с KWin render/core blocker.
+
+## Reference-derived PCI release boundary
+
+Read-only audit `utajum/g-helper-linux` commit `b1322417...` подтверждает
+последовательность `ReleaseApplicationGpuUsers` → card-level DRM remove
+notification → PCI function unbind → refcount settle → holder purge → NVIDIA
+module unload → firmware Eco transition. G-Helper перечисляет PCI functions
+одного dGPU, unbind'ит их в reverse order, затем имеет timeout/late-completion
+polling, rollback и reboot/defer fallback.
+
+В reference не найден отдельный KWin API или принятый render-minor release
+primitive. Protected compositor/system holders не kill'ятся. PCI unbind
+используется как release-stage primitive, но G-Helper не доказывает перед ним
+полное исчезновение compositor render/core holders и частично полагается на
+hot-remove/device-removal semantics.
+
+Для Linux PCI/NVIDIA lifecycle это не является host-specific safety proof:
+PCI unbind может начаться при открытых userspace FDs, PCI core их не закрывает,
+DRM unplug инвалидирует device и unregister'ит minors, но не закрывает уже
+открытые file objects. NVIDIA remove/modeset lifecycle ожидает quiesced/closed
+clients и может ждать usage refs. Поэтому Native Eco должен оставаться
+fail-closed до `VerifyCompositorRelease` либо отдельного контролируемого
+session-isolated workflow. После доказанного compositor release загруженный
+module stack остаётся отдельной следующей lifecycle stage; firmware transition
+не может перескочить через unload/read-back verification.
+
+Это evidence feasibility reference implementation, а не доказательство
+безопасности PCI unbind на текущем graphical host. Logout/restart compositor
+остаётся возможной будущей strategy, но не product requirement и не должен
+автоматически превращаться в `RequiresLogout` только из-за holders.
+
+PCI-unbind executor в Orbis не реализуется. Production path
+`Hardware1.SetGpuMode → supergfxd` и ownership boundary остаются неизменными.

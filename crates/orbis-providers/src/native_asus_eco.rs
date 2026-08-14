@@ -995,6 +995,35 @@ mod tests {
             EcoTransitionPlan::ReadyImmediately | EcoTransitionPlan::RequiresLogout(_)
         ));
     }
+
+    #[test]
+    fn verified_compositor_release_still_requires_module_lifecycle() {
+        let mut s = base();
+        s.compositor_release_supported = Some(true);
+        s.nvidia_modules_loaded = true;
+        s.nvidia_module_refcount = Some(0);
+        s.nvidia_module_busy = Some(false);
+        s.nvidia_module_unload_feasible = Some(true);
+
+        let assessment = plan_native_asus_eco(&s);
+        let requirements = match &assessment.plan {
+            EcoTransitionPlan::CanBecomeReady {
+                release_requirements,
+                ..
+            } => release_requirements,
+            _ => unreachable!(),
+        };
+
+        assert!(requirements.contains(&EcoReleaseRequirement::UnloadNvidiaModules));
+        assert!(requirements.contains(&EcoReleaseRequirement::VerifyNvidiaUsers));
+        assert!(requirements.contains(&EcoReleaseRequirement::VerifyNvidiaModuleUnload));
+        assert!(!requirements.contains(&EcoReleaseRequirement::VerifyCompositorRelease));
+        assert!(!matches!(
+            assessment.plan,
+            EcoTransitionPlan::ReadyImmediately
+        ));
+    }
+
     #[test]
     fn unsupported_and_unknown_are_conservative() {
         let mut s = base();
