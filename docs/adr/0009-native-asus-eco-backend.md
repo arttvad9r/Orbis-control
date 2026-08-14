@@ -50,3 +50,31 @@ release lifecycle stage: zero userspace holders не доказывает unload
 NVIDIA UVM busy reference остаётся unresolved. Compositor/device release должен
 быть подтверждён до появления mutation executor. Никаких hardware writes,
 process kills, service actions или driver/PCI operations.
+
+## Host evidence: DRM release boundaries
+
+На host доказан отдельный safe primitive для `ReleaseSecondaryDrmDevice`:
+synthetic `remove` в NVIDIA DRM card-minor `uevent` освободил card FDs у PID 1,
+`systemd-logind`, KWin и Xwayland live; Plasma/KWin/Xwayland при этом сохранили
+работоспособность. Это не доказывает release render-node или NVIDIA core state.
+
+Отдельный synthetic `remove` для NVIDIA render-minor `renderD129` дал только
+частичный эффект: часть render/core holders и module refs уменьшилась, но
+KWin сохранил render/core users; также был зафиксирован временный лог
+`The main thread was hanging temporarily!`. KWin не завершился, не
+перезапускался (`NRestarts=0`), coredump отсутствовал, а graphical session
+осталась healthy. Поэтому render-minor notification не является принятым
+live-release primitive и не должен входить в production execution sequence.
+
+`ReleaseSecondaryDrmDevice` и release `renderD129`/NVIDIA core backend — разные
+stages. После safe card release наличие render-node holders, `/dev/nvidia0`,
+`/dev/nvidiactl`, `/dev/nvidia-modeset` или compositor mappings сохраняет
+firmware transition fail-closed до `VerifyCompositorRelease` и последующих
+`UnloadNvidiaModules`/`VerifyNvidiaModuleUnload` stages. Это не является
+доказательством необходимости logout: logout пока остаётся unresolved, а не
+автоматическим `RequiresLogout`.
+
+LACT/UVM — отдельная lifecycle stage: LACT direct `/dev/nvidia-uvm` holders
+сопровождались `nvidia_uvm refcount=4`; LACT teardown дал holders `0` и
+refcount `0`, после чего отдельный live `modprobe -r nvidia_uvm` прошёл.
+Это evidence не смешивается с KWin render/core blocker.

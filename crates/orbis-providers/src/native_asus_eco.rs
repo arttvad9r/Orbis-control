@@ -80,7 +80,7 @@ pub enum EcoLiveBlocker {
 pub enum EcoReleaseRequirement {
     /// Release userspace processes with an NVIDIA device workload.
     ReleaseApplicationGpuUsers,
-    /// Release a secondary NVIDIA DRM card/render reference.
+    /// Release a secondary NVIDIA DRM card reference.
     ReleaseSecondaryDrmDevice,
     /// Re-scan users and verify that no NVIDIA users remain.
     VerifyNvidiaUsers,
@@ -88,7 +88,7 @@ pub enum EcoReleaseRequirement {
     VerifyNvidiaModuleUnload,
     /// Unload the loaded NVIDIA module family.
     UnloadNvidiaModules,
-    /// Verify that the compositor released the secondary device.
+    /// Verify that the compositor released all NVIDIA DRM/core users.
     VerifyCompositorRelease,
 }
 
@@ -130,7 +130,7 @@ pub struct EcoDiagnosticEvidence {
 pub enum NvidiaHolderKind {
     /// `/dev/nvidia*`.
     Device,
-    /// NVIDIA-owned `/dev/dri/*`.
+    /// NVIDIA-owned DRM card or render node in `/dev/dri/*`.
     Drm,
     /// NVIDIA-owned `/dev/i2c-*`.
     I2c,
@@ -179,8 +179,9 @@ pub struct EcoLivePreflightSnapshot {
     pub holders: Vec<NvidiaHolderEvidence>,
     /// A non-NVIDIA DRM card/render device exists.
     pub integrated_drm_present: bool,
-    /// Whether the current compositor can release a secondary NVIDIA DRM
-    /// device live. `None` is intentionally unresolved, not success.
+    /// Whether the current compositor can release all NVIDIA DRM/core users
+    /// live. `None` is intentionally unresolved, not success. A proven
+    /// card-minor release does not imply that render/core users are gone.
     pub compositor_release_supported: Option<bool>,
     /// Fresh supergfxd snapshot.
     pub supergfxd: Option<SupergfxdSnapshot>,
@@ -924,6 +925,74 @@ mod tests {
         assert!(matches!(
             assessment.plan,
             EcoTransitionPlan::CanBecomeReady { .. }
+        ));
+    }
+
+    #[test]
+    fn card_release_does_not_imply_compositor_release() {
+        let mut s = with_holder(NvidiaHolderKind::Device);
+        s.compositor_release_supported = None;
+        let assessment = plan_native_asus_eco(&s);
+
+        assert!(
+            assessment
+                .release_required
+                .iter()
+                .any(|e| e.category == EcoLiveBlocker::NvidiaDeviceUser)
+        );
+        assert!(
+            assessment
+                .unknown
+                .iter()
+                .any(|e| e.category == EcoLiveBlocker::Unknown)
+        );
+        let requirements = match &assessment.plan {
+            EcoTransitionPlan::CanBecomeReady {
+                release_requirements,
+                ..
+            } => release_requirements,
+            _ => unreachable!(),
+        };
+        assert!(requirements.contains(&EcoReleaseRequirement::VerifyCompositorRelease));
+        assert!(!matches!(
+            assessment.plan,
+            EcoTransitionPlan::ReadyImmediately | EcoTransitionPlan::RequiresLogout(_)
+        ));
+    }
+
+    #[test]
+    fn remaining_render_and_core_users_stay_fail_closed_without_logout_claim() {
+        let mut s = base();
+        s.holders = vec![
+            NvidiaHolderEvidence {
+                kind: NvidiaHolderKind::Drm,
+                count: 2,
+                details: vec!["renderD129".into()],
+            },
+            NvidiaHolderEvidence {
+                kind: NvidiaHolderKind::Device,
+                count: 4,
+                details: vec!["nvidiactl/nvidia0".into()],
+            },
+        ];
+        s.compositor_release_supported = Some(true);
+        let assessment = plan_native_asus_eco(&s);
+
+        assert!(
+            assessment
+                .release_required
+                .iter()
+                .any(|e| e.category == EcoLiveBlocker::NvidiaDrmUser)
+        );
+        assert!(
+            assessment
+                .release_required
+                .iter()
+                .any(|e| e.category == EcoLiveBlocker::NvidiaDeviceUser)
+        );
+        assert!(!matches!(
+            assessment.plan,
+            EcoTransitionPlan::ReadyImmediately | EcoTransitionPlan::RequiresLogout(_)
         ));
     }
     #[test]
