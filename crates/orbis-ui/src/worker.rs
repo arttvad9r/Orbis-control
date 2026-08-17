@@ -25,14 +25,17 @@ use orbis_application::{
     ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome, PerformanceState,
     SetChargeLimitError, SetGpuModeError, SetPerformanceError,
 };
+use orbis_core::action::ApplyResult;
+use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
-use orbis_core::profile::PerformanceProfile;
+use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_providers::error::ProviderError;
+use orbis_providers::traits::FanCurvePoints;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 /// Типизированная команда worker-а (Performance Mode / GPU Mode / Battery).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerCommand {
     /// Установить профиль производительности.
     SetPerformance(PerformanceProfile),
@@ -80,6 +83,28 @@ pub enum WorkerCommand {
     /// Выполняет `TelemetryServiceRuntime::snapshot()` (новый provider read,
     /// без mutation и без polling). Обычная ordered команда/барьер.
     RefreshTelemetry,
+    /// Установить fan curve для одного вентилятора.
+    ///
+    /// `profile` — lossless `AsusdFanProfile` (не `PerformanceProfile`):
+    /// worker не преобразует профили и не решает, какой профиль «тот же».
+    /// `curve` передаётся в `AppService` без изменения: worker не выполняет
+    /// clamp/валидацию (валидация — в UI перед отправкой и в domain).
+    SetFanCurve {
+        /// Запрашиваемый профиль (lossless wire profile).
+        profile: AsusdFanProfile,
+        /// Вентилятор (CPU/GPU).
+        fan: FanId,
+        /// 8 точек кривой (temp °C + raw PWM 0..255).
+        curve: FanCurvePoints,
+    },
+    /// Authoritative read-only refresh активной fan curve вентилятора.
+    ///
+    /// Выполняет `FanServiceRuntime::active_curve()` (новый provider read,
+    /// без mutation). Обычная ordered команда/барьер: не coalesce-ится.
+    RefreshFanCurve {
+        /// Вентилятор (CPU/GPU).
+        fan: FanId,
+    },
 }
 
 /// Событие результата команды.
@@ -130,6 +155,18 @@ pub enum WorkerEvent {
     /// `Err(ProviderError)` — read недоступен (worker не подставляет
     /// mock/default и не затирает последний успешный UI telemetry state).
     TelemetryRefresh(Result<orbis_core::telemetry::Telemetry, ProviderError>),
+    /// Полный результат команды Fan Curve mutation.
+    ///
+    /// `Ok(ApplyResult)` — authoritative read-back подтвердил применение;
+    /// `Err(ProviderError)` — mutation/read-back недоступен (worker не
+    /// подставляет mock/default и не затирает последний успешный UI state).
+    FanCurve(Result<ApplyResult, ProviderError>),
+    /// Результат authoritative read-only refresh активной fan curve.
+    ///
+    /// `Ok(FanCurve)` — фактическое authoritative значение provider;
+    /// `Err(ProviderError)` — read недоступен (worker не подставляет
+    /// mock/default и не затирает последний успешный UI state).
+    FanCurveRefresh(Result<FanCurve, ProviderError>),
 }
 
 /// Создать command channel для worker.
@@ -354,6 +391,20 @@ async fn run_worker_inner<G, B, R, F>(
                 // Performance read service; worker не подставляет mock/default.
                 WorkerEvent::PerformanceRefresh(performance.performance_state().await)
             }
+            WorkerCommand::SetFanCurve {
+                profile,
+                fan,
+                curve,
+            } => {
+                // Mutation одной fan curve (lossless AsusdFanProfile).
+                // Worker не валидирует и не clamp-ит: валидация — в UI перед
+                // отправкой и в domain (`FanCurve::validate`).
+                WorkerEvent::FanCurve(runtime.fan.set_fan_curve(profile, fan, curve).await)
+            }
+            WorkerCommand::RefreshFanCurve { fan } => {
+                // Authoritative read-only refresh активной fan curve.
+                WorkerEvent::FanCurveRefresh(runtime.fan.active_curve(fan).await)
+            }
             WorkerCommand::RefreshCapabilities => unreachable!("handled above"),
             WorkerCommand::RefreshTelemetry => unreachable!("handled above"),
         };
@@ -497,6 +548,8 @@ mod tests {
         // проверяют telemetry, но runtime требует его наличия).
         let telemetry_state = build_state_arc("zephyrus-full").expect("profile exists");
         let telemetry_service = AppService::new(Arc::new(MockProvider::new(telemetry_state)));
+        let fan_state = build_state_arc("zephyrus-full").expect("profile exists");
+        let fan_service = AppService::new(Arc::new(MockProvider::new(fan_state)));
         run_worker(
             ApplicationRuntime::new_with_snapshot(
                 GpuServices::new(
@@ -507,6 +560,7 @@ mod tests {
                 ),
                 battery_service,
                 performance_service,
+                fan_service,
                 telemetry_service,
                 snapshot,
             ),
@@ -595,6 +649,8 @@ mod tests {
         let snapshot = CapabilityRegistryBuilder::new(1, std::time::SystemTime::now())
             .build()
             .expect("empty registry snapshot must build");
+        let fan_state = build_state_arc("zephyrus-full").expect("profile exists");
+        let fan_service = AppService::new(Arc::new(MockProvider::new(fan_state)));
         ApplicationRuntime::new_with_snapshot(
             GpuServices::new(
                 main_service,
@@ -604,6 +660,7 @@ mod tests {
             ),
             battery_service,
             performance_service,
+            fan_service,
             telemetry,
             snapshot,
         )

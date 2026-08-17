@@ -133,6 +133,22 @@ pub enum GpuModeHwState {
     Unavailable,
 }
 
+/// Состояние готовности/доступности fan curve.
+///
+/// Отделено от `fan_curve_writable` (write-capability): read-only backend
+/// при Ready всё равно не позволяет запись; mock/offscreen могут сохранять
+/// writable behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FanCurveHwState {
+    /// Первый authoritative read ещё не выполнен.
+    #[default]
+    Loading,
+    /// Authoritative read успешен (curve points известны).
+    Ready,
+    /// Backend/read недоступен.
+    Unavailable,
+}
+
 /// Отображаемое состояние главного окна.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiState {
@@ -227,6 +243,26 @@ pub struct UiState {
     /// Служебная информация.
     pub version: String,
     pub mock_profile: String,
+
+    // ── Fan Curve Editor ──────────────────────────────────────────────
+    /// Состояние готовности fan curve (Loading/Ready/Unavailable).
+    pub fan_curve_state: FanCurveHwState,
+    /// Можно ли применять fan curve (write-capability из FanCurves.operations.write).
+    pub fan_curve_writable: bool,
+    /// Capability availability: Fan Curves read/write support.
+    pub fan_curve_capability: CapabilityAvailability,
+    /// Выбранный вентилятор: 0=CPU, 1=GPU.
+    pub fan_selected: i32,
+    /// Выбранный lossless asusd профиль: 0=Balanced, 1=Performance, 2=Quiet, 3=LowPower.
+    pub fan_profile_selected: i32,
+    /// 8 температур точек кривой (°C).
+    pub fan_curve_temps: [i32; 8],
+    /// 8 raw PWM точек кривой (0..255).
+    pub fan_curve_pwms: [i32; 8],
+    /// Ошибка backend в fan-секции (остальное окно остаётся рабочим).
+    pub fan_curve_error: bool,
+    /// Есть ли несохранённые изменения ( dirty flag для UI кнопки Apply).
+    pub fan_curve_dirty: bool,
 }
 
 /// Явное исчерпывающее сопоставление GPU-режима с индексом кнопки
@@ -371,6 +407,17 @@ impl UiState {
             power_ac,
             version: "0.1.0".to_string(),
             mock_profile: profile_name.to_string(),
+            // Fan Curve Editor: Loading до первого authoritative refresh;
+            // mock profile не предоставляет real fan curve hardware state.
+            fan_curve_state: FanCurveHwState::Loading,
+            fan_curve_writable: false,
+            fan_curve_capability: CapabilityAvailability::Unknown,
+            fan_selected: 0,         // CPU
+            fan_profile_selected: 0, // Balanced
+            fan_curve_temps: [0; 8],
+            fan_curve_pwms: [0; 8],
+            fan_curve_error: false,
+            fan_curve_dirty: false,
         }
     }
 
@@ -405,6 +452,10 @@ impl UiState {
         }
         if let Some(cap) = snapshot.capability(FeatureId::GpuAccess) {
             self.gpu_access_capability = CapabilityAvailability::from_status(cap.status);
+        }
+        if let Some(cap) = snapshot.capability(FeatureId::FanCurves) {
+            self.fan_curve_capability = CapabilityAvailability::from_status(cap.status);
+            self.fan_curve_writable = write_allows_mutation(cap.operations.write.status);
         }
     }
 
@@ -470,6 +521,105 @@ impl UiState {
         };
         self.gpu_power_display = format_watts(telemetry.power.gpu);
         self.power_ac = format_watts(telemetry.power.ac);
+    }
+
+    // ── Fan Curve helpers ─────────────────────────────────────────────
+
+    /// Map UI fan index (0=CPU, 1=GPU) to domain `FanId`.
+    pub fn fan_id_from_index(index: i32) -> Option<FanId> {
+        match index {
+            0 => Some(FanId::Cpu),
+            1 => Some(FanId::Gpu),
+            _ => None,
+        }
+    }
+
+    /// Map UI profile index to lossless `AsusdFanProfile`.
+    pub fn asusd_profile_from_index(index: i32) -> Option<orbis_core::profile::AsusdFanProfile> {
+        use orbis_core::profile::AsusdFanProfile;
+        match index {
+            0 => Some(AsusdFanProfile::Balanced),
+            1 => Some(AsusdFanProfile::Performance),
+            2 => Some(AsusdFanProfile::Quiet),
+            3 => Some(AsusdFanProfile::LowPower),
+            _ => None,
+        }
+    }
+
+    /// Load authoritative `FanCurve` into editor state.
+    ///
+    /// Points are truncated/padded to exactly 8. Missing points become 0.
+    pub fn load_fan_curve(&mut self, curve: &orbis_core::fan::FanCurve) {
+        self.fan_curve_state = FanCurveHwState::Ready;
+        self.fan_curve_error = false;
+        // Map fan id to index
+        self.fan_selected = match &curve.fan {
+            FanId::Cpu => 0,
+            FanId::Gpu => 1,
+            _ => self.fan_selected,
+        };
+        // Map profile to index
+        use orbis_core::profile::PerformanceProfile;
+        self.fan_profile_selected = match curve.profile {
+            PerformanceProfile::Balanced => 0,
+            PerformanceProfile::Turbo => 1,
+            PerformanceProfile::Silent => 2,
+        };
+        // Fill 8 temp/pwm arrays from curve points
+        let mut temps = [0i32; 8];
+        let mut pwms = [0i32; 8];
+        for (i, pt) in curve.points.iter().take(8).enumerate() {
+            temps[i] = pt.temp.get() as i32;
+            pwms[i] = pt.pwm.get() as i32;
+        }
+        self.fan_curve_temps = temps;
+        self.fan_curve_pwms = pwms;
+        self.fan_curve_dirty = false;
+    }
+
+    /// Build `FanCurvePoints` from editor state for mutation.
+    ///
+    /// Returns `None` if any temp/pwm value is out of the valid newtype range.
+    pub fn build_fan_curve_points(&self) -> Option<orbis_providers::traits::FanCurvePoints> {
+        use orbis_core::newtypes::{FanPwm, TemperatureC};
+        let mut temps = [TemperatureC::new(0).ok()?; 8];
+        let mut pwms = [FanPwm::new(0).ok()?; 8];
+        for i in 0..8 {
+            temps[i] = TemperatureC::new(self.fan_curve_temps[i] as i16).ok()?;
+            pwms[i] = FanPwm::new(self.fan_curve_pwms[i] as u8).ok()?;
+        }
+        Some(orbis_providers::traits::FanCurvePoints { temps, pwms })
+    }
+
+    /// Check if fan curve mutation is allowed (writable + not dirty + valid).
+    ///
+    /// Used as Rust-side guard: disabled or invalid curves never send mutation.
+    pub fn fan_curve_can_mutate(&self) -> bool {
+        if !self.fan_curve_writable {
+            return false;
+        }
+        if self.fan_curve_error {
+            return false;
+        }
+        if !self.fan_curve_dirty {
+            return false;
+        }
+        // Validate via domain FanCurve::validate
+        let Some(points) = self.build_fan_curve_points() else {
+            return false;
+        };
+        use orbis_core::fan::{FanCurve, FanCurvePoint};
+        let curve = FanCurve {
+            profile: PerformanceProfile::Silent, // profile doesn't affect validate
+            fan: FanId::Cpu,
+            points: points
+                .temps
+                .iter()
+                .zip(points.pwms.iter())
+                .map(|(t, p)| FanCurvePoint::new(*t, *p))
+                .collect(),
+        };
+        curve.validate(8, false).is_ok()
     }
 }
 

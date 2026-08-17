@@ -19,13 +19,13 @@ use std::sync::Arc;
 
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::battery::ChargeLimit;
-use orbis_core::fan::FanId;
+use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
-    BatteryProvider, FanCurveMutationProvider, FanCurvePoints, GpuAccessProvider, GpuMuxProvider,
-    GpuPowerProvider, GpuProvider, PerformanceProvider,
+    BatteryProvider, FanCurveMutationProvider, FanCurvePoints, FanProvider, GpuAccessProvider,
+    GpuMuxProvider, GpuPowerProvider, GpuProvider, PerformanceProvider,
 };
 
 /// Authoritative состояние Performance Mode.
@@ -342,6 +342,19 @@ where
         curve: &FanCurvePoints,
     ) -> Result<ApplyResult, ProviderError> {
         self.provider.set_fan_curve(profile, fan, curve).await
+    }
+}
+
+impl<P> AppService<P>
+where
+    P: FanProvider + Send + Sync,
+{
+    /// Прочитать authoritative активную fan curve для вентилятора.
+    ///
+    /// Вызывает только `FanProvider::active_curve(fan)`; `ProviderError`
+    /// сохраняется без преобразования. Read-only: никакой mutation.
+    pub async fn active_curve(&self, fan: &FanId) -> Result<FanCurve, ProviderError> {
+        self.provider.active_curve(fan).await
     }
 }
 

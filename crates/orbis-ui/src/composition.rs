@@ -13,15 +13,17 @@ use orbis_application::{
     SetPerformanceError,
 };
 use orbis_capabilities::{CapabilityRegistryBuilder, CapabilityRegistrySnapshot, ProbeError};
+use orbis_core::action::ApplyResult;
 use orbis_core::battery::ChargeLimit;
+use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
-use orbis_core::profile::PerformanceProfile;
+use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_providers::error::ProviderError;
 #[cfg(test)]
 use orbis_providers::mock::MockProvider;
 use orbis_providers::traits::{
-    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, GpuProvider,
-    PerformanceProvider,
+    BatteryProvider, FanCurveMutationProvider, FanCurvePoints, FanProvider, GpuAccessProvider,
+    GpuMuxProvider, GpuPowerProvider, GpuProvider, PerformanceProvider,
 };
 use orbis_session_client::{
     SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
@@ -316,6 +318,44 @@ where
     }
 }
 
+/// Fan curve service capability boundary.
+///
+/// Read (`active_curve`) идёт через существующий read path (sessiond
+/// `FanProvider`); mutation (`set_fan_curve`) — через lossless
+/// `AsusdFanProfile` напрямую к Hardware1. Никаких новых backend/API.
+#[async_trait]
+pub trait FanServiceRuntime: Send + Sync {
+    /// Read authoritative активную fan curve для вентилятора.
+    async fn active_curve(&self, fan: FanId) -> Result<FanCurve, ProviderError>;
+
+    /// Mutate одну fan curve (lossless `AsusdFanProfile`).
+    async fn set_fan_curve(
+        &self,
+        profile: AsusdFanProfile,
+        fan: FanId,
+        curve: FanCurvePoints,
+    ) -> Result<ApplyResult, ProviderError>;
+}
+
+#[async_trait]
+impl<P> FanServiceRuntime for AppService<P>
+where
+    P: FanProvider + FanCurveMutationProvider + Send + Sync,
+{
+    async fn active_curve(&self, fan: FanId) -> Result<FanCurve, ProviderError> {
+        AppService::active_curve(self, &fan).await
+    }
+
+    async fn set_fan_curve(
+        &self,
+        profile: AsusdFanProfile,
+        fan: FanId,
+        curve: FanCurvePoints,
+    ) -> Result<ApplyResult, ProviderError> {
+        AppService::set_fan_curve(self, profile, &fan, &curve).await
+    }
+}
+
 /// Telemetry service capability boundary.
 #[async_trait]
 pub trait TelemetryServiceRuntime: Send + Sync {
@@ -348,6 +388,11 @@ pub struct ApplicationRuntime<G, B, R> {
     pub battery: B,
     /// Performance service.
     pub performance: R,
+    /// Fan curve service (read + mutation).
+    ///
+    /// `Arc<dyn>` позволяет worker-у обращаться к fan service через
+    /// trait-object boundary, как к telemetry.
+    pub fan: Arc<dyn FanServiceRuntime>,
     /// Telemetry service (read-only sysfs snapshot).
     ///
     /// `Arc<dyn>` позволяет worker-у клонировать handle для фонового polling
@@ -363,20 +408,23 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
     /// Production composition must always supply an authoritative snapshot
     /// assembled through the discovery pipeline. Permissive constructors that
     /// silently allocate an empty default snapshot have been removed.
-    pub fn new_with_snapshot<T>(
+    pub fn new_with_snapshot<T, F>(
         gpu: G,
         battery: B,
         performance: R,
+        fan: F,
         telemetry: T,
         snapshot: CapabilityRegistrySnapshot,
     ) -> Self
     where
         T: TelemetryServiceRuntime + 'static,
+        F: FanServiceRuntime + 'static,
     {
         Self {
             gpu,
             battery,
             performance,
+            fan: Arc::new(fan),
             telemetry: Arc::new(telemetry),
             capabilities: Arc::new(snapshot),
         }
@@ -411,9 +459,10 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
     /// without discovered capabilities. Available only to test code in this
     /// crate so that production callers cannot accidentally use it.
     #[cfg(test)]
-    pub fn empty_for_testing<T>(gpu: G, battery: B, performance: R, telemetry: T) -> Self
+    pub fn empty_for_testing<T, F>(gpu: G, battery: B, performance: R, fan: F, telemetry: T) -> Self
     where
         T: TelemetryServiceRuntime + 'static,
+        F: FanServiceRuntime + 'static,
     {
         let checked_at = SystemTime::now();
         let snapshot = CapabilityRegistryBuilder::new(1, checked_at)
@@ -423,6 +472,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             gpu,
             battery,
             performance,
+            fan: Arc::new(fan),
             telemetry: Arc::new(telemetry),
             capabilities: Arc::new(snapshot),
         }
@@ -760,6 +810,7 @@ pub async fn build_production_runtime(
         ),
         orbis_session_client::ZbusHardwareFanCurveSource::new(system_connection.clone()),
     );
+    let fan_service = AppService::new(Arc::new(fan_provider));
 
     let snapshot = build_initial_registry_snapshot(
         &*battery_arc,
@@ -767,13 +818,20 @@ pub async fn build_production_runtime(
         gpu.primitive_power_provider(),
         gpu.primitive_mux_provider(),
         gpu.primitive_access_provider(),
-        &fan_provider,
+        fan_service.provider(),
         hardware_owner,
     )
     .await?;
 
     Ok((
-        ApplicationRuntime::new_with_snapshot(gpu, battery, performance, telemetry, snapshot),
+        ApplicationRuntime::new_with_snapshot(
+            gpu,
+            battery,
+            performance,
+            fan_service,
+            telemetry,
+            snapshot,
+        ),
         hardware_owner,
     ))
 }
@@ -817,6 +875,7 @@ pub fn mock_runtime() -> MockRuntime {
         .expect("empty registry snapshot must build");
     ApplicationRuntime::new_with_snapshot(
         gpu,
+        AppService::new(provider.clone()),
         AppService::new(provider.clone()),
         AppService::new(provider.clone()),
         AppService::new(provider),
@@ -878,6 +937,7 @@ mod tests {
                 AppService::new(provider.clone()),
                 AppService::new(provider.clone()),
             ),
+            AppService::new(provider.clone()),
             AppService::new(provider.clone()),
             AppService::new(provider.clone()),
             AppService::new(provider),
@@ -975,6 +1035,7 @@ mod tests {
                 AppService::new(provider.clone()),
                 AppService::new(provider.clone()),
             ),
+            AppService::new(provider.clone()),
             AppService::new(provider.clone()),
             AppService::new(provider.clone()),
             AppService::new(provider),

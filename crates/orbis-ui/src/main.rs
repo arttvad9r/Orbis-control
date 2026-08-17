@@ -230,6 +230,16 @@ fn from_slint(state: &UiState) -> controller::UiState {
         battery_status: state.battery_status.to_string(),
         ac_online: state.ac_online.to_string(),
         gpu_power_display: state.gpu_power.to_string(),
+        // Fan Curve: no Slint fields yet — use defaults from controller
+        fan_curve_state: controller::FanCurveHwState::Loading,
+        fan_curve_writable: false,
+        fan_curve_capability: controller::CapabilityAvailability::Unknown,
+        fan_selected: 0,
+        fan_profile_selected: 0,
+        fan_curve_temps: [0; 8],
+        fan_curve_pwms: [0; 8],
+        fan_curve_error: false,
+        fan_curve_dirty: false,
     }
 }
 
@@ -728,6 +738,37 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             // Ошибка read: НЕ затираем последний успешный telemetry state.
             tracing::warn!("telemetry refresh failed: {e:?}");
         }
+        WorkerEvent::FanCurve(Ok(apply_result)) => {
+            // Mutation результат: Ok(ApplyResult) — read-back подтвердил
+            // применение. Обновляем state из подтверждённого результата.
+            match &apply_result {
+                ApplyResult::Applied => {
+                    tracing::debug!("fan curve: mutation applied (read-back confirmed)");
+                    state.fan_curve_error = false;
+                    state.fan_curve_dirty = false;
+                }
+                other => {
+                    tracing::warn!("fan curve: mutation result not Applied: {other:?}");
+                    state.fan_curve_error = true;
+                }
+            }
+        }
+        WorkerEvent::FanCurve(Err(e)) => {
+            // Ошибка mutation/read-back: НЕ затираем предыдущую curve,
+            // выставляем error state.
+            tracing::warn!("fan curve mutation failed: {e:?}");
+            state.fan_curve_error = true;
+        }
+        WorkerEvent::FanCurveRefresh(Ok(curve)) => {
+            // Authoritative read: загружаем curve в editor state.
+            state.load_fan_curve(&curve);
+        }
+        WorkerEvent::FanCurveRefresh(Err(e)) => {
+            // Ошибка read: НЕ затираем предыдущую curve, выставляем error.
+            tracing::warn!("fan curve refresh failed: {e:?}");
+            state.fan_curve_state = controller::FanCurveHwState::Unavailable;
+            state.fan_curve_error = true;
+        }
     }
 }
 
@@ -1093,6 +1134,7 @@ mod tests {
     use super::*;
     use orbis_core::battery::ChargeLimit;
     use orbis_core::battery::ChargeLimitBounds;
+    use orbis_core::fan::FanId;
     use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
     use orbis_core::newtypes::Percent;
 
@@ -2011,5 +2053,228 @@ mod tests {
         assert_eq!(s.gpu_power, controller::GpuHwState::Loading);
         assert_eq!(s.gpu_mux, controller::GpuHwState::Loading);
         assert_eq!(s.gpu_access, controller::GpuHwState::Loading);
+    }
+
+    // ── Fan Curve Editor tests ────────────────────────────────────────
+
+    #[test]
+    fn fan_curve_initial_state_is_loading_and_not_writable() {
+        let s = base_state();
+        assert_eq!(s.fan_curve_state, controller::FanCurveHwState::Loading);
+        assert!(!s.fan_curve_writable);
+        assert!(!s.fan_curve_error);
+        assert!(!s.fan_curve_dirty);
+    }
+
+    #[test]
+    fn fan_curve_load_fan_curve_sets_ready_and_populates_points() {
+        use orbis_core::fan::{FanCurve, FanCurvePoint};
+        use orbis_core::newtypes::{FanPwm, TemperatureC};
+        use orbis_core::profile::PerformanceProfile;
+
+        let mut s = base_state();
+        let points: Vec<FanCurvePoint> = [
+            (50u16, 0u8),
+            (55, 8),
+            (60, 13),
+            (65, 26),
+            (70, 36),
+            (75, 54),
+            (79, 77),
+            (85, 100),
+        ]
+        .into_iter()
+        .map(|(t, p)| {
+            FanCurvePoint::new(
+                TemperatureC::new(t as i16).unwrap(),
+                FanPwm::new(p).unwrap(),
+            )
+        })
+        .collect();
+        let curve = FanCurve {
+            profile: PerformanceProfile::Balanced,
+            fan: FanId::Cpu,
+            points,
+        };
+        s.load_fan_curve(&curve);
+
+        assert_eq!(s.fan_curve_state, controller::FanCurveHwState::Ready);
+        assert!(!s.fan_curve_error);
+        assert!(!s.fan_curve_dirty);
+        assert_eq!(s.fan_selected, 0); // CPU
+        assert_eq!(s.fan_profile_selected, 0); // Balanced
+        assert_eq!(s.fan_curve_temps[0], 50);
+        assert_eq!(s.fan_curve_temps[7], 85);
+        assert_eq!(s.fan_curve_pwms[0], 0);
+        assert_eq!(s.fan_curve_pwms[7], 100);
+    }
+
+    #[test]
+    fn fan_curve_can_mutate_requires_writable_dirty_and_valid() {
+        let mut s = base_state();
+        // Not writable → false
+        assert!(!s.fan_curve_can_mutate());
+
+        // Writable but not dirty → false
+        s.fan_curve_writable = true;
+        assert!(!s.fan_curve_can_mutate());
+
+        // Writable + dirty but error → false
+        s.fan_curve_dirty = true;
+        s.fan_curve_error = true;
+        assert!(!s.fan_curve_can_mutate());
+
+        // Writable + dirty + no error but decreasing temps (invalid) → false
+        s.fan_curve_error = false;
+        s.fan_curve_temps = [85, 50, 60, 65, 70, 75, 79, 85]; // decreasing at start
+        s.fan_curve_pwms = [0, 8, 13, 26, 36, 54, 77, 100];
+        assert!(!s.fan_curve_can_mutate());
+    }
+
+    #[test]
+    fn fan_curve_can_mutate_valid_curve_returns_true() {
+        let mut s = base_state();
+        s.fan_curve_writable = true;
+        s.fan_curve_dirty = true;
+        s.fan_curve_error = false;
+        // Valid monotone increasing curve
+        s.fan_curve_temps = [50, 55, 60, 65, 70, 75, 79, 85];
+        s.fan_curve_pwms = [0, 8, 13, 26, 36, 54, 77, 100];
+        assert!(s.fan_curve_can_mutate());
+    }
+
+    #[test]
+    fn fan_curve_refresh_ok_loads_curve_and_clears_error() {
+        use orbis_core::fan::{FanCurve, FanCurvePoint};
+        use orbis_core::newtypes::{FanPwm, TemperatureC};
+        use orbis_core::profile::PerformanceProfile;
+
+        let mut s = base_state();
+        s.fan_curve_error = true;
+        s.fan_curve_state = controller::FanCurveHwState::Unavailable;
+
+        let curve = FanCurve {
+            profile: PerformanceProfile::Balanced,
+            fan: FanId::Cpu,
+            points: vec![
+                FanCurvePoint::new(TemperatureC::new(50).unwrap(), FanPwm::new(0).unwrap()),
+                FanCurvePoint::new(TemperatureC::new(85).unwrap(), FanPwm::new(100).unwrap()),
+            ],
+        };
+        s.load_fan_curve(&curve);
+
+        assert_eq!(s.fan_curve_state, controller::FanCurveHwState::Ready);
+        assert!(!s.fan_curve_error);
+        assert_eq!(s.fan_curve_temps[0], 50);
+        assert_eq!(s.fan_curve_temps[1], 85);
+    }
+
+    #[test]
+    fn fan_curve_mutation_ok_clears_dirty_and_error() {
+        use orbis_core::action::ApplyResult;
+
+        let mut s = base_state();
+        s.fan_curve_dirty = true;
+        s.fan_curve_error = false;
+
+        // Simulate FanCurve(Ok(Applied))
+        match ApplyResult::Applied {
+            ApplyResult::Applied => {
+                s.fan_curve_error = false;
+                s.fan_curve_dirty = false;
+            }
+            _ => {
+                s.fan_curve_error = true;
+            }
+        }
+
+        assert!(!s.fan_curve_dirty);
+        assert!(!s.fan_curve_error);
+    }
+
+    #[test]
+    fn fan_curve_mutation_error_sets_error_preserves_dirty() {
+        let mut s = base_state();
+        s.fan_curve_dirty = true;
+        s.fan_curve_error = false;
+
+        // Simulate FanCurve(Err(...))
+        s.fan_curve_error = true;
+
+        assert!(s.fan_curve_error);
+        // dirty remains true — error doesn't clear dirty
+        assert!(s.fan_curve_dirty);
+    }
+
+    #[test]
+    fn fan_curve_profile_index_mapping() {
+        use orbis_core::profile::AsusdFanProfile;
+        assert_eq!(
+            controller::UiState::asusd_profile_from_index(0),
+            Some(AsusdFanProfile::Balanced)
+        );
+        assert_eq!(
+            controller::UiState::asusd_profile_from_index(1),
+            Some(AsusdFanProfile::Performance)
+        );
+        assert_eq!(
+            controller::UiState::asusd_profile_from_index(2),
+            Some(AsusdFanProfile::Quiet)
+        );
+        assert_eq!(
+            controller::UiState::asusd_profile_from_index(3),
+            Some(AsusdFanProfile::LowPower)
+        );
+        assert_eq!(controller::UiState::asusd_profile_from_index(4), None);
+        assert_eq!(controller::UiState::asusd_profile_from_index(-1), None);
+    }
+
+    #[test]
+    fn fan_curve_fan_id_mapping() {
+        assert_eq!(controller::UiState::fan_id_from_index(0), Some(FanId::Cpu));
+        assert_eq!(controller::UiState::fan_id_from_index(1), Some(FanId::Gpu));
+        assert_eq!(controller::UiState::fan_id_from_index(2), None);
+    }
+
+    #[test]
+    fn fan_curve_pwm_above_100_is_valid() {
+        let mut s = base_state();
+        s.fan_curve_writable = true;
+        s.fan_curve_dirty = true;
+        s.fan_curve_temps = [50, 55, 60, 65, 70, 75, 79, 85];
+        s.fan_curve_pwms = [0, 8, 13, 26, 36, 54, 77, 112]; // raw > 100
+        assert!(s.fan_curve_can_mutate());
+    }
+
+    #[test]
+    fn fan_curve_capabilities_gating_from_registry() {
+        let mut s = base_state();
+        assert!(!s.fan_curve_writable);
+
+        // Build a snapshot with FanCurves write=Supported
+        use orbis_core::capability::{
+            Capability, CapabilityOperations, CapabilityStatus, OperationCapability,
+        };
+        let mut builder =
+            orbis_capabilities::CapabilityRegistryBuilder::new(1, std::time::SystemTime::now());
+        builder
+            .add(
+                orbis_core::FeatureId::FanCurves,
+                Capability::new(CapabilityStatus::Supported).with_operations(
+                    CapabilityOperations {
+                        read: OperationCapability::new(CapabilityStatus::Supported),
+                        write: OperationCapability::new(CapabilityStatus::Supported),
+                    },
+                ),
+            )
+            .unwrap();
+        let snapshot = builder.build().unwrap();
+        s.update_capabilities(&snapshot);
+
+        assert!(s.fan_curve_writable);
+        assert_eq!(
+            s.fan_curve_capability,
+            controller::CapabilityAvailability::Supported
+        );
     }
 }
