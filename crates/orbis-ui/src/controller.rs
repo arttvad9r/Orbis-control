@@ -54,6 +54,18 @@ impl CapabilityAvailability {
     }
 }
 
+/// Разрешена ли мутация при данном write-operation статусе.
+///
+/// Только `Supported` и `SupportedWithRequirement` открывают mutation control.
+/// Все остальные статусы (`ReadOnly`, `Unsupported`, `BackendMissing`,
+/// `TemporarilyUnavailable`, `PermissionDenied`, `Unknown`) — disabled.
+pub fn write_allows_mutation(status: CapabilityStatus) -> bool {
+    matches!(
+        status,
+        CapabilityStatus::Supported | CapabilityStatus::SupportedWithRequirement
+    )
+}
+
 /// Состояние готовности/доступности Battery Charge Limit.
 ///
 /// Отделено от `charge_limit_enabled` (фактический hardware/backend state):
@@ -336,7 +348,12 @@ impl UiState {
     /// Update capability availability from a registry snapshot.
     ///
     /// Called when the registry is refreshed (generation changes) or initially
-    /// published. Maps each capability's CapabilityStatus to CapabilityAvailability.
+    /// published. Maps each capability's `CapabilityStatus` to
+    /// `CapabilityAvailability` and derives mutation gating from the
+    /// `operations.write.status` of Performance and ChargeLimit.
+    ///
+    /// Observed state (current profile, battery values, GPU states) is never
+    /// touched: capability metadata and observed values stay separate.
     pub fn update_capabilities(
         &mut self,
         snapshot: &orbis_capabilities::CapabilityRegistrySnapshot,
@@ -345,9 +362,11 @@ impl UiState {
 
         if let Some(cap) = snapshot.capability(FeatureId::Performance) {
             self.perf_capability = CapabilityAvailability::from_status(cap.status);
+            self.perf_writable = write_allows_mutation(cap.operations.write.status);
         }
         if let Some(cap) = snapshot.capability(FeatureId::ChargeLimit) {
             self.charge_limit_capability = CapabilityAvailability::from_status(cap.status);
+            self.charge_limit_writable = write_allows_mutation(cap.operations.write.status);
         }
         if let Some(cap) = snapshot.capability(FeatureId::GpuPower) {
             self.gpu_power_capability = CapabilityAvailability::from_status(cap.status);

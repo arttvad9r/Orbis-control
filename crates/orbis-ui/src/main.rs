@@ -300,6 +300,13 @@ fn performance_command_for_click(state: &controller::UiState, index: i32) -> Opt
     performance_profile_from_index(index).map(WorkerCommand::SetPerformance)
 }
 
+/// Rust-side guard for the Battery Charge Limit slider: mutation is allowed
+/// only when the write capability is present AND the authoritative read is
+/// ready. Mirrors the Slint `disabled` binding for the charge slider.
+fn charge_mutation_allowed(state: &controller::UiState) -> bool {
+    state.charge_limit_writable && state.charge_limit_state == controller::ChargeLimitState::Ready
+}
+
 /// Разрешён ли клик по product GPU Mode карточке (приводит ли он к
 /// `SetGpuMode` в worker).
 ///
@@ -781,11 +788,21 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
     }
     {
         let worker_tx = worker_tx.clone();
+        let app_weak = app.as_weak();
         app.on_charge_changed(move |v| {
             let Some(percent) = charge_limit_from_ui(v) else {
                 tracing::warn!("charge-changed с недопустимым значением: {v}");
                 return;
             };
+            // Production guard: disabled slider не должен отправлять mutation,
+            // даже если Slint disabled binding не сработал (защита в глубину).
+            if let Some(app) = app_weak.upgrade() {
+                let s = from_slint(&app.get_ui_state());
+                if !charge_mutation_allowed(&s) {
+                    tracing::warn!("charge-changed игнорирован: ChargeLimit недоступен/read-only");
+                    return;
+                }
+            }
             match &worker_tx {
                 Some(tx) => {
                     tracing::debug!(requested_percent = percent, "battery GUI commit");
@@ -960,12 +977,15 @@ fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
     // Read-only capability probe: the UI becomes writable only when the
     // production Hardware1 name is already owned. No mutation or polling.
-    let (application_runtime, hardware_owner) = runtime.block_on(build_production_runtime(
+    let (application_runtime, _hardware_owner) = runtime.block_on(build_production_runtime(
         session_connection,
         system_connection,
     ))?;
-    state.perf_writable = hardware_owner;
-    state.charge_limit_writable = hardware_owner;
+    // Mutation gating is derived exclusively from the registry snapshot write
+    // capability (`WorkerCommand::RefreshCapabilities` ниже). Until the first
+    // snapshot is published, evidence is absent and controls stay disabled.
+    state.perf_writable = false;
+    state.charge_limit_writable = false;
 
     let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();
 
@@ -1003,6 +1023,14 @@ fn main() -> anyhow::Result<()> {
     // (включая отсутствие orbis-sessiond) не превращается в mock data.
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshPerformance) {
         tracing::warn!("worker закрыт, initial performance refresh не отправлен: {e:?}");
+    }
+
+    // Ровно один initial capability registry refresh. Публикует initial
+    // snapshot в UI state: отсюда derived mutation gating (perf/charge
+    // writable) для существующих controls. Без polling; software failure
+    // сохраняет previous snapshot и gating остаётся disabled.
+    if let Err(e) = worker_tx.send(WorkerCommand::RefreshCapabilities) {
+        tracing::warn!("worker закрыт, initial capability refresh не отправлен: {e:?}");
     }
 
     app.show()?;
@@ -1047,6 +1075,35 @@ mod tests {
             )
             .expect("valid"),
         }
+    }
+
+    /// Собрать registry snapshot, где Performance/ChargeLimit имеют
+    /// `read = Supported` и заданный `write` статус.
+    fn snapshot_with_write(
+        write: orbis_core::capability::CapabilityStatus,
+    ) -> std::sync::Arc<orbis_capabilities::CapabilityRegistrySnapshot> {
+        use orbis_core::capability::{
+            Capability, CapabilityOperations, CapabilityStatus, OperationCapability,
+        };
+        let mut builder =
+            orbis_capabilities::CapabilityRegistryBuilder::new(1, std::time::SystemTime::now());
+        for feature in [
+            orbis_core::FeatureId::Performance,
+            orbis_core::FeatureId::ChargeLimit,
+        ] {
+            builder
+                .add(
+                    feature,
+                    Capability::new(CapabilityStatus::Supported).with_operations(
+                        CapabilityOperations {
+                            read: OperationCapability::new(CapabilityStatus::Supported),
+                            write: OperationCapability::new(write),
+                        },
+                    ),
+                )
+                .expect("capability must validate");
+        }
+        std::sync::Arc::new(builder.build().expect("snapshot must build"))
     }
 
     #[test]
@@ -1410,6 +1467,97 @@ mod tests {
             controller::ChargeLimitState::Ready,
             &missing_effective
         ));
+    }
+
+    #[test]
+    fn charge_mutation_allowed_requires_writable_and_ready() {
+        let mut s = base_state();
+        assert!(s.charge_limit_writable); // mock default writable
+        assert_eq!(s.charge_limit_state, controller::ChargeLimitState::Ready);
+        assert!(charge_mutation_allowed(&s));
+
+        s.charge_limit_writable = false;
+        assert!(!charge_mutation_allowed(&s));
+
+        s.charge_limit_writable = true;
+        s.charge_limit_state = controller::ChargeLimitState::Loading;
+        assert!(!charge_mutation_allowed(&s));
+
+        s.charge_limit_state = controller::ChargeLimitState::Unavailable;
+        assert!(!charge_mutation_allowed(&s));
+    }
+
+    #[test]
+    fn write_status_gating_derives_from_registry() {
+        use orbis_core::capability::CapabilityStatus;
+
+        for (write, expected) in [
+            (CapabilityStatus::Supported, true),
+            (CapabilityStatus::SupportedWithRequirement, true),
+            (CapabilityStatus::ReadOnly, false),
+            (CapabilityStatus::Unsupported, false),
+            (CapabilityStatus::BackendMissing, false),
+            (CapabilityStatus::TemporarilyUnavailable, false),
+            (CapabilityStatus::PermissionDenied, false),
+            (CapabilityStatus::Unknown, false),
+        ] {
+            let mut s = base_state();
+            let snapshot = snapshot_with_write(write);
+            s.update_capabilities(&snapshot);
+            assert_eq!(s.perf_writable, expected, "perf write={write:?}");
+            assert_eq!(s.charge_limit_writable, expected, "charge write={write:?}");
+        }
+    }
+
+    #[test]
+    fn registry_change_updates_gating_without_touching_observed() {
+        use orbis_core::capability::CapabilityStatus;
+
+        let mut s = base_state();
+        // Отличимые observed values.
+        s.perf_selected = 2;
+        s.charge_limit = 60;
+        s.gpu_power_value = 1;
+        s.gpu_mux_value = 2;
+
+        // Write Unsupported → gating disabled, observed values неизменны.
+        let snapshot = snapshot_with_write(CapabilityStatus::Unsupported);
+        apply_performance_event(
+            &mut s,
+            WorkerEvent::RegistryChange(Ok((2, snapshot.clone()))),
+        );
+        assert!(!s.perf_writable);
+        assert!(!s.charge_limit_writable);
+        assert_eq!(s.perf_selected, 2);
+        assert_eq!(s.charge_limit, 60);
+        assert_eq!(s.gpu_power_value, 1);
+        assert_eq!(s.gpu_mux_value, 2);
+
+        // Write Supported → gating enabled, observed values по-прежнему неизменны.
+        let snapshot = snapshot_with_write(CapabilityStatus::Supported);
+        apply_performance_event(
+            &mut s,
+            WorkerEvent::RegistryChange(Ok((3, snapshot.clone()))),
+        );
+        assert!(s.perf_writable);
+        assert!(s.charge_limit_writable);
+        assert_eq!(s.perf_selected, 2);
+        assert_eq!(s.charge_limit, 60);
+        assert_eq!(s.gpu_power_value, 1);
+        assert_eq!(s.gpu_mux_value, 2);
+    }
+
+    #[test]
+    fn disabled_charge_control_does_not_emit_mutation_command() {
+        // Rust-side guard: даже если Slint disabled binding не сработал,
+        // charge mutation разрешена только при writable + Ready.
+        let mut s = base_state();
+        s.charge_limit_writable = false;
+        assert!(!charge_mutation_allowed(&s));
+
+        s.charge_limit_writable = true;
+        s.charge_limit_state = controller::ChargeLimitState::Unavailable;
+        assert!(!charge_mutation_allowed(&s));
     }
 
     #[test]
