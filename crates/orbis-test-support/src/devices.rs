@@ -157,7 +157,9 @@ fn telemetry(cpu: i16, gpu: i16, fans: Vec<(FanId, Rpm)>, battery: bool) -> Tele
                 None
             },
             total: None,
+            gpu: None,
         },
+        ac_online: Some(true),
         battery: if battery {
             Some(BatteryTelemetry {
                 percent: Percent::new(80).expect("pct"),

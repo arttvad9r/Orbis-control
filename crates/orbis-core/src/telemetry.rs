@@ -34,6 +34,12 @@ pub struct PowerTelemetry {
     pub battery: Option<MilliWatt>,
     /// Суммарная мощность, мВт.
     pub total: Option<MilliWatt>,
+    /// Потребление dGPU, мВт (из hwmon amdgpu `power1_input`).
+    ///
+    /// Это telemetry-значение (потребление в ваттах) и НЕ является
+    /// `GpuPowerState` (Active/Suspended/Off) — capability state живёт в
+    /// отдельном `GpuPowerProvider`.
+    pub gpu: Option<MilliWatt>,
 }
 
 /// Телеметрия батареи.
@@ -64,6 +70,8 @@ pub struct Telemetry {
     pub fans: Vec<FanTelemetry>,
     /// Мощности.
     pub power: PowerTelemetry,
+    /// Подключён ли AC-адаптер (из `power_supply` `online`).
+    pub ac_online: Option<bool>,
     /// Батарея.
     pub battery: Option<BatteryTelemetry>,
     /// Фактический power state dGPU.
@@ -80,6 +88,7 @@ impl Telemetry {
             gpu_temp: None,
             fans: Vec::new(),
             power: PowerTelemetry::default(),
+            ac_online: None,
             battery: None,
             gpu_power_state: GpuPowerState::Unknown,
             ts: SystemTime::now(),

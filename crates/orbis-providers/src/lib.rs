@@ -17,6 +17,7 @@ pub mod error;
 pub mod native_asus_eco;
 pub mod probes;
 pub mod supergfxd;
+pub mod sysfs_telemetry;
 pub mod traits;
 
 #[cfg(feature = "mock")]
@@ -27,6 +28,7 @@ pub use native_asus_eco::*;
 pub use probes::{
     probe_charge_limit, probe_gpu_access, probe_gpu_mux, probe_gpu_power, probe_performance,
 };
+pub use sysfs_telemetry::SysfsTelemetryProvider;
 pub use traits::*;
 
 #[cfg(feature = "mock")]
