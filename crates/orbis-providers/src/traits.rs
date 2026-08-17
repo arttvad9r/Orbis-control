@@ -120,6 +120,33 @@ pub trait FanProvider: Provider {
     fn validate_curve(&self, curve: &FanCurve) -> ValidationResult;
 }
 
+/// Typed fan curve mutation (lossless `AsusdFanProfile`, не `PerformanceProfile`).
+///
+/// Отдельный от `FanProvider::set_fan_curve` (который использует
+/// `PerformanceProfile` и теряет различие Quiet/LowPower). Mutation идёт
+/// напрямую к Hardware1 (original caller), не через sessiond.
+#[async_trait]
+pub trait FanCurveMutationProvider: Provider {
+    /// Установить одну fan curve для профиля и вентилятора.
+    ///
+    /// `curve` — ровно 8 `(TemperatureC, FanPwm)` точек (raw PWM 0..255).
+    async fn set_fan_curve(
+        &self,
+        profile: orbis_core::profile::AsusdFanProfile,
+        fan: &orbis_core::fan::FanId,
+        curve: &FanCurvePoints,
+    ) -> Result<ApplyResult, ProviderError>;
+}
+
+/// 8 точек кривой вентилятора (typed, для mutation).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FanCurvePoints {
+    /// 8 температур, °C.
+    pub temps: [orbis_core::newtypes::TemperatureC; 8],
+    /// 8 raw PWM 0..255.
+    pub pwms: [orbis_core::newtypes::FanPwm; 8],
+}
+
 /// Power limits.
 #[async_trait]
 pub trait PowerLimitProvider: Provider {

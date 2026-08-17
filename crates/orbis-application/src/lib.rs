@@ -19,12 +19,13 @@ use std::sync::Arc;
 
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::battery::ChargeLimit;
+use orbis_core::fan::FanId;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
-use orbis_core::profile::PerformanceProfile;
+use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
-    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, GpuProvider,
-    PerformanceProvider,
+    BatteryProvider, FanCurveMutationProvider, FanCurvePoints, GpuAccessProvider, GpuMuxProvider,
+    GpuPowerProvider, GpuProvider, PerformanceProvider,
 };
 
 /// Authoritative состояние Performance Mode.
@@ -325,6 +326,25 @@ where
     }
 }
 
+impl<P> AppService<P>
+where
+    P: FanCurveMutationProvider + Send + Sync,
+{
+    /// Установить одну fan curve (lossless `AsusdFanProfile`).
+    ///
+    /// Вызывает `FanCurveMutationProvider::set_fan_curve` без преобразования;
+    /// `ProviderError` сохраняется. Mutation идёт напрямую к Hardware1
+    /// (original caller), не через sessiond.
+    pub async fn set_fan_curve(
+        &self,
+        profile: AsusdFanProfile,
+        fan: &FanId,
+        curve: &FanCurvePoints,
+    ) -> Result<ApplyResult, ProviderError> {
+        self.provider.set_fan_curve(profile, fan, curve).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -335,15 +355,16 @@ mod tests {
     use orbis_core::action::{ActionRequirement, ApplyResult};
     use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
     use orbis_core::diagnostics::DiagnosticEntry;
+    use orbis_core::fan::FanId;
     use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
     use orbis_core::identity::BackendIdentity;
     use orbis_core::newtypes::Percent;
-    use orbis_core::profile::PerformanceProfile;
+    use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
     use orbis_providers::error::{ProviderError, ValidationResult};
     use orbis_providers::mock::{MockErrorMode, MockProvider};
     use orbis_providers::traits::{
-        BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, GpuProvider,
-        PerformanceProvider, Provider, ProviderHealth,
+        BatteryProvider, FanCurvePoints, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
+        GpuProvider, PerformanceProvider, Provider, ProviderHealth,
     };
     use orbis_test_support::devices::build_state_arc;
 
@@ -1232,5 +1253,59 @@ mod tests {
             svc.gpu_access_policy().await.expect("access"),
             GpuAccessPolicy::Blocked
         );
+    }
+
+    #[tokio::test]
+    async fn fan_curve_mutation_applies_through_mock() {
+        let (provider, svc) = service();
+        let mut temps = [orbis_core::newtypes::TemperatureC::new(0).unwrap(); 8];
+        let mut pwms = [orbis_core::newtypes::FanPwm::new(0).unwrap(); 8];
+        for (i, slot) in temps.iter_mut().enumerate() {
+            *slot = orbis_core::newtypes::TemperatureC::new(40 + i as i16 * 10).unwrap();
+        }
+        for (i, slot) in pwms.iter_mut().enumerate() {
+            *slot = orbis_core::newtypes::FanPwm::new(20 + i as u8 * 10).unwrap();
+        }
+        let points = FanCurvePoints { temps, pwms };
+
+        assert_eq!(
+            svc.set_fan_curve(AsusdFanProfile::Quiet, &FanId::Cpu, &points)
+                .await
+                .expect("set"),
+            ApplyResult::Applied
+        );
+        // Mock хранит кривую по PerformanceProfile::Silent (Quiet → Silent).
+        let state = provider.state();
+        let binding = state.read().await;
+        let stored = binding
+            .fan_curves
+            .get(&(PerformanceProfile::Silent, FanId::Cpu))
+            .expect("stored curve");
+        assert_eq!(stored.points.len(), 8);
+        assert_eq!(stored.points[0].temp.get(), 40);
+        assert_eq!(stored.points[0].pwm.get(), 20);
+    }
+
+    #[tokio::test]
+    async fn fan_curve_mutation_preserves_provider_error() {
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        state.write().await.error_mode = MockErrorMode::PermissionDenied;
+        let provider = Arc::new(MockProvider::new(state));
+        let svc = AppService::new(provider);
+        let mut temps = [orbis_core::newtypes::TemperatureC::new(0).unwrap(); 8];
+        let mut pwms = [orbis_core::newtypes::FanPwm::new(0).unwrap(); 8];
+        for (i, slot) in temps.iter_mut().enumerate() {
+            *slot = orbis_core::newtypes::TemperatureC::new(40 + i as i16 * 10).unwrap();
+        }
+        for (i, slot) in pwms.iter_mut().enumerate() {
+            *slot = orbis_core::newtypes::FanPwm::new(20 + i as u8 * 10).unwrap();
+        }
+        let points = FanCurvePoints { temps, pwms };
+
+        assert!(matches!(
+            svc.set_fan_curve(AsusdFanProfile::Quiet, &FanId::Cpu, &points)
+                .await,
+            Err(ProviderError::PermissionDenied(_))
+        ));
     }
 }

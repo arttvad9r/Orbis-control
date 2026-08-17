@@ -496,6 +496,7 @@ pub async fn probe_capability_registry<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     gpu_mux_provider: &Gmux,
     gpu_access_provider: &Gacc,
     fan_provider: &Fp,
+    fan_write_available: bool,
     generation: u64,
     checked_at: SystemTime,
 ) -> Result<CapabilityRegistrySnapshot, ProbeError>
@@ -579,11 +580,16 @@ where
             }
         })?;
 
-    // Fan curve read capabilities: CPU and GPU active curve reads, write
-    // always Unsupported (read-only backend). Curve points never enter the
-    // registry — only support metadata.
-    let cpu_curve =
-        orbis_providers::probe_fan_curve(fan_provider, &orbis_core::fan::FanId::Cpu).await?;
+    // Fan curve read capabilities: CPU and GPU active curve reads. Write
+    // capability = Supported только если доказан production Hardware1 mutation
+    // contract (fan_write_available). Curve points never enter the registry —
+    // only support metadata.
+    let cpu_curve = orbis_providers::probe_fan_curve(
+        fan_provider,
+        &orbis_core::fan::FanId::Cpu,
+        fan_write_available,
+    )
+    .await?;
     builder
         .add(orbis_core::FeatureId::FanCurves, cpu_curve)
         .map_err(|err| match err {
@@ -615,6 +621,7 @@ pub async fn build_initial_registry_snapshot<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     gpu_mux_provider: &Gmux,
     gpu_access_provider: &Gacc,
     fan_provider: &Fp,
+    fan_write_available: bool,
 ) -> Result<CapabilityRegistrySnapshot, RegistryAssemblyError>
 where
     Bp: orbis_providers::traits::BatteryProvider + ?Sized,
@@ -632,6 +639,7 @@ where
         gpu_mux_provider,
         gpu_access_provider,
         fan_provider,
+        fan_write_available,
         1,
         checked_at,
     )
@@ -652,6 +660,7 @@ pub async fn refresh_capability_registry<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     gpu_mux_provider: &Gmux,
     gpu_access_provider: &Gacc,
     fan_provider: &Fp,
+    fan_write_available: bool,
     next_generation: u64,
 ) -> Result<CapabilityRegistrySnapshot, RefreshError>
 where
@@ -670,6 +679,7 @@ where
         gpu_mux_provider,
         gpu_access_provider,
         fan_provider,
+        fan_write_available,
         next_generation,
         checked_at,
     )
@@ -731,7 +741,7 @@ pub async fn build_production_runtime(
     let battery_arc = Arc::new(battery_provider);
     let performance_arc = Arc::new(SessionHardwarePerformanceProvider::new(
         ZbusSessionPerformanceSource::new(session_connection),
-        ZbusHardwarePerformanceSource::new(system_connection),
+        ZbusHardwarePerformanceSource::new(system_connection.clone()),
     ));
     let battery = AppService::new(battery_arc.clone());
     let performance = AppService::new(performance_arc.clone());
@@ -740,10 +750,15 @@ pub async fn build_production_runtime(
     // writes, no privileged APIs. Construction performs no I/O.
     let telemetry = AppService::new(Arc::new(orbis_providers::SysfsTelemetryProvider::default()));
 
-    // Read-only fan curve provider: dynamic asus_custom_fan_curve discovery,
-    // active curve read, write Unsupported. No writes, no privileged APIs.
-    let fan_provider = orbis_sessiond::fans::SysfsFanCurveProvider::new(
-        orbis_sessiond::fans::SysfsFanCurveSource::default(),
+    // Composed fan curve provider: read через sessiond (asus_custom_fan_curve),
+    // mutation напрямую через Hardware1 (original caller). Write capability
+    // определяется наличием production Hardware1 mutation backend
+    // (hardware_owner). No writes, no privileged APIs.
+    let fan_provider = orbis_session_client::SessionHardwareFanCurveProvider::new(
+        orbis_sessiond::fans::SysfsFanCurveProvider::new(
+            orbis_sessiond::fans::SysfsFanCurveSource::default(),
+        ),
+        orbis_session_client::ZbusHardwareFanCurveSource::new(system_connection.clone()),
     );
 
     let snapshot = build_initial_registry_snapshot(
@@ -753,6 +768,7 @@ pub async fn build_production_runtime(
         gpu.primitive_mux_provider(),
         gpu.primitive_access_provider(),
         &fan_provider,
+        hardware_owner,
     )
     .await?;
 
@@ -851,7 +867,7 @@ mod tests {
             build_state_arc("zephyrus-full").expect("profile exists"),
         ));
         let snapshot = build_initial_registry_snapshot(
-            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider,
+            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, false,
         )
         .await
         .expect("scripted provider must produce a coherent snapshot");
@@ -891,7 +907,7 @@ mod tests {
             build_state_arc("zephyrus-full").expect("profile exists"),
         ));
         let snapshot = build_initial_registry_snapshot(
-            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider,
+            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, false,
         )
         .await
         .expect("scripted provider must produce a coherent snapshot");
@@ -910,7 +926,7 @@ mod tests {
             build_state_arc("zephyrus-full").expect("profile exists"),
         ));
         let snapshot = build_initial_registry_snapshot(
-            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider,
+            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, false,
         )
         .await
         .expect("scripted provider must produce a coherent snapshot");
@@ -922,12 +938,33 @@ mod tests {
         assert_eq!(fan.operations.write.status, CapabilityStatus::Unsupported);
     }
 
+    #[tokio::test]
+    async fn fan_curve_write_is_supported_when_hardware_backend_proven() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let snapshot = build_initial_registry_snapshot(
+            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, true,
+        )
+        .await
+        .expect("scripted provider must produce a coherent snapshot");
+        let fan = snapshot
+            .capability(FeatureId::FanCurves)
+            .expect("fan curve capability present");
+        // Write capability декларативна: Supported только при доказанном
+        // Hardware1 mutation backend; никаких пробных writes.
+        assert_eq!(fan.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(fan.operations.write.status, CapabilityStatus::Supported);
+    }
+
     async fn build_initial_snapshot_for_refresh(
         provider: &MockProvider,
     ) -> CapabilityRegistrySnapshot {
-        build_initial_registry_snapshot(provider, provider, provider, provider, provider, provider)
-            .await
-            .expect("scripted provider must produce a coherent snapshot")
+        build_initial_registry_snapshot(
+            provider, provider, provider, provider, provider, provider, false,
+        )
+        .await
+        .expect("scripted provider must produce a coherent snapshot")
     }
 
     fn script_gpu_runtime(provider: std::sync::Arc<MockProvider>) -> MockRuntime {
@@ -960,6 +997,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
+            false,
             runtime.capabilities().generation() + 1,
         )
         .await
@@ -976,6 +1014,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
+            false,
             runtime.capabilities().generation() + 1,
         )
         .await
@@ -1011,6 +1050,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
+            false,
             pre_generation + 1,
         )
         .await
@@ -1039,6 +1079,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
+            false,
             runtime.capabilities().generation() + 1,
         )
         .await

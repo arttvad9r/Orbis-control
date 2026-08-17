@@ -18,16 +18,18 @@ use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
 use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
 use orbis_core::diagnostics::DiagnosticEntry;
+use orbis_core::fan::FanId;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::Percent;
-use orbis_core::profile::PerformanceProfile;
+use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_hardwared::battery::validate_charge_limit;
+use orbis_hardwared::fans::{FanCurveWire, fan_profile_from_wire};
 use orbis_hardwared::{DBUS_OBJECT_PATH, Hardware1Proxy};
 use orbis_providers::error::{ProviderError, ValidationResult};
 use orbis_providers::traits::{
-    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
-    Provider, ProviderHealth,
+    BatteryProvider, FanCurveMutationProvider, FanCurvePoints, FanProvider, GpuAccessProvider,
+    GpuMuxProvider, GpuPowerProvider, PerformanceProvider, Provider, ProviderHealth,
 };
 use orbis_session_protocol::{
     ChargeLimitInfo, PerformanceInfo, Session1Proxy, gpu_access, gpu_mux, gpu_power, performance,
@@ -605,6 +607,55 @@ pub trait HardwareBatterySource: Send + Sync {
     async fn set_charge_limit(&self, percent: u8) -> Result<u8, ProviderError>;
 }
 
+/// Testable direct system-bus source для fan curve mutation через Hardware1.
+#[async_trait]
+pub trait HardwareFanCurveSource: Send + Sync {
+    /// Установить одну fan curve; вернуть подтверждённый profile wire value.
+    async fn set_fan_curve(
+        &self,
+        profile: u32,
+        fan: u8,
+        curve: orbis_hardwared::fans::FanCurveWire,
+    ) -> Result<u32, ProviderError>;
+}
+
+/// Реальный direct system-bus источник fan curve mutation через Hardware1.
+///
+/// Connection создаётся и хранится в application/GUI process; sessiond в этот
+/// путь не входит и sender Hardware1 остаётся исходным caller process.
+pub struct ZbusHardwareFanCurveSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusHardwareFanCurveSource {
+    /// Создать источник над готовой system-bus Connection.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl HardwareFanCurveSource for ZbusHardwareFanCurveSource {
+    async fn set_fan_curve(
+        &self,
+        profile: u32,
+        fan: u8,
+        curve: orbis_hardwared::fans::FanCurveWire,
+    ) -> Result<u32, ProviderError> {
+        let proxy = Hardware1Proxy::builder(&self.connection)
+            .path(DBUS_OBJECT_PATH)
+            .expect("valid hardware object path")
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .set_fan_curve(profile, fan, curve)
+            .await
+            .map_err(zbus_error_to_provider)
+    }
+}
+
 /// Реальный direct system-bus источник Battery mutation через Hardware1.
 ///
 /// Connection создаётся и хранится в application/GUI process; sessiond в этот
@@ -978,11 +1029,205 @@ where
     }
 }
 
+/// Composed fan curve mutation provider: read через `FanProvider`
+/// (sessiond read-only backend), mutation напрямую через Hardware1
+/// (`HardwareFanCurveSource`).
+///
+/// Mutation использует lossless `AsusdFanProfile` (не `PerformanceProfile`),
+/// чтобы Quiet/LowPower оставались различимыми. Original caller сохраняется:
+/// connection живёт в application/GUI process, sessiond в путь не входит.
+pub struct SessionHardwareFanCurveProvider<S, H> {
+    session: S,
+    hardware: H,
+}
+
+impl<S, H> SessionHardwareFanCurveProvider<S, H> {
+    /// Создать composed provider без I/O на construction.
+    pub fn new(session: S, hardware: H) -> Self {
+        Self { session, hardware }
+    }
+}
+
+impl<S, H> Provider for SessionHardwareFanCurveProvider<S, H>
+where
+    S: FanProvider,
+    H: HardwareFanCurveSource,
+{
+    fn id(&self) -> &'static str {
+        "session-hardware-fan-curve"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("session-hardware-fan-curve")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("session + hardware fan curve backend: функция '{feature}' недоступна")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.session-hardware-fan-curve",
+            "composed session read + hardware mutation fan curve backend",
+        )]
+    }
+}
+
+#[async_trait]
+impl<S, H> FanProvider for SessionHardwareFanCurveProvider<S, H>
+where
+    S: FanProvider,
+    H: HardwareFanCurveSource,
+{
+    async fn fan_ids(&self) -> Result<Vec<FanId>, ProviderError> {
+        self.session.fan_ids().await
+    }
+
+    async fn fan_rpms(&self) -> Result<Vec<(FanId, orbis_core::newtypes::Rpm)>, ProviderError> {
+        self.session.fan_rpms().await
+    }
+
+    async fn fan_curve(
+        &self,
+        profile: PerformanceProfile,
+        fan: &FanId,
+    ) -> Result<orbis_core::fan::FanCurve, ProviderError> {
+        self.session.fan_curve(profile, fan).await
+    }
+
+    async fn active_curve(&self, fan: &FanId) -> Result<orbis_core::fan::FanCurve, ProviderError> {
+        self.session.active_curve(fan).await
+    }
+
+    async fn set_fan_curve(
+        &self,
+        _curve: &orbis_core::fan::FanCurve,
+    ) -> Result<ApplyResult, ProviderError> {
+        // PerformanceProfile-based mutation не поддерживается: используйте
+        // `FanCurveMutationProvider::set_fan_curve` (lossless AsusdFanProfile).
+        Err(ProviderError::Unsupported(
+            "fan curve mutation: используйте typed FanCurveMutationProvider (AsusdFanProfile), не PerformanceProfile-based set_fan_curve".into(),
+        ))
+    }
+
+    async fn set_curves_to_defaults(
+        &self,
+        _profile: PerformanceProfile,
+    ) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "fan curve defaults/reset не поддерживается".into(),
+        ))
+    }
+
+    fn curve_point_count(&self) -> usize {
+        self.session.curve_point_count()
+    }
+
+    fn allow_decreasing(&self) -> bool {
+        self.session.allow_decreasing()
+    }
+
+    fn validate_curve(&self, curve: &orbis_core::fan::FanCurve) -> ValidationResult {
+        self.session.validate_curve(curve)
+    }
+}
+
+#[async_trait]
+impl<S, H> FanCurveMutationProvider for SessionHardwareFanCurveProvider<S, H>
+where
+    S: FanProvider,
+    H: HardwareFanCurveSource,
+{
+    async fn set_fan_curve(
+        &self,
+        profile: AsusdFanProfile,
+        fan: &FanId,
+        curve: &FanCurvePoints,
+    ) -> Result<ApplyResult, ProviderError> {
+        let requested_profile = profile.wire();
+        let requested_fan = fan_wire_from_id(fan)?;
+        let mut temps = Vec::with_capacity(curve.temps.len());
+        for temp in &curve.temps {
+            let raw = temp.get();
+            let raw_u8 = u8::try_from(raw).map_err(|_| {
+                ProviderError::InvalidRequest(format!(
+                    "hardware fan curve: температура {raw} вне wire диапазона 0..=255"
+                ))
+            })?;
+            temps.push(raw_u8);
+        }
+        let wire = FanCurveWire {
+            temps,
+            pwms: curve.pwms.iter().map(|p| p.get()).collect(),
+        };
+        tracing::debug!(
+            requested_profile,
+            requested_fan,
+            temps = ?wire.temps,
+            pwms = ?wire.pwms,
+            "fan curve hardware mutation request"
+        );
+        let confirmed = match self
+            .hardware
+            .set_fan_curve(requested_profile, requested_fan, wire)
+            .await
+        {
+            Ok(confirmed) => {
+                tracing::debug!(
+                    requested_profile,
+                    confirmed_profile = confirmed,
+                    "fan curve hardware mutation reply"
+                );
+                confirmed
+            }
+            Err(error) => {
+                tracing::debug!(
+                    requested_profile,
+                    error = ?error,
+                    "fan curve hardware mutation error"
+                );
+                return Err(error);
+            }
+        };
+        let confirmed_profile = fan_profile_from_wire(confirmed)?;
+        if confirmed_profile != profile {
+            return Err(ProviderError::Internal(format!(
+                "hardware protocol: подтверждён другой fan profile: requested={profile:?}, confirmed={confirmed_profile:?}"
+            )));
+        }
+        Ok(ApplyResult::Applied)
+    }
+}
+
+/// Strict mapping `FanId` → wire `u8` (0=CPU, 1=GPU) для Hardware1.
+///
+/// Hardware1 поддерживает только CPU/GPU; остальные `FanId` — `InvalidRequest`.
+fn fan_wire_from_id(fan: &FanId) -> Result<u8, ProviderError> {
+    match fan {
+        FanId::Cpu => Ok(0),
+        FanId::Gpu => Ok(1),
+        other => Err(ProviderError::InvalidRequest(format!(
+            "hardware fan curve: неподдерживаемый fan {other:?} (только CPU/GPU)"
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use orbis_core::fan::{FanCurve, FanCurvePoint};
+    use orbis_core::newtypes::{FanPwm, TemperatureC};
 
     use super::*;
 
@@ -1599,5 +1844,275 @@ mod tests {
         let provider = SessionPerformanceProvider::new(source);
         assert_eq!(provider.profile_on_ac().await.expect("ac"), None);
         assert_eq!(provider.profile_on_battery().await.expect("battery"), None);
+    }
+
+    /// Mock read-only FanProvider (delegates nothing; only used for read).
+    struct ScriptedFanReadProvider {
+        active: FanCurve,
+    }
+
+    impl ScriptedFanReadProvider {
+        fn new(active: FanCurve) -> Self {
+            Self { active }
+        }
+    }
+
+    impl Provider for ScriptedFanReadProvider {
+        fn id(&self) -> &'static str {
+            "scripted-fan-read"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-fan-read")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted fan read: функция '{feature}' недоступна")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl FanProvider for ScriptedFanReadProvider {
+        async fn fan_ids(&self) -> Result<Vec<FanId>, ProviderError> {
+            Ok(vec![FanId::Cpu, FanId::Gpu])
+        }
+
+        async fn fan_rpms(&self) -> Result<Vec<(FanId, orbis_core::newtypes::Rpm)>, ProviderError> {
+            Err(ProviderError::Unsupported("no rpm".into()))
+        }
+
+        async fn fan_curve(
+            &self,
+            _profile: PerformanceProfile,
+            _fan: &FanId,
+        ) -> Result<orbis_core::fan::FanCurve, ProviderError> {
+            Err(ProviderError::Unsupported("no profile curve".into()))
+        }
+
+        async fn active_curve(
+            &self,
+            _fan: &FanId,
+        ) -> Result<orbis_core::fan::FanCurve, ProviderError> {
+            Ok(self.active.clone())
+        }
+
+        async fn set_fan_curve(
+            &self,
+            _curve: &orbis_core::fan::FanCurve,
+        ) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("read-only".into()))
+        }
+
+        async fn set_curves_to_defaults(
+            &self,
+            _profile: PerformanceProfile,
+        ) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("read-only".into()))
+        }
+
+        fn curve_point_count(&self) -> usize {
+            8
+        }
+
+        fn allow_decreasing(&self) -> bool {
+            false
+        }
+
+        fn validate_curve(&self, curve: &orbis_core::fan::FanCurve) -> ValidationResult {
+            match curve.validate(self.curve_point_count(), self.allow_decreasing()) {
+                Ok(()) => ValidationResult::ok(),
+                Err(e) => ValidationResult::invalid(e.to_string()),
+            }
+        }
+    }
+
+    /// Mock HardwareFanCurveSource: записывает запрос, возвращает scripted результат.
+    struct ScriptedFanHardwareSource {
+        result: Mutex<Option<Result<u32, ProviderError>>>,
+        requests: Mutex<Vec<(u32, u8, FanCurveWire)>>,
+    }
+
+    impl ScriptedFanHardwareSource {
+        fn new(result: Result<u32, ProviderError>) -> Self {
+            Self {
+                result: Mutex::new(Some(result)),
+                requests: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl HardwareFanCurveSource for ScriptedFanHardwareSource {
+        async fn set_fan_curve(
+            &self,
+            profile: u32,
+            fan: u8,
+            curve: FanCurveWire,
+        ) -> Result<u32, ProviderError> {
+            self.requests.lock().unwrap().push((profile, fan, curve));
+            self.result
+                .lock()
+                .unwrap()
+                .take()
+                .expect("scripted fan hardware source: one mutation expected")
+        }
+    }
+
+    fn fan_curve_points() -> FanCurvePoints {
+        let mut temps = [TemperatureC::new(0).expect("temp"); 8];
+        let mut pwms = [FanPwm::new(0).expect("pwm"); 8];
+        for (i, slot) in temps.iter_mut().enumerate() {
+            *slot = TemperatureC::new(40 + i as i16 * 10).expect("temp");
+        }
+        for (i, slot) in pwms.iter_mut().enumerate() {
+            *slot = FanPwm::new(20 + i as u8 * 10).expect("pwm");
+        }
+        FanCurvePoints { temps, pwms }
+    }
+
+    #[tokio::test]
+    async fn fan_mutation_writes_direct_hardware_and_confirms_profile() {
+        let session = ScriptedFanReadProvider::new(active_curve_fixture());
+        let hardware = ScriptedFanHardwareSource::new(Ok(AsusdFanProfile::Quiet.wire()));
+        let provider = SessionHardwareFanCurveProvider::new(session, hardware);
+        let points = fan_curve_points();
+
+        assert_eq!(
+            orbis_providers::traits::FanCurveMutationProvider::set_fan_curve(
+                &provider,
+                AsusdFanProfile::Quiet,
+                &FanId::Cpu,
+                &points
+            )
+            .await
+            .expect("set"),
+            ApplyResult::Applied
+        );
+        let (profile, fan, curve) = &provider.hardware.requests.lock().unwrap()[0];
+        assert_eq!(*profile, AsusdFanProfile::Quiet.wire());
+        assert_eq!(*fan, 0);
+        assert_eq!(curve.temps.len(), 8);
+        assert_eq!(curve.pwms.len(), 8);
+        assert_eq!(curve.temps[0], 40);
+        assert_eq!(curve.pwms[0], 20);
+    }
+
+    #[tokio::test]
+    async fn fan_mutation_rejects_mismatched_confirmation() {
+        let session = ScriptedFanReadProvider::new(active_curve_fixture());
+        let hardware = ScriptedFanHardwareSource::new(Ok(AsusdFanProfile::Balanced.wire()));
+        let provider = SessionHardwareFanCurveProvider::new(session, hardware);
+        let points = fan_curve_points();
+
+        assert!(matches!(
+            orbis_providers::traits::FanCurveMutationProvider::set_fan_curve(
+                &provider,
+                AsusdFanProfile::Quiet,
+                &FanId::Cpu,
+                &points
+            )
+            .await,
+            Err(ProviderError::Internal(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn fan_mutation_rejects_unknown_confirmation_wire() {
+        let session = ScriptedFanReadProvider::new(active_curve_fixture());
+        let hardware = ScriptedFanHardwareSource::new(Ok(99));
+        let provider = SessionHardwareFanCurveProvider::new(session, hardware);
+        let points = fan_curve_points();
+
+        assert!(matches!(
+            orbis_providers::traits::FanCurveMutationProvider::set_fan_curve(
+                &provider,
+                AsusdFanProfile::Quiet,
+                &FanId::Cpu,
+                &points
+            )
+            .await,
+            Err(ProviderError::InvalidRequest(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn fan_mutation_preserves_hardware_error() {
+        let session = ScriptedFanReadProvider::new(active_curve_fixture());
+        let hardware =
+            ScriptedFanHardwareSource::new(Err(ProviderError::PermissionDenied("denied".into())));
+        let provider = SessionHardwareFanCurveProvider::new(session, hardware);
+        let points = fan_curve_points();
+
+        assert!(matches!(
+            orbis_providers::traits::FanCurveMutationProvider::set_fan_curve(
+                &provider,
+                AsusdFanProfile::Quiet,
+                &FanId::Cpu,
+                &points
+            )
+            .await,
+            Err(ProviderError::PermissionDenied(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn fan_mutation_rejects_non_cpu_gpu_fan() {
+        let session = ScriptedFanReadProvider::new(active_curve_fixture());
+        let hardware = ScriptedFanHardwareSource::new(Ok(AsusdFanProfile::Quiet.wire()));
+        let provider = SessionHardwareFanCurveProvider::new(session, hardware);
+        let points = fan_curve_points();
+
+        assert!(matches!(
+            orbis_providers::traits::FanCurveMutationProvider::set_fan_curve(
+                &provider,
+                AsusdFanProfile::Quiet,
+                &FanId::Mid,
+                &points
+            )
+            .await,
+            Err(ProviderError::InvalidRequest(_))
+        ));
+        assert!(provider.hardware.requests.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn fan_read_delegates_to_session_provider() {
+        let session = ScriptedFanReadProvider::new(active_curve_fixture());
+        let hardware = ScriptedFanHardwareSource::new(Ok(AsusdFanProfile::Quiet.wire()));
+        let provider = SessionHardwareFanCurveProvider::new(session, hardware);
+
+        let curve = provider.active_curve(&FanId::Cpu).await.expect("active");
+        assert_eq!(curve.points.len(), 8);
+        assert!(matches!(
+            orbis_providers::traits::FanProvider::set_fan_curve(&provider, &curve).await,
+            Err(ProviderError::Unsupported(_))
+        ));
+    }
+
+    fn active_curve_fixture() -> FanCurve {
+        let mut points = Vec::new();
+        for i in 0..8 {
+            points.push(FanCurvePoint::new(
+                TemperatureC::new(40 + i as i16 * 10).expect("temp"),
+                FanPwm::new(20 + i as u8 * 10).expect("pwm"),
+            ));
+        }
+        FanCurve {
+            profile: PerformanceProfile::Balanced,
+            fan: FanId::Cpu,
+            points,
+        }
     }
 }

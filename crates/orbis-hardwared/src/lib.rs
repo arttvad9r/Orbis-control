@@ -794,6 +794,9 @@ pub trait Hardware1 {
 
     /// Set one supergfxd backend mode and return staged observation.
     fn set_gpu_mode(&self, requested_mode: u32) -> zbus::Result<GpuMutationResult>;
+
+    /// Установить одну fan curve; возвращает подтверждённый profile wire.
+    fn set_fan_curve(&self, profile: u32, fan: u8, curve: fans::FanCurveWire) -> zbus::Result<u32>;
 }
 
 #[cfg(test)]

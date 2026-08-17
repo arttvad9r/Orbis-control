@@ -187,22 +187,42 @@ where
 /// Probe fan curve read capability for a specific fan.
 ///
 /// Reads the active curve (read-only) to establish the read contract; the
-/// curve points are discarded and never enter the capability metadata. Write
-/// is always `Unsupported` (read-only fan curve backend).
+/// curve points are discarded and never enter the capability metadata.
+///
+/// Write capability: `Supported` только если доказан production Hardware1
+/// mutation contract (`write_available = true`). Никаких пробных writes —
+/// write status определяется декларативно по наличию mutation backend.
 pub async fn probe_fan_curve<P>(
     provider: &P,
     fan: &orbis_core::fan::FanId,
+    write_available: bool,
 ) -> Result<Capability, ProbeError>
 where
     P: FanProvider + ?Sized,
 {
+    let write = if write_available {
+        ProbeOperationResult::classified(ProbeClassification::Supported).into_operation()
+    } else {
+        unsupported_write()
+    };
     match provider.active_curve(fan).await {
-        Ok(_) => Ok(supported_read_only()),
+        Ok(_) => Ok(capability_from_operations(
+            CapabilityOperations {
+                read: ProbeOperationResult::classified(ProbeClassification::Supported)
+                    .into_operation(),
+                write,
+            },
+            CapabilityConstraints::Unknown,
+        )),
         Err(error) => {
             let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            // Write не фальсифицируется: при структурном отказе read write
+            // определяется по статусу read (BackendMissing/Unsupported/...),
+            // даже если Hardware1 mutation backend доказан.
+            let write = write_from_read_failure(&read);
             Ok(capability_from_read(
                 read,
-                unsupported_write(),
+                write,
                 CapabilityConstraints::Unknown,
             ))
         }
@@ -917,5 +937,169 @@ mod tests {
         assert!(snapshot.contains(orbis_core::FeatureId::GpuPower));
         assert!(snapshot.contains(orbis_core::FeatureId::GpuMux));
         assert!(snapshot.contains(orbis_core::FeatureId::GpuAccess));
+    }
+
+    /// Mock FanProvider: scripted active_curve результат.
+    struct ScriptedFanProvider {
+        active: Scripted<orbis_core::fan::FanCurve>,
+    }
+
+    impl ScriptedFanProvider {
+        fn ok() -> Self {
+            Self {
+                active: Scripted::Value(orbis_core::fan::FanCurve {
+                    profile: PerformanceProfile::Balanced,
+                    fan: orbis_core::fan::FanId::Cpu,
+                    points: vec![
+                        orbis_core::fan::FanCurvePoint::new(
+                            orbis_core::newtypes::TemperatureC::new(40).unwrap(),
+                            orbis_core::newtypes::FanPwm::new(20).unwrap(),
+                        ),
+                        orbis_core::fan::FanCurvePoint::new(
+                            orbis_core::newtypes::TemperatureC::new(50).unwrap(),
+                            orbis_core::newtypes::FanPwm::new(40).unwrap(),
+                        ),
+                    ],
+                }),
+            }
+        }
+
+        fn backend_missing() -> Self {
+            Self {
+                active: Scripted::Error(ScriptedError::BackendMissing),
+            }
+        }
+    }
+
+    impl Provider for ScriptedFanProvider {
+        fn id(&self) -> &'static str {
+            "scripted-fan"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-fan")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted fan: функция '{feature}' недоступна")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl FanProvider for ScriptedFanProvider {
+        async fn fan_ids(&self) -> Result<Vec<orbis_core::fan::FanId>, ProviderError> {
+            Ok(vec![orbis_core::fan::FanId::Cpu])
+        }
+
+        async fn fan_rpms(
+            &self,
+        ) -> Result<Vec<(orbis_core::fan::FanId, orbis_core::newtypes::Rpm)>, ProviderError>
+        {
+            Err(ProviderError::Unsupported("no rpm".into()))
+        }
+
+        async fn fan_curve(
+            &self,
+            _profile: PerformanceProfile,
+            _fan: &orbis_core::fan::FanId,
+        ) -> Result<orbis_core::fan::FanCurve, ProviderError> {
+            Err(ProviderError::Unsupported("no profile curve".into()))
+        }
+
+        async fn active_curve(
+            &self,
+            _fan: &orbis_core::fan::FanId,
+        ) -> Result<orbis_core::fan::FanCurve, ProviderError> {
+            self.active.result()
+        }
+
+        async fn set_fan_curve(
+            &self,
+            _curve: &orbis_core::fan::FanCurve,
+        ) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("read-only".into()))
+        }
+
+        async fn set_curves_to_defaults(
+            &self,
+            _profile: PerformanceProfile,
+        ) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("read-only".into()))
+        }
+
+        fn curve_point_count(&self) -> usize {
+            8
+        }
+
+        fn allow_decreasing(&self) -> bool {
+            false
+        }
+
+        fn validate_curve(&self, _curve: &orbis_core::fan::FanCurve) -> ValidationResult {
+            ValidationResult::ok()
+        }
+    }
+
+    #[tokio::test]
+    async fn fan_curve_probe_reports_write_unsupported_without_hardware_backend() {
+        let provider = ScriptedFanProvider::ok();
+        let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
+
+    #[tokio::test]
+    async fn fan_curve_probe_reports_write_supported_when_hardware_backend_proven() {
+        let provider = ScriptedFanProvider::ok();
+        let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(capability.status, CapabilityStatus::Supported);
+    }
+
+    #[tokio::test]
+    async fn fan_curve_probe_write_mirrors_backend_missing_when_read_fails() {
+        let provider = ScriptedFanProvider::backend_missing();
+        let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::BackendMissing
+        );
+        // Write не фальсифицируется: при структурном отказе read write тоже
+        // BackendMissing, даже если Hardware1 backend доказан.
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::BackendMissing
+        );
     }
 }

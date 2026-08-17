@@ -16,21 +16,21 @@ use orbis_core::automation::{AutomationAction, AutomationRule, AutomationTrigger
 use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::display::DisplayMode;
-use orbis_core::fan::{FanCurve, FanId};
+use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
 use orbis_core::lighting::LightingMode;
 use orbis_core::limits::{PowerLimitField, PowerLimits};
 use orbis_core::newtypes::{Percent, RefreshHz, Rpm};
-use orbis_core::profile::PerformanceProfile;
+use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_core::telemetry::Telemetry;
 
 use crate::error::{OperationId, ProviderError, ValidationResult};
 use crate::traits::{
-    AnimeProvider, AutomationProvider, BatteryProvider, DisplayProvider, FanProvider,
-    FirmwareUpdate, FirmwareUpdateProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
-    GpuProvider, HotkeyProvider, LightingProvider, PerformanceProvider, PowerLimitProvider,
-    Provider, ProviderHealth, TelemetryProvider,
+    AnimeProvider, AutomationProvider, BatteryProvider, DisplayProvider, FanCurveMutationProvider,
+    FanCurvePoints, FanProvider, FirmwareUpdate, FirmwareUpdateProvider, GpuAccessProvider,
+    GpuMuxProvider, GpuPowerProvider, GpuProvider, HotkeyProvider, LightingProvider,
+    PerformanceProvider, PowerLimitProvider, Provider, ProviderHealth, TelemetryProvider,
 };
 
 /// Способ имитации ошибки в mock-режиме.
@@ -439,6 +439,37 @@ impl FanProvider for MockProvider {
             Ok(()) => ValidationResult::Valid,
             Err(e) => ValidationResult::Invalid(e.to_string()),
         }
+    }
+}
+
+#[async_trait]
+impl FanCurveMutationProvider for MockProvider {
+    async fn set_fan_curve(
+        &self,
+        profile: AsusdFanProfile,
+        fan: &FanId,
+        curve: &FanCurvePoints,
+    ) -> Result<ApplyResult, ProviderError> {
+        // Mock хранит profile-specific curves по PerformanceProfile; для
+        // mutation маппим lossless AsusdFanProfile → PerformanceProfile
+        // (mock semantics, не hardware evidence).
+        let perf = PerformanceProfile::from(profile);
+        let fan_curve = FanCurve {
+            profile: perf,
+            fan: fan.clone(),
+            points: curve
+                .temps
+                .iter()
+                .zip(curve.pwms.iter())
+                .map(|(t, p)| FanCurvePoint::new(*t, *p))
+                .collect(),
+        };
+        self.validate_curve(&fan_curve).into_result()?;
+        self.mutate(|s| {
+            s.fan_curves.insert((perf, fan.clone()), fan_curve.clone());
+            Ok(ApplyResult::Applied)
+        })
+        .await
     }
 }
 
@@ -937,7 +968,7 @@ mod tests {
         let (_, provider) = setup();
         let mut curve = default_curve(PerformanceProfile::Balanced, FanId::Cpu);
         curve.points[1].temp = orbis_core::newtypes::TemperatureC::new(30).unwrap(); // убывание
-        assert!(provider.set_fan_curve(&curve).await.is_err());
+        assert!(FanProvider::set_fan_curve(&provider, &curve).await.is_err());
     }
 
     #[tokio::test]
