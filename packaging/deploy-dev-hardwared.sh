@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # deploy-dev-hardwared — standalone Orbis Hardware1 deployment.
 #
-# Использует НАРЯДНЫЙ пакет orbis-hardwared (без GUI/Slint deps).
-# Сборка занимает ~1-2 минуты вместо ~20 минут полного orbis-control.
+# Обновляет ТОЛЬКО бинарник и systemd unit.
+# D-Bus policy и polkit actions регистрируются через NixOS один раз
+# (nixosModules.orbis-hardwared-policies), НЕ через этот скрипт.
 #
-# Идемпотентен: повторный запуск обновляет binary + policies + unit.
+# Идемпотентен: повторный запуск обновляет binary + unit.
 #
 # Использование:
 #   sudo bash packaging/deploy-dev-hardwared.sh [--stop]
@@ -18,8 +19,6 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ─── Пути ───────────────────────────────────────────────────────────
 STABLE_BIN="/usr/local/bin"
-DBUS_CONF="/etc/dbus-1/system.d"
-POLKIT_DIR="/etc/polkit-1/actions"
 SYSTEMD_DIR="/etc/systemd/system"
 SERVICE_NAME="orbis-hardwared"
 SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}.service"
@@ -56,14 +55,12 @@ echo "✓ [BUILD] Пакет: $BUILD_PATH"
 # ─── DIRECTORY PREP ──────────────────────────────────────────────────
 echo "→ [DIR] Создаём целевые директории…"
 install -d -m 0755 "${STABLE_BIN}"
-install -d -m 0755 "${DBUS_CONF}"
-install -d -m 0755 "${POLKIT_DIR}"
 install -d -m 0755 "${SYSTEMD_DIR}"
 install -d -m 0755 "$(dirname "$GC_ROOT")"
 echo "✓ Директории готовы"
 
-# ─── INSTALL ────────────────────────────────────────────────────────
-echo "→ [INSTALL] Создаём persistent GC root…"
+# ─── GC ROOT ────────────────────────────────────────────────────────
+echo "→ [GC] Создаём persistent GC root…"
 nix-store --add-root "$GC_ROOT" -r "$BUILD_PATH" >/dev/null 2>&1
 if [[ -L "$GC_ROOT" ]]; then
   echo "✓ GC root: $GC_ROOT → $(readlink "$GC_ROOT")"
@@ -71,59 +68,14 @@ else
   echo "✓ GC root создан: $GC_ROOT"
 fi
 
+# ─── INSTALL BINARY ────────────────────────────────────────────────
 echo "→ [INSTALL] Устанавливаем бинарник…"
 install -m 0755 "$BUILD_PATH/bin/orbis-hardwared" "${STABLE_BIN}/orbis-hardwared"
 echo "✓ ${STABLE_BIN}/orbis-hardwared"
 
-# ─── DBUS ───────────────────────────────────────────────────────────
-echo "→ [DBUS] Устанавливаем D-Bus policy…"
-install -m 0644 "$BUILD_PATH/share/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf" \
-      "${DBUS_CONF}/io.github.orbiscontrol.Hardware.conf"
-echo "✓ D-Bus policy: ${DBUS_CONF}/io.github.orbiscontrol.Hardware.conf"
-
-# ─── POLKIT ─────────────────────────────────────────────────────────
-echo "→ [POLKIT] Устанавливаем polkit actions…"
-install -m 0644 "$BUILD_PATH/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy" \
-      "${POLKIT_DIR}/io.github.orbiscontrol.hardware.policy"
-echo "✓ Polkit: ${POLKIT_DIR}/io.github.orbiscontrol.hardware.policy"
-
 # ─── SYSTEMD ────────────────────────────────────────────────────────
 echo "→ [SYSTEMD] Устанавливаем systemd unit…"
-TMPUNIT="$(mktemp)"
-cat > "${TMPUNIT}" << 'UNIT'
-[Unit]
-Description=Orbis Control hardware helper (standalone dev deployment)
-X-StopOnRemoval=false
-After=dbus.service
-Requires=dbus.service
-
-[Service]
-Type=dbus
-BusName=io.github.orbiscontrol.Hardware
-ExecStart=/usr/local/bin/orbis-hardwared
-Restart=on-failure
-RestartSec=2s
-X-RestartIfChanged=false
-
-# Sandbox (threat-model §3.3)
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-PrivateDevices=true
-ProtectControlGroups=true
-RestrictAddressFamilies=AF_UNIX
-MemoryDenyWriteExecute=true
-AmbientCapabilities=
-CapabilityBoundingSet=
-
-# /sys read-only, на write ТОЛЬКО platform_profile
-ReadOnlyPaths=/sys
-ReadWritePaths=-/sys/firmware/acpi/platform_profile
-UNIT
-
-install -m 0644 "${TMPUNIT}" "${SERVICE_FILE}"
-rm -f "${TMPUNIT}"
+install -m 0644 "${SCRIPT_DIR}/orbis-hardwared.service" "${SERVICE_FILE}"
 echo "✓ Unit: ${SERVICE_FILE}"
 
 # ─── START ──────────────────────────────────────────────────────────
@@ -143,3 +95,5 @@ echo "✓ Deploy завершён."
 echo "  Бинарник: ${STABLE_BIN}/orbis-hardwared"
 echo "  GC root:  ${GC_ROOT}"
 echo "  Unit:     ${SERVICE_FILE}"
+echo ""
+echo "  D-Bus/polkit registration: через NixOS (orbis-hardwared-policies)"

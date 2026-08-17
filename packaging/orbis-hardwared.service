@@ -1,0 +1,38 @@
+# orbis-hardwared.service — standalone dev deployment unit.
+#
+# Устанавливается deploy-dev-hardwared.sh в /etc/systemd/system/.
+# NixOS НЕ управляет этим service (module.nix не создаёт его).
+#
+# X-StopOnRemoval=false: при удалении unit'а systemd НЕ останавливает service.
+# X-RestartIfChanged=false: при обновлении unit'а systemd НЕ перезапускает
+#   service (deploy скрипт делает explicit restart).
+
+[Unit]
+Description=Orbis Control hardware helper (standalone dev deployment)
+X-StopOnRemoval=false
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=dbus
+BusName=io.github.orbiscontrol.Hardware
+ExecStart=/usr/local/bin/orbis-hardwared
+Restart=on-failure
+RestartSec=2s
+X-RestartIfChanged=false
+
+# Sandbox (threat-model §3.3)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+MemoryDenyWriteExecute=true
+AmbientCapabilities=
+CapabilityBoundingSet=
+
+# /sys read-only, на write ТОЛЬКО platform_profile
+ReadOnlyPaths=/sys
+ReadWritePaths=-/sys/firmware/acpi/platform_profile

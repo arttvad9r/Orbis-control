@@ -10,6 +10,12 @@
     {
       # NixOS module (system-independent): services.orbis-control
       nixosModules.orbis-control = import ./packaging/nix/module.nix;
+
+      # Минимальный NixOS-модуль: только static D-Bus/polkit registration
+      # для orbis-hardwared. НЕ создаёт systemd service, НЕ включает
+      # services.orbis-control. Lifecycle демона — deploy-dev-hardwared.sh.
+      nixosModules.orbis-hardwared-policies =
+        import ./packaging/nix/hardwared-policies-module.nix;
     }
     // flake-utils.lib.eachDefaultSystem (system:
       let
@@ -17,6 +23,7 @@
         lib = nixpkgs.lib;
         orbis-control = pkgs.callPackage ./packaging/nix/package.nix { };
         orbis-hardwared = pkgs.callPackage ./packaging/nix/hardwared.nix { };
+        orbis-hardwared-policies = pkgs.callPackage ./packaging/nix/hardwared-policies.nix { };
       in
       {
         # nix build .#orbis-control
@@ -24,6 +31,8 @@
         packages.orbis-control = orbis-control;
         # nix build .#orbis-hardwared  (fast standalone daemon)
         packages.orbis-hardwared = orbis-hardwared;
+        # nix build .#orbis-hardwared-policies  (D-Bus + polkit only, no binary)
+        packages.orbis-hardwared-policies = orbis-hardwared-policies;
 
         # nix run .#orbis-control -- --mock-device zephyrus-full
         apps.default = {
