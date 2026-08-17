@@ -132,6 +132,7 @@ Live MVP validation (packaged GUI + packaged sessiond):
 | CLI | NOT IMPLEMENTED | `orbisctl` binary — stub |
 | Production mutations | PARTIAL | Performance и Battery backend LIVE-VALIDATED; GPU mutation не реализована |
 | Privileged helper | LIVE-VALIDATED | Узкий `orbis-hardwared` для Performance и Battery; не generic writer |
+| Fan curves | READ-ONLY | Read-only `asus_custom_fan_curve` backend (active CPU/GPU curve, raw FanPwm 0..255); write ownership — asusd (ADR 0011), mutation не реализована |
 
 ## Battery Charge Limit
 

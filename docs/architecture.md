@@ -212,6 +212,11 @@ getter-only в final mutation architecture.
   live-validated; hardwared НЕ является generic sysfs writer, каждая новая
   privileged capability добавляется отдельно. См. [ADR 0006](adr/0006-privileged-performance-write.md)
   и [ADR 0007](adr/0007-battery-mutation-backend.md).
+- Fan curve writes: единственный owner — `asusd` (typed `xyz.ljones.FanCurves`
+  D-Bus setter), по паттерну Battery ADR 0007; прямой sysfs write при активном
+  asusd запрещён (duplicate-writer risk). Read-only fan curve backend
+  (`asus_custom_fan_curve`) остаётся источником authoritative read-back и
+  capability metadata. См. [ADR 0011](adr/0011-fan-curve-write-ownership.md).
 - GPU mutation через supergfxd следует staged lifecycle contract из [ADR 0008](adr/0008-supergfxd-staged-gpu-mutation.md):
   supergfxd остаётся single lifecycle owner, а будущий GPU `Hardware1` должен
   добавлять узкую polkit authorization и не переисполнять lifecycle sequencing.
@@ -327,6 +332,8 @@ asusd/sysfs writes.
   preflight foundation.
 - [ADR 0010](adr/0010-architecture-evolution.md) — архитектурный verdict после
   source audit (KEEP/EVOLVE/REPLACE/DEFER).
+- [ADR 0011](adr/0011-fan-curve-write-ownership.md) — fan curve write ownership:
+  asusd как единственный writer (по паттерну Battery ADR 0007).
 - [`research-report.md`](research-report.md) и hardware fixtures — dated evidence,
   не current implementation status.
 
