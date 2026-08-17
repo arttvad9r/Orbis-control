@@ -690,6 +690,12 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         WorkerEvent::PerformanceRefresh(result) => {
             apply_performance_refresh(state, result);
         }
+        WorkerEvent::RegistryChange(Ok(generation)) => {
+            tracing::debug!("capability registry refreshed: generation={}", generation);
+        }
+        WorkerEvent::RegistryChange(Err(e)) => {
+            tracing::warn!("capability registry refresh failed: {e:?}");
+        }
     }
 }
 

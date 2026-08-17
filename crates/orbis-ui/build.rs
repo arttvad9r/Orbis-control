@@ -6,10 +6,14 @@
 use std::path::PathBuf;
 
 fn main() {
-    let ui_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ui");
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let ui_dir = PathBuf::from(&manifest_dir).join("../../ui");
     let entry = ui_dir.join("app-window.slint");
+
+    let entry_str = entry.to_string_lossy().to_string();
+
     slint_build::compile_with_config(
-        entry.to_str().expect("path"),
+        &entry_str,
         slint_build::CompilerConfiguration::new().with_include_paths(vec![ui_dir]),
     )
     .expect("slint compile");

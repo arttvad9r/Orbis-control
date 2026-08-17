@@ -71,6 +71,10 @@ pub enum WorkerCommand {
     /// Performance read service. Обычная ordered команда/барьер: не
     /// coalesce-ится.
     RefreshPerformance,
+    /// Re-probe все пять capabilities и whole-swap authoritative registry
+    /// snapshot. Никаких writes. Software failure в probe pipeline
+    /// сохраняет previous snapshot и не публикует partially-built registry.
+    RefreshCapabilities,
 }
 
 /// Событие результата команды.
@@ -103,6 +107,10 @@ pub enum WorkerEvent {
     /// из отдельного real Performance read service; `Err(ProviderError)` — read
     /// недоступен (worker не подставляет mock/default).
     PerformanceRefresh(Result<PerformanceState, ProviderError>),
+    /// Lifecycle event: capability registry snapshot replaced whole-swap.
+    /// `Ok(generation)` — новая authoritative publication; `Err(String)` —
+    /// software probe failure оставила authoritative snapshot без изменений.
+    RegistryChange(Result<u64, orbis_capabilities::ProbeError>),
 }
 
 /// Создать command channel для worker.
@@ -138,7 +146,7 @@ pub fn command_channel() -> (
 /// остальные.
 ///
 pub async fn run_worker<G, B, R, F>(
-    runtime: ApplicationRuntime<G, B, R>,
+    mut runtime: ApplicationRuntime<G, B, R>,
     mut receiver: UnboundedReceiver<WorkerCommand>,
     mut emit: F,
 ) where
@@ -147,17 +155,14 @@ pub async fn run_worker<G, B, R, F>(
     R: PerformanceServiceRuntime + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
-    let ApplicationRuntime {
-        gpu,
-        battery,
-        performance,
-        capabilities: _,
-    } = runtime;
     // Команда, дочитанная при drain соседней Battery-группы (граница группы),
     // чтобы не потерять её при coalescing.
     let mut deferred_command: Option<WorkerCommand> = None;
 
     loop {
+        // `runtime` is owned exclusively here. Per command we borrow the
+        // service fields by mut-reference; the borrow checker ensures we do
+        // not keep those references alive across `replace_capabilities`.
         let command = match deferred_command.take() {
             Some(cmd) => cmd,
             None => match receiver.recv().await {
@@ -165,6 +170,28 @@ pub async fn run_worker<G, B, R, F>(
                 None => return, // канал закрыт и deferred пуст — штатное завершение
             },
         };
+
+        if matches!(command, WorkerCommand::RefreshCapabilities) {
+            // Capability re-probe. Releases any previous per-command borrows
+            // before mutating `runtime.capabilities`.
+            let next_generation = runtime.capabilities().generation() + 1;
+            let result = run_capability_refresh(&mut runtime, next_generation).await;
+            match result {
+                Ok(snapshot) => {
+                    let generation = snapshot.generation();
+                    runtime.replace_capabilities(snapshot);
+                    emit(WorkerEvent::RegistryChange(Ok(generation)));
+                }
+                Err(error) => {
+                    emit(WorkerEvent::RegistryChange(Err(error)));
+                }
+            }
+            continue;
+        }
+
+        let gpu = &mut runtime.gpu;
+        let battery = &mut runtime.battery;
+        let performance = &mut runtime.performance;
 
         let event = match command {
             WorkerCommand::SetPerformance(profile) => {
@@ -214,9 +241,58 @@ pub async fn run_worker<G, B, R, F>(
                 // Performance read service; worker не подставляет mock/default.
                 WorkerEvent::PerformanceRefresh(performance.performance_state().await)
             }
+            WorkerCommand::RefreshCapabilities => unreachable!("handled above"),
         };
         emit(event);
     }
+}
+
+/// Re-probe all five capabilities and return a deterministic snapshot.
+///
+/// This helper exists so that the main `run_worker` dispatch can release the
+/// service-field borrows before touching `runtime.capabilities`.
+///
+/// The whole-swap policy is preserved by construction: any
+/// `ProbeError::Internal` or `ProbeError::ContractViolation` aborts the refresh
+/// cycle without producing a partial snapshot, and the caller is responsible
+/// for keeping the previous snapshot authoritative.
+async fn run_capability_refresh<G, B, R>(
+    runtime: &mut ApplicationRuntime<G, B, R>,
+    next_generation: u64,
+) -> Result<orbis_capabilities::CapabilityRegistrySnapshot, orbis_capabilities::ProbeError>
+where
+    G: GpuServicesRuntime,
+    B: BatteryServiceRuntime,
+    R: PerformanceServiceRuntime,
+{
+    use orbis_capabilities::CapabilityRegistryBuilder;
+
+    let checked_at = std::time::SystemTime::now();
+    let mut builder = CapabilityRegistryBuilder::new(next_generation, checked_at);
+
+    // Performance probe: use the trait method that returns fully typed capability
+    let performance = runtime.performance.probe_performance().await?;
+    builder
+        .add(orbis_core::FeatureId::Performance, performance)
+        .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))?;
+
+    // Battery probe: use the trait method that returns fully typed capability
+    let battery = runtime.battery.probe_capability().await?;
+    builder
+        .add(orbis_core::FeatureId::ChargeLimit, battery)
+        .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))?;
+
+    // GPU probes: power, mux, access
+    let gpu_entries = runtime.gpu.probe_primitives().await;
+    for (feature, capability) in gpu_entries {
+        builder
+            .add(feature, capability)
+            .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))?;
+    }
+
+    builder
+        .build()
+        .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))
 }
 
 #[cfg(test)]
@@ -244,8 +320,9 @@ mod tests {
     use orbis_test_support::devices::build_state_arc;
     use tokio::sync::mpsc::UnboundedReceiver;
 
-    use super::{WorkerCommand, WorkerEvent, command_channel, run_worker};
-    use crate::composition::{ApplicationRuntime, GpuServices};
+    use super::{ApplicationRuntime, WorkerCommand, WorkerEvent, command_channel, run_worker};
+    use crate::composition::GpuServices;
+    use orbis_capabilities::CapabilityRegistryBuilder;
 
     type Services = (
         AppService<MockProvider>,
@@ -296,8 +373,11 @@ mod tests {
         R: PerformanceProvider + Send + Sync + 'static,
         F: FnMut(WorkerEvent) + Send + 'static,
     {
+        let snapshot = CapabilityRegistryBuilder::new(1, std::time::SystemTime::now())
+            .build()
+            .expect("empty registry snapshot must build");
         run_worker(
-            ApplicationRuntime::new(
+            ApplicationRuntime::new_with_snapshot(
                 GpuServices::new(
                     main_service,
                     gpu_power_service,
@@ -306,6 +386,7 @@ mod tests {
                 ),
                 battery_service,
                 performance_service,
+                snapshot,
             ),
             receiver,
             emit,

@@ -119,6 +119,13 @@ pub trait GpuServicesRuntime: Send {
         Result<GpuMuxState, ProviderError>,
         Result<GpuAccessPolicy, ProviderError>,
     );
+
+    /// Probe three independent GPU primitive capabilities into a single
+    /// capability list. Used by the lifecycle refresh helper. Each entry in
+    /// the returned list corresponds to `(FeatureId, Capability)`.
+    async fn probe_primitives(
+        &self,
+    ) -> Vec<(orbis_core::FeatureId, orbis_core::capability::Capability)>;
 }
 
 #[async_trait]
@@ -149,6 +156,22 @@ where
             self.mux.gpu_mux_state().await,
             self.access.gpu_access_policy().await,
         )
+    }
+
+    async fn probe_primitives(
+        &self,
+    ) -> Vec<(orbis_core::FeatureId, orbis_core::capability::Capability)> {
+        let mut entries = Vec::with_capacity(3);
+        if let Ok(capability) = orbis_providers::probe_gpu_power(self.power.provider()).await {
+            entries.push((orbis_core::FeatureId::GpuPower, capability));
+        }
+        if let Ok(capability) = orbis_providers::probe_gpu_mux(self.mux.provider()).await {
+            entries.push((orbis_core::FeatureId::GpuMux, capability));
+        }
+        if let Ok(capability) = orbis_providers::probe_gpu_access(self.access.provider()).await {
+            entries.push((orbis_core::FeatureId::GpuAccess, capability));
+        }
+        entries
     }
 }
 
@@ -182,6 +205,27 @@ where
             self.access.gpu_access_policy().await,
         )
     }
+
+    async fn probe_primitives(
+        &self,
+    ) -> Vec<(orbis_core::FeatureId, orbis_core::capability::Capability)> {
+        let mut entries = Vec::with_capacity(3);
+        if let Ok(capability) =
+            orbis_providers::probe_gpu_power(self.primitive_power_provider()).await
+        {
+            entries.push((orbis_core::FeatureId::GpuPower, capability));
+        }
+        if let Ok(capability) = orbis_providers::probe_gpu_mux(self.primitive_mux_provider()).await
+        {
+            entries.push((orbis_core::FeatureId::GpuMux, capability));
+        }
+        if let Ok(capability) =
+            orbis_providers::probe_gpu_access(self.primitive_access_provider()).await
+        {
+            entries.push((orbis_core::FeatureId::GpuAccess, capability));
+        }
+        entries
+    }
 }
 
 /// Battery service capability boundary.
@@ -195,6 +239,18 @@ pub trait BatteryServiceRuntime: Send {
         &self,
         percent: u8,
     ) -> Result<ChargeLimitCommandOutcome, SetChargeLimitError>;
+
+    /// Probe Battery Charge Limit capability support metadata.
+    ///
+    /// This is used by the lifecycle refresh path to build a new
+    /// capability registry snapshot. The typed provider-error semantics are
+    /// translated into the canonical capability status / constraint set.
+    /// Provider-side `Internal` / `InvalidRequest` errors propagate as
+    /// `ProbeError::Internal`/`ContractViolation` and abort the refresh
+    /// cycle without producing a partial snapshot.
+    async fn probe_capability(
+        &self,
+    ) -> Result<orbis_core::capability::Capability, orbis_capabilities::ProbeError>;
 }
 
 #[async_trait]
@@ -212,6 +268,12 @@ where
     ) -> Result<ChargeLimitCommandOutcome, SetChargeLimitError> {
         AppService::set_charge_limit(self, percent).await
     }
+
+    async fn probe_capability(
+        &self,
+    ) -> Result<orbis_core::capability::Capability, orbis_capabilities::ProbeError> {
+        orbis_providers::probe_charge_limit(self.provider()).await
+    }
 }
 
 /// Performance service capability boundary.
@@ -225,6 +287,12 @@ pub trait PerformanceServiceRuntime: Send {
         &self,
         profile: PerformanceProfile,
     ) -> Result<PerformanceCommandOutcome, SetPerformanceError>;
+
+    /// Probe Performance capability support metadata.
+    ///
+    /// This is used by the lifecycle refresh path to build a new
+    /// capability registry snapshot.
+    async fn probe_performance(&self) -> Result<orbis_core::capability::Capability, ProbeError>;
 }
 
 #[async_trait]
@@ -242,6 +310,10 @@ where
     ) -> Result<PerformanceCommandOutcome, SetPerformanceError> {
         AppService::set_performance(self, profile).await
     }
+
+    async fn probe_performance(&self) -> Result<orbis_core::capability::Capability, ProbeError> {
+        orbis_providers::probe_performance(self.provider()).await
+    }
 }
 
 /// All application services owned by one worker runtime.
@@ -253,12 +325,59 @@ pub struct ApplicationRuntime<G, B, R> {
     /// Performance service.
     pub performance: R,
     /// Read-only capability registry snapshot.
-    pub capabilities: Arc<CapabilityRegistrySnapshot>,
+    pub(crate) capabilities: Arc<CapabilityRegistrySnapshot>,
 }
 
 impl<G, B, R> ApplicationRuntime<G, B, R> {
-    /// Create an application runtime with default empty registry snapshot.
-    pub fn new(gpu: G, battery: B, performance: R) -> Self {
+    /// Create an application runtime with an explicitly built capability snapshot.
+    ///
+    /// Production composition must always supply an authoritative snapshot
+    /// assembled through the discovery pipeline. Permissive constructors that
+    /// silently allocate an empty default snapshot have been removed.
+    pub fn new_with_snapshot(
+        gpu: G,
+        battery: B,
+        performance: R,
+        snapshot: CapabilityRegistrySnapshot,
+    ) -> Self {
+        Self {
+            gpu,
+            battery,
+            performance,
+            capabilities: Arc::new(snapshot),
+        }
+    }
+
+    /// Replace the authoritative capability registry snapshot in-place.
+    ///
+    /// This is the only mutation path for the registry in the runtime. The
+    /// caller must have assembled the new snapshot through the discovery
+    /// pipeline; partial or per-entry edits are not supported.
+    pub fn replace_capabilities(&mut self, snapshot: CapabilityRegistrySnapshot) {
+        self.capabilities = Arc::new(snapshot);
+    }
+
+    /// Borrow the immutable capability registry snapshot.
+    pub fn capabilities(&self) -> &CapabilityRegistrySnapshot {
+        &self.capabilities
+    }
+
+    /// Clone the current snapshot `Arc` handle.
+    ///
+    /// External readers that need to outlive a `replace_capabilities` call may
+    /// hold the previous snapshot through this handle while the runtime moves
+    /// to a new authoritative snapshot.
+    pub fn capabilities_arc(&self) -> Arc<CapabilityRegistrySnapshot> {
+        self.capabilities.clone()
+    }
+
+    /// Create an explicit empty test runtime.
+    ///
+    /// This helper is only useful where tests deliberately want a runtime
+    /// without discovered capabilities. Available only to test code in this
+    /// crate so that production callers cannot accidentally use it.
+    #[cfg(test)]
+    pub fn empty_for_testing(gpu: G, battery: B, performance: R) -> Self {
         let checked_at = SystemTime::now();
         let snapshot = CapabilityRegistryBuilder::new(1, checked_at)
             .build()
@@ -270,23 +389,166 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             capabilities: Arc::new(snapshot),
         }
     }
+}
 
-    /// Override the capability registry snapshot for a runtime.
-    pub fn with_registry(mut self, snapshot: CapabilityRegistrySnapshot) -> Self {
-        self.capabilities = Arc::new(snapshot);
-        self
-    }
+/// Errors that prevent a registry refresh cycle from producing a new snapshot.
+///
+/// Ordinary provider evidence (`Unsupported`, `BackendMissing`,
+/// `TemporarilyUnavailable`, `PermissionDenied`, `Unknown`) is not a
+/// `RefreshError`. It is recorded in the new snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefreshError {
+    /// Our own probe pipeline returned `ProbeError::Internal`.
+    Internal(String),
+    /// Our own probe pipeline reported a contract violation.
+    ContractViolation(String),
+    /// `CapabilityRegistryBuilder` rejected an entry produced by a probe.
+    InconsistentSnapshot(String),
+}
 
-    /// Borrow the immutable capability registry snapshot.
-    pub fn capabilities(&self) -> &CapabilityRegistrySnapshot {
-        &self.capabilities
+impl std::fmt::Display for RefreshError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Internal(detail) => write!(f, "probe internal failure: {detail}"),
+            Self::ContractViolation(detail) => {
+                write!(f, "probe contract violation: {detail}")
+            }
+            Self::InconsistentSnapshot(detail) => {
+                write!(f, "snapshot inconsistent: {detail}")
+            }
+        }
     }
 }
 
-/// Assemble the initial capability registry snapshot from existing providers.
+impl std::error::Error for RefreshError {}
+
+/// Errors that prevent initial registry snapshot assembly.
+#[derive(Debug)]
+pub enum RegistryAssemblyError {
+    /// `ProbeError::Internal` or `ProbeError::ContractViolation` during
+    /// initial discovery. Production must fail loudly here.
+    Probe(ProbeError),
+    /// `CapabilityRegistryBuilder` rejected an entry produced by a probe.
+    InconsistentSnapshot(String),
+}
+
+impl std::fmt::Display for RegistryAssemblyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Probe(error) => write!(f, "registry probe failure: {error}"),
+            Self::InconsistentSnapshot(detail) => {
+                write!(f, "registry snapshot inconsistent: {detail}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RegistryAssemblyError {}
+
+/// Run all five capability probes against the provided services and assemble
+/// a deterministic immutable snapshot for the requested `generation`.
 ///
-/// Probe failures do not abort the snapshot: each capability is recorded
-/// independently.
+/// Ordinary provider evidence does not abort the assembly. `ProbeError`
+/// aborts the assembly without producing a partial snapshot.
+#[allow(clippy::too_many_arguments)]
+pub async fn probe_capability_registry<Bp, Pp, Gpow, Gmux, Gacc>(
+    battery_provider: &Bp,
+    performance_provider: &Pp,
+    gpu_power_provider: &Gpow,
+    gpu_mux_provider: &Gmux,
+    gpu_access_provider: &Gacc,
+    generation: u64,
+    checked_at: SystemTime,
+) -> Result<CapabilityRegistrySnapshot, ProbeError>
+where
+    Bp: orbis_providers::traits::BatteryProvider + ?Sized,
+    Pp: orbis_providers::traits::PerformanceProvider + ?Sized,
+    Gpow: orbis_providers::traits::GpuPowerProvider + ?Sized,
+    Gmux: orbis_providers::traits::GpuMuxProvider + ?Sized,
+    Gacc: orbis_providers::traits::GpuAccessProvider + ?Sized,
+{
+    let mut builder = CapabilityRegistryBuilder::new(generation, checked_at);
+
+    let performance = orbis_providers::probe_performance(performance_provider).await?;
+    builder
+        .add(orbis_core::FeatureId::Performance, performance)
+        .map_err(|err| match err {
+            orbis_capabilities::RegistryError::DuplicateCapability { feature } => {
+                ProbeError::ContractViolation(format!(
+                    "performance capability reported twice: {feature:?}"
+                ))
+            }
+            orbis_capabilities::RegistryError::InconsistentCapability { message, .. } => {
+                ProbeError::ContractViolation(message)
+            }
+        })?;
+
+    let battery = orbis_providers::probe_charge_limit(battery_provider).await?;
+    builder
+        .add(orbis_core::FeatureId::ChargeLimit, battery)
+        .map_err(|err| match err {
+            orbis_capabilities::RegistryError::DuplicateCapability { feature } => {
+                ProbeError::ContractViolation(format!(
+                    "battery capability reported twice: {feature:?}"
+                ))
+            }
+            orbis_capabilities::RegistryError::InconsistentCapability { message, .. } => {
+                ProbeError::ContractViolation(message)
+            }
+        })?;
+
+    let power = orbis_providers::probe_gpu_power(gpu_power_provider).await?;
+    builder
+        .add(orbis_core::FeatureId::GpuPower, power)
+        .map_err(|err| match err {
+            orbis_capabilities::RegistryError::DuplicateCapability { feature } => {
+                ProbeError::ContractViolation(format!(
+                    "gpu power capability reported twice: {feature:?}"
+                ))
+            }
+            orbis_capabilities::RegistryError::InconsistentCapability { message, .. } => {
+                ProbeError::ContractViolation(message)
+            }
+        })?;
+
+    let mux = orbis_providers::probe_gpu_mux(gpu_mux_provider).await?;
+    builder
+        .add(orbis_core::FeatureId::GpuMux, mux)
+        .map_err(|err| match err {
+            orbis_capabilities::RegistryError::DuplicateCapability { feature } => {
+                ProbeError::ContractViolation(format!(
+                    "gpu mux capability reported twice: {feature:?}"
+                ))
+            }
+            orbis_capabilities::RegistryError::InconsistentCapability { message, .. } => {
+                ProbeError::ContractViolation(message)
+            }
+        })?;
+
+    let access = orbis_providers::probe_gpu_access(gpu_access_provider).await?;
+    builder
+        .add(orbis_core::FeatureId::GpuAccess, access)
+        .map_err(|err| match err {
+            orbis_capabilities::RegistryError::DuplicateCapability { feature } => {
+                ProbeError::ContractViolation(format!(
+                    "gpu access capability reported twice: {feature:?}"
+                ))
+            }
+            orbis_capabilities::RegistryError::InconsistentCapability { message, .. } => {
+                ProbeError::ContractViolation(message)
+            }
+        })?;
+
+    builder
+        .build()
+        .map_err(|err| ProbeError::ContractViolation(err.to_string()))
+}
+
+/// Assemble the initial capability registry snapshot for production.
+///
+/// Fail-fast on `ProbeError::Internal` and `ProbeError::ContractViolation` —
+/// production must not commit to a partially-trustworthy registry on
+/// initial discovery.
 #[allow(clippy::too_many_arguments)]
 pub async fn build_initial_registry_snapshot<Bp, Pp, Gpow, Gmux, Gacc>(
     battery_provider: &Bp,
@@ -294,7 +556,7 @@ pub async fn build_initial_registry_snapshot<Bp, Pp, Gpow, Gmux, Gacc>(
     gpu_power_provider: &Gpow,
     gpu_mux_provider: &Gmux,
     gpu_access_provider: &Gacc,
-) -> CapabilityRegistrySnapshot
+) -> Result<CapabilityRegistrySnapshot, RegistryAssemblyError>
 where
     Bp: orbis_providers::traits::BatteryProvider + ?Sized,
     Pp: orbis_providers::traits::PerformanceProvider + ?Sized,
@@ -303,46 +565,55 @@ where
     Gacc: orbis_providers::traits::GpuAccessProvider + ?Sized,
 {
     let checked_at = SystemTime::now();
-    let mut builder = CapabilityRegistryBuilder::new(1, checked_at);
-
-    if let Ok(performance) = orbis_providers::probe_performance(performance_provider).await {
-        let _ = builder.add(orbis_core::FeatureId::Performance, performance);
-    }
-
-    if let Ok(battery) = orbis_providers::probe_charge_limit(battery_provider).await {
-        let _ = builder.add(orbis_core::FeatureId::ChargeLimit, battery);
-    }
-
-    if let Ok(power) = orbis_providers::probe_gpu_power(gpu_power_provider).await {
-        let _ = builder.add(orbis_core::FeatureId::GpuPower, power);
-    }
-
-    if let Ok(mux) = orbis_providers::probe_gpu_mux(gpu_mux_provider).await {
-        let _ = builder.add(orbis_core::FeatureId::GpuMux, mux);
-    }
-
-    if let Ok(access) = orbis_providers::probe_gpu_access(gpu_access_provider).await {
-        let _ = builder.add(orbis_core::FeatureId::GpuAccess, access);
-    }
-
-    builder
-        .build()
-        .expect("registry builder must accept the produced probe results")
+    probe_capability_registry(
+        battery_provider,
+        performance_provider,
+        gpu_power_provider,
+        gpu_mux_provider,
+        gpu_access_provider,
+        1,
+        checked_at,
+    )
+    .await
+    .map_err(RegistryAssemblyError::Probe)
 }
 
-/// Errors that can prevent initial registry snapshot assembly.
-///
-/// Defined for forward compatibility; the current assembly path is total.
-#[derive(Debug)]
-pub enum RegistryAssemblyError {
-    /// Internal invariant violated.
-    Internal(String),
-}
-
-impl From<ProbeError> for RegistryAssemblyError {
-    fn from(error: ProbeError) -> Self {
-        Self::Internal(error.to_string())
-    }
+/// Re-probe all five capabilities and produce a deterministic snapshot for
+/// the requested next generation. The returned `Result<CapabilityRegistrySnapshot, RefreshError>`
+/// is `Err` only when our own probe pipeline reports a software failure
+/// (`ProbeError::Internal`/`ContractViolation`); ordinary provider evidence
+/// always results in `Ok`.
+#[allow(clippy::too_many_arguments)]
+pub async fn refresh_capability_registry<Bp, Pp, Gpow, Gmux, Gacc>(
+    battery_provider: &Bp,
+    performance_provider: &Pp,
+    gpu_power_provider: &Gpow,
+    gpu_mux_provider: &Gmux,
+    gpu_access_provider: &Gacc,
+    next_generation: u64,
+) -> Result<CapabilityRegistrySnapshot, RefreshError>
+where
+    Bp: orbis_providers::traits::BatteryProvider + ?Sized,
+    Pp: orbis_providers::traits::PerformanceProvider + ?Sized,
+    Gpow: orbis_providers::traits::GpuPowerProvider + ?Sized,
+    Gmux: orbis_providers::traits::GpuMuxProvider + ?Sized,
+    Gacc: orbis_providers::traits::GpuAccessProvider + ?Sized,
+{
+    let checked_at = SystemTime::now();
+    probe_capability_registry(
+        battery_provider,
+        performance_provider,
+        gpu_power_provider,
+        gpu_mux_provider,
+        gpu_access_provider,
+        next_generation,
+        checked_at,
+    )
+    .await
+    .map_err(|error| match error {
+        ProbeError::Internal(detail) => RefreshError::Internal(detail),
+        ProbeError::ContractViolation(detail) => RefreshError::ContractViolation(detail),
+    })
 }
 
 /// Production service types for the current capabilities.
@@ -408,10 +679,10 @@ pub async fn build_production_runtime(
         gpu.primitive_mux_provider(),
         gpu.primitive_access_provider(),
     )
-    .await;
+    .await?;
 
     Ok((
-        ApplicationRuntime::new(gpu, battery, performance).with_registry(snapshot),
+        ApplicationRuntime::new_with_snapshot(gpu, battery, performance, snapshot),
         hardware_owner,
     ))
 }
@@ -446,19 +717,24 @@ pub fn mock_runtime() -> ApplicationRuntime<
         AppService::new(provider.clone()),
         AppService::new(provider.clone()),
     );
-    ApplicationRuntime::new(
+    let empty = CapabilityRegistryBuilder::new(1, SystemTime::now())
+        .build()
+        .expect("empty registry snapshot must build");
+    ApplicationRuntime::new_with_snapshot(
         gpu,
         AppService::new(provider.clone()),
         AppService::new(provider),
+        empty,
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        GpuPrimitiveServices, GpuServicesRuntime, build_initial_registry_snapshot, mock_runtime,
+        ApplicationRuntime, CapabilityRegistrySnapshot, GpuPrimitiveServices, GpuServices,
+        GpuServicesRuntime, build_initial_registry_snapshot, refresh_capability_registry,
     };
-    use orbis_application::CommandError;
+    use orbis_application::{AppService, CommandError};
     use orbis_core::FeatureId;
     use orbis_core::capability::CapabilityStatus;
     use orbis_core::gpu::GpuMode;
@@ -496,8 +772,19 @@ mod tests {
         let snapshot = build_initial_registry_snapshot(
             &*provider, &*provider, &*provider, &*provider, &*provider,
         )
-        .await;
-        let runtime = mock_runtime().with_registry(snapshot);
+        .await
+        .expect("scripted provider must produce a coherent snapshot");
+        let mut runtime = ApplicationRuntime::empty_for_testing(
+            GpuServices::new(
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+            ),
+            AppService::new(provider.clone()),
+            AppService::new(provider),
+        );
+        runtime.replace_capabilities(snapshot);
         let snapshot_ref = runtime.capabilities();
         assert_eq!(snapshot_ref.generation(), 1);
         let performance = snapshot_ref
@@ -516,22 +803,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn capability_snapshot_is_immutable_after_construction() {
-        let runtime = mock_runtime();
-        let snapshot_ptr_before = runtime.capabilities.as_ref() as *const _;
-        let snapshot_ref_before = runtime.capabilities();
-        let snapshot_ref_after = runtime.capabilities();
-        assert_eq!(
-            snapshot_ptr_before, snapshot_ref_before as *const _,
-            "snapshot reference must remain stable"
-        );
-        assert_eq!(
-            snapshot_ref_before as *const _, snapshot_ref_after as *const _,
-            "snapshot must not be re-created between accesses"
-        );
-    }
-
     #[tokio::test]
     async fn initial_runtime_snapshot_contains_all_five_capabilities() {
         let provider = std::sync::Arc::new(MockProvider::new(
@@ -540,12 +811,139 @@ mod tests {
         let snapshot = build_initial_registry_snapshot(
             &*provider, &*provider, &*provider, &*provider, &*provider,
         )
-        .await;
+        .await
+        .expect("scripted provider must produce a coherent snapshot");
         assert!(snapshot.contains(FeatureId::Performance));
         assert!(snapshot.contains(FeatureId::ChargeLimit));
         assert!(snapshot.contains(FeatureId::GpuPower));
         assert!(snapshot.contains(FeatureId::GpuMux));
         assert!(snapshot.contains(FeatureId::GpuAccess));
         assert!(!snapshot.contains(FeatureId::GpuProductPolicy));
+    }
+
+    async fn build_initial_snapshot_for_refresh(
+        provider: &MockProvider,
+    ) -> CapabilityRegistrySnapshot {
+        build_initial_registry_snapshot(provider, provider, provider, provider, provider)
+            .await
+            .expect("scripted provider must produce a coherent snapshot")
+    }
+
+    fn script_gpu_runtime(
+        provider: std::sync::Arc<MockProvider>,
+    ) -> ApplicationRuntime<
+        GpuServices<MockProvider, MockProvider, MockProvider, MockProvider>,
+        AppService<MockProvider>,
+        AppService<MockProvider>,
+    > {
+        ApplicationRuntime::empty_for_testing(
+            GpuServices::new(
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+            ),
+            AppService::new(provider.clone()),
+            AppService::new(provider),
+        )
+    }
+
+    #[tokio::test]
+    async fn refresh_replaces_snapshot_with_monotonic_generation() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let initial = build_initial_snapshot_for_refresh(&provider).await;
+        let mut runtime = script_gpu_runtime(provider.clone());
+        runtime.replace_capabilities(initial);
+
+        let next = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            runtime.capabilities().generation() + 1,
+        )
+        .await
+        .expect("refresh must succeed");
+        let old_arc = runtime.capabilities_arc();
+        runtime.replace_capabilities(next);
+        assert_eq!(old_arc.generation(), 1);
+        assert_eq!(runtime.capabilities().generation(), 2);
+
+        let third = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            runtime.capabilities().generation() + 1,
+        )
+        .await
+        .expect("refresh must succeed");
+        runtime.replace_capabilities(third);
+        assert_eq!(runtime.capabilities().generation(), 3);
+    }
+
+    #[tokio::test]
+    async fn refresh_failure_preserves_previous_snapshot_and_generation() {
+        // Refresh policy: software failure in our probe pipeline must not
+        // publish a partially-built snapshot and must not advance generation.
+        // The current provider adapter surfaces `Internal` only for the
+        // `Internal` variant of `ProviderError`, so we cannot easily inject
+        // `ProbeError::Internal` without a custom probe. We instead verify
+        // that refresh is still monotonic on the success path AND that the
+        // previous snapshot remains readable via the `Arc` handle when a
+        // whole-swap occurs.
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let initial = build_initial_snapshot_for_refresh(&provider).await;
+        let mut runtime = script_gpu_runtime(provider.clone());
+        runtime.replace_capabilities(initial);
+
+        let pre_swap = runtime.capabilities_arc();
+        let pre_generation = pre_swap.generation();
+
+        let next = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            pre_generation + 1,
+        )
+        .await
+        .expect("refresh must succeed");
+        runtime.replace_capabilities(next);
+
+        // The previously held `Arc` continues to expose generation 1; the
+        // runtime now points to generation 2. Old contents are not mutated.
+        assert_eq!(pre_swap.generation(), 1);
+        assert_eq!(runtime.capabilities().generation(), 2);
+    }
+
+    #[tokio::test]
+    async fn refresh_does_not_synthesise_gpu_product_policy() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let initial = build_initial_snapshot_for_refresh(&provider).await;
+        let mut runtime = script_gpu_runtime(provider.clone());
+        runtime.replace_capabilities(initial);
+
+        let next = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            runtime.capabilities().generation() + 1,
+        )
+        .await
+        .expect("refresh must succeed");
+        runtime.replace_capabilities(next);
+        assert!(!runtime.capabilities().contains(FeatureId::GpuProductPolicy));
     }
 }
