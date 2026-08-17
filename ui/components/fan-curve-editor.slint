@@ -1,0 +1,414 @@
+// FanCurveEditor — редактор кривой вентилятора.
+// Профиль: Balanced / Performance / Quiet / LowPower.
+// Вентилятор: CPU / GPU.
+// 8 точек: температура (°C) + raw PWM (0..255).
+// Кнопка Apply: disabled если не writable или нет dirty.
+
+import { Palette } from "../themes/dark.slint";
+
+/// Строка для одной точки кривой: температура + PWM.
+component FanPointRow inherits Rectangle {
+    in property <int> index;
+    in property <int> temp;
+    in property <int> pwm;
+    in property <bool> editable: true;
+    callback temp-changed(int, int);   // index, new-temp
+    callback pwm-changed(int, int);    // index, new-pwm
+
+    height: 24px;
+    background: Palette.surface-default;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: Palette.border-default;
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 4px;
+        alignment: center;
+
+        Text {
+            text: "#" + (root.index + 1);
+            font-size: 10px;
+            color: Palette.text-secondary;
+            vertical-alignment: center;
+            min-width: 20px;
+        }
+
+        // Temperature
+        Rectangle {
+            height: 20px;
+            width: 56px;
+            border-radius: 3px;
+            background: root.editable ? Palette.surface-pressed : Palette.surface-disabled;
+            border-width: 1px;
+            border-color: Palette.border-default;
+
+            HorizontalLayout {
+                padding-left: 4px;
+                padding-right: 4px;
+                spacing: 2px;
+                alignment: center;
+                Text {
+                    text: root.temp + "";
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: root.editable ? Palette.text-primary : Palette.text-disabled;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "°C";
+                    font-size: 9px;
+                    color: Palette.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
+
+            if (root.editable) : TouchArea {
+                clicked => {
+                    // Temp increment by 5 on click (simple increment pattern)
+                    // Slint doesn't allow reassignment of `let` variables,
+                    // so we compute the new value directly.
+                    root.temp-changed(root.index, root.temp + 5 - Math.floor(root.temp / 100) * 70);
+                }
+            }
+        }
+
+        // PWM
+        Rectangle {
+            height: 20px;
+            width: 52px;
+            border-radius: 3px;
+            background: root.editable ? Palette.surface-pressed : Palette.surface-disabled;
+            border-width: 1px;
+            border-color: Palette.border-default;
+
+            HorizontalLayout {
+                padding-left: 4px;
+                padding-right: 4px;
+                spacing: 2px;
+                alignment: center;
+                Text {
+                    text: root.pwm + "";
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: root.editable ? Palette.text-primary : Palette.text-disabled;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "PWM";
+                    font-size: 9px;
+                    color: Palette.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
+
+            if (root.editable) : TouchArea {
+                clicked => {
+                    // PWM increment by 10 on click, wraps to 0 at > 255
+                    root.pwm-changed(root.index, Math.mod(root.pwm + 10, 256));
+                }
+            }
+        }
+    }
+}
+
+/// Карточка-переключатель для профиля/вентилятора.
+component ToggleChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    in property <bool> disabled: false;
+
+    callback clicked;
+
+    height: 24px;
+    min-width: 50px;
+    horizontal-stretch: 1;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: root.selected ? Palette.accent-default
+        : root.disabled ? Palette.surface-disabled
+        : Palette.border-default;
+    background: root.selected ? Palette.surface-hover
+        : root.disabled ? Palette.surface-disabled
+        : Palette.surface-default;
+
+    Text {
+        text: root.label;
+        font-size: 11px;
+        font-weight: 600;
+        color: root.disabled ? Palette.text-disabled
+            : root.selected ? Palette.accent-default
+            : Palette.text-secondary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Состояние fan curve editor (read-only).
+export enum FanCurveHwState {
+    Loading,
+    Ready,
+    Unavailable,
+}
+
+/// Полный редактор кривой вентилятора.
+export component FanCurveEditor inherits Rectangle {
+    // ── State ──────────────────────────────────────────────────────
+    in property <FanCurveHwState> state: FanCurveHwState.Loading;
+    in property <bool> writable: false;
+    in property <bool> error-state: false;
+    in property <bool> dirty: false;
+
+    // Fan: 0=CPU, 1=GPU
+    in property <int> fan-selected: 0;
+    // Profile: 0=Balanced, 1=Performance, 2=Quiet, 3=LowPower
+    in property <int> profile-selected: 0;
+
+    // 8 temperature points
+    in property <int> temp-0: 0;
+    in property <int> temp-1: 0;
+    in property <int> temp-2: 0;
+    in property <int> temp-3: 0;
+    in property <int> temp-4: 0;
+    in property <int> temp-5: 0;
+    in property <int> temp-6: 0;
+    in property <int> temp-7: 0;
+
+    // 8 PWM points
+    in property <int> pwm-0: 0;
+    in property <int> pwm-1: 0;
+    in property <int> pwm-2: 0;
+    in property <int> pwm-3: 0;
+    in property <int> pwm-4: 0;
+    in property <int> pwm-5: 0;
+    in property <int> pwm-6: 0;
+    in property <int> pwm-7: 0;
+
+    // ── Callbacks ──────────────────────────────────────────────────
+    callback fan-changed(int);       // new-fan-index (0=CPU, 1=GPU)
+    callback profile-changed(int);   // new-profile-index
+    callback temp-point-changed(int, int); // index, new-temp
+    callback pwm-point-changed(int, int);  // index, new-pwm
+    callback apply-clicked;
+
+    height: self.visible ? 200px : 0px;
+    background: Palette.surface-default;
+    border-radius: 5px;
+    border-width: 1px;
+    border-color: root.error-state ? Palette.error : Palette.border-default;
+
+    // ── Loading / Unavailable overlay ──────────────────────────────
+    if (root.state == FanCurveHwState.Loading) : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: Palette.surface-default;
+        border-radius: 5px;
+        z: 100;
+        HorizontalLayout {
+            alignment: center;
+            Text {
+                text: "Loading fan curve…";
+                font-size: 12px;
+                color: Palette.text-secondary;
+            }
+        }
+    }
+
+    if (root.state == FanCurveHwState.Unavailable) : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: Palette.surface-default;
+        border-radius: 5px;
+        z: 100;
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 8px;
+            alignment: center;
+            Rectangle {
+                width: 3px;
+                height: 14px;
+                border-radius: 1.5px;
+                background: Palette.error;
+            }
+            Text {
+                text: "Fan curve backend unavailable";
+                font-size: 12px;
+                color: Palette.text-primary;
+            }
+        }
+    }
+
+    // ── Main content ───────────────────────────────────────────────
+    if (root.state == FanCurveHwState.Ready) : VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+
+        // Row 1: Profile + Fan selectors
+        HorizontalLayout {
+            spacing: 6px;
+
+            // Profile selector
+            HorizontalLayout {
+                spacing: 3px;
+                vertical-stretch: 0;
+
+                ToggleChip {
+                    label: "Balanced";
+                    selected: root.profile-selected == 0;
+                    disabled: !root.writable;
+                    clicked => { root.profile-changed(0); }
+                }
+                ToggleChip {
+                    label: "Perf";
+                    selected: root.profile-selected == 1;
+                    disabled: !root.writable;
+                    clicked => { root.profile-changed(1); }
+                }
+                ToggleChip {
+                    label: "Quiet";
+                    selected: root.profile-selected == 2;
+                    disabled: !root.writable;
+                    clicked => { root.profile-changed(2); }
+                }
+                ToggleChip {
+                    label: "Low";
+                    selected: root.profile-selected == 3;
+                    disabled: !root.writable;
+                    clicked => { root.profile-changed(3); }
+                }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            // Fan selector
+            HorizontalLayout {
+                spacing: 3px;
+                vertical-stretch: 0;
+
+                ToggleChip {
+                    label: "CPU";
+                    selected: root.fan-selected == 0;
+                    disabled: !root.writable;
+                    clicked => { root.fan-changed(0); }
+                }
+                ToggleChip {
+                    label: "GPU";
+                    selected: root.fan-selected == 1;
+                    disabled: !root.writable;
+                    clicked => { root.fan-changed(1); }
+                }
+            }
+        }
+
+        // Row 2: Points header
+        Rectangle {
+            height: 18px;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                spacing: 4px;
+                alignment: center;
+                Text {
+                    text: "#";
+                    font-size: 9px;
+                    color: Palette.text-secondary;
+                    vertical-alignment: center;
+                    min-width: 20px;
+                }
+                Text {
+                    text: "Temp";
+                    font-size: 9px;
+                    color: Palette.text-secondary;
+                    vertical-alignment: center;
+                    min-width: 56px;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "PWM";
+                    font-size: 9px;
+                    color: Palette.text-secondary;
+                    vertical-alignment: center;
+                    min-width: 52px;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+        // Row 3: 8 points
+        VerticalLayout {
+            spacing: 2px;
+            vertical-stretch: 1;
+
+            FanPointRow { index: 0; temp: root.temp-0; pwm: root.pwm-0; editable: root.writable; temp-changed(idx, v) => { root.temp-point-changed(idx, v); } pwm-changed(idx, v) => { root.pwm-point-changed(idx, v); } }
+            FanPointRow { index: 1; temp: root.temp-1; pwm: root.pwm-1; editable: root.writable; temp-changed(idx, v) => { root.temp-point-changed(idx, v); } pwm-changed(idx, v) => { root.pwm-point-changed(idx, v); } }
+            FanPointRow { index: 2; temp: root.temp-2; pwm: root.pwm-2; editable: root.writable; temp-changed(idx, v) => { root.temp-point-changed(idx, v); } pwm-changed(idx, v) => { root.pwm-point-changed(idx, v); } }
+            FanPointRow { index: 3; temp: root.temp-3; pwm: root.pwm-3; editable: root.writable; temp-changed(idx, v) => { root.temp-point-changed(idx, v); } pwm-changed(idx, v) => { root.pwm-point-changed(idx, v); } }
+            FanPointRow { index: 4; temp: root.temp-4; pwm: root.pwm-4; editable: root.writable; temp-changed(idx, v) => { root.temp-point-changed(idx, v); } pwm-changed(idx, v) => { root.pwm-point-changed(idx, v); } }
+            FanPointRow { index: 5; temp: root.temp-5; pwm: root.pwm-5; editable: root.writable; temp-changed(idx, v) => { root.temp-point-changed(idx, v); } pwm-changed(idx, v) => { root.pwm-point-changed(idx, v); } }
+            FanPointRow { index: 6; temp: root.temp-6; pwm: root.pwm-6; editable: root.writable; temp-changed(idx, v) => { root.temp-point-changed(idx, v); } pwm-changed(idx, v) => { root.pwm-point-changed(idx, v); } }
+            FanPointRow { index: 7; temp: root.temp-7; pwm: root.pwm-7; editable: root.writable; temp-changed(idx, v) => { root.temp-point-changed(idx, v); } pwm-changed(idx, v) => { root.pwm-point-changed(idx, v); } }
+        }
+
+        // Row 4: Apply button + dirty indicator
+        HorizontalLayout {
+            spacing: 8px;
+            vertical-stretch: 0;
+
+            Rectangle {
+                height: 28px;
+                min-width: 70px;
+                horizontal-stretch: 0;
+                border-radius: 4px;
+                border-width: 1.5px;
+                border-color: root.dirty && root.writable ? Palette.accent-default : Palette.border-default;
+                background: root.dirty && root.writable ? Palette.accent-default
+                    : root.error-state ? Palette.error
+                    : Palette.surface-pressed;
+
+                HorizontalLayout {
+                    alignment: center;
+                    Text {
+                        text: root.dirty ? "Apply" : "Saved";
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: root.dirty && root.writable ? Palette.text-primary : Palette.text-disabled;
+                    }
+                }
+
+                touch := TouchArea {
+                    enabled: root.dirty && root.writable;
+                    clicked => { root.apply-clicked(); }
+                }
+            }
+
+            if (root.error-state) : HorizontalLayout {
+                spacing: 4px;
+                vertical-stretch: 0;
+                alignment: center;
+                Rectangle {
+                    width: 3px;
+                    height: 14px;
+                    border-radius: 1.5px;
+                    background: Palette.error;
+                }
+                Text {
+                    text: "Apply failed";
+                    font-size: 11px;
+                    color: Palette.error;
+                }
+            }
+
+            // Spacer
+            Rectangle { horizontal-stretch: 1; }
+        }
+    }
+}

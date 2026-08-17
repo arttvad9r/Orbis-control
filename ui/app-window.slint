@@ -5,6 +5,7 @@
 import { ModeCard } from "components/mode-card.slint";
 import { SectionHeader } from "components/section-header.slint";
 import { ValueSlider } from "components/value-slider.slint";
+import { FanCurveEditor, FanCurveHwState } from "components/fan-curve-editor.slint";
 import { Palette } from "themes/dark.slint";
 
 export enum ChargeLimitState {
@@ -66,6 +67,30 @@ export struct UiState {
     gpu-power: string,
     version: string,
     mock-profile: string,
+
+    // ── Fan Curve Editor ──────────────────────────────────────────
+    fan-curve-state: FanCurveHwState,
+    fan-curve-writable: bool,
+    fan-curve-error: bool,
+    fan-curve-dirty: bool,
+    fan-selected: int,         // 0=CPU, 1=GPU
+    fan-profile-selected: int, // 0=Balanced, 1=Perf, 2=Quiet, 3=Low
+    fan-temp-0: int,
+    fan-temp-1: int,
+    fan-temp-2: int,
+    fan-temp-3: int,
+    fan-temp-4: int,
+    fan-temp-5: int,
+    fan-temp-6: int,
+    fan-temp-7: int,
+    fan-pwm-0: int,
+    fan-pwm-1: int,
+    fan-pwm-2: int,
+    fan-pwm-3: int,
+    fan-pwm-4: int,
+    fan-pwm-5: int,
+    fan-pwm-6: int,
+    fan-pwm-7: int,
 }
 
 component TelemetryCell {
@@ -151,11 +176,40 @@ export component AppWindow inherits Window {
         gpu-power: "—",
         version: "0.1.0",
         mock-profile: "zephyrus-full",
+        fan-curve-state: FanCurveHwState.Loading,
+        fan-curve-writable: false,
+        fan-curve-error: false,
+        fan-curve-dirty: false,
+        fan-selected: 0,
+        fan-profile-selected: 0,
+        fan-temp-0: 0,
+        fan-temp-1: 0,
+        fan-temp-2: 0,
+        fan-temp-3: 0,
+        fan-temp-4: 0,
+        fan-temp-5: 0,
+        fan-temp-6: 0,
+        fan-temp-7: 0,
+        fan-pwm-0: 0,
+        fan-pwm-1: 0,
+        fan-pwm-2: 0,
+        fan-pwm-3: 0,
+        fan-pwm-4: 0,
+        fan-pwm-5: 0,
+        fan-pwm-6: 0,
+        fan-pwm-7: 0,
     };
 
     callback perf-clicked(int);
     callback gpu-clicked(int);
     callback charge-changed(float);
+
+    // Fan curve editor
+    callback fan-changed(int);           // 0=CPU, 1=GPU
+    callback fan-profile-changed(int);   // 0=Balanced, 1=Perf, 2=Quiet, 3=Low
+    callback fan-temp-point-changed(int, int); // index, new-temp
+    callback fan-pwm-point-changed(int, int);  // index, new-pwm
+    callback fan-apply-clicked;
 
     // Проверка бита маски доступности арифметикой: в Slint 1.13 нет побитовых
     // операторов (&), поэтому бит извлекается делением и Math.floor.
@@ -483,6 +537,41 @@ export component AppWindow inherits Window {
                             vertical-alignment: center;
                         }
                     }
+                }
+            }
+
+            // Fan Curve Editor
+            VerticalLayout {
+                spacing: 4px;
+                SectionHeader { title: "Fan Curve"; }
+                FanCurveEditor {
+                    state: root.ui-state.fan-curve-state;
+                    writable: root.ui-state.fan-curve-writable;
+                    error-state: root.ui-state.fan-curve-error;
+                    dirty: root.ui-state.fan-curve-dirty;
+                    fan-selected: root.ui-state.fan-selected;
+                    profile-selected: root.ui-state.fan-profile-selected;
+                    temp-0: root.ui-state.fan-temp-0;
+                    temp-1: root.ui-state.fan-temp-1;
+                    temp-2: root.ui-state.fan-temp-2;
+                    temp-3: root.ui-state.fan-temp-3;
+                    temp-4: root.ui-state.fan-temp-4;
+                    temp-5: root.ui-state.fan-temp-5;
+                    temp-6: root.ui-state.fan-temp-6;
+                    temp-7: root.ui-state.fan-temp-7;
+                    pwm-0: root.ui-state.fan-pwm-0;
+                    pwm-1: root.ui-state.fan-pwm-1;
+                    pwm-2: root.ui-state.fan-pwm-2;
+                    pwm-3: root.ui-state.fan-pwm-3;
+                    pwm-4: root.ui-state.fan-pwm-4;
+                    pwm-5: root.ui-state.fan-pwm-5;
+                    pwm-6: root.ui-state.fan-pwm-6;
+                    pwm-7: root.ui-state.fan-pwm-7;
+                    fan-changed(i) => { root.fan-changed(i); }
+                    profile-changed(i) => { root.fan-profile-changed(i); }
+                    temp-point-changed(i, v) => { root.fan-temp-point-changed(i, v); }
+                    pwm-point-changed(i, v) => { root.fan-pwm-point-changed(i, v); }
+                    apply-clicked => { root.fan-apply-clicked(); }
                 }
             }
 

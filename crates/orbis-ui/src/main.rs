@@ -88,13 +88,14 @@ fn state_for_scenario(name: &str) -> controller::UiState {
 }
 
 /// Высота окна: в состоянии error добавляется баннер GPU-ошибки; в
-/// Performance- и GPU-секциях статус-строки Loading/Unavailable (+30px каждая).
+/// Performance- и GPU-секциях статус-строки Loading/Unavailable (+30px каждая);
+/// Fan Curve секция ~200px.
 fn window_height(state: &controller::UiState) -> f32 {
     // высота клиентской области без внутреннего titlebar (34px удалены)
     if state.gpu_section_error {
-        466.0
+        666.0
     } else {
-        441.0
+        641.0
     }
 }
 
@@ -162,6 +163,33 @@ fn to_slint(state: &controller::UiState) -> UiState {
         gpu_power: state.gpu_power_display.clone().into(),
         version: state.version.clone().into(),
         mock_profile: state.mock_profile.clone().into(),
+        // Fan Curve Editor
+        fan_curve_state: match state.fan_curve_state {
+            controller::FanCurveHwState::Loading => FanCurveHwState::Loading,
+            controller::FanCurveHwState::Ready => FanCurveHwState::Ready,
+            controller::FanCurveHwState::Unavailable => FanCurveHwState::Unavailable,
+        },
+        fan_curve_writable: state.fan_curve_writable,
+        fan_curve_error: state.fan_curve_error,
+        fan_curve_dirty: state.fan_curve_dirty,
+        fan_selected: state.fan_selected,
+        fan_profile_selected: state.fan_profile_selected,
+        fan_temp_0: state.fan_curve_temps[0],
+        fan_temp_1: state.fan_curve_temps[1],
+        fan_temp_2: state.fan_curve_temps[2],
+        fan_temp_3: state.fan_curve_temps[3],
+        fan_temp_4: state.fan_curve_temps[4],
+        fan_temp_5: state.fan_curve_temps[5],
+        fan_temp_6: state.fan_curve_temps[6],
+        fan_temp_7: state.fan_curve_temps[7],
+        fan_pwm_0: state.fan_curve_pwms[0],
+        fan_pwm_1: state.fan_curve_pwms[1],
+        fan_pwm_2: state.fan_curve_pwms[2],
+        fan_pwm_3: state.fan_curve_pwms[3],
+        fan_pwm_4: state.fan_curve_pwms[4],
+        fan_pwm_5: state.fan_curve_pwms[5],
+        fan_pwm_6: state.fan_curve_pwms[6],
+        fan_pwm_7: state.fan_curve_pwms[7],
     }
 }
 
@@ -230,16 +258,38 @@ fn from_slint(state: &UiState) -> controller::UiState {
         battery_status: state.battery_status.to_string(),
         ac_online: state.ac_online.to_string(),
         gpu_power_display: state.gpu_power.to_string(),
-        // Fan Curve: no Slint fields yet — use defaults from controller
-        fan_curve_state: controller::FanCurveHwState::Loading,
-        fan_curve_writable: false,
+        // Fan Curve Editor
+        fan_curve_state: match state.fan_curve_state {
+            FanCurveHwState::Loading => controller::FanCurveHwState::Loading,
+            FanCurveHwState::Ready => controller::FanCurveHwState::Ready,
+            FanCurveHwState::Unavailable => controller::FanCurveHwState::Unavailable,
+        },
+        fan_curve_writable: state.fan_curve_writable,
+        fan_curve_error: state.fan_curve_error,
+        fan_curve_dirty: state.fan_curve_dirty,
+        fan_selected: state.fan_selected,
+        fan_profile_selected: state.fan_profile_selected,
+        fan_curve_temps: [
+            state.fan_temp_0,
+            state.fan_temp_1,
+            state.fan_temp_2,
+            state.fan_temp_3,
+            state.fan_temp_4,
+            state.fan_temp_5,
+            state.fan_temp_6,
+            state.fan_temp_7,
+        ],
+        fan_curve_pwms: [
+            state.fan_pwm_0,
+            state.fan_pwm_1,
+            state.fan_pwm_2,
+            state.fan_pwm_3,
+            state.fan_pwm_4,
+            state.fan_pwm_5,
+            state.fan_pwm_6,
+            state.fan_pwm_7,
+        ],
         fan_curve_capability: controller::CapabilityAvailability::Unknown,
-        fan_selected: 0,
-        fan_profile_selected: 0,
-        fan_curve_temps: [0; 8],
-        fan_curve_pwms: [0; 8],
-        fan_curve_error: false,
-        fan_curve_dirty: false,
     }
 }
 
@@ -876,6 +926,124 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             }
         });
     }
+    // Fan curve callbacks
+    {
+        let worker_tx = worker_tx.clone();
+        let app_weak = app.as_weak();
+        app.on_fan_changed(move |i| {
+            let Some(app) = app_weak.upgrade() else {
+                tracing::warn!("fan-changed после уничтожения окна: {i}");
+                return;
+            };
+            let mut s = from_slint(&app.get_ui_state());
+            let Some(fan_id) = controller::UiState::fan_id_from_index(i) else {
+                tracing::warn!("fan-changed с неизвестным индексом: {i}");
+                return;
+            };
+            // Local state update
+            s.fan_selected = i;
+            app.set_ui_state(to_slint(&s));
+            // Send refresh command to worker
+            match &worker_tx {
+                Some(tx) => {
+                    if let Err(e) = tx.send(WorkerCommand::RefreshFanCurve { fan: fan_id }) {
+                        tracing::warn!("worker закрыт, fan refresh не отправлен: {e:?}");
+                    }
+                }
+                None => {
+                    tracing::warn!("fan-changed вне интерактивного режима");
+                }
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        app.on_fan_profile_changed(move |i| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let mut s = from_slint(&app.get_ui_state());
+            s.fan_profile_selected = i;
+            s.fan_curve_dirty = true;
+            app.set_ui_state(to_slint(&s));
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        app.on_fan_temp_point_changed(move |index, value| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let mut s = from_slint(&app.get_ui_state());
+            if (0..8).contains(&index) {
+                s.fan_curve_temps[index as usize] = value;
+                s.fan_curve_dirty = true;
+            }
+            app.set_ui_state(to_slint(&s));
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        app.on_fan_pwm_point_changed(move |index, value| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let mut s = from_slint(&app.get_ui_state());
+            if (0..8).contains(&index) {
+                s.fan_curve_pwms[index as usize] = value;
+                s.fan_curve_dirty = true;
+            }
+            app.set_ui_state(to_slint(&s));
+        });
+    }
+    {
+        let worker_tx = worker_tx.clone();
+        let app_weak = app.as_weak();
+        app.on_fan_apply_clicked(move || {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let s = from_slint(&app.get_ui_state());
+            // Rust-side guard: disabled/invalid curve must not send mutation
+            if !s.fan_curve_can_mutate() {
+                tracing::warn!(
+                    "fan-apply rejected: not writable, not dirty, error, or invalid curve"
+                );
+                return;
+            }
+            let Some(profile) =
+                controller::UiState::asusd_profile_from_index(s.fan_profile_selected)
+            else {
+                tracing::warn!(
+                    "fan-apply: invalid profile index {}",
+                    s.fan_profile_selected
+                );
+                return;
+            };
+            let Some(fan_id) = controller::UiState::fan_id_from_index(s.fan_selected) else {
+                tracing::warn!("fan-apply: invalid fan index {}", s.fan_selected);
+                return;
+            };
+            let Some(curve) = s.build_fan_curve_points() else {
+                tracing::warn!("fan-apply: failed to build FanCurvePoints from editor state");
+                return;
+            };
+            match &worker_tx {
+                Some(tx) => {
+                    if let Err(e) = tx.send(WorkerCommand::SetFanCurve {
+                        profile,
+                        fan: fan_id,
+                        curve,
+                    }) {
+                        tracing::warn!("worker закрыт, fan mutation не отправлена: {e:?}");
+                    }
+                }
+                None => {
+                    tracing::warn!("fan-apply вне интерактивного режима");
+                }
+            }
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,6 +1283,15 @@ fn main() -> anyhow::Result<()> {
     // ошибка не затирает последний успешный state.
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshTelemetry) {
         tracing::warn!("worker закрыт, initial telemetry refresh не отправлен: {e:?}");
+    }
+
+    // Ровно один initial fan curve refresh. Публикует authoritative fan
+    // curve для CPU (default fan selected). Без polling; ошибка не
+    // затирает предыдущий state.
+    if let Err(e) = worker_tx.send(WorkerCommand::RefreshFanCurve {
+        fan: orbis_core::fan::FanId::Cpu,
+    }) {
+        tracing::warn!("worker закрыт, initial fan curve refresh не отправлен: {e:?}");
     }
 
     app.show()?;
