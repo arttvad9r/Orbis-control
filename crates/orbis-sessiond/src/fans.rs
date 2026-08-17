@@ -94,7 +94,10 @@ pub fn asusd_fan_profile_from_wire(raw: u32) -> Result<AsusdFanProfile, Provider
 
 /// Сопоставление asusd fan profile с трёхкнопочной `PerformanceProfile`.
 ///
-/// `LowPower` и `Quiet` → `Silent` (как `PlatformProfile → PerformanceProfile`).
+/// Это read-only mapping (asusd → трёхкнопочная модель). `LowPower` и `Quiet`
+/// оба отображаются на `Silent` (как `PlatformProfile → PerformanceProfile`),
+/// но сам `AsusdFanProfile` остаётся lossless: `Quiet` и `LowPower` — отдельные
+/// варианты (wire 2 и 3), различимость сохраняется.
 impl From<AsusdFanProfile> for PerformanceProfile {
     fn from(p: AsusdFanProfile) -> Self {
         match p {
@@ -107,14 +110,19 @@ impl From<AsusdFanProfile> for PerformanceProfile {
 
 /// Обратное сопоставление трёхкнопочной модели с asusd fan profile.
 ///
-/// `Silent` → `Quiet` (как `PerformanceProfile → PlatformProfile`); `LowPower`
-/// не используется для трёхкнопочной модели.
-impl From<PerformanceProfile> for AsusdFanProfile {
-    fn from(p: PerformanceProfile) -> Self {
+/// **Fallible**: `Silent` неоднозначен (может быть `Quiet` или `LowPower`),
+/// поэтому автоматический выбор запрещён. Fan mutation API должен использовать
+/// lossless `AsusdFanProfile` напрямую, а не `PerformanceProfile`.
+impl TryFrom<PerformanceProfile> for AsusdFanProfile {
+    type Error = ProviderError;
+
+    fn try_from(p: PerformanceProfile) -> Result<Self, Self::Error> {
         match p {
-            PerformanceProfile::Silent => AsusdFanProfile::Quiet,
-            PerformanceProfile::Balanced => AsusdFanProfile::Balanced,
-            PerformanceProfile::Turbo => AsusdFanProfile::Performance,
+            PerformanceProfile::Balanced => Ok(AsusdFanProfile::Balanced),
+            PerformanceProfile::Turbo => Ok(AsusdFanProfile::Performance),
+            PerformanceProfile::Silent => Err(ProviderError::InvalidRequest(
+                "PerformanceProfile::Silent неоднозначен для asusd fan profile: выберите AsusdFanProfile::Quiet или AsusdFanProfile::LowPower явно".into(),
+            )),
         }
     }
 }
@@ -859,6 +867,39 @@ mod tests {
     }
 
     #[test]
+    fn asusd_fan_profile_wire_roundtrip_is_lossless() {
+        // wire 0..3 round-trip без потери.
+        for wire in 0..=3u32 {
+            let profile = asusd_fan_profile_from_wire(wire).expect("valid wire");
+            assert_eq!(profile.wire(), wire, "round-trip wire {wire}");
+        }
+    }
+
+    #[test]
+    fn quiet_and_lowpower_remain_distinct() {
+        // AsusdFanProfile lossless: Quiet (wire 2) и LowPower (wire 3) различимы.
+        assert_ne!(AsusdFanProfile::Quiet, AsusdFanProfile::LowPower);
+        assert_eq!(AsusdFanProfile::Quiet.wire(), 2);
+        assert_eq!(AsusdFanProfile::LowPower.wire(), 3);
+        assert_eq!(
+            asusd_fan_profile_from_wire(2).unwrap(),
+            AsusdFanProfile::Quiet
+        );
+        assert_eq!(
+            asusd_fan_profile_from_wire(3).unwrap(),
+            AsusdFanProfile::LowPower
+        );
+    }
+
+    #[test]
+    fn silent_does_not_auto_select_quiet_or_lowpower() {
+        // Silent не выбирает автоматически Quiet или LowPower — ошибка.
+        let err = AsusdFanProfile::try_from(PerformanceProfile::Silent)
+            .expect_err("Silent must be ambiguous");
+        assert!(matches!(err, ProviderError::InvalidRequest(_)));
+    }
+
+    #[test]
     fn asusd_fan_profile_maps_to_performance_profile() {
         // Согласуется с PlatformProfile → PerformanceProfile (profile.rs).
         assert_eq!(
@@ -878,17 +919,17 @@ mod tests {
             PerformanceProfile::Silent
         );
 
-        // Обратное: трёхкнопочная → asusd fan profile.
+        // Обратное: трёхкнопочная → asusd fan profile (fallible).
+        // Silent неоднозначен (Quiet vs LowPower) → ошибка, не silent fallback.
+        let err =
+            AsusdFanProfile::try_from(PerformanceProfile::Silent).expect_err("Silent ambiguous");
+        assert!(matches!(err, ProviderError::InvalidRequest(_)));
         assert_eq!(
-            AsusdFanProfile::from(PerformanceProfile::Silent),
-            AsusdFanProfile::Quiet
-        );
-        assert_eq!(
-            AsusdFanProfile::from(PerformanceProfile::Balanced),
+            AsusdFanProfile::try_from(PerformanceProfile::Balanced).unwrap(),
             AsusdFanProfile::Balanced
         );
         assert_eq!(
-            AsusdFanProfile::from(PerformanceProfile::Turbo),
+            AsusdFanProfile::try_from(PerformanceProfile::Turbo).unwrap(),
             AsusdFanProfile::Performance
         );
     }
