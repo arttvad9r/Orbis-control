@@ -1,4 +1,4 @@
-//! Read-only capability adapters for Performance and Battery.
+//! Read-only capability adapters for Performance, Battery, and GPU primitives.
 //!
 //! These functions execute provider reads but never execute mutation methods.
 //! They return capability metadata only; observed values are deliberately
@@ -12,7 +12,9 @@ use orbis_core::capability::{
 };
 
 use crate::error::ProviderError;
-use crate::traits::{BatteryProvider, PerformanceProvider};
+use crate::traits::{
+    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
+};
 
 fn operation_from_error(
     error: &ProviderError,
@@ -105,6 +107,75 @@ where
     Ok(capability_from_read(read, constraints))
 }
 
+/// Probe GPU runtime power capability.
+///
+/// The resulting power value is read only to confirm the read contract; the
+/// observed `GpuPowerState` (e.g. `Active`/`Suspended`/`Off`/`Stale`) does
+/// not enter the capability metadata.
+pub async fn probe_gpu_power<P>(provider: &P) -> Result<Capability, ProbeError>
+where
+    P: GpuPowerProvider + ?Sized,
+{
+    match provider.power_state().await {
+        Ok(_) => Ok(supported_read_only()),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            Ok(capability_from_read(read, CapabilityConstraints::Unknown))
+        }
+    }
+}
+
+/// Probe physical GPU MUX capability.
+///
+/// The resulting MUX value is read only to confirm the read contract; the
+/// observed `GpuMuxState` (e.g. `Integrated`/`Discrete`) does not enter the
+/// capability metadata. Provider-level `Unsupported` for an absent firmware
+/// attribute is classified by the existing `ProviderError → ProbeClassification`
+/// adapter rather than escalated to a separate `BackendMissing`.
+pub async fn probe_gpu_mux<P>(provider: &P) -> Result<Capability, ProbeError>
+where
+    P: GpuMuxProvider + ?Sized,
+{
+    match provider.mux_state().await {
+        Ok(_) => Ok(supported_read_only()),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            Ok(capability_from_read(read, CapabilityConstraints::Unknown))
+        }
+    }
+}
+
+/// Probe dGPU access policy capability.
+///
+/// The resulting `GpuAccessPolicy` is read only to confirm the read contract;
+/// the observed `Blocked`/`Unblocked`/`Pending` value does not enter the
+/// capability metadata.
+pub async fn probe_gpu_access<P>(provider: &P) -> Result<Capability, ProbeError>
+where
+    P: GpuAccessProvider + ?Sized,
+{
+    match provider.access_policy().await {
+        Ok(_) => Ok(supported_read_only()),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            Ok(capability_from_read(read, CapabilityConstraints::Unknown))
+        }
+    }
+}
+
+fn supported_read_only() -> Capability {
+    let read = ProbeOperationResult::classified(ProbeClassification::Supported).into_operation();
+    let write = ProbeOperationResult::with_detail(
+        ProbeClassification::Unsupported,
+        "GPU primitive read-only probe does not establish write support",
+    )
+    .into_operation();
+    capability_from_operations(
+        CapabilityOperations { read, write },
+        CapabilityConstraints::Unknown,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -120,7 +191,10 @@ mod tests {
 
     use super::*;
     use crate::error::ValidationResult;
-    use crate::traits::{Provider, ProviderHealth};
+    use crate::traits::{
+        GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, Provider, ProviderHealth,
+    };
+    use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 
     #[derive(Debug, Clone)]
     enum ScriptedError {
@@ -159,6 +233,9 @@ mod tests {
         profiles: Scripted<Vec<PerformanceProfile>>,
         current: Scripted<PerformanceProfile>,
         charge_limit: Scripted<ChargeLimit>,
+        gpu_power: Scripted<GpuPowerState>,
+        gpu_mux: Scripted<GpuMuxState>,
+        gpu_access: Scripted<GpuAccessPolicy>,
     }
 
     impl ScriptedProvider {
@@ -167,6 +244,9 @@ mod tests {
                 profiles,
                 current: Scripted::Value(PerformanceProfile::Balanced),
                 charge_limit: Scripted::Error(ScriptedError::Unsupported),
+                gpu_power: Scripted::Error(ScriptedError::Unsupported),
+                gpu_mux: Scripted::Error(ScriptedError::Unsupported),
+                gpu_access: Scripted::Error(ScriptedError::Unsupported),
             }
         }
 
@@ -175,6 +255,24 @@ mod tests {
                 profiles: Scripted::Error(ScriptedError::Unsupported),
                 current: Scripted::Error(ScriptedError::Unsupported),
                 charge_limit,
+                gpu_power: Scripted::Error(ScriptedError::Unsupported),
+                gpu_mux: Scripted::Error(ScriptedError::Unsupported),
+                gpu_access: Scripted::Error(ScriptedError::Unsupported),
+            }
+        }
+
+        fn gpu(
+            power: Scripted<GpuPowerState>,
+            mux: Scripted<GpuMuxState>,
+            access: Scripted<GpuAccessPolicy>,
+        ) -> Self {
+            Self {
+                profiles: Scripted::Error(ScriptedError::Unsupported),
+                current: Scripted::Error(ScriptedError::Unsupported),
+                charge_limit: Scripted::Error(ScriptedError::Unsupported),
+                gpu_power: power,
+                gpu_mux: mux,
+                gpu_access: access,
             }
         }
     }
@@ -251,6 +349,27 @@ mod tests {
 
         fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
             ValidationResult::invalid("probe provider")
+        }
+    }
+
+    #[async_trait]
+    impl GpuPowerProvider for ScriptedProvider {
+        async fn power_state(&self) -> Result<GpuPowerState, ProviderError> {
+            self.gpu_power.result()
+        }
+    }
+
+    #[async_trait]
+    impl GpuMuxProvider for ScriptedProvider {
+        async fn mux_state(&self) -> Result<GpuMuxState, ProviderError> {
+            self.gpu_mux.result()
+        }
+    }
+
+    #[async_trait]
+    impl GpuAccessProvider for ScriptedProvider {
+        async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError> {
+            self.gpu_access.result()
         }
     }
 
@@ -382,5 +501,171 @@ mod tests {
         let snapshot = builder.build().unwrap();
         assert!(snapshot.contains(orbis_core::FeatureId::Performance));
         assert!(snapshot.contains(orbis_core::FeatureId::ChargeLimit));
+    }
+
+    #[tokio::test]
+    async fn gpu_power_probe_reports_supported_without_storing_state() {
+        for state in [
+            GpuPowerState::Active,
+            GpuPowerState::Suspended,
+            GpuPowerState::Off,
+            GpuPowerState::Stale,
+            GpuPowerState::Unknown,
+        ] {
+            let capability = probe_gpu_power(&ScriptedProvider::gpu(
+                Scripted::Value(state),
+                Scripted::Error(ScriptedError::Unsupported),
+                Scripted::Error(ScriptedError::Unsupported),
+            ))
+            .await
+            .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported
+            );
+            assert_eq!(
+                capability.operations.write.status,
+                CapabilityStatus::Unsupported
+            );
+            assert_eq!(capability.constraints, CapabilityConstraints::Unknown);
+            assert!(capability.reason.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn gpu_power_probe_propagates_backend_missing_for_power_read() {
+        let missing = probe_gpu_power(&ScriptedProvider::gpu(
+            Scripted::Error(ScriptedError::BackendMissing),
+            Scripted::Error(ScriptedError::Unsupported),
+            Scripted::Error(ScriptedError::Unsupported),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            missing.operations.read.status,
+            CapabilityStatus::BackendMissing
+        );
+    }
+
+    #[tokio::test]
+    async fn gpu_mux_probe_supported_for_proven_values_and_unsupported_when_absent() {
+        for state in [
+            GpuMuxState::Integrated,
+            GpuMuxState::Discrete,
+            GpuMuxState::Unknown,
+        ] {
+            let capability = probe_gpu_mux(&ScriptedProvider::gpu(
+                Scripted::Error(ScriptedError::Unsupported),
+                Scripted::Value(state),
+                Scripted::Error(ScriptedError::Unsupported),
+            ))
+            .await
+            .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported
+            );
+            assert_eq!(
+                capability.operations.write.status,
+                CapabilityStatus::Unsupported
+            );
+            assert_eq!(capability.constraints, CapabilityConstraints::Unknown);
+        }
+
+        let absent = probe_gpu_mux(&ScriptedProvider::gpu(
+            Scripted::Error(ScriptedError::Unsupported),
+            Scripted::Error(ScriptedError::Unsupported),
+            Scripted::Error(ScriptedError::Unsupported),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(absent.operations.read.status, CapabilityStatus::Unsupported);
+    }
+
+    #[tokio::test]
+    async fn gpu_access_probe_supported_and_writes_remain_unsupported() {
+        for state in [
+            GpuAccessPolicy::Unblocked,
+            GpuAccessPolicy::Blocked,
+            GpuAccessPolicy::Pending,
+            GpuAccessPolicy::Unknown,
+        ] {
+            let capability = probe_gpu_access(&ScriptedProvider::gpu(
+                Scripted::Error(ScriptedError::Unsupported),
+                Scripted::Error(ScriptedError::Unsupported),
+                Scripted::Value(state),
+            ))
+            .await
+            .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported
+            );
+            assert_eq!(
+                capability.operations.write.status,
+                CapabilityStatus::Unsupported
+            );
+            assert_eq!(capability.constraints, CapabilityConstraints::Unknown);
+        }
+
+        let absent = probe_gpu_access(&ScriptedProvider::gpu(
+            Scripted::Error(ScriptedError::Unsupported),
+            Scripted::Error(ScriptedError::Unsupported),
+            Scripted::Error(ScriptedError::Unsupported),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(absent.operations.read.status, CapabilityStatus::Unsupported);
+    }
+
+    #[tokio::test]
+    async fn gpu_primitive_probes_fail_independently_without_dropping_others() {
+        let provider = ScriptedProvider::gpu(
+            Scripted::Value(GpuPowerState::Suspended),
+            Scripted::Error(ScriptedError::BackendMissing),
+            Scripted::Value(GpuAccessPolicy::Blocked),
+        );
+        let power = probe_gpu_power(&provider).await.unwrap();
+        let mux = probe_gpu_mux(&provider).await.unwrap();
+        let access = probe_gpu_access(&provider).await.unwrap();
+        assert_eq!(power.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(mux.operations.read.status, CapabilityStatus::BackendMissing);
+        assert_eq!(access.operations.read.status, CapabilityStatus::Supported);
+    }
+
+    #[tokio::test]
+    async fn registry_does_not_synthesise_gpu_product_policy() {
+        let provider = ScriptedProvider::gpu(
+            Scripted::Value(GpuPowerState::Suspended),
+            Scripted::Value(GpuMuxState::Integrated),
+            Scripted::Value(GpuAccessPolicy::Unblocked),
+        );
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        builder
+            .add(
+                orbis_core::FeatureId::GpuPower,
+                probe_gpu_power(&provider).await.unwrap(),
+            )
+            .unwrap();
+        builder
+            .add(
+                orbis_core::FeatureId::GpuMux,
+                probe_gpu_mux(&provider).await.unwrap(),
+            )
+            .unwrap();
+        builder
+            .add(
+                orbis_core::FeatureId::GpuAccess,
+                probe_gpu_access(&provider).await.unwrap(),
+            )
+            .unwrap();
+        let snapshot = builder.build().unwrap();
+        assert!(!snapshot.contains(orbis_core::FeatureId::GpuProductPolicy));
+        assert!(snapshot.contains(orbis_core::FeatureId::GpuPower));
+        assert!(snapshot.contains(orbis_core::FeatureId::GpuMux));
+        assert!(snapshot.contains(orbis_core::FeatureId::GpuAccess));
     }
 }

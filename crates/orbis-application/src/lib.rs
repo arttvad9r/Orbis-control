@@ -114,6 +114,11 @@ impl<P> AppService<P> {
     pub fn new(provider: Arc<P>) -> Self {
         Self { provider }
     }
+
+    /// Borrow the underlying provider for capability probes.
+    pub fn provider(&self) -> &P {
+        &self.provider
+    }
 }
 
 impl<P> AppService<P>

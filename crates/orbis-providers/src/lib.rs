@@ -24,7 +24,9 @@ pub mod mock;
 
 pub use error::{OperationId, ProviderError, ValidationResult};
 pub use native_asus_eco::*;
-pub use probes::{probe_charge_limit, probe_performance};
+pub use probes::{
+    probe_charge_limit, probe_gpu_access, probe_gpu_mux, probe_gpu_power, probe_performance,
+};
 pub use traits::*;
 
 #[cfg(feature = "mock")]

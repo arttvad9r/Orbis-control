@@ -69,6 +69,36 @@ impl<P, X, A> GpuPrimitiveServices<P, X, A> {
     pub fn new(power: AppService<P>, mux: AppService<X>, access: AppService<A>) -> Self {
         Self { power, mux, access }
     }
+
+    /// Borrow the underlying runtime power service for capability probing.
+    pub fn primitive_power(&self) -> &AppService<P> {
+        &self.power
+    }
+
+    /// Borrow the underlying physical MUX service for capability probing.
+    pub fn primitive_mux(&self) -> &AppService<X> {
+        &self.mux
+    }
+
+    /// Borrow the underlying access policy service for capability probing.
+    pub fn primitive_access(&self) -> &AppService<A> {
+        &self.access
+    }
+
+    /// Borrow the inner power provider for capability probing.
+    pub fn primitive_power_provider(&self) -> &P {
+        self.power.provider()
+    }
+
+    /// Borrow the inner MUX provider for capability probing.
+    pub fn primitive_mux_provider(&self) -> &X {
+        self.mux.provider()
+    }
+
+    /// Borrow the inner access policy provider for capability probing.
+    pub fn primitive_access_provider(&self) -> &A {
+        self.access.provider()
+    }
 }
 
 /// Capability operations exposed by the grouped GPU composition.
@@ -257,13 +287,20 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
 ///
 /// Probe failures do not abort the snapshot: each capability is recorded
 /// independently.
-pub async fn build_initial_registry_snapshot<Bp, Pp>(
+#[allow(clippy::too_many_arguments)]
+pub async fn build_initial_registry_snapshot<Bp, Pp, Gpow, Gmux, Gacc>(
     battery_provider: &Bp,
     performance_provider: &Pp,
+    gpu_power_provider: &Gpow,
+    gpu_mux_provider: &Gmux,
+    gpu_access_provider: &Gacc,
 ) -> CapabilityRegistrySnapshot
 where
     Bp: orbis_providers::traits::BatteryProvider + ?Sized,
     Pp: orbis_providers::traits::PerformanceProvider + ?Sized,
+    Gpow: orbis_providers::traits::GpuPowerProvider + ?Sized,
+    Gmux: orbis_providers::traits::GpuMuxProvider + ?Sized,
+    Gacc: orbis_providers::traits::GpuAccessProvider + ?Sized,
 {
     let checked_at = SystemTime::now();
     let mut builder = CapabilityRegistryBuilder::new(1, checked_at);
@@ -274,6 +311,18 @@ where
 
     if let Ok(battery) = orbis_providers::probe_charge_limit(battery_provider).await {
         let _ = builder.add(orbis_core::FeatureId::ChargeLimit, battery);
+    }
+
+    if let Ok(power) = orbis_providers::probe_gpu_power(gpu_power_provider).await {
+        let _ = builder.add(orbis_core::FeatureId::GpuPower, power);
+    }
+
+    if let Ok(mux) = orbis_providers::probe_gpu_mux(gpu_mux_provider).await {
+        let _ = builder.add(orbis_core::FeatureId::GpuMux, mux);
+    }
+
+    if let Ok(access) = orbis_providers::probe_gpu_access(gpu_access_provider).await {
+        let _ = builder.add(orbis_core::FeatureId::GpuAccess, access);
     }
 
     builder
@@ -352,7 +401,14 @@ pub async fn build_production_runtime(
     let battery = AppService::new(battery_arc.clone());
     let performance = AppService::new(performance_arc.clone());
 
-    let snapshot = build_initial_registry_snapshot(&*battery_arc, &*performance_arc).await;
+    let snapshot = build_initial_registry_snapshot(
+        &*battery_arc,
+        &*performance_arc,
+        gpu.primitive_power_provider(),
+        gpu.primitive_mux_provider(),
+        gpu.primitive_access_provider(),
+    )
+    .await;
 
     Ok((
         ApplicationRuntime::new(gpu, battery, performance).with_registry(snapshot),
@@ -437,7 +493,10 @@ mod tests {
         let provider = Arc::new(MockProvider::new(
             build_state_arc("zephyrus-full").expect("profile exists"),
         ));
-        let snapshot = build_initial_registry_snapshot(&*provider, &*provider).await;
+        let snapshot = build_initial_registry_snapshot(
+            &*provider, &*provider, &*provider, &*provider, &*provider,
+        )
+        .await;
         let runtime = mock_runtime().with_registry(snapshot);
         let snapshot_ref = runtime.capabilities();
         assert_eq!(snapshot_ref.generation(), 1);
@@ -471,5 +530,22 @@ mod tests {
             snapshot_ref_before as *const _, snapshot_ref_after as *const _,
             "snapshot must not be re-created between accesses"
         );
+    }
+
+    #[tokio::test]
+    async fn initial_runtime_snapshot_contains_all_five_capabilities() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let snapshot = build_initial_registry_snapshot(
+            &*provider, &*provider, &*provider, &*provider, &*provider,
+        )
+        .await;
+        assert!(snapshot.contains(FeatureId::Performance));
+        assert!(snapshot.contains(FeatureId::ChargeLimit));
+        assert!(snapshot.contains(FeatureId::GpuPower));
+        assert!(snapshot.contains(FeatureId::GpuMux));
+        assert!(snapshot.contains(FeatureId::GpuAccess));
+        assert!(!snapshot.contains(FeatureId::GpuProductPolicy));
     }
 }
