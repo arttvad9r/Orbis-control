@@ -37,4 +37,15 @@
       <allow_active>yes</allow_active>
     </defaults>
   </action>
+  <action id="io.github.orbiscontrol.hardware.set-fan-curve">
+    <description>Change the Orbis Control fan curve</description>
+    <description xml:lang="ru">Изменить кривую вентилятора Orbis Control</description>
+    <message>Authentication is required to change the fan curve</message>
+    <message xml:lang="ru">Требуется аутентификация для изменения кривой вентилятора</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
 </policyconfig>

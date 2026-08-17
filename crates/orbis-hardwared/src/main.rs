@@ -13,9 +13,10 @@
 use std::error::Error;
 
 use orbis_hardwared::{
-    Authorizer, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, GPU_POLKIT_ACTION,
-    HardwareService, PolkitAuthorizer,
+    Authorizer, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION,
+    GPU_POLKIT_ACTION, HardwareService, PolkitAuthorizer,
     battery::{AsusdBatteryMutationBackend, ZbusAsusdBatteryClient, discover_effective_reader},
+    fans::{AsusdFanCurveMutationBackend, ZbusAsusdFanCurveClient},
     supergfxd::{SupergfxdMutationBackend, ZbusSupergfxdMutationClient},
 };
 
@@ -44,12 +45,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
         connection.clone(),
         GPU_POLKIT_ACTION,
     ));
-    let service = HardwareService::with_battery_and_gpu_backends(
+    let fan_backend =
+        AsusdFanCurveMutationBackend::new(ZbusAsusdFanCurveClient::new(connection.clone()));
+    let fan_authorizer: Box<dyn Authorizer> = Box::new(PolkitAuthorizer::with_action(
+        connection.clone(),
+        FAN_POLKIT_ACTION,
+    ));
+    let service = HardwareService::with_battery_gpu_and_fan_backends(
         authorizer,
         Box::new(battery_backend),
         battery_authorizer,
         Box::new(gpu_backend),
         gpu_authorizer,
+        Box::new(fan_backend),
+        fan_authorizer,
     );
     connection
         .object_server()

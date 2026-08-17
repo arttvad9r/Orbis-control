@@ -634,6 +634,29 @@ impl HardwareService {
         }
     }
 
+    /// Создать production service с Battery, GPU и fan curve backends.
+    pub fn with_battery_gpu_and_fan_backends(
+        authorizer: Box<dyn Authorizer>,
+        battery_backend: Box<dyn BatteryMutationBackend>,
+        battery_authorizer: Box<dyn Authorizer>,
+        gpu_backend: Box<dyn supergfxd::SupergfxdMutationOperation>,
+        gpu_authorizer: Box<dyn Authorizer>,
+        fan_backend: Box<dyn fans::FanCurveMutationOperation>,
+        fan_authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        Self {
+            authorizer,
+            writer: PlatformProfileWriter::default(),
+            battery_authorizer,
+            battery_backend: Some(battery_backend),
+            gpu_authorizer,
+            gpu_backend: Some(gpu_backend),
+            gpu_sender_fallback: None,
+            fan_authorizer,
+            fan_backend: Some(fan_backend),
+        }
+    }
+
     /// Test/injection construction for the GPU Hardware1 boundary.
     pub fn with_gpu_backend(
         authorizer: Box<dyn Authorizer>,
@@ -1234,6 +1257,14 @@ mod tests {
             "io.github.orbiscontrol.hardware.set-performance-profile"
         );
         assert_eq!(
+            BATTERY_POLKIT_ACTION,
+            "io.github.orbiscontrol.hardware.set-charge-limit"
+        );
+        assert_eq!(
+            GPU_POLKIT_ACTION,
+            "io.github.orbiscontrol.hardware.set-gpu-mode"
+        );
+        assert_eq!(
             FAN_POLKIT_ACTION,
             "io.github.orbiscontrol.hardware.set-fan-curve"
         );
@@ -1360,5 +1391,32 @@ mod tests {
             .expect_err("backend error");
         assert!(matches!(err, zbus::fdo::Error::Failed(_)));
         assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Polkit policy deployment: каждый Rust action constant присутствует в
+    // установленном policy файле (packaging/nix/polkit).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn polkit_policy_contains_all_mutation_actions() {
+        let policy_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packaging/nix/polkit/io.github.orbiscontrol.hardware.policy"
+        );
+        let policy = std::fs::read_to_string(policy_path)
+            .unwrap_or_else(|e| panic!("не удалось прочитать policy файл {policy_path}: {e}"));
+
+        for action in [
+            POLKIT_ACTION,
+            BATTERY_POLKIT_ACTION,
+            GPU_POLKIT_ACTION,
+            FAN_POLKIT_ACTION,
+        ] {
+            assert!(
+                policy.contains(&format!("<action id=\"{action}\">")),
+                "policy файл не содержит action '{action}'"
+            );
+        }
     }
 }
