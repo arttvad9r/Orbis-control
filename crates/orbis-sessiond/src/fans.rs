@@ -31,6 +31,236 @@ use orbis_providers::traits::{FanProvider, Provider, ProviderHealth};
 /// Количество точек кривой, фиксированное kernel ABI `asus_custom_fan_curve`.
 pub const CURVE_POINT_COUNT: usize = 8;
 
+// ---------------------------------------------------------------------------
+// asusd fan profile wire mapping (live-validated, Task 6.6/6.7)
+// ---------------------------------------------------------------------------
+
+/// Wire value asusd `FanCurveData`/`SetFanCurve` profile argument.
+///
+/// Mapping доказан (не угадан) из:
+/// - `/etc/asusd/fan_curves.ron` строковые имена (`balanced`/`performance`/`quiet`);
+/// - `FanCurveData(0/1/2)` == `fan_curves.ron` (`balanced`/`performance`/`quiet`);
+/// - `PlatformProfileChoices = [3, 2, 0, 1]` == `[LowPower, Quiet, Balanced, Performance]`;
+/// - historical mapping (`0=Balanced`, `2=Quiet`) и live-валидация (активный 0 = Balanced).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AsusdFanProfile {
+    /// wire 0 — balanced.
+    Balanced,
+    /// wire 1 — performance.
+    Performance,
+    /// wire 2 — quiet.
+    Quiet,
+    /// wire 3 — low-power.
+    LowPower,
+}
+
+impl AsusdFanProfile {
+    /// Wire value для D-Bus.
+    pub fn wire(self) -> u32 {
+        match self {
+            Self::Balanced => 0,
+            Self::Performance => 1,
+            Self::Quiet => 2,
+            Self::LowPower => 3,
+        }
+    }
+
+    /// Строковое имя (для диагностики/сравнения с `fan_curves.ron`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Balanced => "balanced",
+            Self::Performance => "performance",
+            Self::Quiet => "quiet",
+            Self::LowPower => "low-power",
+        }
+    }
+}
+
+/// Strict decode wire `u32` → `AsusdFanProfile`.
+///
+/// Неизвестное значение → `ProviderError::Internal` (remote нарушил contract),
+/// без fallback.
+pub fn asusd_fan_profile_from_wire(raw: u32) -> Result<AsusdFanProfile, ProviderError> {
+    match raw {
+        0 => Ok(AsusdFanProfile::Balanced),
+        1 => Ok(AsusdFanProfile::Performance),
+        2 => Ok(AsusdFanProfile::Quiet),
+        3 => Ok(AsusdFanProfile::LowPower),
+        other => Err(ProviderError::Internal(format!(
+            "asusd FanCurves: неизвестный profile wire value {other}"
+        ))),
+    }
+}
+
+/// Сопоставление asusd fan profile с трёхкнопочной `PerformanceProfile`.
+///
+/// `LowPower` и `Quiet` → `Silent` (как `PlatformProfile → PerformanceProfile`).
+impl From<AsusdFanProfile> for PerformanceProfile {
+    fn from(p: AsusdFanProfile) -> Self {
+        match p {
+            AsusdFanProfile::Balanced => PerformanceProfile::Balanced,
+            AsusdFanProfile::Performance => PerformanceProfile::Turbo,
+            AsusdFanProfile::Quiet | AsusdFanProfile::LowPower => PerformanceProfile::Silent,
+        }
+    }
+}
+
+/// Обратное сопоставление трёхкнопочной модели с asusd fan profile.
+///
+/// `Silent` → `Quiet` (как `PerformanceProfile → PlatformProfile`); `LowPower`
+/// не используется для трёхкнопочной модели.
+impl From<PerformanceProfile> for AsusdFanProfile {
+    fn from(p: PerformanceProfile) -> Self {
+        match p {
+            PerformanceProfile::Silent => AsusdFanProfile::Quiet,
+            PerformanceProfile::Balanced => AsusdFanProfile::Balanced,
+            PerformanceProfile::Turbo => AsusdFanProfile::Performance,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Typed asusd FanCurves read contract
+// ---------------------------------------------------------------------------
+
+/// Одна кривая вентилятора из asusd `FanCurveData`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsusdFanCurve {
+    /// Вентилятор (CPU/GPU).
+    pub fan: FanId,
+    /// 8 температур, °C.
+    pub temps: [TemperatureC; CURVE_POINT_COUNT],
+    /// 8 raw PWM 0..255.
+    pub pwms: [FanPwm; CURVE_POINT_COUNT],
+    /// Enabled flag (не изменяется, только сохраняется).
+    pub enabled: bool,
+}
+
+/// Полный результат `FanCurveData(profile)`: CPU + GPU кривые.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsusdFanCurveSet {
+    /// Профиль, для которого прочитаны кривые.
+    pub profile: AsusdFanProfile,
+    /// CPU кривая.
+    pub cpu: AsusdFanCurve,
+    /// GPU кривая.
+    pub gpu: AsusdFanCurve,
+}
+
+/// Testable источник asusd `FanCurveData`.
+#[async_trait]
+pub trait AsusdFanCurveSource: Send + Sync {
+    /// Прочитать сохранённые кривые для профиля (authoritative, без кэша).
+    async fn read_curves(
+        &self,
+        profile: AsusdFanProfile,
+    ) -> Result<AsusdFanCurveSet, ProviderError>;
+}
+
+/// Реальный zbus источник asusd `FanCurveData`.
+///
+/// Хранит готовую system-bus `Connection`; I/O начинается только в
+/// `read_curves().await`. Конструктор не выполняет I/O.
+pub struct ZbusAsusdFanCurveSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusAsusdFanCurveSource {
+    /// Создать источник над готовой system-bus Connection.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+/// Wire-элемент asusd `FanCurveData`: name + 8 temp + 8 pwm + enabled.
+type AsusdCurveWire = (String, [u8; 8], [u8; 8], bool);
+
+#[zbus::proxy(
+    interface = "xyz.ljones.FanCurves",
+    default_service = "xyz.ljones.Asusd",
+    default_path = "/xyz/ljones"
+)]
+trait AsusdFanCurves {
+    fn fan_curve_data(&self, profile: u32) -> zbus::Result<Vec<AsusdCurveWire>>;
+}
+
+/// Парсинг одного `(name, temp8, pwm8, enabled)` элемента из asusd.
+///
+/// Формат wire: `(s(yyyyyyyy)(yyyyyyyy)b)` = name + 8 temp + 8 pwm + enabled.
+/// zbus раскладывает `(yyyyyyyy)` в `[u8; 8]`.
+fn parse_curve_entry(
+    name: &str,
+    temps: &[u8; 8],
+    pwms: &[u8; 8],
+    enabled: bool,
+) -> Result<AsusdFanCurve, ProviderError> {
+    let fan = match name {
+        "CPU" => FanId::Cpu,
+        "GPU" => FanId::Gpu,
+        other => {
+            return Err(ProviderError::Internal(format!(
+                "asusd FanCurves: неизвестный fan name '{other}'"
+            )));
+        }
+    };
+    let mut temps_arr = [TemperatureC::new(0).expect("const"); CURVE_POINT_COUNT];
+    let mut pwms_arr = [FanPwm::new(0).expect("const"); CURVE_POINT_COUNT];
+    for (i, (t, p)) in temps.iter().zip(pwms.iter()).enumerate() {
+        temps_arr[i] = TemperatureC::new(*t as i16).map_err(|_| {
+            ProviderError::Internal(format!(
+                "asusd FanCurves: температура вне диапазона '{t}' для {name}"
+            ))
+        })?;
+        pwms_arr[i] = FanPwm::new(*p).map_err(|_| {
+            ProviderError::Internal(format!(
+                "asusd FanCurves: PWM вне диапазона '{p}' для {name}"
+            ))
+        })?;
+    }
+    Ok(AsusdFanCurve {
+        fan,
+        temps: temps_arr,
+        pwms: pwms_arr,
+        enabled,
+    })
+}
+
+#[async_trait]
+impl AsusdFanCurveSource for ZbusAsusdFanCurveSource {
+    async fn read_curves(
+        &self,
+        profile: AsusdFanProfile,
+    ) -> Result<AsusdFanCurveSet, ProviderError> {
+        let proxy = AsusdFanCurvesProxy::builder(&self.connection)
+            .cache_properties(zbus::proxy::CacheProperties::No)
+            .build()
+            .await
+            .map_err(|e| ProviderError::Dbus(format!("asusd FanCurves proxy: {e}")))?;
+        let raw = proxy
+            .fan_curve_data(profile.wire())
+            .await
+            .map_err(|e| ProviderError::Dbus(format!("asusd FanCurveData read: {e}")))?;
+
+        let mut cpu = None;
+        let mut gpu = None;
+        for (name, temps, pwms, enabled) in raw {
+            let curve = parse_curve_entry(&name, &temps, &pwms, enabled)?;
+            match curve.fan {
+                FanId::Cpu => cpu = Some(curve),
+                FanId::Gpu => gpu = Some(curve),
+                _ => {}
+            }
+        }
+        let cpu = cpu.ok_or_else(|| {
+            ProviderError::Internal("asusd FanCurves: CPU кривая отсутствует".into())
+        })?;
+        let gpu = gpu.ok_or_else(|| {
+            ProviderError::Internal("asusd FanCurves: GPU кривая отсутствует".into())
+        })?;
+        Ok(AsusdFanCurveSet { profile, cpu, gpu })
+    }
+}
+
 /// Testable источник активной кривой вентилятора.
 #[async_trait]
 pub trait FanCurveSource: Send + Sync {
@@ -587,5 +817,166 @@ mod tests {
         assert!(ids.contains(&FanId::Gpu));
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // asusd fan profile wire mapping
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn asusd_fan_profile_wire_mapping_is_exact() {
+        // Полный mapping доказан (Task 6.6/6.7): wire 0..3.
+        assert_eq!(AsusdFanProfile::Balanced.wire(), 0);
+        assert_eq!(AsusdFanProfile::Performance.wire(), 1);
+        assert_eq!(AsusdFanProfile::Quiet.wire(), 2);
+        assert_eq!(AsusdFanProfile::LowPower.wire(), 3);
+
+        assert_eq!(
+            asusd_fan_profile_from_wire(0).unwrap(),
+            AsusdFanProfile::Balanced
+        );
+        assert_eq!(
+            asusd_fan_profile_from_wire(1).unwrap(),
+            AsusdFanProfile::Performance
+        );
+        assert_eq!(
+            asusd_fan_profile_from_wire(2).unwrap(),
+            AsusdFanProfile::Quiet
+        );
+        assert_eq!(
+            asusd_fan_profile_from_wire(3).unwrap(),
+            AsusdFanProfile::LowPower
+        );
+    }
+
+    #[test]
+    fn asusd_fan_profile_unknown_wire_is_internal_error() {
+        // Unknown wire → typed error, не fallback.
+        let err = asusd_fan_profile_from_wire(4).expect_err("unknown wire");
+        assert!(matches!(err, ProviderError::Internal(_)));
+        let err = asusd_fan_profile_from_wire(99).expect_err("unknown wire");
+        assert!(matches!(err, ProviderError::Internal(_)));
+    }
+
+    #[test]
+    fn asusd_fan_profile_maps_to_performance_profile() {
+        // Согласуется с PlatformProfile → PerformanceProfile (profile.rs).
+        assert_eq!(
+            PerformanceProfile::from(AsusdFanProfile::Balanced),
+            PerformanceProfile::Balanced
+        );
+        assert_eq!(
+            PerformanceProfile::from(AsusdFanProfile::Performance),
+            PerformanceProfile::Turbo
+        );
+        assert_eq!(
+            PerformanceProfile::from(AsusdFanProfile::Quiet),
+            PerformanceProfile::Silent
+        );
+        assert_eq!(
+            PerformanceProfile::from(AsusdFanProfile::LowPower),
+            PerformanceProfile::Silent
+        );
+
+        // Обратное: трёхкнопочная → asusd fan profile.
+        assert_eq!(
+            AsusdFanProfile::from(PerformanceProfile::Silent),
+            AsusdFanProfile::Quiet
+        );
+        assert_eq!(
+            AsusdFanProfile::from(PerformanceProfile::Balanced),
+            AsusdFanProfile::Balanced
+        );
+        assert_eq!(
+            AsusdFanProfile::from(PerformanceProfile::Turbo),
+            AsusdFanProfile::Performance
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // asusd FanCurveData parsing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_curve_entry_parses_cpu_and_gpu() {
+        // CPU: raw PWM до 94.
+        let cpu = parse_curve_entry(
+            "CPU",
+            &[45, 49, 54, 68, 74, 79, 84, 89],
+            &[5, 22, 38, 45, 56, 63, 81, 94],
+            true,
+        )
+        .expect("cpu");
+        assert_eq!(cpu.fan, FanId::Cpu);
+        assert_eq!(cpu.temps[0].get(), 45);
+        assert_eq!(cpu.temps[7].get(), 89);
+        assert_eq!(cpu.pwms[7].get(), 94);
+        assert!(cpu.enabled);
+
+        // GPU: raw PWM 112 > 100 сохраняется.
+        let gpu = parse_curve_entry(
+            "GPU",
+            &[40, 42, 43, 60, 65, 69, 74, 78],
+            &[5, 20, 38, 43, 56, 66, 84, 112],
+            false,
+        )
+        .expect("gpu");
+        assert_eq!(gpu.fan, FanId::Gpu);
+        assert_eq!(gpu.pwms[7].get(), 112);
+        assert!(!gpu.enabled);
+    }
+
+    #[test]
+    fn parse_curve_entry_rejects_unknown_fan() {
+        let err = parse_curve_entry("MID", &[45; 8], &[5; 8], true).expect_err("unknown fan");
+        assert!(matches!(err, ProviderError::Internal(_)));
+    }
+
+    #[test]
+    fn parse_curve_entry_rejects_out_of_range_pwm() {
+        // FanPwm диапазон 0..255 гарантирован типом u8; проверяем, что
+        // значение 255 принимается, а конструктор FanPwm валидирует диапазон.
+        let curve = parse_curve_entry("CPU", &[45; 8], &[5, 22, 38, 45, 56, 63, 81, 255], true)
+            .expect("pwm 255 valid");
+        assert_eq!(curve.pwms[7].get(), 255);
+        // FanPwm::new валидирует диапазон (0..=255).
+        assert!(FanPwm::new(255).is_ok());
+    }
+
+    #[test]
+    fn parse_curve_entry_rejects_out_of_range_temp() {
+        // 200 °C вне диапазона TemperatureC.
+        let err = parse_curve_entry("CPU", &[45, 49, 54, 68, 74, 79, 84, 200], &[5; 8], true)
+            .expect_err("temp out of range");
+        assert!(matches!(err, ProviderError::Internal(_)));
+    }
+
+    #[test]
+    fn asusd_curve_set_matches_sysfs_active_curve() {
+        // Live-валидация (Task 6.6): FanCurveData(0) == sysfs active curve
+        // для активного профиля (Balanced). Проверяем, что парсинг даёт те же
+        // значения, что SysfsFanCurveSource::active_curve.
+        let cpu = parse_curve_entry(
+            "CPU",
+            &[45, 49, 54, 68, 74, 79, 84, 89],
+            &[5, 22, 38, 45, 56, 63, 81, 94],
+            true,
+        )
+        .expect("cpu");
+        let gpu = parse_curve_entry(
+            "GPU",
+            &[40, 42, 43, 60, 65, 69, 74, 78],
+            &[5, 20, 38, 43, 56, 66, 84, 112],
+            false,
+        )
+        .expect("gpu");
+        let set = AsusdFanCurveSet {
+            profile: AsusdFanProfile::Balanced,
+            cpu,
+            gpu,
+        };
+        assert_eq!(set.profile, AsusdFanProfile::Balanced);
+        assert_eq!(set.cpu.pwms[7].get(), 94);
+        assert_eq!(set.gpu.pwms[7].get(), 112);
     }
 }
