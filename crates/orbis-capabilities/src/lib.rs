@@ -8,10 +8,14 @@
 
 pub mod engine;
 pub mod fixture;
+pub mod probe;
 pub mod registry;
 
 pub use engine::{ProbeReport, build_from_parts};
 pub use fixture::{
     ExpectedCapabilitiesFixture, ExpectedFeature, parse_status, privacy_check_fixture_dir,
+};
+pub use probe::{
+    ProbeClassification, ProbeContext, ProbeError, ProbeOperationResult, classify_dbus_detail,
 };
 pub use registry::{CapabilityRegistryBuilder, CapabilityRegistrySnapshot, RegistryError};
