@@ -121,6 +121,80 @@ impl TryFrom<&PlatformProfile> for PerformanceProfile {
     }
 }
 
+/// Lossless asusd fan profile ID (wire 0..3).
+///
+/// Используется для fan curve mutation API: `Quiet` (wire 2) и `LowPower`
+/// (wire 3) остаются различимыми, в отличие от трёхкнопочной
+/// `PerformanceProfile`, где оба отображаются на `Silent`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AsusdFanProfile {
+    /// wire 0 — balanced.
+    Balanced,
+    /// wire 1 — performance.
+    Performance,
+    /// wire 2 — quiet.
+    Quiet,
+    /// wire 3 — low-power.
+    LowPower,
+}
+
+impl AsusdFanProfile {
+    /// Wire value для asusd `FanCurveData`/`SetFanCurve`.
+    pub fn wire(self) -> u32 {
+        match self {
+            Self::Balanced => 0,
+            Self::Performance => 1,
+            Self::Quiet => 2,
+            Self::LowPower => 3,
+        }
+    }
+
+    /// Строковое имя (для диагностики/сравнения с `fan_curves.ron`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Balanced => "balanced",
+            Self::Performance => "performance",
+            Self::Quiet => "quiet",
+            Self::LowPower => "low-power",
+        }
+    }
+}
+
+/// Сопоставление asusd fan profile с трёхкнопочной `PerformanceProfile`.
+///
+/// Read-only mapping (asusd → трёхкнопочная модель). `LowPower` и `Quiet`
+/// оба → `Silent`, но сам `AsusdFanProfile` остаётся lossless.
+impl From<AsusdFanProfile> for PerformanceProfile {
+    fn from(p: AsusdFanProfile) -> Self {
+        match p {
+            AsusdFanProfile::Balanced => PerformanceProfile::Balanced,
+            AsusdFanProfile::Performance => PerformanceProfile::Turbo,
+            AsusdFanProfile::Quiet | AsusdFanProfile::LowPower => PerformanceProfile::Silent,
+        }
+    }
+}
+
+/// Обратное сопоставление трёхкнопочной модели с asusd fan profile.
+///
+/// **Fallible**: `Silent` неоднозначен (Quiet vs LowPower), поэтому
+/// автоматический выбор запрещён. Fan mutation API должен использовать
+/// lossless `AsusdFanProfile` напрямую.
+impl TryFrom<PerformanceProfile> for AsusdFanProfile {
+    type Error = CoreError;
+
+    fn try_from(p: PerformanceProfile) -> std::result::Result<Self, Self::Error> {
+        match p {
+            PerformanceProfile::Balanced => Ok(AsusdFanProfile::Balanced),
+            PerformanceProfile::Turbo => Ok(AsusdFanProfile::Performance),
+            PerformanceProfile::Silent => Err(CoreError::invariant(
+                "AsusdFanProfile",
+                "PerformanceProfile::Silent неоднозначен: выберите Quiet или LowPower явно",
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

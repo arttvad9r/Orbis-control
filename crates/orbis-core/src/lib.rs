@@ -50,7 +50,7 @@ pub use lighting::LightingMode;
 pub use limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
 pub use newtypes::{EnergyMWh, FanPwm, MilliWatt, Percent, PowerW, RefreshHz, Rpm, TemperatureC};
 pub use power::PowerSource;
-pub use profile::{PerformanceProfile, PlatformProfile};
+pub use profile::{AsusdFanProfile, PerformanceProfile, PlatformProfile};
 pub use provider::ProviderStatus;
 pub use telemetry::{BatteryTelemetry, FanTelemetry, HardwareSnapshot, PowerTelemetry, Telemetry};
 pub use warning::{Warning, WarningSeverity};

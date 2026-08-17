@@ -35,46 +35,14 @@ pub const CURVE_POINT_COUNT: usize = 8;
 // asusd fan profile wire mapping (live-validated, Task 6.6/6.7)
 // ---------------------------------------------------------------------------
 
-/// Wire value asusd `FanCurveData`/`SetFanCurve` profile argument.
+/// Lossless asusd fan profile ID (wire 0..3) — определён в `orbis-core`.
 ///
 /// Mapping доказан (не угадан) из:
 /// - `/etc/asusd/fan_curves.ron` строковые имена (`balanced`/`performance`/`quiet`);
 /// - `FanCurveData(0/1/2)` == `fan_curves.ron` (`balanced`/`performance`/`quiet`);
 /// - `PlatformProfileChoices = [3, 2, 0, 1]` == `[LowPower, Quiet, Balanced, Performance]`;
 /// - historical mapping (`0=Balanced`, `2=Quiet`) и live-валидация (активный 0 = Balanced).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AsusdFanProfile {
-    /// wire 0 — balanced.
-    Balanced,
-    /// wire 1 — performance.
-    Performance,
-    /// wire 2 — quiet.
-    Quiet,
-    /// wire 3 — low-power.
-    LowPower,
-}
-
-impl AsusdFanProfile {
-    /// Wire value для D-Bus.
-    pub fn wire(self) -> u32 {
-        match self {
-            Self::Balanced => 0,
-            Self::Performance => 1,
-            Self::Quiet => 2,
-            Self::LowPower => 3,
-        }
-    }
-
-    /// Строковое имя (для диагностики/сравнения с `fan_curves.ron`).
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Balanced => "balanced",
-            Self::Performance => "performance",
-            Self::Quiet => "quiet",
-            Self::LowPower => "low-power",
-        }
-    }
-}
+pub use orbis_core::profile::AsusdFanProfile;
 
 /// Strict decode wire `u32` → `AsusdFanProfile`.
 ///
@@ -89,41 +57,6 @@ pub fn asusd_fan_profile_from_wire(raw: u32) -> Result<AsusdFanProfile, Provider
         other => Err(ProviderError::Internal(format!(
             "asusd FanCurves: неизвестный profile wire value {other}"
         ))),
-    }
-}
-
-/// Сопоставление asusd fan profile с трёхкнопочной `PerformanceProfile`.
-///
-/// Это read-only mapping (asusd → трёхкнопочная модель). `LowPower` и `Quiet`
-/// оба отображаются на `Silent` (как `PlatformProfile → PerformanceProfile`),
-/// но сам `AsusdFanProfile` остаётся lossless: `Quiet` и `LowPower` — отдельные
-/// варианты (wire 2 и 3), различимость сохраняется.
-impl From<AsusdFanProfile> for PerformanceProfile {
-    fn from(p: AsusdFanProfile) -> Self {
-        match p {
-            AsusdFanProfile::Balanced => PerformanceProfile::Balanced,
-            AsusdFanProfile::Performance => PerformanceProfile::Turbo,
-            AsusdFanProfile::Quiet | AsusdFanProfile::LowPower => PerformanceProfile::Silent,
-        }
-    }
-}
-
-/// Обратное сопоставление трёхкнопочной модели с asusd fan profile.
-///
-/// **Fallible**: `Silent` неоднозначен (может быть `Quiet` или `LowPower`),
-/// поэтому автоматический выбор запрещён. Fan mutation API должен использовать
-/// lossless `AsusdFanProfile` напрямую, а не `PerformanceProfile`.
-impl TryFrom<PerformanceProfile> for AsusdFanProfile {
-    type Error = ProviderError;
-
-    fn try_from(p: PerformanceProfile) -> Result<Self, Self::Error> {
-        match p {
-            PerformanceProfile::Balanced => Ok(AsusdFanProfile::Balanced),
-            PerformanceProfile::Turbo => Ok(AsusdFanProfile::Performance),
-            PerformanceProfile::Silent => Err(ProviderError::InvalidRequest(
-                "PerformanceProfile::Silent неоднозначен для asusd fan profile: выберите AsusdFanProfile::Quiet или AsusdFanProfile::LowPower явно".into(),
-            )),
-        }
     }
 }
 
@@ -896,7 +829,7 @@ mod tests {
         // Silent не выбирает автоматически Quiet или LowPower — ошибка.
         let err = AsusdFanProfile::try_from(PerformanceProfile::Silent)
             .expect_err("Silent must be ambiguous");
-        assert!(matches!(err, ProviderError::InvalidRequest(_)));
+        assert!(err.to_string().contains("неоднозначен"));
     }
 
     #[test]
@@ -923,7 +856,7 @@ mod tests {
         // Silent неоднозначен (Quiet vs LowPower) → ошибка, не silent fallback.
         let err =
             AsusdFanProfile::try_from(PerformanceProfile::Silent).expect_err("Silent ambiguous");
-        assert!(matches!(err, ProviderError::InvalidRequest(_)));
+        assert!(err.to_string().contains("неоднозначен"));
         assert_eq!(
             AsusdFanProfile::try_from(PerformanceProfile::Balanced).unwrap(),
             AsusdFanProfile::Balanced
