@@ -142,7 +142,11 @@ impl ExpectedCapabilitiesFixture {
                 risk: parse_risk(raw.risk.as_deref()),
                 checked_at: None,
             });
-            features.insert(feature, Capability { status, reason });
+            let capability = match reason {
+                Some(reason) => Capability::with_reason(status, reason),
+                None => Capability::new(status),
+            };
+            features.insert(feature, capability);
         }
         Ok(DeviceCapabilities { features })
     }

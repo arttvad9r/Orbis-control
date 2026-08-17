@@ -47,13 +47,11 @@ impl ProbeReport {
     ) -> Self {
         let mut features = BTreeMap::new();
         for part in parts {
-            features.insert(
-                part.feature,
-                Capability {
-                    status: part.status,
-                    reason: part.reason,
-                },
-            );
+            let capability = match part.reason {
+                Some(reason) => Capability::with_reason(part.status, reason),
+                None => Capability::new(part.status),
+            };
+            features.insert(part.feature, capability);
         }
         Self {
             device,

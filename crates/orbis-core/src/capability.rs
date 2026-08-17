@@ -6,7 +6,11 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 
 use crate::action::ActionRequirement;
+use crate::battery::ChargeLimitBounds;
+use crate::gpu::GpuMode;
 use crate::identity::BackendIdentity;
+use crate::limits::{PowerLimitField, Unit};
+use crate::profile::PerformanceProfile;
 
 /// Идентификатор функции устройства (словарь capability-матрицы).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -24,6 +28,12 @@ pub enum FeatureId {
     ChargeMode,
     /// Физический MUX.
     GpuMux,
+    /// Фактический runtime power state dGPU.
+    GpuPower,
+    /// Политика доступа приложений к dGPU.
+    GpuAccess,
+    /// Product GPU policy (Eco/Standard/Ultimate/Optimized).
+    GpuProductPolicy,
     /// dgpu_disable (Eco).
     DgpuDisable,
     /// Panel Overdrive.
@@ -75,6 +85,9 @@ impl FeatureId {
         FeatureId::ChargeLimit,
         FeatureId::ChargeMode,
         FeatureId::GpuMux,
+        FeatureId::GpuPower,
+        FeatureId::GpuAccess,
+        FeatureId::GpuProductPolicy,
         FeatureId::DgpuDisable,
         FeatureId::PanelOverdrive,
         FeatureId::PptPl1Spl,
@@ -106,6 +119,9 @@ impl FeatureId {
             FeatureId::ChargeLimit => "charge_limit",
             FeatureId::ChargeMode => "charge_mode",
             FeatureId::GpuMux => "gpu_mux",
+            FeatureId::GpuPower => "gpu_power",
+            FeatureId::GpuAccess => "gpu_access",
+            FeatureId::GpuProductPolicy => "gpu_product_policy",
             FeatureId::DgpuDisable => "dgpu_disable",
             FeatureId::PanelOverdrive => "panel_overdrive",
             FeatureId::PptPl1Spl => "ppt_pl1_spl",
@@ -134,25 +150,25 @@ impl FeatureId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityStatus {
-    /// Поддерживается и работает.
+    /// Capability или operation доказанно поддерживается.
     Supported,
-    /// Поддерживается, но есть требование (reboot/logout и т.п.).
+    /// Поддерживается, но для operation есть явное требование (reboot/logout).
     SupportedWithRequirement,
-    /// Значение достоверно читается, запись отсутствует или запрещена.
+    /// Read capability существует, но write capability отсутствует или запрещена.
     ReadOnly,
-    /// Может стать доступной без изменения программы/оборудования.
+    /// Обычно доступно, но временно недоступно из-за backend/lifecycle state.
     TemporarilyUnavailable,
-    /// Поддержка достоверно опровергнута (ENODEV/ENOTSUP/EOPNOTSUPP).
+    /// Capability или operation доказанно не поддерживается контрактом/backend.
     Unsupported,
-    /// Backend отсутствует (сервис не установлен/не запущен).
+    /// Потенциальная capability известна, но требуемый backend/service отсутствует.
     BackendMissing,
-    /// Ядро/D-Bus отклоняет операцию из-за прав.
+    /// Capability/operation существует, но текущая authorization evidence отказывает.
     PermissionDenied,
     /// Функция доступна только в экспериментальном режиме.
     Experimental,
     /// Конфликт владельцев интерфейса.
     Conflicted,
-    /// Недостаточно информации.
+    /// Evidence недостаточно для классификации capability/operation.
     Unknown,
 }
 
@@ -207,13 +223,117 @@ pub struct CapabilityReason {
     pub checked_at: Option<SystemTime>,
 }
 
+/// Статус одной operation capability (read или write).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationCapability {
+    /// Канонический статус operation.
+    pub status: CapabilityStatus,
+    /// Причина статуса, если она известна.
+    #[serde(default)]
+    pub reason: Option<CapabilityReason>,
+}
+
+impl OperationCapability {
+    /// Создать operation metadata без дополнительной причины.
+    pub fn new(status: CapabilityStatus) -> Self {
+        Self {
+            status,
+            reason: None,
+        }
+    }
+
+    /// Создать operation metadata с причиной.
+    pub fn with_reason(status: CapabilityStatus, reason: CapabilityReason) -> Self {
+        Self {
+            status,
+            reason: Some(reason),
+        }
+    }
+}
+
+/// Независимые read/write semantics одной capability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityOperations {
+    /// Статус authoritative read operation.
+    #[serde(default = "default_unknown_operation")]
+    pub read: OperationCapability,
+    /// Статус write operation.
+    #[serde(default = "default_unknown_operation")]
+    pub write: OperationCapability,
+}
+
+fn default_unknown_operation() -> OperationCapability {
+    OperationCapability::new(CapabilityStatus::Unknown)
+}
+
+impl Default for CapabilityOperations {
+    fn default() -> Self {
+        Self {
+            read: default_unknown_operation(),
+            write: default_unknown_operation(),
+        }
+    }
+}
+
+/// Typed integer constraints without an observed current value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntegerConstraints {
+    /// Минимум, если доказан.
+    pub min: Option<i32>,
+    /// Максимум, если доказан.
+    pub max: Option<i32>,
+    /// Шаг, если доказан.
+    pub step: Option<i32>,
+    /// Default, если backend его сообщает.
+    #[serde(default)]
+    pub default: Option<i32>,
+}
+
+/// Typed constraint для одного power-limit поля.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PowerLimitConstraint {
+    /// Поле power-limit.
+    pub field: PowerLimitField,
+    /// Диапазон и шаг без текущего observed value.
+    pub range: IntegerConstraints,
+    /// Единица измерения.
+    pub unit: Unit,
+}
+
+/// Constraints capability без observed hardware state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum CapabilityConstraints {
+    /// Evidence недостаточно, чтобы определить constraints.
+    #[default]
+    Unknown,
+    /// Capability не имеет дополнительных constraints.
+    None,
+    /// Battery charge-limit constraints.
+    ChargeLimit(ChargeLimitBounds),
+    /// Generic integer range.
+    Integer(IntegerConstraints),
+    /// Typed Performance choices.
+    PerformanceProfiles(Vec<PerformanceProfile>),
+    /// Typed product GPU choices; наличие choices не доказывает backend.
+    GpuModes(Vec<GpuMode>),
+    /// Typed power-limit metadata.
+    PowerLimits(Vec<PowerLimitConstraint>),
+}
+
 /// Capability одной функции.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Capability {
     /// Статус.
     pub status: CapabilityStatus,
     /// Причина (обязательна при статусе != Supported).
+    #[serde(default)]
     pub reason: Option<CapabilityReason>,
+    /// Независимые read/write operation statuses.
+    #[serde(default)]
+    pub operations: CapabilityOperations,
+    /// Typed constraints; `Unknown` не равен `None`.
+    #[serde(default)]
+    pub constraints: CapabilityConstraints,
 }
 
 impl Capability {
@@ -222,6 +342,8 @@ impl Capability {
         Self {
             status,
             reason: None,
+            operations: CapabilityOperations::default(),
+            constraints: CapabilityConstraints::Unknown,
         }
     }
 
@@ -230,7 +352,21 @@ impl Capability {
         Self {
             status,
             reason: Some(reason),
+            operations: CapabilityOperations::default(),
+            constraints: CapabilityConstraints::Unknown,
         }
+    }
+
+    /// Добавить operation-level read/write metadata.
+    pub fn with_operations(mut self, operations: CapabilityOperations) -> Self {
+        self.operations = operations;
+        self
+    }
+
+    /// Добавить typed constraints без помещения observed value в capability.
+    pub fn with_constraints(mut self, constraints: CapabilityConstraints) -> Self {
+        self.constraints = constraints;
+        self
     }
 }
 
@@ -287,6 +423,23 @@ mod tests {
         assert_eq!(json, "\"gpu_mux\"");
         let back: FeatureId = serde_json::from_str(&json).unwrap();
         assert_eq!(back, FeatureId::GpuMux);
+
+        assert_eq!(
+            serde_json::to_string(&FeatureId::DgpuDisable).unwrap(),
+            "\"dgpu_disable\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FeatureId::GpuPower).unwrap(),
+            "\"gpu_power\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FeatureId::GpuAccess).unwrap(),
+            "\"gpu_access\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FeatureId::GpuProductPolicy).unwrap(),
+            "\"gpu_product_policy\""
+        );
     }
 
     #[test]
@@ -315,5 +468,97 @@ mod tests {
             caps.reason(FeatureId::GpuMux).unwrap().requirement,
             Some(ActionRequirement::Reboot)
         );
+    }
+
+    #[test]
+    fn capability_status_semantics_roundtrip() {
+        for status in [
+            CapabilityStatus::Supported,
+            CapabilityStatus::SupportedWithRequirement,
+            CapabilityStatus::ReadOnly,
+            CapabilityStatus::TemporarilyUnavailable,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::BackendMissing,
+            CapabilityStatus::PermissionDenied,
+            CapabilityStatus::Experimental,
+            CapabilityStatus::Conflicted,
+            CapabilityStatus::Unknown,
+        ] {
+            let json = serde_json::to_string(&status).unwrap();
+            let back: CapabilityStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, status);
+        }
+    }
+
+    #[test]
+    fn operation_statuses_are_independent() {
+        let capability =
+            Capability::new(CapabilityStatus::Supported).with_operations(CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::Supported),
+                write: OperationCapability::new(CapabilityStatus::Unsupported),
+            });
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+
+        let denied =
+            Capability::new(CapabilityStatus::Supported).with_operations(CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::Supported),
+                write: OperationCapability::new(CapabilityStatus::PermissionDenied),
+            });
+        assert_eq!(
+            denied.operations.write.status,
+            CapabilityStatus::PermissionDenied
+        );
+
+        let unsupported =
+            Capability::new(CapabilityStatus::Unsupported).with_operations(CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::Unsupported),
+                write: OperationCapability::new(CapabilityStatus::Unsupported),
+            });
+        assert_eq!(
+            unsupported.operations.read.status,
+            CapabilityStatus::Unsupported
+        );
+        assert_eq!(
+            unsupported.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
+
+    #[test]
+    fn unknown_constraints_are_not_none_constraints() {
+        assert_ne!(CapabilityConstraints::Unknown, CapabilityConstraints::None);
+
+        let bounds = ChargeLimitBounds::new(
+            crate::newtypes::Percent::new(40).unwrap(),
+            crate::newtypes::Percent::new(100).unwrap(),
+            1,
+        )
+        .unwrap();
+        let capability = Capability::new(CapabilityStatus::Supported)
+            .with_constraints(CapabilityConstraints::ChargeLimit(bounds));
+        assert_eq!(
+            capability.constraints,
+            CapabilityConstraints::ChargeLimit(bounds)
+        );
+    }
+
+    #[test]
+    fn old_capability_json_deserializes_with_default_metadata() {
+        let old_json = r#"{"status":"supported","reason":null}"#;
+        let capability: Capability = serde_json::from_str(old_json).unwrap();
+        assert_eq!(capability.status, CapabilityStatus::Supported);
+        assert_eq!(capability.operations.read.status, CapabilityStatus::Unknown);
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unknown
+        );
+        assert_eq!(capability.constraints, CapabilityConstraints::Unknown);
     }
 }
