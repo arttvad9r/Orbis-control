@@ -1103,6 +1103,14 @@ where
         self.session.fan_curve(profile, fan).await
     }
 
+    async fn fan_curve_for_profile(
+        &self,
+        profile: orbis_core::profile::AsusdFanProfile,
+        fan: &FanId,
+    ) -> Result<orbis_core::fan::FanCurve, ProviderError> {
+        self.session.fan_curve_for_profile(profile, fan).await
+    }
+
     async fn active_curve(&self, fan: &FanId) -> Result<orbis_core::fan::FanCurve, ProviderError> {
         self.session.active_curve(fan).await
     }
@@ -1896,6 +1904,14 @@ mod tests {
         async fn fan_curve(
             &self,
             _profile: PerformanceProfile,
+            _fan: &FanId,
+        ) -> Result<orbis_core::fan::FanCurve, ProviderError> {
+            Err(ProviderError::Unsupported("no profile curve".into()))
+        }
+
+        async fn fan_curve_for_profile(
+            &self,
+            _profile: orbis_core::profile::AsusdFanProfile,
             _fan: &FanId,
         ) -> Result<orbis_core::fan::FanCurve, ProviderError> {
             Err(ProviderError::Unsupported("no profile curve".into()))

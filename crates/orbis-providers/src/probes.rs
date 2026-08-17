@@ -1018,6 +1018,14 @@ mod tests {
             Err(ProviderError::Unsupported("no profile curve".into()))
         }
 
+        async fn fan_curve_for_profile(
+            &self,
+            _profile: orbis_core::profile::AsusdFanProfile,
+            _fan: &orbis_core::fan::FanId,
+        ) -> Result<orbis_core::fan::FanCurve, ProviderError> {
+            Err(ProviderError::Unsupported("no profile curve".into()))
+        }
+
         async fn active_curve(
             &self,
             _fan: &orbis_core::fan::FanId,

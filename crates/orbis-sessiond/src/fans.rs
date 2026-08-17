@@ -448,6 +448,19 @@ where
         ))
     }
 
+    async fn fan_curve_for_profile(
+        &self,
+        _profile: orbis_core::profile::AsusdFanProfile,
+        _fan: &FanId,
+    ) -> Result<FanCurve, ProviderError> {
+        // sysfs asus_custom_fan_curve хранит только активную кривую, НЕ
+        // profile-specific storage. Не фальсифицируем profile semantics:
+        // возвращаем Unsupported, а не активную кривую под видом profile.
+        Err(ProviderError::Unsupported(
+            "asus_custom_fan_curve: sysfs хранит только активную кривую, не profile-specific; используйте active_curve(fan)".into(),
+        ))
+    }
+
     async fn active_curve(&self, fan: &FanId) -> Result<FanCurve, ProviderError> {
         self.source.read_active_curve(fan).await
     }

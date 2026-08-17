@@ -356,6 +356,18 @@ where
     pub async fn active_curve(&self, fan: &FanId) -> Result<FanCurve, ProviderError> {
         self.provider.active_curve(fan).await
     }
+
+    /// Прочитать lossless fan curve для конкретного `AsusdFanProfile`.
+    ///
+    /// Вызывает `FanProvider::fan_curve_for_profile(profile, fan)`.
+    /// Read-only: никакой mutation. Сохраняет различие между Quiet и LowPower.
+    pub async fn fan_curve_for_profile(
+        &self,
+        profile: AsusdFanProfile,
+        fan: &FanId,
+    ) -> Result<FanCurve, ProviderError> {
+        self.provider.fan_curve_for_profile(profile, fan).await
+    }
 }
 
 #[cfg(test)]

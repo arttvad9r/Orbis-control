@@ -809,15 +809,19 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             tracing::warn!("fan curve mutation failed: {e:?}");
             state.fan_curve_error = true;
         }
-        WorkerEvent::FanCurveRefresh(Ok(curve)) => {
-            // Authoritative read: загружаем curve в editor state.
-            state.load_fan_curve(&curve);
-        }
-        WorkerEvent::FanCurveRefresh(Err(e)) => {
-            // Ошибка read: НЕ затираем предыдущую curve, выставляем error.
-            tracing::warn!("fan curve refresh failed: {e:?}");
-            state.fan_curve_state = controller::FanCurveHwState::Unavailable;
-            state.fan_curve_error = true;
+        WorkerEvent::FanCurveRefresh { profile, result } => {
+            match result {
+                Ok(curve) => {
+                    // Authoritative read: загружаем curve в editor state.
+                    state.load_fan_curve(&curve, profile);
+                }
+                Err(e) => {
+                    // Ошибка read: НЕ затираем предыдущую curve, выставляем error.
+                    tracing::warn!("fan curve refresh failed: {e:?}");
+                    state.fan_curve_state = controller::FanCurveHwState::Unavailable;
+                    state.fan_curve_error = true;
+                }
+            }
         }
     }
 }
@@ -940,13 +944,25 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 tracing::warn!("fan-changed с неизвестным индексом: {i}");
                 return;
             };
+            let Some(profile) =
+                controller::UiState::asusd_profile_from_index(s.fan_profile_selected)
+            else {
+                tracing::warn!(
+                    "fan-changed: invalid profile index {}",
+                    s.fan_profile_selected
+                );
+                return;
+            };
             // Local state update
             s.fan_selected = i;
             app.set_ui_state(to_slint(&s));
-            // Send refresh command to worker
+            // Send refresh command to worker with current profile
             match &worker_tx {
                 Some(tx) => {
-                    if let Err(e) = tx.send(WorkerCommand::RefreshFanCurve { fan: fan_id }) {
+                    if let Err(e) = tx.send(WorkerCommand::RefreshFanCurve {
+                        profile,
+                        fan: fan_id,
+                    }) {
                         tracing::warn!("worker закрыт, fan refresh не отправлен: {e:?}");
                     }
                 }
@@ -957,15 +973,38 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
         });
     }
     {
+        let worker_tx = worker_tx.clone();
         let app_weak = app.as_weak();
         app.on_fan_profile_changed(move |i| {
             let Some(app) = app_weak.upgrade() else {
                 return;
             };
             let mut s = from_slint(&app.get_ui_state());
+            let Some(profile) = controller::UiState::asusd_profile_from_index(i) else {
+                tracing::warn!("fan-profile-changed: invalid profile index {i}");
+                return;
+            };
+            let Some(fan_id) = controller::UiState::fan_id_from_index(s.fan_selected) else {
+                tracing::warn!("fan-profile-changed: invalid fan index {}", s.fan_selected);
+                return;
+            };
+            // Local state update — profile change does NOT set dirty (task requirement 4)
             s.fan_profile_selected = i;
-            s.fan_curve_dirty = true;
             app.set_ui_state(to_slint(&s));
+            // Send refresh command to worker with new profile
+            match &worker_tx {
+                Some(tx) => {
+                    if let Err(e) = tx.send(WorkerCommand::RefreshFanCurve {
+                        profile,
+                        fan: fan_id,
+                    }) {
+                        tracing::warn!("worker закрыт, fan profile refresh не отправлен: {e:?}");
+                    }
+                }
+                None => {
+                    tracing::warn!("fan-profile-changed вне интерактивного режима");
+                }
+            }
         });
     }
     {
@@ -1286,9 +1325,10 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Ровно один initial fan curve refresh. Публикует authoritative fan
-    // curve для CPU (default fan selected). Без polling; ошибка не
-    // затирает предыдущий state.
+    // curve для CPU (default fan selected) и Balanced profile (default).
+    // Без polling; ошибка не затирает предыдущий state.
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshFanCurve {
+        profile: orbis_core::profile::AsusdFanProfile::Balanced,
         fan: orbis_core::fan::FanId::Cpu,
     }) {
         tracing::warn!("worker закрыт, initial fan curve refresh не отправлен: {e:?}");
@@ -2273,7 +2313,7 @@ mod tests {
             fan: FanId::Cpu,
             points,
         };
-        s.load_fan_curve(&curve);
+        s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
 
         assert_eq!(s.fan_curve_state, controller::FanCurveHwState::Ready);
         assert!(!s.fan_curve_error);
@@ -2338,7 +2378,7 @@ mod tests {
                 FanCurvePoint::new(TemperatureC::new(85).unwrap(), FanPwm::new(100).unwrap()),
             ],
         };
-        s.load_fan_curve(&curve);
+        s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
 
         assert_eq!(s.fan_curve_state, controller::FanCurveHwState::Ready);
         assert!(!s.fan_curve_error);

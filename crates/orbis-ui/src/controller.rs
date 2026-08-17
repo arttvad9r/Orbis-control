@@ -549,7 +549,13 @@ impl UiState {
     /// Load authoritative `FanCurve` into editor state.
     ///
     /// Points are truncated/padded to exactly 8. Missing points become 0.
-    pub fn load_fan_curve(&mut self, curve: &orbis_core::fan::FanCurve) {
+    /// Profile is set from the provided `AsusdFanProfile` (lossless), not from
+    /// `curve.profile` (which uses `PerformanceProfile` and loses Quiet/LowPower).
+    pub fn load_fan_curve(
+        &mut self,
+        curve: &orbis_core::fan::FanCurve,
+        profile: orbis_core::profile::AsusdFanProfile,
+    ) {
         self.fan_curve_state = FanCurveHwState::Ready;
         self.fan_curve_error = false;
         // Map fan id to index
@@ -558,12 +564,12 @@ impl UiState {
             FanId::Gpu => 1,
             _ => self.fan_selected,
         };
-        // Map profile to index
-        use orbis_core::profile::PerformanceProfile;
-        self.fan_profile_selected = match curve.profile {
-            PerformanceProfile::Balanced => 0,
-            PerformanceProfile::Turbo => 1,
-            PerformanceProfile::Silent => 2,
+        // Map lossless asusd profile to index (lossless, preserves Quiet/LowPower)
+        self.fan_profile_selected = match profile {
+            orbis_core::profile::AsusdFanProfile::Balanced => 0,
+            orbis_core::profile::AsusdFanProfile::Performance => 1,
+            orbis_core::profile::AsusdFanProfile::Quiet => 2,
+            orbis_core::profile::AsusdFanProfile::LowPower => 3,
         };
         // Fill 8 temp/pwm arrays from curve points
         let mut temps = [0i32; 8];
@@ -1173,5 +1179,90 @@ mod tests {
         assert_eq!(s.perf_selected, before.perf_selected);
         assert_eq!(s.charge_limit, before.charge_limit);
         assert_eq!(s.gpu_selected, before.gpu_selected);
+    }
+
+    // -----------------------------------------------------------------------
+    // Fan Curve profile-aware read tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn load_fan_curve_sets_profile_from_asusd_profile() {
+        use orbis_core::fan::{FanCurve, FanCurvePoint};
+        use orbis_core::newtypes::{FanPwm, TemperatureC};
+        use orbis_core::profile::PerformanceProfile;
+
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let curve = FanCurve {
+            profile: PerformanceProfile::Balanced,
+            fan: FanId::Cpu,
+            points: vec![
+                FanCurvePoint::new(TemperatureC::new(50).unwrap(), FanPwm::new(0).unwrap()),
+                FanCurvePoint::new(TemperatureC::new(85).unwrap(), FanPwm::new(100).unwrap()),
+            ],
+        };
+
+        // Load with Quiet profile — should set fan_profile_selected = 2
+        s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Quiet);
+        assert_eq!(s.fan_profile_selected, 2); // Quiet
+
+        // Load with LowPower profile — should set fan_profile_selected = 3
+        s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::LowPower);
+        assert_eq!(s.fan_profile_selected, 3); // LowPower
+
+        // Load with Balanced profile — should set fan_profile_selected = 0
+        s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
+        assert_eq!(s.fan_profile_selected, 0); // Balanced
+
+        // Load with Performance profile — should set fan_profile_selected = 1
+        s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Performance);
+        assert_eq!(s.fan_profile_selected, 1); // Performance
+    }
+
+    #[test]
+    fn load_fan_curve_clears_dirty_and_error() {
+        use orbis_core::fan::FanCurve;
+        use orbis_core::profile::PerformanceProfile;
+
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.fan_curve_dirty = true;
+        s.fan_curve_error = true;
+
+        let curve = FanCurve {
+            profile: PerformanceProfile::Balanced,
+            fan: FanId::Cpu,
+            points: vec![],
+        };
+        s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
+
+        assert!(!s.fan_curve_dirty);
+        assert!(!s.fan_curve_error);
+        assert_eq!(s.fan_curve_state, FanCurveHwState::Ready);
+    }
+
+    #[test]
+    fn quiet_and_low_power_are_distinguishable() {
+        use orbis_core::fan::FanCurve;
+        use orbis_core::profile::PerformanceProfile;
+
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let curve = FanCurve {
+            profile: PerformanceProfile::Silent,
+            fan: FanId::Cpu,
+            points: vec![],
+        };
+
+        // Quiet = index 2
+        s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Quiet);
+        assert_eq!(s.fan_profile_selected, 2);
+
+        // LowPower = index 3 (NOT the same as Quiet!)
+        s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::LowPower);
+        assert_eq!(s.fan_profile_selected, 3);
+
+        // Verify they are different
+        assert_ne!(
+            orbis_core::profile::AsusdFanProfile::Quiet,
+            orbis_core::profile::AsusdFanProfile::LowPower
+        );
     }
 }

@@ -93,6 +93,17 @@ pub trait FanProvider: Provider {
         fan: &orbis_core::fan::FanId,
     ) -> Result<FanCurve, ProviderError>;
 
+    /// Lossless read fan curve для lossless `AsusdFanProfile`.
+    ///
+    /// Читает кривую для конкретного `AsusdFanProfile` (Balanced/Performance/Quiet/LowPower).
+    /// В отличие от `fan_curve(PerformanceProfile, fan)`, этот метод сохраняет
+    /// различие между Quiet и LowPower.
+    async fn fan_curve_for_profile(
+        &self,
+        profile: orbis_core::profile::AsusdFanProfile,
+        fan: &orbis_core::fan::FanId,
+    ) -> Result<FanCurve, ProviderError>;
+
     /// Активная кривая вентилятора (read-only, без profile).
     ///
     /// Некоторые backends (например, kernel `asus_custom_fan_curve`) хранят

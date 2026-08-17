@@ -320,13 +320,23 @@ where
 
 /// Fan curve service capability boundary.
 ///
-/// Read (`active_curve`) идёт через существующий read path (sessiond
-/// `FanProvider`); mutation (`set_fan_curve`) — через lossless
-/// `AsusdFanProfile` напрямую к Hardware1. Никаких новых backend/API.
+/// Read (`active_curve`, `fan_curve_for_profile`) идёт через существующий
+/// read path (sessiond `FanProvider`); mutation (`set_fan_curve`) — через
+/// lossless `AsusdFanProfile` напрямую к Hardware1. Никаких новых backend/API.
 #[async_trait]
 pub trait FanServiceRuntime: Send + Sync {
     /// Read authoritative активную fan curve для вентилятора.
     async fn active_curve(&self, fan: FanId) -> Result<FanCurve, ProviderError>;
+
+    /// Read lossless fan curve для конкретного `AsusdFanProfile`.
+    ///
+    /// В отличие от `active_curve`, этот метод сохраняет различие между
+    /// Quiet и LowPower (lossless read path).
+    async fn fan_curve_for_profile(
+        &self,
+        profile: AsusdFanProfile,
+        fan: FanId,
+    ) -> Result<FanCurve, ProviderError>;
 
     /// Mutate одну fan curve (lossless `AsusdFanProfile`).
     async fn set_fan_curve(
@@ -344,6 +354,14 @@ where
 {
     async fn active_curve(&self, fan: FanId) -> Result<FanCurve, ProviderError> {
         AppService::active_curve(self, &fan).await
+    }
+
+    async fn fan_curve_for_profile(
+        &self,
+        profile: AsusdFanProfile,
+        fan: FanId,
+    ) -> Result<FanCurve, ProviderError> {
+        AppService::fan_curve_for_profile(self, profile, &fan).await
     }
 
     async fn set_fan_curve(

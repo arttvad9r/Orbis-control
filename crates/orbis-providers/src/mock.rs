@@ -402,6 +402,18 @@ impl FanProvider for MockProvider {
         self.fan_curve(PerformanceProfile::Balanced, fan).await
     }
 
+    async fn fan_curve_for_profile(
+        &self,
+        profile: orbis_core::profile::AsusdFanProfile,
+        fan: &FanId,
+    ) -> Result<FanCurve, ProviderError> {
+        // Mock хранит profile-specific curves по PerformanceProfile; для read
+        // маппим lossless AsusdFanProfile → PerformanceProfile (mock semantics,
+        // не hardware evidence).
+        let perf = PerformanceProfile::from(profile);
+        self.fan_curve(perf, fan).await
+    }
+
     async fn set_fan_curve(&self, curve: &FanCurve) -> Result<ApplyResult, ProviderError> {
         self.validate_curve(curve).into_result()?;
         self.mutate(|s| {

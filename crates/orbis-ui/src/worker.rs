@@ -97,11 +97,15 @@ pub enum WorkerCommand {
         /// 8 точек кривой (temp °C + raw PWM 0..255).
         curve: FanCurvePoints,
     },
-    /// Authoritative read-only refresh активной fan curve вентилятора.
+    /// Authoritative read-only refresh fan curve для конкретного profile.
     ///
-    /// Выполняет `FanServiceRuntime::active_curve()` (новый provider read,
-    /// без mutation). Обычная ordered команда/барьер: не coalesce-ится.
+    /// Выполняет `FanServiceRuntime::fan_curve_for_profile(profile, fan)`
+    /// (новый provider read, без mutation). Обычная ordered команда/барьер:
+    /// не coalesce-ится. Использует lossless `AsusdFanProfile` для сохранения
+    /// различия Quiet/LowPower.
     RefreshFanCurve {
+        /// Lossless asusd профиль (Balanced/Performance/Quiet/LowPower).
+        profile: AsusdFanProfile,
         /// Вентилятор (CPU/GPU).
         fan: FanId,
     },
@@ -161,12 +165,18 @@ pub enum WorkerEvent {
     /// `Err(ProviderError)` — mutation/read-back недоступен (worker не
     /// подставляет mock/default и не затирает последний успешный UI state).
     FanCurve(Result<ApplyResult, ProviderError>),
-    /// Результат authoritative read-only refresh активной fan curve.
+    /// Результат authoritative read-only refresh fan curve для конкретного profile.
     ///
+    /// `profile` — lossless `AsusdFanProfile`, для которого выполнялся read.
     /// `Ok(FanCurve)` — фактическое authoritative значение provider;
     /// `Err(ProviderError)` — read недоступен (worker не подставляет
     /// mock/default и не затирает последний успешный UI state).
-    FanCurveRefresh(Result<FanCurve, ProviderError>),
+    FanCurveRefresh {
+        /// Запрошенный profile (для UI: установка fan_profile_selected).
+        profile: AsusdFanProfile,
+        /// Результат read.
+        result: Result<FanCurve, ProviderError>,
+    },
 }
 
 /// Создать command channel для worker.
@@ -401,9 +411,12 @@ async fn run_worker_inner<G, B, R, F>(
                 // отправкой и в domain (`FanCurve::validate`).
                 WorkerEvent::FanCurve(runtime.fan.set_fan_curve(profile, fan, curve).await)
             }
-            WorkerCommand::RefreshFanCurve { fan } => {
-                // Authoritative read-only refresh активной fan curve.
-                WorkerEvent::FanCurveRefresh(runtime.fan.active_curve(fan).await)
+            WorkerCommand::RefreshFanCurve { profile, fan } => {
+                // Authoritative read-only refresh fan curve для конкретного profile.
+                WorkerEvent::FanCurveRefresh {
+                    profile,
+                    result: runtime.fan.fan_curve_for_profile(profile, fan).await,
+                }
             }
             WorkerCommand::RefreshCapabilities => unreachable!("handled above"),
             WorkerCommand::RefreshTelemetry => unreachable!("handled above"),
