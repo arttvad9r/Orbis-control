@@ -15,6 +15,7 @@
 
 pub mod error;
 pub mod native_asus_eco;
+pub mod probes;
 pub mod supergfxd;
 pub mod traits;
 
@@ -23,6 +24,7 @@ pub mod mock;
 
 pub use error::{OperationId, ProviderError, ValidationResult};
 pub use native_asus_eco::*;
+pub use probes::{probe_charge_limit, probe_performance};
 pub use traits::*;
 
 #[cfg(feature = "mock")]

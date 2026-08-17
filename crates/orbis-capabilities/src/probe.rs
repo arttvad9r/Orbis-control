@@ -6,7 +6,10 @@
 use thiserror::Error;
 
 use orbis_core::action::ActionRequirement;
-use orbis_core::capability::{CapabilityReason, CapabilityStatus, OperationCapability};
+use orbis_core::capability::{
+    Capability, CapabilityConstraints, CapabilityOperations, CapabilityReason, CapabilityStatus,
+    OperationCapability,
+};
 
 /// Context needed to distinguish an absent backend from an unavailable one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,6 +142,60 @@ pub fn classify_dbus_detail(detail: &str, _context: ProbeContext) -> ProbeClassi
     } else {
         ProbeClassification::Unknown
     }
+}
+
+/// Resolve one overall capability status from independently classified
+/// operations. This is the shared policy used by all capability adapters.
+pub fn resolve_overall_status(operations: &CapabilityOperations) -> CapabilityStatus {
+    if operations.read.status == CapabilityStatus::SupportedWithRequirement
+        || operations.write.status == CapabilityStatus::SupportedWithRequirement
+    {
+        return CapabilityStatus::SupportedWithRequirement;
+    }
+    if operations.read.status == CapabilityStatus::Supported
+        || operations.write.status == CapabilityStatus::Supported
+    {
+        return CapabilityStatus::Supported;
+    }
+    if operations.read.status == CapabilityStatus::ReadOnly
+        || operations.write.status == CapabilityStatus::ReadOnly
+    {
+        return CapabilityStatus::ReadOnly;
+    }
+    if operations.read.status == CapabilityStatus::PermissionDenied
+        || operations.write.status == CapabilityStatus::PermissionDenied
+    {
+        return CapabilityStatus::PermissionDenied;
+    }
+    if operations.read.status == CapabilityStatus::BackendMissing
+        || operations.write.status == CapabilityStatus::BackendMissing
+    {
+        return CapabilityStatus::BackendMissing;
+    }
+    if operations.read.status == CapabilityStatus::TemporarilyUnavailable
+        || operations.write.status == CapabilityStatus::TemporarilyUnavailable
+    {
+        return CapabilityStatus::TemporarilyUnavailable;
+    }
+    if operations.read.status == CapabilityStatus::Unsupported
+        || operations.write.status == CapabilityStatus::Unsupported
+    {
+        return CapabilityStatus::Unsupported;
+    }
+    CapabilityStatus::Unknown
+}
+
+/// Build a capability from operation results and typed constraints.
+///
+/// The caller still submits the returned value to
+/// `CapabilityRegistryBuilder`, which performs final consistency validation.
+pub fn capability_from_operations(
+    operations: CapabilityOperations,
+    constraints: CapabilityConstraints,
+) -> Capability {
+    Capability::new(resolve_overall_status(&operations))
+        .with_operations(operations)
+        .with_constraints(constraints)
 }
 
 #[cfg(test)]
