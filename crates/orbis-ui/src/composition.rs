@@ -4,6 +4,7 @@
 //! not define provider semantics or transport contracts.
 
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use async_trait::async_trait;
 use orbis_application::{
@@ -11,6 +12,7 @@ use orbis_application::{
     PerformanceCommandOutcome, PerformanceState, SetChargeLimitError, SetGpuModeError,
     SetPerformanceError,
 };
+use orbis_capabilities::{CapabilityRegistryBuilder, CapabilityRegistrySnapshot, ProbeError};
 use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
@@ -220,16 +222,77 @@ pub struct ApplicationRuntime<G, B, R> {
     pub battery: B,
     /// Performance service.
     pub performance: R,
+    /// Read-only capability registry snapshot.
+    pub capabilities: Arc<CapabilityRegistrySnapshot>,
 }
 
 impl<G, B, R> ApplicationRuntime<G, B, R> {
-    /// Create an application runtime from already-built services.
+    /// Create an application runtime with default empty registry snapshot.
     pub fn new(gpu: G, battery: B, performance: R) -> Self {
+        let checked_at = SystemTime::now();
+        let snapshot = CapabilityRegistryBuilder::new(1, checked_at)
+            .build()
+            .expect("empty registry snapshot must build");
         Self {
             gpu,
             battery,
             performance,
+            capabilities: Arc::new(snapshot),
         }
+    }
+
+    /// Override the capability registry snapshot for a runtime.
+    pub fn with_registry(mut self, snapshot: CapabilityRegistrySnapshot) -> Self {
+        self.capabilities = Arc::new(snapshot);
+        self
+    }
+
+    /// Borrow the immutable capability registry snapshot.
+    pub fn capabilities(&self) -> &CapabilityRegistrySnapshot {
+        &self.capabilities
+    }
+}
+
+/// Assemble the initial capability registry snapshot from existing providers.
+///
+/// Probe failures do not abort the snapshot: each capability is recorded
+/// independently.
+pub async fn build_initial_registry_snapshot<Bp, Pp>(
+    battery_provider: &Bp,
+    performance_provider: &Pp,
+) -> CapabilityRegistrySnapshot
+where
+    Bp: orbis_providers::traits::BatteryProvider + ?Sized,
+    Pp: orbis_providers::traits::PerformanceProvider + ?Sized,
+{
+    let checked_at = SystemTime::now();
+    let mut builder = CapabilityRegistryBuilder::new(1, checked_at);
+
+    if let Ok(performance) = orbis_providers::probe_performance(performance_provider).await {
+        let _ = builder.add(orbis_core::FeatureId::Performance, performance);
+    }
+
+    if let Ok(battery) = orbis_providers::probe_charge_limit(battery_provider).await {
+        let _ = builder.add(orbis_core::FeatureId::ChargeLimit, battery);
+    }
+
+    builder
+        .build()
+        .expect("registry builder must accept the produced probe results")
+}
+
+/// Errors that can prevent initial registry snapshot assembly.
+///
+/// Defined for forward compatibility; the current assembly path is total.
+#[derive(Debug)]
+pub enum RegistryAssemblyError {
+    /// Internal invariant violated.
+    Internal(String),
+}
+
+impl From<ProbeError> for RegistryAssemblyError {
+    fn from(error: ProbeError) -> Self {
+        Self::Internal(error.to_string())
     }
 }
 
@@ -281,14 +344,18 @@ pub async fn build_production_runtime(
         ))),
     );
 
-    let battery = AppService::new(Arc::new(battery_provider));
-    let performance = AppService::new(Arc::new(SessionHardwarePerformanceProvider::new(
+    let battery_arc = Arc::new(battery_provider);
+    let performance_arc = Arc::new(SessionHardwarePerformanceProvider::new(
         ZbusSessionPerformanceSource::new(session_connection),
         ZbusHardwarePerformanceSource::new(system_connection),
-    )));
+    ));
+    let battery = AppService::new(battery_arc.clone());
+    let performance = AppService::new(performance_arc.clone());
+
+    let snapshot = build_initial_registry_snapshot(&*battery_arc, &*performance_arc).await;
 
     Ok((
-        ApplicationRuntime::new(gpu, battery, performance),
+        ApplicationRuntime::new(gpu, battery, performance).with_registry(snapshot),
         hardware_owner,
     ))
 }
@@ -332,8 +399,12 @@ pub fn mock_runtime() -> ApplicationRuntime<
 
 #[cfg(test)]
 mod tests {
-    use super::{GpuPrimitiveServices, GpuServicesRuntime};
+    use super::{
+        GpuPrimitiveServices, GpuServicesRuntime, build_initial_registry_snapshot, mock_runtime,
+    };
     use orbis_application::CommandError;
+    use orbis_core::FeatureId;
+    use orbis_core::capability::CapabilityStatus;
     use orbis_core::gpu::GpuMode;
     use orbis_providers::error::ProviderError;
     use orbis_providers::mock::MockProvider;
@@ -359,5 +430,46 @@ mod tests {
             result,
             CommandError::Command(ProviderError::Unsupported(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn runtime_with_registry_exposes_performance_and_charge_limit() {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let snapshot = build_initial_registry_snapshot(&*provider, &*provider).await;
+        let runtime = mock_runtime().with_registry(snapshot);
+        let snapshot_ref = runtime.capabilities();
+        assert_eq!(snapshot_ref.generation(), 1);
+        let performance = snapshot_ref
+            .capability(FeatureId::Performance)
+            .expect("performance capability present");
+        assert_eq!(
+            performance.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        let charge_limit = snapshot_ref
+            .capability(FeatureId::ChargeLimit)
+            .expect("charge limit capability present");
+        assert_eq!(
+            charge_limit.operations.read.status,
+            CapabilityStatus::Supported
+        );
+    }
+
+    #[test]
+    fn capability_snapshot_is_immutable_after_construction() {
+        let runtime = mock_runtime();
+        let snapshot_ptr_before = runtime.capabilities.as_ref() as *const _;
+        let snapshot_ref_before = runtime.capabilities();
+        let snapshot_ref_after = runtime.capabilities();
+        assert_eq!(
+            snapshot_ptr_before, snapshot_ref_before as *const _,
+            "snapshot reference must remain stable"
+        );
+        assert_eq!(
+            snapshot_ref_before as *const _, snapshot_ref_after as *const _,
+            "snapshot must not be re-created between accesses"
+        );
     }
 }

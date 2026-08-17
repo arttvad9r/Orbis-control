@@ -151,6 +151,7 @@ pub async fn run_worker<G, B, R, F>(
         gpu,
         battery,
         performance,
+        capabilities: _,
     } = runtime;
     // Команда, дочитанная при drain соседней Battery-группы (граница группы),
     // чтобы не потерять её при coalescing.
