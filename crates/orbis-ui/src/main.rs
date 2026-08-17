@@ -215,6 +215,11 @@ fn from_slint(state: &UiState) -> controller::UiState {
         power_ac_mw: state.power_ac_mw,
         version: state.version.to_string(),
         mock_profile: state.mock_profile.to_string(),
+        perf_capability: controller::CapabilityAvailability::Unknown,
+        charge_limit_capability: controller::CapabilityAvailability::Unknown,
+        gpu_power_capability: controller::CapabilityAvailability::Unknown,
+        gpu_mux_capability: controller::CapabilityAvailability::Unknown,
+        gpu_access_capability: controller::CapabilityAvailability::Unknown,
     }
 }
 
@@ -690,8 +695,9 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         WorkerEvent::PerformanceRefresh(result) => {
             apply_performance_refresh(state, result);
         }
-        WorkerEvent::RegistryChange(Ok(generation)) => {
+        WorkerEvent::RegistryChange(Ok((generation, snapshot))) => {
             tracing::debug!("capability registry refreshed: generation={}", generation);
+            state.update_capabilities(&snapshot);
         }
         WorkerEvent::RegistryChange(Err(e)) => {
             tracing::warn!("capability registry refresh failed: {e:?}");

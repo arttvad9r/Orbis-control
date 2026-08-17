@@ -5,9 +5,54 @@
 //! кнопки меняют только локальное состояние интерфейса, никаких аппаратных
 //! вызовов, системных интерфейсов и фоновых демонов здесь нет.
 
+use orbis_core::capability::CapabilityStatus;
 use orbis_core::fan::FanId;
 use orbis_core::gpu::GpuMode;
 use orbis_core::profile::PerformanceProfile;
+
+/// Состояние capability (read-only).
+///
+/// Отображает CapabilityStatus из registry snapshot, различая между:
+/// - Supported / ReadOnly (capability доступна)
+/// - Unsupported / BackendMissing / TemporarilyUnavailable / PermissionDenied / Unknown
+///   (capability недоступна по разным причинам)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CapabilityAvailability {
+    /// Capability поддерживается.
+    Supported,
+    /// Capability существует, но только read-only (write запрещена).
+    ReadOnly,
+    /// Capability не поддерживается.
+    Unsupported,
+    /// Required backend/service отсутствует.
+    BackendMissing,
+    /// Capability временно недоступна.
+    TemporarilyUnavailable,
+    /// Недостаточно прав для capability.
+    PermissionDenied,
+    /// Unknown capability status.
+    #[default]
+    Unknown,
+}
+
+impl CapabilityAvailability {
+    /// Construct from CapabilityStatus.
+    pub fn from_status(status: CapabilityStatus) -> Self {
+        match status {
+            CapabilityStatus::Supported | CapabilityStatus::SupportedWithRequirement => {
+                Self::Supported
+            }
+            CapabilityStatus::ReadOnly => Self::ReadOnly,
+            CapabilityStatus::Unsupported => Self::Unsupported,
+            CapabilityStatus::BackendMissing => Self::BackendMissing,
+            CapabilityStatus::TemporarilyUnavailable => Self::TemporarilyUnavailable,
+            CapabilityStatus::PermissionDenied => Self::PermissionDenied,
+            CapabilityStatus::Experimental
+            | CapabilityStatus::Conflicted
+            | CapabilityStatus::Unknown => Self::Unknown,
+        }
+    }
+}
 
 /// Состояние готовности/доступности Battery Charge Limit.
 ///
@@ -131,6 +176,16 @@ pub struct UiState {
     pub gpu_mux_value: i32,
     /// Значение access policy (0=Unblocked,1=Blocked,2=Pending,3=Unknown).
     pub gpu_access_value: i32,
+    /// Capability availability: Performance Mode read/write support.
+    pub perf_capability: CapabilityAvailability,
+    /// Capability availability: Battery Charge Limit read/write support.
+    pub charge_limit_capability: CapabilityAvailability,
+    /// Capability availability: GPU Power state read support.
+    pub gpu_power_capability: CapabilityAvailability,
+    /// Capability availability: GPU MUX state read support.
+    pub gpu_mux_capability: CapabilityAvailability,
+    /// Capability availability: GPU Access Policy read support.
+    pub gpu_access_capability: CapabilityAvailability,
     /// Телеметрия.
     pub cpu_temp: i32,
     pub gpu_temp: i32,
@@ -262,6 +317,11 @@ impl UiState {
             gpu_power_value: 0,
             gpu_mux_value: 0,
             gpu_access_value: 0,
+            perf_capability: CapabilityAvailability::Unknown,
+            charge_limit_capability: CapabilityAvailability::Unknown,
+            gpu_power_capability: CapabilityAvailability::Unknown,
+            gpu_mux_capability: CapabilityAvailability::Unknown,
+            gpu_access_capability: CapabilityAvailability::Unknown,
             cpu_temp,
             gpu_temp,
             cpu_fan_rpm,
@@ -270,6 +330,33 @@ impl UiState {
             power_ac_mw,
             version: "0.1.0".to_string(),
             mock_profile: profile_name.to_string(),
+        }
+    }
+
+    /// Update capability availability from a registry snapshot.
+    ///
+    /// Called when the registry is refreshed (generation changes) or initially
+    /// published. Maps each capability's CapabilityStatus to CapabilityAvailability.
+    pub fn update_capabilities(
+        &mut self,
+        snapshot: &orbis_capabilities::CapabilityRegistrySnapshot,
+    ) {
+        use orbis_core::FeatureId;
+
+        if let Some(cap) = snapshot.capability(FeatureId::Performance) {
+            self.perf_capability = CapabilityAvailability::from_status(cap.status);
+        }
+        if let Some(cap) = snapshot.capability(FeatureId::ChargeLimit) {
+            self.charge_limit_capability = CapabilityAvailability::from_status(cap.status);
+        }
+        if let Some(cap) = snapshot.capability(FeatureId::GpuPower) {
+            self.gpu_power_capability = CapabilityAvailability::from_status(cap.status);
+        }
+        if let Some(cap) = snapshot.capability(FeatureId::GpuMux) {
+            self.gpu_mux_capability = CapabilityAvailability::from_status(cap.status);
+        }
+        if let Some(cap) = snapshot.capability(FeatureId::GpuAccess) {
+            self.gpu_access_capability = CapabilityAvailability::from_status(cap.status);
         }
     }
 }

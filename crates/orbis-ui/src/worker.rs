@@ -108,9 +108,17 @@ pub enum WorkerEvent {
     /// недоступен (worker не подставляет mock/default).
     PerformanceRefresh(Result<PerformanceState, ProviderError>),
     /// Lifecycle event: capability registry snapshot replaced whole-swap.
-    /// `Ok(generation)` — новая authoritative publication; `Err(String)` —
-    /// software probe failure оставила authoritative snapshot без изменений.
-    RegistryChange(Result<u64, orbis_capabilities::ProbeError>),
+    /// `Ok((generation, snapshot))` — новая authoritative publication;
+    /// `Err(error)` — software probe failure оставила authoritative snapshot без изменений.
+    RegistryChange(
+        Result<
+            (
+                u64,
+                std::sync::Arc<orbis_capabilities::CapabilityRegistrySnapshot>,
+            ),
+            orbis_capabilities::ProbeError,
+        >,
+    ),
 }
 
 /// Создать command channel для worker.
@@ -179,8 +187,9 @@ pub async fn run_worker<G, B, R, F>(
             match result {
                 Ok(snapshot) => {
                     let generation = snapshot.generation();
-                    runtime.replace_capabilities(snapshot);
-                    emit(WorkerEvent::RegistryChange(Ok(generation)));
+                    let snapshot_arc = std::sync::Arc::new(snapshot);
+                    runtime.replace_capabilities((*snapshot_arc).clone());
+                    emit(WorkerEvent::RegistryChange(Ok((generation, snapshot_arc))));
                 }
                 Err(error) => {
                     emit(WorkerEvent::RegistryChange(Err(error)));
