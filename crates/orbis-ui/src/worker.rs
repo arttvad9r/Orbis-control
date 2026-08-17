@@ -20,6 +20,7 @@
 
 use crate::composition::{
     ApplicationRuntime, BatteryServiceRuntime, GpuServicesRuntime, PerformanceServiceRuntime,
+    TelemetryServiceRuntime,
 };
 use orbis_application::{
     ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome, PerformanceState,
@@ -75,6 +76,11 @@ pub enum WorkerCommand {
     /// snapshot. Никаких writes. Software failure в probe pipeline
     /// сохраняет previous snapshot и не публикует partially-built registry.
     RefreshCapabilities,
+    /// Authoritative read-only refresh telemetry (sysfs hwmon/power_supply).
+    ///
+    /// Выполняет `TelemetryServiceRuntime::snapshot()` (новый provider read,
+    /// без mutation и без polling). Обычная ordered команда/барьер.
+    RefreshTelemetry,
 }
 
 /// Событие результата команды.
@@ -119,6 +125,12 @@ pub enum WorkerEvent {
             orbis_capabilities::ProbeError,
         >,
     ),
+    /// Результат authoritative read-only telemetry refresh.
+    ///
+    /// `Ok(Telemetry)` — фактический authoritative snapshot из sysfs;
+    /// `Err(ProviderError)` — read недоступен (worker не подставляет
+    /// mock/default и не затирает последний успешный UI telemetry state).
+    TelemetryRefresh(Result<orbis_core::telemetry::Telemetry, ProviderError>),
 }
 
 /// Создать command channel для worker.
@@ -153,14 +165,15 @@ pub fn command_channel() -> (
 /// (power/mux/access) выполняются независимо: failure одного не блокирует
 /// остальные.
 ///
-pub async fn run_worker<G, B, R, F>(
-    mut runtime: ApplicationRuntime<G, B, R>,
+pub async fn run_worker<G, B, R, T, F>(
+    mut runtime: ApplicationRuntime<G, B, R, T>,
     mut receiver: UnboundedReceiver<WorkerCommand>,
     mut emit: F,
 ) where
     G: GpuServicesRuntime + 'static,
     B: BatteryServiceRuntime + 'static,
     R: PerformanceServiceRuntime + 'static,
+    T: TelemetryServiceRuntime + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
     // Команда, дочитанная при drain соседней Battery-группы (граница группы),
@@ -195,6 +208,16 @@ pub async fn run_worker<G, B, R, F>(
                     emit(WorkerEvent::RegistryChange(Err(error)));
                 }
             }
+            continue;
+        }
+
+        if matches!(command, WorkerCommand::RefreshTelemetry) {
+            // Authoritative read-only telemetry snapshot. Ошибка не затирает
+            // последний успешный UI state: event переносит Result, UI сам
+            // решает, что делать с ошибкой.
+            emit(WorkerEvent::TelemetryRefresh(
+                runtime.telemetry.snapshot().await,
+            ));
             continue;
         }
 
@@ -251,6 +274,7 @@ pub async fn run_worker<G, B, R, F>(
                 WorkerEvent::PerformanceRefresh(performance.performance_state().await)
             }
             WorkerCommand::RefreshCapabilities => unreachable!("handled above"),
+            WorkerCommand::RefreshTelemetry => unreachable!("handled above"),
         };
         emit(event);
     }
@@ -265,14 +289,15 @@ pub async fn run_worker<G, B, R, F>(
 /// `ProbeError::Internal` or `ProbeError::ContractViolation` aborts the refresh
 /// cycle without producing a partial snapshot, and the caller is responsible
 /// for keeping the previous snapshot authoritative.
-async fn run_capability_refresh<G, B, R>(
-    runtime: &mut ApplicationRuntime<G, B, R>,
+async fn run_capability_refresh<G, B, R, T>(
+    runtime: &mut ApplicationRuntime<G, B, R, T>,
     next_generation: u64,
 ) -> Result<orbis_capabilities::CapabilityRegistrySnapshot, orbis_capabilities::ProbeError>
 where
     G: GpuServicesRuntime,
     B: BatteryServiceRuntime,
     R: PerformanceServiceRuntime,
+    T: TelemetryServiceRuntime,
 {
     use orbis_capabilities::CapabilityRegistryBuilder;
 
@@ -385,6 +410,10 @@ mod tests {
         let snapshot = CapabilityRegistryBuilder::new(1, std::time::SystemTime::now())
             .build()
             .expect("empty registry snapshot must build");
+        // Telemetry service: отдельный MockProvider (существующие тесты не
+        // проверяют telemetry, но runtime требует его наличия).
+        let telemetry_state = build_state_arc("zephyrus-full").expect("profile exists");
+        let telemetry_service = AppService::new(Arc::new(MockProvider::new(telemetry_state)));
         run_worker(
             ApplicationRuntime::new_with_snapshot(
                 GpuServices::new(
@@ -395,6 +424,7 @@ mod tests {
                 ),
                 battery_service,
                 performance_service,
+                telemetry_service,
                 snapshot,
             ),
             receiver,

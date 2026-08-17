@@ -149,12 +149,17 @@ fn to_slint(state: &controller::UiState) -> UiState {
         gpu_power_value: state.gpu_power_value,
         gpu_mux_value: state.gpu_mux_value,
         gpu_access_value: state.gpu_access_value,
-        cpu_temp: state.cpu_temp,
-        gpu_temp: state.gpu_temp,
-        cpu_fan_rpm: state.cpu_fan_rpm,
-        gpu_fan_rpm: state.gpu_fan_rpm,
-        battery_percent: state.battery_percent,
-        power_ac_mw: state.power_ac_mw,
+        cpu_temp: state.cpu_temp.clone().into(),
+        gpu_temp: state.gpu_temp.clone().into(),
+        cpu_fan_rpm: state.cpu_fan_rpm.clone().into(),
+        gpu_fan_rpm: state.gpu_fan_rpm.clone().into(),
+        battery_percent: state.battery_percent.clone().into(),
+        power_ac_mw: state.power_ac.clone().into(),
+        battery_health: state.battery_health.clone().into(),
+        battery_cycles: state.battery_cycles.clone().into(),
+        battery_status: state.battery_status.clone().into(),
+        ac_online: state.ac_online.clone().into(),
+        gpu_power: state.gpu_power_display.clone().into(),
         version: state.version.clone().into(),
         mock_profile: state.mock_profile.clone().into(),
     }
@@ -207,12 +212,12 @@ fn from_slint(state: &UiState) -> controller::UiState {
         gpu_power_value: state.gpu_power_value,
         gpu_mux_value: state.gpu_mux_value,
         gpu_access_value: state.gpu_access_value,
-        cpu_temp: state.cpu_temp,
-        gpu_temp: state.gpu_temp,
-        cpu_fan_rpm: state.cpu_fan_rpm,
-        gpu_fan_rpm: state.gpu_fan_rpm,
-        battery_percent: state.battery_percent,
-        power_ac_mw: state.power_ac_mw,
+        cpu_temp: state.cpu_temp.to_string(),
+        gpu_temp: state.gpu_temp.to_string(),
+        cpu_fan_rpm: state.cpu_fan_rpm.to_string(),
+        gpu_fan_rpm: state.gpu_fan_rpm.to_string(),
+        battery_percent: state.battery_percent.to_string(),
+        power_ac: state.power_ac_mw.to_string(),
         version: state.version.to_string(),
         mock_profile: state.mock_profile.to_string(),
         perf_capability: controller::CapabilityAvailability::Unknown,
@@ -220,6 +225,11 @@ fn from_slint(state: &UiState) -> controller::UiState {
         gpu_power_capability: controller::CapabilityAvailability::Unknown,
         gpu_mux_capability: controller::CapabilityAvailability::Unknown,
         gpu_access_capability: controller::CapabilityAvailability::Unknown,
+        battery_health: state.battery_health.to_string(),
+        battery_cycles: state.battery_cycles.to_string(),
+        battery_status: state.battery_status.to_string(),
+        ac_online: state.ac_online.to_string(),
+        gpu_power_display: state.gpu_power.to_string(),
     }
 }
 
@@ -709,6 +719,15 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         WorkerEvent::RegistryChange(Err(e)) => {
             tracing::warn!("capability registry refresh failed: {e:?}");
         }
+        WorkerEvent::TelemetryRefresh(Ok(telemetry)) => {
+            // Authoritative telemetry snapshot: обновляем все telemetry-поля.
+            // Отсутствующие (None) поля становятся "—" независимо друг от друга.
+            state.update_telemetry(&telemetry);
+        }
+        WorkerEvent::TelemetryRefresh(Err(e)) => {
+            // Ошибка read: НЕ затираем последний успешный telemetry state.
+            tracing::warn!("telemetry refresh failed: {e:?}");
+        }
     }
 }
 
@@ -959,6 +978,12 @@ fn main() -> anyhow::Result<()> {
     // Loading; первый RefreshPerformance переведёт в Ready/Unavailable.
     state.perf_state = controller::PerformanceHwState::Loading;
 
+    // Честный initial Telemetry state: fixture-профиль дал mock значения
+    // (72°C/65°C/28000 мВт), но они НЕ должны быть видимы как authoritative
+    // hardware state до первого telemetry refresh. Сбрасываем в "—";
+    // первый RefreshTelemetry (ниже) обновит из реального sysfs snapshot.
+    state.reset_telemetry();
+
     // Production product GPU Mode: реального backend нет (read-only hardware
     // status Power/MUX/Access идёт через независимые capability providers).
     // Product policy остаётся недоказанной: не показывать selected mode как
@@ -1031,6 +1056,13 @@ fn main() -> anyhow::Result<()> {
     // сохраняет previous snapshot и gating остаётся disabled.
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshCapabilities) {
         tracing::warn!("worker закрыт, initial capability refresh не отправлен: {e:?}");
+    }
+
+    // Ровно один initial telemetry refresh. Публикует authoritative sysfs
+    // snapshot в UI state (CPU/GPU temp, fans, battery, AC). Без polling;
+    // ошибка не затирает последний успешный state.
+    if let Err(e) = worker_tx.send(WorkerCommand::RefreshTelemetry) {
+        tracing::warn!("worker закрыт, initial telemetry refresh не отправлен: {e:?}");
     }
 
     app.show()?;
@@ -1219,7 +1251,7 @@ mod tests {
         s.gpu_ultimate_pending = true;
         s.gpu_section_error = true;
         s.charge_limit = 60;
-        s.cpu_temp = 99;
+        s.cpu_temp = "99°C".into();
 
         let outcome = PerformanceCommandOutcome {
             result: ApplyResult::Applied,
@@ -1236,7 +1268,7 @@ mod tests {
         assert!(s.gpu_ultimate_pending);
         assert!(s.gpu_section_error);
         assert_eq!(s.charge_limit, 60);
-        assert_eq!(s.cpu_temp, 99);
+        assert_eq!(s.cpu_temp, "99°C");
     }
 
     #[test]
@@ -1558,6 +1590,52 @@ mod tests {
         s.charge_limit_writable = true;
         s.charge_limit_state = controller::ChargeLimitState::Unavailable;
         assert!(!charge_mutation_allowed(&s));
+    }
+
+    #[test]
+    fn telemetry_refresh_updates_ui_and_error_keeps_previous_state() {
+        let mut s = base_state();
+        s.reset_telemetry();
+        assert_eq!(s.cpu_temp, "—");
+
+        // Ok: обновляет telemetry display из authoritative snapshot.
+        let t = orbis_core::telemetry::Telemetry {
+            cpu_temp: Some(orbis_core::newtypes::TemperatureC::new(46).unwrap()),
+            gpu_temp: Some(orbis_core::newtypes::TemperatureC::new(43).unwrap()),
+            fans: vec![orbis_core::telemetry::FanTelemetry {
+                fan: orbis_core::fan::FanId::Cpu,
+                rpm: orbis_core::newtypes::Rpm::new(2600).unwrap(),
+                percent: None,
+            }],
+            power: orbis_core::telemetry::PowerTelemetry {
+                ac: None,
+                battery: None,
+                total: None,
+                gpu: Some(orbis_core::newtypes::MilliWatt::new(13_073).unwrap()),
+            },
+            ac_online: Some(false),
+            battery: None,
+            gpu_power_state: orbis_core::gpu::GpuPowerState::Unknown,
+            ts: std::time::SystemTime::UNIX_EPOCH,
+        };
+        apply_performance_event(&mut s, WorkerEvent::TelemetryRefresh(Ok(t)));
+        assert_eq!(s.cpu_temp, "46°C");
+        assert_eq!(s.gpu_temp, "43°C");
+        assert_eq!(s.cpu_fan_rpm, "2600 rpm");
+        assert_eq!(s.gpu_fan_rpm, "—");
+        assert_eq!(s.battery_percent, "—");
+        assert_eq!(s.ac_online, "On battery");
+        assert_eq!(s.gpu_power_display, "13 W");
+
+        // Err: не затирает последний успешный telemetry state.
+        apply_performance_event(
+            &mut s,
+            WorkerEvent::TelemetryRefresh(Err(orbis_providers::error::ProviderError::Io(
+                std::io::Error::other("test"),
+            ))),
+        );
+        assert_eq!(s.cpu_temp, "46°C");
+        assert_eq!(s.gpu_power_display, "13 W");
     }
 
     #[test]

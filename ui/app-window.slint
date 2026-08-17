@@ -53,12 +53,17 @@ export struct UiState {
     gpu-power-value: int,
     gpu-mux-value: int,
     gpu-access-value: int,
-    cpu-temp: int,
-    gpu-temp: int,
-    cpu-fan-rpm: int,
-    gpu-fan-rpm: int,
-    battery-percent: int,
-    power-ac-mw: int,
+    cpu-temp: string,
+    gpu-temp: string,
+    cpu-fan-rpm: string,
+    gpu-fan-rpm: string,
+    battery-percent: string,
+    power-ac-mw: string,
+    battery-health: string,
+    battery-cycles: string,
+    battery-status: string,
+    ac-online: string,
+    gpu-power: string,
     version: string,
     mock-profile: string,
 }
@@ -133,12 +138,17 @@ export component AppWindow inherits Window {
         gpu-power-value: 0,
         gpu-mux-value: 0,
         gpu-access-value: 0,
-        cpu-temp: 0,
-        gpu-temp: 0,
-        cpu-fan-rpm: 0,
-        gpu-fan-rpm: 0,
-        battery-percent: 0,
-        power-ac-mw: 0,
+        cpu-temp: "—",
+        gpu-temp: "—",
+        cpu-fan-rpm: "—",
+        gpu-fan-rpm: "—",
+        battery-percent: "—",
+        power-ac-mw: "—",
+        battery-health: "—",
+        battery-cycles: "—",
+        battery-status: "",
+        ac-online: "—",
+        gpu-power: "—",
         version: "0.1.0",
         mock-profile: "zephyrus-full",
     };
@@ -484,18 +494,18 @@ export component AppWindow inherits Window {
                     spacing: 4px;
                     HorizontalLayout {
                         spacing: 14px;
-                        TelemetryCell { value: root.ui-state.cpu-temp + "°C"; label: "CPU"; }
-                        TelemetryCell { value: root.ui-state.gpu-temp + "°C"; label: "GPU"; }
+                        TelemetryCell { value: root.ui-state.cpu-temp; label: "CPU"; }
+                        TelemetryCell { value: root.ui-state.gpu-temp; label: "GPU"; }
                     }
                     HorizontalLayout {
                         spacing: 14px;
-                        TelemetryCell { value: root.ui-state.cpu-fan-rpm + " rpm"; label: "CPU fan"; }
-                        TelemetryCell { value: root.ui-state.gpu-fan-rpm + " rpm"; label: "GPU fan"; }
+                        TelemetryCell { value: root.ui-state.cpu-fan-rpm; label: "CPU fan"; }
+                        TelemetryCell { value: root.ui-state.gpu-fan-rpm; label: "GPU fan"; }
                     }
                     HorizontalLayout {
                         spacing: 14px;
-                        TelemetryCell { value: root.ui-state.battery-percent + "%"; label: "Battery"; }
-                        TelemetryCell { value: root.ui-state.power-ac-mw / 1000 + " W"; label: "Power (AC)"; }
+                        TelemetryCell { value: root.ui-state.battery-percent; label: "Battery"; }
+                        TelemetryCell { value: root.ui-state.power-ac-mw; label: "Power (AC)"; }
                     }
                 }
             }

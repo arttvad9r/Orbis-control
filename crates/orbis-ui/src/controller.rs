@@ -198,13 +198,32 @@ pub struct UiState {
     pub gpu_mux_capability: CapabilityAvailability,
     /// Capability availability: GPU Access Policy read support.
     pub gpu_access_capability: CapabilityAvailability,
-    /// Телеметрия.
-    pub cpu_temp: i32,
-    pub gpu_temp: i32,
-    pub cpu_fan_rpm: i32,
-    pub gpu_fan_rpm: i32,
-    pub battery_percent: i32,
-    pub power_ac_mw: i32,
+    /// Телеметрия (authoritative значения из `SysfsTelemetryProvider`).
+    ///
+    /// Хранятся как display-строки: "—" = значение ещё не получено или
+    /// отсутствует у backend. Production не показывает mock/placeholder
+    /// значения до первого refresh.
+    pub cpu_temp: String,
+    /// Температура dGPU, °C ("—" = неизвестно).
+    pub gpu_temp: String,
+    /// CPU fan RPM ("—" = неизвестно).
+    pub cpu_fan_rpm: String,
+    /// GPU fan RPM ("—" = неизвестно).
+    pub gpu_fan_rpm: String,
+    /// Battery percent, % ("—" = неизвестно).
+    pub battery_percent: String,
+    /// Battery health (capacity), % от design ("—" = неизвестно).
+    pub battery_health: String,
+    /// Число циклов заряда ("—" = неизвестно).
+    pub battery_cycles: String,
+    /// Battery status ("Charging"/"Discharging"/"Full"/...) (пусто = неизвестно).
+    pub battery_status: String,
+    /// Подключён ли AC-адаптер ("On AC"/"On battery"/"—").
+    pub ac_online: String,
+    /// Потребление dGPU, Вт (telemetry, не `GpuPowerState`; "—" = неизвестно).
+    pub gpu_power_display: String,
+    /// Потребление от AC, Вт ("—" = неизвестно/не вычисляется).
+    pub power_ac: String,
     /// Служебная информация.
     pub version: String,
     pub mock_profile: String,
@@ -262,39 +281,42 @@ impl UiState {
             .unwrap_or(80);
         let charge_limit_enabled = state.charge_limit.enabled;
 
-        let cpu_temp = state
-            .telemetry
-            .cpu_temp
-            .map(|t| i32::from(t.get()))
-            .unwrap_or(0);
-        let gpu_temp = state
-            .telemetry
-            .gpu_temp
-            .map(|t| i32::from(t.get()))
-            .unwrap_or(0);
+        let cpu_temp = format_celsius(state.telemetry.cpu_temp);
+        let gpu_temp = format_celsius(state.telemetry.gpu_temp);
 
-        let mut cpu_fan_rpm = 0;
-        let mut gpu_fan_rpm = 0;
+        let mut cpu_fan_rpm = None;
+        let mut gpu_fan_rpm = None;
         for f in &state.telemetry.fans {
-            let rpm = i32::from(f.rpm.get());
+            let rpm = f.rpm;
             match &f.fan {
-                FanId::Cpu => cpu_fan_rpm = rpm,
-                FanId::Gpu => gpu_fan_rpm = rpm,
+                FanId::Cpu => cpu_fan_rpm = Some(rpm),
+                FanId::Gpu => gpu_fan_rpm = Some(rpm),
                 _ => {}
             }
         }
+        let cpu_fan_rpm = format_rpm(cpu_fan_rpm);
+        let gpu_fan_rpm = format_rpm(gpu_fan_rpm);
 
-        let battery_percent = state
+        let battery_percent = state.telemetry.battery.as_ref().map(|b| b.percent);
+        let battery_health = state.telemetry.battery.as_ref().and_then(|b| b.capacity);
+        let battery_cycles = state
             .telemetry
             .battery
-            .map(|b| i32::from(b.percent.get()))
-            .unwrap_or(0);
-        let power_ac_mw = state
+            .as_ref()
+            .and_then(|b| b.charge_cycles.map(|c| c as i32));
+        let battery_status = state
             .telemetry
-            .power
-            .ac
-            .map(|m| m.get() as i32)
-            .unwrap_or(0);
+            .battery
+            .as_ref()
+            .map(|b| b.state.clone())
+            .unwrap_or_default();
+        let ac_online = match state.telemetry.ac_online {
+            Some(true) => "On AC".to_string(),
+            Some(false) => "On battery".to_string(),
+            None => "—".to_string(),
+        };
+        let gpu_power = format_watts(state.telemetry.power.gpu);
+        let power_ac = format_watts(state.telemetry.power.ac);
 
         Self {
             perf_selected,
@@ -338,8 +360,15 @@ impl UiState {
             gpu_temp,
             cpu_fan_rpm,
             gpu_fan_rpm,
-            battery_percent,
-            power_ac_mw,
+            battery_percent: format_percent(battery_percent),
+            battery_health: format_percent(battery_health),
+            battery_cycles: battery_cycles
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "—".into()),
+            battery_status,
+            ac_online,
+            gpu_power_display: gpu_power,
+            power_ac,
             version: "0.1.0".to_string(),
             mock_profile: profile_name.to_string(),
         }
@@ -377,6 +406,102 @@ impl UiState {
         if let Some(cap) = snapshot.capability(FeatureId::GpuAccess) {
             self.gpu_access_capability = CapabilityAvailability::from_status(cap.status);
         }
+    }
+
+    /// Сбросить все telemetry-поля в неизвестное состояние.
+    ///
+    /// Используется production interactive startup: до первого authoritative
+    /// `Telemetry` refresh mock fixture значения не должны отображаться.
+    pub fn reset_telemetry(&mut self) {
+        self.cpu_temp = "—".into();
+        self.gpu_temp = "—".into();
+        self.cpu_fan_rpm = "—".into();
+        self.gpu_fan_rpm = "—".into();
+        self.battery_percent = "—".into();
+        self.battery_health = "—".into();
+        self.battery_cycles = "—".into();
+        self.battery_status.clear();
+        self.ac_online = "—".into();
+        self.gpu_power_display = "—".into();
+        self.power_ac = "—".into();
+    }
+
+    /// Обновить telemetry-поля из authoritative `Telemetry` snapshot.
+    ///
+    /// Каждое поле обновляется независимо: отсутствующие (None) поля
+    /// становятся "—", но не ломают остальные значения. Ошибка snapshot-а
+    /// обновление не вызывает (caller сохраняет последний успешный state).
+    pub fn update_telemetry(&mut self, telemetry: &orbis_core::telemetry::Telemetry) {
+        use orbis_core::fan::FanId;
+
+        self.cpu_temp = format_celsius(telemetry.cpu_temp);
+        self.gpu_temp = format_celsius(telemetry.gpu_temp);
+
+        let mut cpu_fan_rpm = None;
+        let mut gpu_fan_rpm = None;
+        for f in &telemetry.fans {
+            let rpm = f.rpm;
+            match &f.fan {
+                FanId::Cpu => cpu_fan_rpm = Some(rpm),
+                FanId::Gpu => gpu_fan_rpm = Some(rpm),
+                _ => {}
+            }
+        }
+        self.cpu_fan_rpm = format_rpm(cpu_fan_rpm);
+        self.gpu_fan_rpm = format_rpm(gpu_fan_rpm);
+
+        self.battery_percent = format_percent(telemetry.battery.as_ref().map(|b| b.percent));
+        self.battery_health = format_percent(telemetry.battery.as_ref().and_then(|b| b.capacity));
+        self.battery_cycles = telemetry
+            .battery
+            .as_ref()
+            .and_then(|b| b.charge_cycles.map(|c| c as i32))
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "—".into());
+        self.battery_status = telemetry
+            .battery
+            .as_ref()
+            .map(|b| b.state.clone())
+            .unwrap_or_default();
+        self.ac_online = match telemetry.ac_online {
+            Some(true) => "On AC".to_string(),
+            Some(false) => "On battery".to_string(),
+            None => "—".to_string(),
+        };
+        self.gpu_power_display = format_watts(telemetry.power.gpu);
+        self.power_ac = format_watts(telemetry.power.ac);
+    }
+}
+
+/// Отформатировать температуру: °C или "—".
+fn format_celsius(t: Option<orbis_core::newtypes::TemperatureC>) -> String {
+    match t {
+        Some(t) => format!("{}°C", t.get()),
+        None => "—".into(),
+    }
+}
+
+/// Отформатировать RPM или "—".
+fn format_rpm(rpm: Option<orbis_core::newtypes::Rpm>) -> String {
+    match rpm {
+        Some(rpm) => format!("{} rpm", rpm.get()),
+        None => "—".into(),
+    }
+}
+
+/// Отформатировать процент или "—".
+fn format_percent(percent: Option<orbis_core::newtypes::Percent>) -> String {
+    match percent {
+        Some(p) => format!("{}%", p.get()),
+        None => "—".into(),
+    }
+}
+
+/// Отформатировать мощность: мВт → Вт или "—".
+fn format_watts(mw: Option<orbis_core::newtypes::MilliWatt>) -> String {
+    match mw {
+        Some(mw) => format!("{} W", mw.get() / 1000),
+        None => "—".into(),
     }
 }
 
@@ -436,10 +561,10 @@ mod tests {
         assert_eq!(s.perf_selected, 1); // Balanced
         assert_eq!(s.gpu_selected, 1); // Standard
         assert_eq!(s.charge_limit, 80);
-        assert!(s.cpu_temp > 0);
-        assert!(s.cpu_fan_rpm > 0);
-        assert!(s.gpu_fan_rpm > 0);
-        assert_eq!(s.power_ac_mw, 28_000);
+        assert!(s.cpu_temp != "—");
+        assert!(s.cpu_fan_rpm != "—");
+        assert!(s.gpu_fan_rpm != "—");
+        assert_eq!(s.power_ac, "28 W");
         assert_eq!(s.mock_profile, "zephyrus-full");
     }
 
@@ -760,5 +885,143 @@ mod tests {
         let slint_state = crate::to_slint(&s);
         assert_eq!(slint_state.charge_limit, 80);
         assert!(slint_state.charge_limit_enabled);
+    }
+
+    // -----------------------------------------------------------------------
+    // Telemetry display + authoritative update
+    // -----------------------------------------------------------------------
+
+    fn sample_telemetry() -> orbis_core::telemetry::Telemetry {
+        orbis_core::telemetry::Telemetry {
+            cpu_temp: Some(orbis_core::newtypes::TemperatureC::new(46).unwrap()),
+            gpu_temp: Some(orbis_core::newtypes::TemperatureC::new(43).unwrap()),
+            fans: vec![
+                orbis_core::telemetry::FanTelemetry {
+                    fan: orbis_core::fan::FanId::Cpu,
+                    rpm: orbis_core::newtypes::Rpm::new(2600).unwrap(),
+                    percent: None,
+                },
+                orbis_core::telemetry::FanTelemetry {
+                    fan: orbis_core::fan::FanId::Gpu,
+                    rpm: orbis_core::newtypes::Rpm::new(2100).unwrap(),
+                    percent: None,
+                },
+            ],
+            power: orbis_core::telemetry::PowerTelemetry {
+                ac: None,
+                battery: None,
+                total: None,
+                gpu: Some(orbis_core::newtypes::MilliWatt::new(13_073).unwrap()),
+            },
+            ac_online: Some(true),
+            battery: Some(orbis_core::telemetry::BatteryTelemetry {
+                percent: orbis_core::newtypes::Percent::new(100).unwrap(),
+                capacity: Some(orbis_core::newtypes::Percent::new(87).unwrap()),
+                energy_now: None,
+                energy_full: None,
+                charge_cycles: Some(5),
+                state: "Full".into(),
+            }),
+            gpu_power_state: orbis_core::gpu::GpuPowerState::Unknown,
+            ts: std::time::SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn mock_profile_formats_telemetry() {
+        let s = UiState::from_mock_profile("zephyrus-full");
+        // mock fixture: 72°C CPU, 65°C GPU, fans (2400/2600 rpm), 80% battery, 28 W AC.
+        assert_eq!(s.cpu_temp, "72°C");
+        assert_eq!(s.gpu_temp, "65°C");
+        assert_eq!(s.cpu_fan_rpm, "2400 rpm");
+        assert_eq!(s.gpu_fan_rpm, "2600 rpm");
+        assert_eq!(s.battery_percent, "80%");
+        assert_eq!(s.battery_health, "89%");
+        assert_eq!(s.battery_cycles, "0");
+        assert_eq!(s.battery_status, "discharging");
+        assert_eq!(s.ac_online, "On AC");
+        assert_eq!(s.power_ac, "28 W");
+    }
+
+    #[test]
+    fn update_telemetry_formats_authoritative_values() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.reset_telemetry();
+        s.update_telemetry(&sample_telemetry());
+
+        assert_eq!(s.cpu_temp, "46°C");
+        assert_eq!(s.gpu_temp, "43°C");
+        assert_eq!(s.cpu_fan_rpm, "2600 rpm");
+        assert_eq!(s.gpu_fan_rpm, "2100 rpm");
+        assert_eq!(s.battery_percent, "100%");
+        assert_eq!(s.battery_health, "87%");
+        assert_eq!(s.battery_cycles, "5");
+        assert_eq!(s.battery_status, "Full");
+        assert_eq!(s.ac_online, "On AC");
+        assert_eq!(s.gpu_power_display, "13 W");
+        assert_eq!(s.power_ac, "—");
+    }
+
+    #[test]
+    fn reset_telemetry_clears_mock_values() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        assert_ne!(s.cpu_temp, "—");
+        s.reset_telemetry();
+        assert_eq!(s.cpu_temp, "—");
+        assert_eq!(s.gpu_temp, "—");
+        assert_eq!(s.cpu_fan_rpm, "—");
+        assert_eq!(s.gpu_fan_rpm, "—");
+        assert_eq!(s.battery_percent, "—");
+        assert_eq!(s.battery_health, "—");
+        assert_eq!(s.battery_cycles, "—");
+        assert_eq!(s.battery_status, "");
+        assert_eq!(s.ac_online, "—");
+        assert_eq!(s.gpu_power_display, "—");
+        assert_eq!(s.power_ac, "—");
+    }
+
+    #[test]
+    fn missing_telemetry_fields_do_not_break_others() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.reset_telemetry();
+
+        let mut t = sample_telemetry();
+        // Убираем CPU temp, fans и battery — остальные поля должны обновиться.
+        t.cpu_temp = None;
+        t.fans.clear();
+        t.battery = None;
+        t.ac_online = None;
+        s.update_telemetry(&t);
+
+        assert_eq!(s.cpu_temp, "—");
+        assert_eq!(s.gpu_temp, "43°C"); // независимо от отсутствия cpu_temp
+        assert_eq!(s.cpu_fan_rpm, "—");
+        assert_eq!(s.gpu_fan_rpm, "—");
+        assert_eq!(s.battery_percent, "—");
+        assert_eq!(s.battery_status, "");
+        assert_eq!(s.ac_online, "—");
+        assert_eq!(s.gpu_power_display, "13 W"); // power.gpu не зависит от battery
+    }
+
+    #[test]
+    fn telemetry_does_not_touch_gpu_capability_state() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.gpu_power = GpuHwState::Ready;
+        s.gpu_power_value = 1;
+        let before = s.clone();
+
+        s.update_telemetry(&sample_telemetry());
+
+        // GPU capability state (power/mux/access) не изменяется telemetry.
+        assert_eq!(s.gpu_power, before.gpu_power);
+        assert_eq!(s.gpu_mux, before.gpu_mux);
+        assert_eq!(s.gpu_access, before.gpu_access);
+        assert_eq!(s.gpu_power_value, before.gpu_power_value);
+        assert_eq!(s.gpu_mux_value, before.gpu_mux_value);
+        assert_eq!(s.gpu_access_value, before.gpu_access_value);
+        // Perf/charge/gpu-selected поля не затрагиваются.
+        assert_eq!(s.perf_selected, before.perf_selected);
+        assert_eq!(s.charge_limit, before.charge_limit);
+        assert_eq!(s.gpu_selected, before.gpu_selected);
     }
 }

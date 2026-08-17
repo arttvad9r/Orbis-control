@@ -316,19 +316,38 @@ where
     }
 }
 
+/// Telemetry service capability boundary.
+#[async_trait]
+pub trait TelemetryServiceRuntime: Send {
+    /// Read an authoritative read-only telemetry snapshot.
+    async fn snapshot(&self) -> Result<orbis_core::telemetry::Telemetry, ProviderError>;
+}
+
+#[async_trait]
+impl<P> TelemetryServiceRuntime for AppService<P>
+where
+    P: orbis_providers::traits::TelemetryProvider + Send + Sync,
+{
+    async fn snapshot(&self) -> Result<orbis_core::telemetry::Telemetry, ProviderError> {
+        self.provider().snapshot().await
+    }
+}
+
 /// All application services owned by one worker runtime.
-pub struct ApplicationRuntime<G, B, R> {
+pub struct ApplicationRuntime<G, B, R, T> {
     /// Grouped GPU capabilities.
     pub gpu: G,
     /// Battery service.
     pub battery: B,
     /// Performance service.
     pub performance: R,
+    /// Telemetry service (read-only sysfs snapshot).
+    pub telemetry: T,
     /// Read-only capability registry snapshot.
     pub(crate) capabilities: Arc<CapabilityRegistrySnapshot>,
 }
 
-impl<G, B, R> ApplicationRuntime<G, B, R> {
+impl<G, B, R, T> ApplicationRuntime<G, B, R, T> {
     /// Create an application runtime with an explicitly built capability snapshot.
     ///
     /// Production composition must always supply an authoritative snapshot
@@ -338,12 +357,14 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
         gpu: G,
         battery: B,
         performance: R,
+        telemetry: T,
         snapshot: CapabilityRegistrySnapshot,
     ) -> Self {
         Self {
             gpu,
             battery,
             performance,
+            telemetry,
             capabilities: Arc::new(snapshot),
         }
     }
@@ -377,7 +398,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
     /// without discovered capabilities. Available only to test code in this
     /// crate so that production callers cannot accidentally use it.
     #[cfg(test)]
-    pub fn empty_for_testing(gpu: G, battery: B, performance: R) -> Self {
+    pub fn empty_for_testing(gpu: G, battery: B, performance: R, telemetry: T) -> Self {
         let checked_at = SystemTime::now();
         let snapshot = CapabilityRegistryBuilder::new(1, checked_at)
             .build()
@@ -386,6 +407,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             gpu,
             battery,
             performance,
+            telemetry,
             capabilities: Arc::new(snapshot),
         }
     }
@@ -635,6 +657,7 @@ pub type ProductionRuntime = ApplicationRuntime<
             ZbusHardwarePerformanceSource,
         >,
     >,
+    AppService<orbis_providers::SysfsTelemetryProvider>,
 >;
 
 /// Build the current production application runtime.
@@ -672,6 +695,10 @@ pub async fn build_production_runtime(
     let battery = AppService::new(battery_arc.clone());
     let performance = AppService::new(performance_arc.clone());
 
+    // Read-only sysfs telemetry: dynamic hwmon/power_supply discovery, no
+    // writes, no privileged APIs. Construction performs no I/O.
+    let telemetry = AppService::new(Arc::new(orbis_providers::SysfsTelemetryProvider::default()));
+
     let snapshot = build_initial_registry_snapshot(
         &*battery_arc,
         &*performance_arc,
@@ -682,7 +709,7 @@ pub async fn build_production_runtime(
     .await?;
 
     Ok((
-        ApplicationRuntime::new_with_snapshot(gpu, battery, performance, snapshot),
+        ApplicationRuntime::new_with_snapshot(gpu, battery, performance, telemetry, snapshot),
         hardware_owner,
     ))
 }
@@ -702,13 +729,18 @@ async fn hardware1_write_available(connection: &zbus::Connection) -> bool {
         .unwrap_or(false)
 }
 
-/// Test-only grouped runtime using one mock provider for all capabilities.
+/// Test-only runtime type: один MockProvider для всех capability services.
 #[cfg(test)]
-pub fn mock_runtime() -> ApplicationRuntime<
+type MockRuntime = ApplicationRuntime<
     GpuServices<MockProvider, MockProvider, MockProvider, MockProvider>,
     AppService<MockProvider>,
     AppService<MockProvider>,
-> {
+    AppService<MockProvider>,
+>;
+
+/// Test-only grouped runtime using one mock provider for all capabilities.
+#[cfg(test)]
+pub fn mock_runtime() -> MockRuntime {
     let state = build_state_arc("zephyrus-full").expect("profile exists");
     let provider = Arc::new(MockProvider::new(state));
     let gpu = GpuServices::new(
@@ -723,6 +755,7 @@ pub fn mock_runtime() -> ApplicationRuntime<
     ApplicationRuntime::new_with_snapshot(
         gpu,
         AppService::new(provider.clone()),
+        AppService::new(provider.clone()),
         AppService::new(provider),
         empty,
     )
@@ -732,7 +765,8 @@ pub fn mock_runtime() -> ApplicationRuntime<
 mod tests {
     use super::{
         ApplicationRuntime, CapabilityRegistrySnapshot, GpuPrimitiveServices, GpuServices,
-        GpuServicesRuntime, build_initial_registry_snapshot, refresh_capability_registry,
+        GpuServicesRuntime, MockRuntime, build_initial_registry_snapshot,
+        refresh_capability_registry,
     };
     use orbis_application::{AppService, CommandError};
     use orbis_core::FeatureId;
@@ -782,6 +816,7 @@ mod tests {
                 AppService::new(provider.clone()),
             ),
             AppService::new(provider.clone()),
+            AppService::new(provider.clone()),
             AppService::new(provider),
         );
         runtime.replace_capabilities(snapshot);
@@ -829,13 +864,7 @@ mod tests {
             .expect("scripted provider must produce a coherent snapshot")
     }
 
-    fn script_gpu_runtime(
-        provider: std::sync::Arc<MockProvider>,
-    ) -> ApplicationRuntime<
-        GpuServices<MockProvider, MockProvider, MockProvider, MockProvider>,
-        AppService<MockProvider>,
-        AppService<MockProvider>,
-    > {
+    fn script_gpu_runtime(provider: std::sync::Arc<MockProvider>) -> MockRuntime {
         ApplicationRuntime::empty_for_testing(
             GpuServices::new(
                 AppService::new(provider.clone()),
@@ -843,6 +872,7 @@ mod tests {
                 AppService::new(provider.clone()),
                 AppService::new(provider.clone()),
             ),
+            AppService::new(provider.clone()),
             AppService::new(provider.clone()),
             AppService::new(provider),
         )
