@@ -3,15 +3,22 @@
 //! These functions execute provider reads but never execute mutation methods.
 //! They return capability metadata only; observed values are deliberately
 //! discarded after the provider contract has been established.
+//!
+//! Write capability for Performance and ChargeLimit is established
+//! declaratively through the provider's `validate_*` method with a
+//! representative valid value: a `Valid` result proves that the production
+//! mutation path exists and is available, while an `Invalid` result (e.g. the
+//! read-only session contract) reports `Unsupported`. No mutation method is
+//! ever invoked by a probe.
 
 use orbis_capabilities::{
     ProbeClassification, ProbeContext, ProbeError, ProbeOperationResult, capability_from_operations,
 };
 use orbis_core::capability::{
-    Capability, CapabilityConstraints, CapabilityOperations, OperationCapability,
+    Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, OperationCapability,
 };
 
-use crate::error::ProviderError;
+use crate::error::{ProviderError, ValidationResult};
 use crate::traits::{
     BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
 };
@@ -33,23 +40,63 @@ fn unsupported_write() -> OperationCapability {
     .into_operation()
 }
 
+/// Derive write capability from the provider's declarative validation result.
+///
+/// `Valid` proves the production mutation path exists and is available.
+/// `Invalid` (e.g. the read-only session contract) reports `Unsupported`; we
+/// never invent `PermissionDenied` without real authorization evidence.
+fn write_from_validation(validation: ValidationResult) -> OperationCapability {
+    match validation {
+        ValidationResult::Valid => {
+            ProbeOperationResult::classified(ProbeClassification::Supported).into_operation()
+        }
+        ValidationResult::Invalid(_) => unsupported_write(),
+    }
+}
+
+/// Conservative write operation for a failed read probe.
+///
+/// When the read contract itself is broken, write support cannot be
+/// established. The canonical status is mirrored for structural failures
+/// (`BackendMissing`/`Unsupported`/`TemporarilyUnavailable`/`Unknown`);
+/// `PermissionDenied` on read is not evidence about writes, so write stays
+/// `Unsupported` rather than inventing a denied status.
+fn write_from_read_failure(read: &OperationCapability) -> OperationCapability {
+    let status = match read.status {
+        CapabilityStatus::BackendMissing => CapabilityStatus::BackendMissing,
+        CapabilityStatus::Unsupported => CapabilityStatus::Unsupported,
+        CapabilityStatus::TemporarilyUnavailable => CapabilityStatus::TemporarilyUnavailable,
+        CapabilityStatus::Unknown => CapabilityStatus::Unknown,
+        // PermissionDenied proves read-only access, not write denial.
+        _ => CapabilityStatus::Unsupported,
+    };
+    OperationCapability {
+        status,
+        reason: Some(orbis_core::capability::CapabilityReason {
+            reason: "write capability cannot be established while the read probe failed".into(),
+            suggestion: String::new(),
+            backend: None,
+            endpoint: None,
+            requirement: None,
+            risk: orbis_core::capability::RiskLevel::Safe,
+            checked_at: None,
+        }),
+    }
+}
+
 fn capability_from_read(
     read: OperationCapability,
+    write: OperationCapability,
     constraints: CapabilityConstraints,
 ) -> Capability {
-    capability_from_operations(
-        CapabilityOperations {
-            read,
-            write: unsupported_write(),
-        },
-        constraints,
-    )
+    capability_from_operations(CapabilityOperations { read, write }, constraints)
 }
 
 /// Probe Performance support from current and available profile reads.
 ///
 /// The current profile is read only to establish that the read contract is
-/// usable; it is not stored in the returned capability metadata.
+/// usable; it is not stored in the returned capability metadata. Write support
+/// is derived from `validate_set_profile` with the first available profile.
 pub async fn probe_performance<P>(provider: &P) -> Result<Capability, ProbeError>
 where
     P: PerformanceProvider + ?Sized,
@@ -58,7 +105,12 @@ where
         Ok(profiles) => profiles,
         Err(error) => {
             let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
-            return Ok(capability_from_read(read, CapabilityConstraints::Unknown));
+            let write = write_from_read_failure(&read);
+            return Ok(capability_from_read(
+                read,
+                write,
+                CapabilityConstraints::Unknown,
+            ));
         }
     };
 
@@ -68,17 +120,29 @@ where
             "performance backend reported no profiles",
         )
         .into_operation();
-        return Ok(capability_from_read(read, CapabilityConstraints::Unknown));
+        let write = write_from_read_failure(&read);
+        return Ok(capability_from_read(
+            read,
+            write,
+            CapabilityConstraints::Unknown,
+        ));
     }
 
     if let Err(error) = provider.current_profile().await {
         let read = operation_from_error(&error, ProbeContext::EstablishedBackend)?;
-        return Ok(capability_from_read(read, CapabilityConstraints::Unknown));
+        let write = write_from_read_failure(&read);
+        return Ok(capability_from_read(
+            read,
+            write,
+            CapabilityConstraints::Unknown,
+        ));
     }
 
     let read = ProbeOperationResult::classified(ProbeClassification::Supported).into_operation();
+    let write = write_from_validation(provider.validate_set_profile(profiles[0]));
     Ok(capability_from_read(
         read,
+        write,
         CapabilityConstraints::PerformanceProfiles(profiles),
     ))
 }
@@ -87,6 +151,8 @@ where
 ///
 /// The returned `ChargeLimit` is used only for support/bounds metadata. Its
 /// enabled/configured/effective values never enter the capability result.
+/// Write support is derived from `validate_charge_limit` with a representative
+/// value inside the reported bounds (or 80 when bounds are unknown).
 pub async fn probe_charge_limit<P>(provider: &P) -> Result<Capability, ProbeError>
 where
     P: BatteryProvider + ?Sized,
@@ -95,7 +161,12 @@ where
         Ok(charge_limit) => charge_limit,
         Err(error) => {
             let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
-            return Ok(capability_from_read(read, CapabilityConstraints::Unknown));
+            let write = write_from_read_failure(&read);
+            return Ok(capability_from_read(
+                read,
+                write,
+                CapabilityConstraints::Unknown,
+            ));
         }
     };
 
@@ -103,8 +174,13 @@ where
         .bounds
         .map(CapabilityConstraints::ChargeLimit)
         .unwrap_or(CapabilityConstraints::Unknown);
+    let representative = charge_limit
+        .bounds
+        .map(|bounds| bounds.min.get())
+        .unwrap_or(80);
     let read = ProbeOperationResult::classified(ProbeClassification::Supported).into_operation();
-    Ok(capability_from_read(read, constraints))
+    let write = write_from_validation(provider.validate_charge_limit(representative));
+    Ok(capability_from_read(read, write, constraints))
 }
 
 /// Probe GPU runtime power capability.
@@ -120,7 +196,11 @@ where
         Ok(_) => Ok(supported_read_only()),
         Err(error) => {
             let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
-            Ok(capability_from_read(read, CapabilityConstraints::Unknown))
+            Ok(capability_from_read(
+                read,
+                unsupported_write(),
+                CapabilityConstraints::Unknown,
+            ))
         }
     }
 }
@@ -140,7 +220,11 @@ where
         Ok(_) => Ok(supported_read_only()),
         Err(error) => {
             let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
-            Ok(capability_from_read(read, CapabilityConstraints::Unknown))
+            Ok(capability_from_read(
+                read,
+                unsupported_write(),
+                CapabilityConstraints::Unknown,
+            ))
         }
     }
 }
@@ -158,7 +242,11 @@ where
         Ok(_) => Ok(supported_read_only()),
         Err(error) => {
             let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
-            Ok(capability_from_read(read, CapabilityConstraints::Unknown))
+            Ok(capability_from_read(
+                read,
+                unsupported_write(),
+                CapabilityConstraints::Unknown,
+            ))
         }
     }
 }
@@ -236,6 +324,7 @@ mod tests {
         gpu_power: Scripted<GpuPowerState>,
         gpu_mux: Scripted<GpuMuxState>,
         gpu_access: Scripted<GpuAccessPolicy>,
+        write_supported: bool,
     }
 
     impl ScriptedProvider {
@@ -247,6 +336,7 @@ mod tests {
                 gpu_power: Scripted::Error(ScriptedError::Unsupported),
                 gpu_mux: Scripted::Error(ScriptedError::Unsupported),
                 gpu_access: Scripted::Error(ScriptedError::Unsupported),
+                write_supported: false,
             }
         }
 
@@ -258,6 +348,7 @@ mod tests {
                 gpu_power: Scripted::Error(ScriptedError::Unsupported),
                 gpu_mux: Scripted::Error(ScriptedError::Unsupported),
                 gpu_access: Scripted::Error(ScriptedError::Unsupported),
+                write_supported: false,
             }
         }
 
@@ -273,6 +364,7 @@ mod tests {
                 gpu_power: power,
                 gpu_mux: mux,
                 gpu_access: access,
+                write_supported: false,
             }
         }
     }
@@ -329,7 +421,11 @@ mod tests {
         }
 
         fn validate_set_profile(&self, _profile: PerformanceProfile) -> ValidationResult {
-            ValidationResult::invalid("probe provider")
+            if self.write_supported {
+                ValidationResult::ok()
+            } else {
+                ValidationResult::invalid("probe provider")
+            }
         }
     }
 
@@ -348,7 +444,11 @@ mod tests {
         }
 
         fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
-            ValidationResult::invalid("probe provider")
+            if self.write_supported {
+                ValidationResult::ok()
+            } else {
+                ValidationResult::invalid("probe provider")
+            }
         }
     }
 
@@ -472,6 +572,130 @@ mod tests {
             denied.operations.read.status,
             CapabilityStatus::PermissionDenied
         );
+    }
+
+    #[tokio::test]
+    async fn performance_probe_reports_write_supported_when_mutation_path_proven() {
+        let mut provider = ScriptedProvider::performance(Scripted::Value(vec![
+            PerformanceProfile::Silent,
+            PerformanceProfile::Balanced,
+            PerformanceProfile::Turbo,
+        ]));
+        provider.write_supported = true;
+        let capability = probe_performance(&provider).await.unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(capability.status, CapabilityStatus::Supported);
+    }
+
+    #[tokio::test]
+    async fn charge_limit_probe_reports_write_supported_when_mutation_path_proven() {
+        let bounds =
+            ChargeLimitBounds::new(Percent::new(40).unwrap(), Percent::new(100).unwrap(), 1)
+                .unwrap();
+        let mut provider = ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds))));
+        provider.write_supported = true;
+        let capability = probe_charge_limit(&provider).await.unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(capability.status, CapabilityStatus::Supported);
+    }
+
+    #[tokio::test]
+    async fn write_operation_mirrors_backend_missing_when_read_fails() {
+        // Structural read failure: write must be reported as BackendMissing,
+        // not Unsupported-as-if-proven or invented PermissionDenied.
+        let performance = probe_performance(&ScriptedProvider::performance(Scripted::Error(
+            ScriptedError::BackendMissing,
+        )))
+        .await
+        .unwrap();
+        assert_eq!(
+            performance.operations.read.status,
+            CapabilityStatus::BackendMissing
+        );
+        assert_eq!(
+            performance.operations.write.status,
+            CapabilityStatus::BackendMissing
+        );
+
+        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
+            ScriptedError::BackendMissing,
+        )))
+        .await
+        .unwrap();
+        assert_eq!(
+            battery.operations.read.status,
+            CapabilityStatus::BackendMissing
+        );
+        assert_eq!(
+            battery.operations.write.status,
+            CapabilityStatus::BackendMissing
+        );
+    }
+
+    #[tokio::test]
+    async fn write_operation_does_not_invent_permission_denied() {
+        // Read PermissionDenied is evidence about reads only. Write must stay
+        // Unsupported instead of claiming a denied write without evidence.
+        let performance = probe_performance(&ScriptedProvider::performance(Scripted::Error(
+            ScriptedError::PermissionDenied,
+        )))
+        .await
+        .unwrap();
+        assert_eq!(
+            performance.operations.read.status,
+            CapabilityStatus::PermissionDenied
+        );
+        assert_eq!(
+            performance.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+
+        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
+            ScriptedError::PermissionDenied,
+        )))
+        .await
+        .unwrap();
+        assert_eq!(
+            battery.operations.read.status,
+            CapabilityStatus::PermissionDenied
+        );
+        assert_eq!(
+            battery.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
+
+    #[tokio::test]
+    async fn probes_never_call_mutation_methods() {
+        // ScriptedProvider::set_profile / set_charge_limit return a distinct
+        // error; the probes must not reach them even when write_supported.
+        let mut provider =
+            ScriptedProvider::performance(Scripted::Value(vec![PerformanceProfile::Silent]));
+        provider.write_supported = true;
+        let performance = probe_performance(&provider).await.unwrap();
+        assert_eq!(
+            performance.operations.write.status,
+            CapabilityStatus::Supported
+        );
+
+        let mut battery = ScriptedProvider::battery(Scripted::Value(charge_limit(None)));
+        battery.write_supported = true;
+        let charge = probe_charge_limit(&battery).await.unwrap();
+        assert_eq!(charge.operations.write.status, CapabilityStatus::Supported);
     }
 
     #[tokio::test]
