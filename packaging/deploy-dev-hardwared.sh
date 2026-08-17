@@ -53,6 +53,15 @@ if [[ ! -d "$BUILD_PATH" ]]; then
 fi
 echo "✓ [BUILD] Пакет: $BUILD_PATH"
 
+# ─── DIRECTORY PREP ──────────────────────────────────────────────────
+echo "→ [DIR] Создаём целевые директории…"
+install -d -m 0755 "${STABLE_BIN}"
+install -d -m 0755 "${DBUS_CONF}"
+install -d -m 0755 "${POLKIT_DIR}"
+install -d -m 0755 "${SYSTEMD_DIR}"
+install -d -m 0755 "$(dirname "$GC_ROOT")"
+echo "✓ Директории готовы"
+
 # ─── INSTALL ────────────────────────────────────────────────────────
 echo "→ [INSTALL] Создаём persistent GC root…"
 nix-store --add-root "$GC_ROOT" -r "$BUILD_PATH" >/dev/null 2>&1
@@ -63,27 +72,25 @@ else
 fi
 
 echo "→ [INSTALL] Устанавливаем бинарник…"
-cp -f "$BUILD_PATH/bin/orbis-hardwared" "${STABLE_BIN}/orbis-hardwared"
-chmod 755 "${STABLE_BIN}/orbis-hardwared"
+install -m 0755 "$BUILD_PATH/bin/orbis-hardwared" "${STABLE_BIN}/orbis-hardwared"
 echo "✓ ${STABLE_BIN}/orbis-hardwared"
 
 # ─── DBUS ───────────────────────────────────────────────────────────
 echo "→ [DBUS] Устанавливаем D-Bus policy…"
-cp -f "$BUILD_PATH/share/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf" \
+install -m 0644 "$BUILD_PATH/share/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf" \
       "${DBUS_CONF}/io.github.orbiscontrol.Hardware.conf"
-chmod 644 "${DBUS_CONF}/io.github.orbiscontrol.Hardware.conf"
 echo "✓ D-Bus policy: ${DBUS_CONF}/io.github.orbiscontrol.Hardware.conf"
 
 # ─── POLKIT ─────────────────────────────────────────────────────────
 echo "→ [POLKIT] Устанавливаем polkit actions…"
-cp -f "$BUILD_PATH/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy" \
+install -m 0644 "$BUILD_PATH/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy" \
       "${POLKIT_DIR}/io.github.orbiscontrol.hardware.policy"
-chmod 644 "${POLKIT_DIR}/io.github.orbiscontrol.hardware.policy"
 echo "✓ Polkit: ${POLKIT_DIR}/io.github.orbiscontrol.hardware.policy"
 
 # ─── SYSTEMD ────────────────────────────────────────────────────────
 echo "→ [SYSTEMD] Устанавливаем systemd unit…"
-cat > "${SERVICE_FILE}" << 'UNIT'
+TMPUNIT="$(mktemp)"
+cat > "${TMPUNIT}" << 'UNIT'
 [Unit]
 Description=Orbis Control hardware helper (standalone dev deployment)
 X-StopOnRemoval=false
@@ -115,7 +122,8 @@ ReadOnlyPaths=/sys
 ReadWritePaths=-/sys/firmware/acpi/platform_profile
 UNIT
 
-chmod 644 "${SERVICE_FILE}"
+install -m 0644 "${TMPUNIT}" "${SERVICE_FILE}"
+rm -f "${TMPUNIT}"
 echo "✓ Unit: ${SERVICE_FILE}"
 
 # ─── START ──────────────────────────────────────────────────────────
