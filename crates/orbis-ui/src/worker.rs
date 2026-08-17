@@ -20,7 +20,6 @@
 
 use crate::composition::{
     ApplicationRuntime, BatteryServiceRuntime, GpuServicesRuntime, PerformanceServiceRuntime,
-    TelemetryServiceRuntime,
 };
 use orbis_application::{
     ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome, PerformanceState,
@@ -165,31 +164,113 @@ pub fn command_channel() -> (
 /// (power/mux/access) выполняются независимо: failure одного не блокирует
 /// остальные.
 ///
-pub async fn run_worker<G, B, R, T, F>(
-    mut runtime: ApplicationRuntime<G, B, R, T>,
-    mut receiver: UnboundedReceiver<WorkerCommand>,
-    mut emit: F,
+pub async fn run_worker<G, B, R, F>(
+    runtime: ApplicationRuntime<G, B, R>,
+    receiver: UnboundedReceiver<WorkerCommand>,
+    emit: F,
 ) where
     G: GpuServicesRuntime + 'static,
     B: BatteryServiceRuntime + 'static,
     R: PerformanceServiceRuntime + 'static,
-    T: TelemetryServiceRuntime + 'static,
+    F: FnMut(WorkerEvent) + Send + 'static,
+{
+    run_worker_inner(runtime, receiver, emit, None).await;
+}
+
+/// Запустить worker с production telemetry polling.
+///
+/// Polling владеется worker-ом (ровно один владелец): каждый tick запускает
+/// один фоновый telemetry snapshot task, результат возвращается в worker loop
+/// через канал и emit-ится как `WorkerEvent::TelemetryRefresh`. Команды
+/// обрабатываются параллельно с фоновым snapshot (не блокируются). Закрытие
+/// command channel завершает worker и вместе с ним polling.
+///
+/// - интервал берётся из `TelemetryServiceRuntime::poll_interval()` (provider
+///   contract), первый tick пропускается — initial `RefreshTelemetry` команда
+///   не дублируется;
+/// - одновременно выполняется максимум один telemetry refresh
+///   (`poll_in_progress` гейт);
+/// - ошибка одного snapshot не останавливает polling и не затирает
+///   last-known-good UI telemetry (event переносит `Result`).
+pub async fn run_worker_with_polling<G, B, R, F>(
+    runtime: ApplicationRuntime<G, B, R>,
+    receiver: UnboundedReceiver<WorkerCommand>,
+    emit: F,
+    poll_interval: std::time::Duration,
+) where
+    G: GpuServicesRuntime + 'static,
+    B: BatteryServiceRuntime + 'static,
+    R: PerformanceServiceRuntime + 'static,
+    F: FnMut(WorkerEvent) + Send + 'static,
+{
+    run_worker_inner(runtime, receiver, emit, Some(poll_interval)).await;
+}
+
+async fn run_worker_inner<G, B, R, F>(
+    mut runtime: ApplicationRuntime<G, B, R>,
+    mut receiver: UnboundedReceiver<WorkerCommand>,
+    mut emit: F,
+    poll_interval: Option<std::time::Duration>,
+) where
+    G: GpuServicesRuntime + 'static,
+    B: BatteryServiceRuntime + 'static,
+    R: PerformanceServiceRuntime + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
     // Команда, дочитанная при drain соседней Battery-группы (граница группы),
     // чтобы не потерять её при coalescing.
     let mut deferred_command: Option<WorkerCommand> = None;
 
+    // Telemetry polling: результаты фоновых snapshot возвращаются через канал.
+    let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::unbounded_channel::<WorkerEvent>();
+    let mut poll_in_progress = false;
+    let mut poll_timer = None;
+    if let Some(interval) = poll_interval {
+        let mut timer = tokio::time::interval(interval);
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // Пропускаем мгновенный первый tick: initial RefreshTelemetry уже
+        // отправлен отдельной командой, duplicate immediate poll не нужен.
+        timer.tick().await;
+        poll_timer = Some(timer);
+    }
+
     loop {
         // `runtime` is owned exclusively here. Per command we borrow the
         // service fields by mut-reference; the borrow checker ensures we do
         // not keep those references alive across `replace_capabilities`.
         let command = match deferred_command.take() {
-            Some(cmd) => cmd,
-            None => match receiver.recv().await {
-                Some(cmd) => cmd,
-                None => return, // канал закрыт и deferred пуст — штатное завершение
+            Some(cmd) => Some(cmd),
+            None => match &mut poll_timer {
+                Some(timer) => {
+                    tokio::select! {
+                        cmd = receiver.recv() => cmd,
+                        event = snapshot_rx.recv(), if poll_in_progress => {
+                            if let Some(event) = event {
+                                emit(event);
+                                poll_in_progress = false;
+                            }
+                            continue;
+                        }
+                        _ = timer.tick(), if !poll_in_progress => {
+                            // Фоновый telemetry refresh: не блокирует команды.
+                            let tx = snapshot_tx.clone();
+                            let telemetry = runtime.telemetry.clone();
+                            tokio::spawn(async move {
+                                let _ = tx.send(WorkerEvent::TelemetryRefresh(
+                                    telemetry.snapshot().await,
+                                ));
+                            });
+                            poll_in_progress = true;
+                            continue;
+                        }
+                    }
+                }
+                None => receiver.recv().await,
             },
+        };
+
+        let Some(command) = command else {
+            return; // канал закрыт и deferred пуст — штатное завершение (polling тоже)
         };
 
         if matches!(command, WorkerCommand::RefreshCapabilities) {
@@ -289,15 +370,14 @@ pub async fn run_worker<G, B, R, T, F>(
 /// `ProbeError::Internal` or `ProbeError::ContractViolation` aborts the refresh
 /// cycle without producing a partial snapshot, and the caller is responsible
 /// for keeping the previous snapshot authoritative.
-async fn run_capability_refresh<G, B, R, T>(
-    runtime: &mut ApplicationRuntime<G, B, R, T>,
+async fn run_capability_refresh<G, B, R>(
+    runtime: &mut ApplicationRuntime<G, B, R>,
     next_generation: u64,
 ) -> Result<orbis_capabilities::CapabilityRegistrySnapshot, orbis_capabilities::ProbeError>
 where
     G: GpuServicesRuntime,
     B: BatteryServiceRuntime,
     R: PerformanceServiceRuntime,
-    T: TelemetryServiceRuntime,
 {
     use orbis_capabilities::CapabilityRegistryBuilder;
 
@@ -349,12 +429,15 @@ mod tests {
     use orbis_providers::mock::{MockErrorMode, MockProvider};
     use orbis_providers::traits::{
         BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, GpuProvider,
-        PerformanceProvider, Provider, ProviderHealth,
+        PerformanceProvider, Provider, ProviderHealth, TelemetryProvider,
     };
     use orbis_test_support::devices::build_state_arc;
     use tokio::sync::mpsc::UnboundedReceiver;
 
-    use super::{ApplicationRuntime, WorkerCommand, WorkerEvent, command_channel, run_worker};
+    use super::{
+        ApplicationRuntime, WorkerCommand, WorkerEvent, command_channel, run_worker,
+        run_worker_with_polling,
+    };
     use crate::composition::GpuServices;
     use orbis_capabilities::CapabilityRegistryBuilder;
 
@@ -431,6 +514,383 @@ mod tests {
             emit,
         )
         .await;
+    }
+
+    // -----------------------------------------------------------------------
+    // Telemetry polling lifecycle
+    // -----------------------------------------------------------------------
+
+    /// Контролируемый telemetry provider для polling-тестов.
+    struct ScriptedTelemetry {
+        snapshot_calls: std::sync::atomic::AtomicUsize,
+        snapshot_delay: Duration,
+        fail_next: std::sync::atomic::AtomicBool,
+        interval: Duration,
+    }
+
+    impl Provider for ScriptedTelemetry {
+        fn id(&self) -> &'static str {
+            "scripted-telemetry"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-telemetry")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted-telemetry: {feature} недоступен")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<orbis_core::diagnostics::DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl TelemetryProvider for ScriptedTelemetry {
+        async fn snapshot(&self) -> Result<orbis_core::telemetry::Telemetry, ProviderError> {
+            self.snapshot_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self
+                .fail_next
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(ProviderError::Internal("scripted telemetry failure".into()));
+            }
+            if !self.snapshot_delay.is_zero() {
+                tokio::time::sleep(self.snapshot_delay).await;
+            }
+            Ok(orbis_core::telemetry::Telemetry::empty())
+        }
+
+        fn default_poll_interval(&self) -> Duration {
+            self.interval
+        }
+    }
+
+    /// Runtime с scripted telemetry service и mock остальными services.
+    fn runtime_with_telemetry<T: crate::composition::TelemetryServiceRuntime + 'static>(
+        telemetry: T,
+    ) -> ApplicationRuntime<
+        GpuServices<MockProvider, MockProvider, MockProvider, MockProvider>,
+        AppService<MockProvider>,
+        AppService<MockProvider>,
+    > {
+        let (
+            main_service,
+            battery_service,
+            gpu_power_service,
+            gpu_mux_service,
+            gpu_access_service,
+            performance_service,
+        ) = services();
+        let snapshot = CapabilityRegistryBuilder::new(1, std::time::SystemTime::now())
+            .build()
+            .expect("empty registry snapshot must build");
+        ApplicationRuntime::new_with_snapshot(
+            GpuServices::new(
+                main_service,
+                gpu_power_service,
+                gpu_mux_service,
+                gpu_access_service,
+            ),
+            battery_service,
+            performance_service,
+            telemetry,
+            snapshot,
+        )
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn polling_refreshes_at_provider_interval() {
+        let provider = Arc::new(ScriptedTelemetry {
+            snapshot_calls: std::sync::atomic::AtomicUsize::new(0),
+            snapshot_delay: Duration::ZERO,
+            fail_next: std::sync::atomic::AtomicBool::new(false),
+            interval: Duration::from_millis(100),
+        });
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(async move {
+            run_worker_with_polling(
+                runtime_with_telemetry(AppService::new(provider)),
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+                Duration::from_millis(100),
+            )
+            .await;
+        });
+
+        // Первый polling tick через 100 мс (первый tick пропущен при старте).
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        let event = result_rx.try_recv().expect("first poll event");
+        assert!(matches!(event, WorkerEvent::TelemetryRefresh(Ok(_))));
+
+        // Второй tick ещё через 100 мс.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        let event = result_rx.try_recv().expect("second poll event");
+        assert!(matches!(event, WorkerEvent::TelemetryRefresh(Ok(_))));
+
+        drop(tx);
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        tokio::time::timeout(Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn polling_does_not_run_parallel_refreshes() {
+        let provider = Arc::new(ScriptedTelemetry {
+            snapshot_calls: std::sync::atomic::AtomicUsize::new(0),
+            // Snapshot медленнее интервала: должен выполняться максимум один.
+            snapshot_delay: Duration::from_millis(150),
+            fail_next: std::sync::atomic::AtomicBool::new(false),
+            interval: Duration::from_millis(100),
+        });
+        let provider_inner = provider.clone();
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(async move {
+            run_worker_with_polling(
+                runtime_with_telemetry(AppService::new(provider_inner)),
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+                Duration::from_millis(100),
+            )
+            .await;
+        });
+
+        // 100 мс: tick → snapshot запущен (спит 150 мс).
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        // Ещё 100 мс: tick пропущен (poll_in_progress), параллельного snapshot нет.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(
+            provider
+                .snapshot_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "не должно быть параллельного refresh"
+        );
+
+        // Ещё 100 мс: первый snapshot завершился → событие.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        let event = result_rx
+            .try_recv()
+            .expect("poll event after snapshot done");
+        assert!(matches!(event, WorkerEvent::TelemetryRefresh(Ok(_))));
+
+        drop(tx);
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        tokio::time::timeout(Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn polling_error_does_not_stop_future_refreshes() {
+        let provider = Arc::new(ScriptedTelemetry {
+            snapshot_calls: std::sync::atomic::AtomicUsize::new(0),
+            snapshot_delay: Duration::ZERO,
+            fail_next: std::sync::atomic::AtomicBool::new(true),
+            interval: Duration::from_millis(100),
+        });
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(async move {
+            run_worker_with_polling(
+                runtime_with_telemetry(AppService::new(provider)),
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+                Duration::from_millis(100),
+            )
+            .await;
+        });
+
+        // Первый refresh падает с ошибкой.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        let event = result_rx.try_recv().expect("first event");
+        assert!(matches!(event, WorkerEvent::TelemetryRefresh(Err(_))));
+
+        // Следующий refresh (через интервал) успешен — polling продолжается.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        let event = result_rx.try_recv().expect("second event");
+        assert!(matches!(event, WorkerEvent::TelemetryRefresh(Ok(_))));
+
+        drop(tx);
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        tokio::time::timeout(Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn other_commands_processed_during_polling() {
+        let provider = Arc::new(ScriptedTelemetry {
+            snapshot_calls: std::sync::atomic::AtomicUsize::new(0),
+            snapshot_delay: Duration::from_millis(150),
+            fail_next: std::sync::atomic::AtomicBool::new(false),
+            interval: Duration::from_millis(100),
+        });
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(async move {
+            run_worker_with_polling(
+                runtime_with_telemetry(AppService::new(provider)),
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+                Duration::from_millis(100),
+            )
+            .await;
+        });
+
+        // Tick → snapshot запущен (спит 150 мс). Пока он выполняется,
+        // команда должна обработаться.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        tx.send(WorkerCommand::SetPerformance(PerformanceProfile::Silent))
+            .expect("send");
+        let event = tokio::time::timeout(Duration::from_millis(200), result_rx.recv())
+            .await
+            .expect("command event during polling")
+            .expect("event");
+        assert!(matches!(event, WorkerEvent::Performance(Ok(_))));
+
+        // Snapshot завершается → telemetry событие приходит после команды.
+        // Snapshot стартовал на t=100мс и спит 150мс → завершится на t=250мс.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let event = tokio::time::timeout(Duration::from_millis(200), result_rx.recv())
+            .await
+            .expect("telemetry event")
+            .expect("event");
+        assert!(matches!(event, WorkerEvent::TelemetryRefresh(Ok(_))));
+
+        drop(tx);
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        tokio::time::timeout(Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn initial_refresh_does_not_create_duplicate_immediate_poll() {
+        let provider = Arc::new(ScriptedTelemetry {
+            snapshot_calls: std::sync::atomic::AtomicUsize::new(0),
+            snapshot_delay: Duration::ZERO,
+            fail_next: std::sync::atomic::AtomicBool::new(false),
+            interval: Duration::from_millis(100),
+        });
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(async move {
+            run_worker_with_polling(
+                runtime_with_telemetry(AppService::new(provider)),
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+                Duration::from_millis(100),
+            )
+            .await;
+        });
+
+        // Initial refresh — отдельная команда (как в production startup).
+        tx.send(WorkerCommand::RefreshTelemetry).expect("send");
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        let event = result_rx.try_recv().expect("initial refresh event");
+        assert!(matches!(event, WorkerEvent::TelemetryRefresh(Ok(_))));
+
+        // До первого интервала нет duplicate immediate poll.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            result_rx.try_recv().is_err(),
+            "не должно быть duplicate immediate poll"
+        );
+
+        drop(tx);
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        tokio::time::timeout(Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn mock_runtime_does_not_start_polling() {
+        // run_worker (без polling): никаких спонтанных TelemetryRefresh.
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(async move {
+            run_worker_with_services(
+                services().0,
+                services().1,
+                services().2,
+                services().3,
+                services().4,
+                services().5,
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        // Ровно один refresh по команде; после него никаких спонтанных событий.
+        tx.send(WorkerCommand::RefreshTelemetry).expect("send");
+        let event = result_rx.recv().await.expect("refresh event");
+        assert!(matches!(event, WorkerEvent::TelemetryRefresh(Ok(_))));
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            result_rx.try_recv().is_err(),
+            "mock runtime не должен самопроизвольно polling"
+        );
+
+        drop(tx);
+        tokio::time::timeout(Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
     }
 
     #[tokio::test]

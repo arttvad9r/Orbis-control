@@ -28,7 +28,7 @@ use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 use orbis_ui::composition::build_production_runtime;
-use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker};
+use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker_with_polling};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
 use slint::{LogicalSize, PhysicalSize, Rgb8Pixel, WindowSize};
 use tokio::sync::mpsc::UnboundedSender;
@@ -1029,7 +1029,18 @@ fn main() -> anyhow::Result<()> {
             tracing::warn!("не удалось вернуть событие worker-а в event loop: {e:?}");
         }
     };
-    runtime.spawn(run_worker(application_runtime, worker_rx, event_sink));
+    // Production telemetry polling: один владелец — worker. Интервал берётся
+    // из provider contract (TelemetryProvider::default_poll_interval);
+    // snapshot выполняется в фоне, не блокируя команды; первый tick пропущен
+    // (initial RefreshTelemetry ниже не дублируется); остановка worker-а
+    // останавливает polling.
+    let poll_interval = application_runtime.telemetry.poll_interval();
+    runtime.spawn(run_worker_with_polling(
+        application_runtime,
+        worker_rx,
+        event_sink,
+        poll_interval,
+    ));
 
     // Ровно один authoritative initial Battery read при старте, без действия
     // пользователя и без polling. Ошибка provider (включая отсутствие

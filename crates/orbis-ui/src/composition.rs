@@ -4,7 +4,7 @@
 //! not define provider semantics or transport contracts.
 
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use orbis_application::{
@@ -318,9 +318,12 @@ where
 
 /// Telemetry service capability boundary.
 #[async_trait]
-pub trait TelemetryServiceRuntime: Send {
+pub trait TelemetryServiceRuntime: Send + Sync {
     /// Read an authoritative read-only telemetry snapshot.
     async fn snapshot(&self) -> Result<orbis_core::telemetry::Telemetry, ProviderError>;
+
+    /// Provider-defined polling interval for this telemetry backend.
+    fn poll_interval(&self) -> Duration;
 }
 
 #[async_trait]
@@ -331,10 +334,14 @@ where
     async fn snapshot(&self) -> Result<orbis_core::telemetry::Telemetry, ProviderError> {
         self.provider().snapshot().await
     }
+
+    fn poll_interval(&self) -> Duration {
+        self.provider().default_poll_interval()
+    }
 }
 
 /// All application services owned by one worker runtime.
-pub struct ApplicationRuntime<G, B, R, T> {
+pub struct ApplicationRuntime<G, B, R> {
     /// Grouped GPU capabilities.
     pub gpu: G,
     /// Battery service.
@@ -342,29 +349,35 @@ pub struct ApplicationRuntime<G, B, R, T> {
     /// Performance service.
     pub performance: R,
     /// Telemetry service (read-only sysfs snapshot).
-    pub telemetry: T,
+    ///
+    /// `Arc<dyn>` позволяет worker-у клонировать handle для фонового polling
+    /// (spawn snapshot task) без блокировки обработки команд.
+    pub telemetry: Arc<dyn TelemetryServiceRuntime>,
     /// Read-only capability registry snapshot.
     pub(crate) capabilities: Arc<CapabilityRegistrySnapshot>,
 }
 
-impl<G, B, R, T> ApplicationRuntime<G, B, R, T> {
+impl<G, B, R> ApplicationRuntime<G, B, R> {
     /// Create an application runtime with an explicitly built capability snapshot.
     ///
     /// Production composition must always supply an authoritative snapshot
     /// assembled through the discovery pipeline. Permissive constructors that
     /// silently allocate an empty default snapshot have been removed.
-    pub fn new_with_snapshot(
+    pub fn new_with_snapshot<T>(
         gpu: G,
         battery: B,
         performance: R,
         telemetry: T,
         snapshot: CapabilityRegistrySnapshot,
-    ) -> Self {
+    ) -> Self
+    where
+        T: TelemetryServiceRuntime + 'static,
+    {
         Self {
             gpu,
             battery,
             performance,
-            telemetry,
+            telemetry: Arc::new(telemetry),
             capabilities: Arc::new(snapshot),
         }
     }
@@ -398,7 +411,10 @@ impl<G, B, R, T> ApplicationRuntime<G, B, R, T> {
     /// without discovered capabilities. Available only to test code in this
     /// crate so that production callers cannot accidentally use it.
     #[cfg(test)]
-    pub fn empty_for_testing(gpu: G, battery: B, performance: R, telemetry: T) -> Self {
+    pub fn empty_for_testing<T>(gpu: G, battery: B, performance: R, telemetry: T) -> Self
+    where
+        T: TelemetryServiceRuntime + 'static,
+    {
         let checked_at = SystemTime::now();
         let snapshot = CapabilityRegistryBuilder::new(1, checked_at)
             .build()
@@ -407,7 +423,7 @@ impl<G, B, R, T> ApplicationRuntime<G, B, R, T> {
             gpu,
             battery,
             performance,
-            telemetry,
+            telemetry: Arc::new(telemetry),
             capabilities: Arc::new(snapshot),
         }
     }
@@ -657,7 +673,6 @@ pub type ProductionRuntime = ApplicationRuntime<
             ZbusHardwarePerformanceSource,
         >,
     >,
-    AppService<orbis_providers::SysfsTelemetryProvider>,
 >;
 
 /// Build the current production application runtime.
@@ -733,7 +748,6 @@ async fn hardware1_write_available(connection: &zbus::Connection) -> bool {
 #[cfg(test)]
 type MockRuntime = ApplicationRuntime<
     GpuServices<MockProvider, MockProvider, MockProvider, MockProvider>,
-    AppService<MockProvider>,
     AppService<MockProvider>,
     AppService<MockProvider>,
 >;
