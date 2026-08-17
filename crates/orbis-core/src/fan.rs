@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
-use crate::newtypes::{Percent, TemperatureC};
+use crate::newtypes::{FanPwm, TemperatureC};
 use crate::profile::PerformanceProfile;
 
 /// Идентификатор вентилятора.
@@ -35,18 +35,22 @@ impl FanId {
     }
 }
 
-/// Точка кривой вентилятора: температура -> процент ШИМ.
+/// Точка кривой вентилятора: температура -> raw PWM.
+///
+/// `pwm` хранит **raw hwmon PWM** (0..=255), НЕ процент. Mapping 0..255 → %
+/// не доказан (на эталоне GPU curve достигает raw 112 > 100), поэтому
+/// преобразование в `Percent` не выполняется.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FanCurvePoint {
     /// Температура, °C.
     pub temp: TemperatureC,
-    /// Значение вентилятора в процентах от максимума.
-    pub pwm: Percent,
+    /// Raw PWM в шкале hwmon 0..=255.
+    pub pwm: FanPwm,
 }
 
 impl FanCurvePoint {
     /// Конструктор с валидацией.
-    pub fn new(temp: TemperatureC, pwm: Percent) -> Self {
+    pub fn new(temp: TemperatureC, pwm: FanPwm) -> Self {
         Self { temp, pwm }
     }
 }
@@ -70,8 +74,8 @@ impl FanCurve {
     /// - температуры не убывают;
     /// - значения не убывают, если backend не допускает обратное
     ///   (в ядре политика задаётся `allow_decreasing`);
-    /// - значения в пределах [0, 100];
-    /// - последняя точка обеспечивает охлаждение (не 0 % при высокой температуре).
+    /// - значения в пределах [0, 255] (raw hwmon PWM);
+    /// - последняя точка обеспечивает охлаждение (не 0 при высокой температуре).
     pub fn validate(
         &self,
         max_points: usize,
@@ -116,8 +120,8 @@ impl FanCurve {
 mod tests {
     use super::*;
 
-    fn p(v: u8) -> Percent {
-        Percent::new(v).unwrap()
+    fn p(v: u8) -> FanPwm {
+        FanPwm::new(v).unwrap()
     }
 
     fn t(v: i16) -> TemperatureC {
@@ -178,5 +182,13 @@ mod tests {
     fn zero_fan_below_critical_ok() {
         let c = curve(vec![(50, 0), (79, 0)]);
         assert!(c.validate(8, false).is_ok());
+    }
+
+    #[test]
+    fn raw_pwm_above_100_is_valid() {
+        // Raw hwmon PWM может превышать 100 (на эталоне GPU curve достигает 112).
+        let c = curve(vec![(50, 5), (60, 40), (70, 80), (85, 112)]);
+        assert!(c.validate(8, false).is_ok());
+        assert_eq!(c.points[3].pwm.get(), 112);
     }
 }

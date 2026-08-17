@@ -215,7 +215,7 @@ fn default_curve(profile: PerformanceProfile, fan: FanId) -> FanCurve {
     .map(|(t, p)| {
         orbis_core::fan::FanCurvePoint::new(
             orbis_core::newtypes::TemperatureC::new(base + t - 45).expect("temp"),
-            Percent::new(p).expect("pwm"),
+            orbis_core::newtypes::FanPwm::new(p).expect("pwm"),
         )
     })
     .collect();

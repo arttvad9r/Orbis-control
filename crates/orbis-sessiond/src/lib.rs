@@ -26,6 +26,7 @@ pub mod armoury;
 pub mod bootstrap;
 pub mod composition;
 pub mod discovery;
+pub mod fans;
 pub mod performance;
 pub mod runtime;
 pub mod server;

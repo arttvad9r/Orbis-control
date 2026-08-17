@@ -10,7 +10,7 @@ use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
 use orbis_core::limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
-use orbis_core::newtypes::{Percent, RefreshHz, Rpm, TemperatureC};
+use orbis_core::newtypes::{FanPwm, Percent, RefreshHz, Rpm, TemperatureC};
 use orbis_core::profile::PerformanceProfile;
 use orbis_core::telemetry::{BatteryTelemetry, FanTelemetry, PowerTelemetry, Telemetry};
 use orbis_providers::mock::{MockErrorMode, MockState};
@@ -114,7 +114,7 @@ pub fn default_curve(profile: PerformanceProfile, fan: FanId) -> FanCurve {
     .map(|(t, p)| {
         FanCurvePoint::new(
             TemperatureC::new(base + t - 45).expect("temp"),
-            Percent::new(p).expect("pwm"),
+            FanPwm::new(p).expect("pwm"),
         )
     })
     .collect();
