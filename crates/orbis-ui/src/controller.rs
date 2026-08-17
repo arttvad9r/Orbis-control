@@ -105,8 +105,8 @@ pub struct UiState {
     pub gpu_mode_state: GpuModeHwState,
     /// Можно ли менять product GPU Mode (write-capability).
     ///
-    /// Отдельно от `gpu_mode_state`: production запрещает mutation, даже если
-    /// legacy MockProvider продолжает обслуживать worker path.
+    /// Отдельно от `gpu_mode_state`: production запрещает mutation, пока
+    /// доказанный product-mode backend отсутствует.
     pub gpu_mode_writable: bool,
     /// Configured/reported charge threshold, % (не показывать при state != Ready).
     pub charge_limit: i32,

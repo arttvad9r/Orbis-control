@@ -17,25 +17,17 @@ mod controller;
 
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use orbis_application::{
-    AppService, ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome,
-    PerformanceCommandOutcome, PerformanceState, SetChargeLimitError, SetGpuModeError,
+    ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome, PerformanceCommandOutcome,
+    PerformanceState, SetChargeLimitError, SetGpuModeError,
 };
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
-use orbis_providers::mock::MockProvider;
-use orbis_session_client::{
-    SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
-    SessionGpuPowerProvider, SessionHardwareBatteryProvider, SessionHardwarePerformanceProvider,
-    ZbusHardwareBatterySource, ZbusHardwarePerformanceSource, ZbusSessionChargeLimitSource,
-    ZbusSessionGpuSource, ZbusSessionPerformanceSource,
-};
-use orbis_test_support::devices::build_state_arc;
+use orbis_ui::composition::build_production_runtime;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
 use slint::{LogicalSize, PhysicalSize, Rgb8Pixel, WindowSize};
@@ -268,8 +260,7 @@ fn performance_available_mask(available: &[PerformanceProfile]) -> i32 {
     mask
 }
 
-/// Hardware1 write capability is available only when the system-bus name has
-/// an owner. A missing name or a failed probe keeps Performance read-only.
+#[cfg(test)]
 fn performance_write_available(name_has_owner: Option<bool>) -> bool {
     name_has_owner == Some(true)
 }
@@ -304,28 +295,12 @@ fn performance_command_for_click(state: &controller::UiState, index: i32) -> Opt
     performance_profile_from_index(index).map(WorkerCommand::SetPerformance)
 }
 
-/// Read-only startup probe for the production Hardware1 owner.
-async fn hardware1_write_available(connection: &zbus::Connection) -> bool {
-    let owner = connection
-        .call_method(
-            Some("org.freedesktop.DBus"),
-            "/org/freedesktop/DBus",
-            Some("org.freedesktop.DBus"),
-            "NameHasOwner",
-            &("io.github.orbiscontrol.Hardware",),
-        )
-        .await
-        .ok()
-        .and_then(|reply| reply.body().deserialize::<bool>().ok());
-    performance_write_available(owner)
-}
-
 /// Разрешён ли клик по product GPU Mode карточке (приводит ли он к
 /// `SetGpuMode` в worker).
 ///
 /// Production: `gpu_mode_state != Ready` или `!gpu_mode_writable` → false:
-/// клик не должен приводить к mutation, даже если legacy MockProvider
-/// продолжает обслуживать worker path. Mock/offscreen — true.
+/// клик не должен приводить к mutation при отсутствии доказанного product-mode
+/// backend. Mock/offscreen — true.
 fn gpu_mode_click_allowed(state: &controller::UiState) -> bool {
     state.gpu_mode_writable && state.gpu_mode_state == controller::GpuModeHwState::Ready
 }
@@ -957,17 +932,10 @@ fn main() -> anyhow::Result<()> {
 
     // Production product GPU Mode: реального backend нет (read-only hardware
     // status Power/MUX/Access идёт через независимые capability providers).
-    // Не показывать mock-selected как authoritative и не разрешать mutation,
-    // даже если legacy MockProvider продолжает обслуживать worker path.
+    // Product policy остаётся недоказанной: не показывать selected mode как
+    // authoritative и не разрешать mutation.
     state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
     state.gpu_mode_writable = false;
-
-    // Mock provider и application service для Performance/GPU (только
-    // интерактивный путь). Battery production больше через MockProvider не читается.
-    let mock_state = build_state_arc("zephyrus-full")
-        .ok_or_else(|| anyhow::anyhow!("mock profile 'zephyrus-full' отсутствует"))?;
-    let mock_provider = Arc::new(MockProvider::new(mock_state));
-    let main_service = AppService::new(mock_provider);
 
     // Ровно одна user-session connection на composition/startup level.
     // Ошибка подключения завершает startup через существующий Result path;
@@ -980,35 +948,12 @@ fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
     // Read-only capability probe: the UI becomes writable only when the
     // production Hardware1 name is already owned. No mutation or polling.
-    let hardware_owner = runtime.block_on(hardware1_write_available(&system_connection));
+    let (application_runtime, hardware_owner) = runtime.block_on(build_production_runtime(
+        session_connection,
+        system_connection,
+    ))?;
     state.perf_writable = hardware_owner;
     state.charge_limit_writable = hardware_owner;
-    let battery_read_source = ZbusSessionChargeLimitSource::new(session_connection.clone());
-    let battery_read_provider = SessionChargeLimitProvider::new(battery_read_source);
-    let battery_provider = SessionHardwareBatteryProvider::new(
-        battery_read_provider,
-        ZbusHardwareBatterySource::new(system_connection.clone()),
-    );
-    let battery_service = AppService::new(Arc::new(battery_provider));
-
-    // Read-only GPU hardware capabilities через тот же session connection
-    // (по ADR 0005: независимые capability providers, без mega-GpuProvider).
-    let gpu_power_service = AppService::new(Arc::new(SessionGpuPowerProvider::new(
-        ZbusSessionGpuSource::new(session_connection.clone()),
-    )));
-    let gpu_mux_service = AppService::new(Arc::new(SessionGpuMuxProvider::new(
-        ZbusSessionGpuSource::new(session_connection.clone()),
-    )));
-    let gpu_access_service = AppService::new(Arc::new(SessionGpuAccessProvider::new(
-        ZbusSessionGpuSource::new(session_connection.clone()),
-    )));
-
-    // Composed Performance provider: reads через Session1, mutation напрямую
-    // через Hardware1 с connection этого application process.
-    let performance_service = AppService::new(Arc::new(SessionHardwarePerformanceProvider::new(
-        ZbusSessionPerformanceSource::new(session_connection),
-        ZbusHardwarePerformanceSource::new(system_connection),
-    )));
 
     let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();
 
@@ -1027,16 +972,7 @@ fn main() -> anyhow::Result<()> {
             tracing::warn!("не удалось вернуть событие worker-а в event loop: {e:?}");
         }
     };
-    runtime.spawn(run_worker(
-        main_service,
-        battery_service,
-        gpu_power_service,
-        gpu_mux_service,
-        gpu_access_service,
-        performance_service,
-        worker_rx,
-        event_sink,
-    ));
+    runtime.spawn(run_worker(application_runtime, worker_rx, event_sink));
 
     // Ровно один authoritative initial Battery read при старте, без действия
     // пользователя и без polling. Ошибка provider (включая отсутствие

@@ -18,17 +18,16 @@
 //! - после закрытия всех command senders `recv()` возвращает `None` и worker
 //!   завершается.
 
+use crate::composition::{
+    ApplicationRuntime, BatteryServiceRuntime, GpuServicesRuntime, PerformanceServiceRuntime,
+};
 use orbis_application::{
-    AppService, ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome,
-    PerformanceState, SetChargeLimitError, SetGpuModeError, SetPerformanceError,
+    ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome, PerformanceState,
+    SetChargeLimitError, SetGpuModeError, SetPerformanceError,
 };
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
-use orbis_providers::traits::{
-    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, GpuProvider,
-    PerformanceProvider,
-};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -69,8 +68,8 @@ pub enum WorkerCommand {
     /// Authoritative read-only refresh Performance Mode (current + available).
     ///
     /// Выполняет `AppService::performance_state()` через отдельный real
-    /// Performance read service (не main MockProvider). Обычная ordered
-    /// команда/барьер: не coalesce-ится.
+    /// Performance read service. Обычная ordered команда/барьер: не
+    /// coalesce-ится.
     RefreshPerformance,
 }
 
@@ -120,12 +119,8 @@ pub fn command_channel() -> (
 /// Последовательный worker для Performance Mode, GPU Mode, Battery Charge Limit
 /// и read-only GPU hardware capabilities.
 ///
-/// - `main_service` — владеемый `AppService<M>` для GPU product mode;
-/// - `battery_service` — владеемый `AppService<B>` для Battery Charge Limit;
-/// - `gpu_power_service` / `gpu_mux_service` / `gpu_access_service` — независимые
-///   read-only GPU capability services (по ADR 0005);
-/// - `performance_service` — отдельный Performance service (в production —
-///   real provider, не main MockProvider) для mutation и `RefreshPerformance`;
+/// - `runtime` — единая application composition boundary с группированными
+///   GPU, Battery и Performance services;
 /// - `receiver` — команды в порядке получения;
 /// - `emit` — event sink, вызывается ровно один раз на каждую выполненную
 ///   команду или coalesced Battery-группу.
@@ -142,28 +137,21 @@ pub fn command_channel() -> (
 /// (power/mux/access) выполняются независимо: failure одного не блокирует
 /// остальные.
 ///
-/// Technical debt: `run_worker` принимает всё больше независимых сервисов.
-/// Сознательно НЕ рефакторим composition в этом шаге (отдельный
-/// technical-debt step); точечный allow фиксирует известный debt.
-#[allow(clippy::too_many_arguments)]
-pub async fn run_worker<M, B, P, X, A, R, F>(
-    main_service: AppService<M>,
-    battery_service: AppService<B>,
-    gpu_power_service: AppService<P>,
-    gpu_mux_service: AppService<X>,
-    gpu_access_service: AppService<A>,
-    performance_service: AppService<R>,
+pub async fn run_worker<G, B, R, F>(
+    runtime: ApplicationRuntime<G, B, R>,
     mut receiver: UnboundedReceiver<WorkerCommand>,
     mut emit: F,
 ) where
-    M: GpuProvider + Send + Sync + 'static,
-    B: BatteryProvider + Send + Sync + 'static,
-    P: GpuPowerProvider + Send + Sync + 'static,
-    X: GpuMuxProvider + Send + Sync + 'static,
-    A: GpuAccessProvider + Send + Sync + 'static,
-    R: PerformanceProvider + Send + Sync + 'static,
+    G: GpuServicesRuntime + 'static,
+    B: BatteryServiceRuntime + 'static,
+    R: PerformanceServiceRuntime + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
+    let ApplicationRuntime {
+        gpu,
+        battery,
+        performance,
+    } = runtime;
     // Команда, дочитанная при drain соседней Battery-группы (граница группы),
     // чтобы не потерять её при coalescing.
     let mut deferred_command: Option<WorkerCommand> = None;
@@ -179,10 +167,10 @@ pub async fn run_worker<M, B, P, X, A, R, F>(
 
         let event = match command {
             WorkerCommand::SetPerformance(profile) => {
-                WorkerEvent::Performance(performance_service.set_performance(profile).await)
+                WorkerEvent::Performance(performance.set_performance(profile).await)
             }
             WorkerCommand::SetGpuMode { mode, confirmed } => {
-                WorkerEvent::Gpu(main_service.set_gpu_mode(mode, confirmed).await)
+                WorkerEvent::Gpu(gpu.set_gpu_mode(mode, confirmed).await)
             }
             WorkerCommand::SetChargeLimit { percent } => {
                 // Coalescing соседних Battery-команд: выполняется только
@@ -203,20 +191,18 @@ pub async fn run_worker<M, B, P, X, A, R, F>(
                         Err(TryRecvError::Disconnected) => break,
                     }
                 }
-                WorkerEvent::ChargeLimit(battery_service.set_charge_limit(latest_percent).await)
+                WorkerEvent::ChargeLimit(battery.set_charge_limit(latest_percent).await)
             }
             WorkerCommand::RefreshChargeLimit => {
                 // Authoritative read-only refresh: обычная ordered команда,
                 // не coalesce-ится и является границей для соседних
                 // SetChargeLimit-групп.
-                WorkerEvent::ChargeLimitRefresh(battery_service.charge_limit().await)
+                WorkerEvent::ChargeLimitRefresh(battery.charge_limit().await)
             }
             WorkerCommand::RefreshGpuCapabilities => {
                 // Три независимых authoritative read: failure одного concept
                 // не блокирует остальные; emit-ится три события.
-                let power = gpu_power_service.gpu_power_state().await;
-                let mux = gpu_mux_service.gpu_mux_state().await;
-                let access = gpu_access_service.gpu_access_policy().await;
+                let (power, mux, access) = gpu.refresh_gpu_capabilities().await;
                 emit(WorkerEvent::GpuPowerRefresh(power));
                 emit(WorkerEvent::GpuMuxRefresh(mux));
                 emit(WorkerEvent::GpuAccessRefresh(access));
@@ -225,7 +211,7 @@ pub async fn run_worker<M, B, P, X, A, R, F>(
             WorkerCommand::RefreshPerformance => {
                 // Authoritative read-only refresh через отдельный real
                 // Performance read service; worker не подставляет mock/default.
-                WorkerEvent::PerformanceRefresh(performance_service.performance_state().await)
+                WorkerEvent::PerformanceRefresh(performance.performance_state().await)
             }
         };
         emit(event);
@@ -255,8 +241,10 @@ mod tests {
         PerformanceProvider, Provider, ProviderHealth,
     };
     use orbis_test_support::devices::build_state_arc;
+    use tokio::sync::mpsc::UnboundedReceiver;
 
     use super::{WorkerCommand, WorkerEvent, command_channel, run_worker};
+    use crate::composition::{ApplicationRuntime, GpuServices};
 
     type Services = (
         AppService<MockProvider>,
@@ -288,13 +276,49 @@ mod tests {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn run_worker_with_services<M, B, P, X, A, R, F>(
+        main_service: AppService<M>,
+        battery_service: AppService<B>,
+        gpu_power_service: AppService<P>,
+        gpu_mux_service: AppService<X>,
+        gpu_access_service: AppService<A>,
+        performance_service: AppService<R>,
+        receiver: UnboundedReceiver<WorkerCommand>,
+        emit: F,
+    ) where
+        M: GpuProvider + Send + Sync + 'static,
+        B: BatteryProvider + Send + Sync + 'static,
+        P: GpuPowerProvider + Send + Sync + 'static,
+        X: GpuMuxProvider + Send + Sync + 'static,
+        A: GpuAccessProvider + Send + Sync + 'static,
+        R: PerformanceProvider + Send + Sync + 'static,
+        F: FnMut(WorkerEvent) + Send + 'static,
+    {
+        run_worker(
+            ApplicationRuntime::new(
+                GpuServices::new(
+                    main_service,
+                    gpu_power_service,
+                    gpu_mux_service,
+                    gpu_access_service,
+                ),
+                battery_service,
+                performance_service,
+            ),
+            receiver,
+            emit,
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn executes_command() {
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 services().0,
                 services().1,
                 services().2,
@@ -334,7 +358,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 services().0,
                 services().1,
                 services().2,
@@ -378,7 +402,7 @@ mod tests {
         drop(tx); // закрыть все senders до запуска
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 services().0,
                 services().1,
                 services().2,
@@ -416,7 +440,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -468,7 +492,7 @@ mod tests {
             .expect("send2");
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 services().0,
                 services().1,
                 services().2,
@@ -694,7 +718,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 services().0,
                 services().1,
                 services().2,
@@ -753,7 +777,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -831,7 +855,7 @@ mod tests {
             .expect("send3");
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -902,7 +926,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -966,7 +990,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -1016,7 +1040,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 services().0,
                 services().1,
                 services().2,
@@ -1061,7 +1085,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 services().0,
                 services().1,
                 services().2,
@@ -1125,7 +1149,7 @@ mod tests {
             .expect("send4");
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -1203,7 +1227,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -1274,7 +1298,7 @@ mod tests {
             .expect("send3");
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -1341,7 +1365,7 @@ mod tests {
             .expect("send5");
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -1404,7 +1428,7 @@ mod tests {
             .expect("send3");
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 services().0,
                 services().1,
                 services().2,
@@ -1468,7 +1492,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -1519,7 +1543,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -1566,7 +1590,7 @@ mod tests {
             .expect("send4");
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 services().0,
                 services().1,
                 services().2,
@@ -1884,7 +1908,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -2020,7 +2044,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -2089,7 +2113,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -2140,7 +2164,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
@@ -2185,7 +2209,7 @@ mod tests {
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker = tokio::spawn(async move {
-            run_worker(
+            run_worker_with_services(
                 main_service,
                 battery_service,
                 gpu_power_service,
