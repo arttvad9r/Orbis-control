@@ -8,8 +8,10 @@
 
 pub mod engine;
 pub mod fixture;
+pub mod registry;
 
 pub use engine::{ProbeReport, build_from_parts};
 pub use fixture::{
     ExpectedCapabilitiesFixture, ExpectedFeature, parse_status, privacy_check_fixture_dir,
 };
+pub use registry::{CapabilityRegistryBuilder, CapabilityRegistrySnapshot, RegistryError};
