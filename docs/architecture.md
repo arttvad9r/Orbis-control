@@ -15,8 +15,9 @@
 - Значения после команд считаются подтверждёнными только после authoritative
   read-back.
 - Неизвестные hardware-ограничения остаются неизвестными.
-- `orbis-hardwared` — узкий production component только для доказанной
-  Performance privileged operation; он не является generic sysfs writer.
+- `orbis-hardwared` — узкий production root-helper только для доказанных
+  привилегированных операций (Performance, Battery); он не является generic
+  sysfs writer и не generic hardware daemon.
 
 ## 2. Фактические слои и зависимости
 
@@ -32,28 +33,31 @@ orbis-application::AppService<P>
         v
 orbis-providers traits
         |
-         +------------------------------+------------------+
-         |                              |                  |
-         v                              v                  v
- MockProvider                    orbis-session-client   Hardware1
- (GPU product backend)           (Performance + Battery  (system D-Bus)
-                                  provider)                    |
-         |                              |                  v
-         |                              v             orbis-hardwared
-         |                    session D-Bus Session1       |
-         |                              |                  v
-         |                              v             fixed platform_profile
-         |                       orbis-sessiond
-         |                              |
-         +------------------------------+             system D-Bus / UPower
+          +------------------------------+------------------+
+          |                              |                  |
+          v                              v                  v
+  ApplicationRuntime             orbis-session-client   Hardware1
+          |                       (Performance + Battery  (system D-Bus)
+          |                        provider)                    |
+          v                              |                  v
+  GpuPrimitiveServices                   |             orbis-hardwared
+    |       |       |                    |                  |
+    v       v       v                    v                  v
+  Power   MUX    Access             Session1          fixed platform_profile
+          |                              |
+          +------------------------------+             system D-Bus / UPower
+
+  Test/offscreen composition only:
+  GpuServices → MockProvider / deterministic fixtures
 ```
 
-Production interactive GUI: GPU product mode остаётся на `MockProvider`
-(`main_service`), Battery — через `orbis-session-client` → sessiond → UPower,
-Performance read/write — через отдельный real `performance_service` с Session1
-read и direct Hardware1 mutation. Split composition использует независимые
-сервисы; Mock сохраняется для GPU product mode, unit tests и offscreen
-rendering.
+Production interactive GUI: `ApplicationRuntime` содержит
+`GpuPrimitiveServices` с независимыми Power/MUX/Access providers, Battery через
+`orbis-session-client` → sessiond → UPower и Performance через Session1/direct
+Hardware1. Product GPU mode не имеет доказанного backend и возвращает
+`Unsupported`/`Unavailable`; production runtime не создаёт и не использует
+`MockProvider`. Mock сохраняется для unit tests, deterministic fixtures и
+offscreen rendering.
 
 ### Crate boundaries
 
@@ -72,9 +76,10 @@ rendering.
 | `orbis-test-support` | Deterministic mock device states |
 
 `orbis-session-protocol`, client и daemon разделены намеренно. Application layer
-не зависит от daemon или D-Bus transport. `orbis-hardwared` намеренно не входит
-в workspace; production deployment запускает его как отдельный узкий helper для
-Performance.
+не зависит от daemon или D-Bus transport. `orbis-hardwared` входит в workspace
+(добавлен после ADR 0006 — первой доказанной privileged capability); production
+deployment запускает его как отдельный узкий root-helper для Performance и
+Battery mutation.
 
 ## 3. UI и application boundary
 
@@ -101,9 +106,9 @@ trait или domain type не означает существование produc
 
 На текущем этапе:
 
-- `MockProvider` реализует широкий набор traits для UI/tests и остаётся
-  production GPU product-mode backend; Performance использует real
-  session-client/Hardware1 provider;
+- `MockProvider` реализует широкий набор traits для tests, deterministic fixtures
+  и offscreen UI; production GPU product-mode backend отсутствует. Performance
+  использует real session-client/Hardware1 provider;
 - `UPowerChargeLimitProvider` — реальный read-only Battery provider внутри
   `orbis-sessiond`;
 - `SessionChargeLimitProvider` — read-only Battery provider над session D-Bus,
@@ -200,11 +205,13 @@ getter-only в final mutation architecture.
   D-Bus APIs, но не получает root и не делегирует Performance mutation.
 - System services (`UPower`, в будущем доказанные ASUS backends) сохраняют свою
   собственную privilege boundary.
-- `orbis-hardwared`: реализован для единственной proven capability — Performance
-  profile write (`/sys/firmware/acpi/platform_profile`) — и не входит в workspace.
-  Его allowlist, validation, authorization и sandboxing live-validated; hardwared
-  НЕ является generic sysfs writer, каждая новая privileged capability
-  добавляется отдельно. См. [ADR 0006](adr/0006-privileged-performance-write.md).
+- `orbis-hardwared`: реализован для доказанных privileged capabilities —
+  Performance profile write (`/sys/firmware/acpi/platform_profile`) и Battery
+  charge-limit mutation (typed asusd D-Bus setter) — и входит в workspace
+  (ADR 0006). Его allowlist, validation, authorization и sandboxing
+  live-validated; hardwared НЕ является generic sysfs writer, каждая новая
+  privileged capability добавляется отдельно. См. [ADR 0006](adr/0006-privileged-performance-write.md)
+  и [ADR 0007](adr/0007-battery-mutation-backend.md).
 - GPU mutation через supergfxd следует staged lifecycle contract из [ADR 0008](adr/0008-supergfxd-staged-gpu-mutation.md):
   supergfxd остаётся single lifecycle owner, а будущий GPU `Hardware1` должен
   добавлять узкую polkit authorization и не переисполнять lifecycle sequencing.
@@ -265,8 +272,11 @@ traits: provider реализует только те capabilities, которы
 
 - `GpuPowerProvider` — первый production example
   (`SupergfxdGpuPowerProvider` реализует только runtime power capability);
-- legacy `GpuProvider` пока существует для full product-mode / mutation /
-  aggregate path;
+- legacy `GpuProvider` пока существует для test/full product-mode abstraction,
+  но не является production hardware backend;
+- production GPU product policy backend не доказан: product mode остаётся
+  `Unsupported`/`Unavailable`, пока не появятся отдельный backend и доказанный
+  policy mapping;
 - application может выставлять independent reads (например,
   `AppService::gpu_power_state()`);
 - hardware backend не обязан быть источником всех GPU concepts.
@@ -309,7 +319,65 @@ asusd/sysfs writes.
   capabilities по hardware concepts.
 - [ADR 0006](adr/0006-privileged-performance-write.md) — привилегированный
   write path Performance profile (первая controlled mutation).
+- [ADR 0007](adr/0007-battery-mutation-backend.md) — Battery mutation backend
+  через asusd (COMPLETED / LIVE-VALIDATED).
 - [ADR 0008](adr/0008-supergfxd-staged-gpu-mutation.md) — staged GPU mutation
   contract и lifecycle ownership через supergfxd; implementation pending.
+- [ADR 0009](adr/0009-native-asus-eco-backend.md) — native ASUS Eco read-only
+  preflight foundation.
+- [ADR 0010](adr/0010-architecture-evolution.md) — архитектурный verdict после
+  source audit (KEEP/EVOLVE/REPLACE/DEFER).
 - [`research-report.md`](research-report.md) и hardware fixtures — dated evidence,
   не current implementation status.
+
+## 11. Future direction (после source audit)
+
+Следующие области являются запланированным направлением эволюции, а не текущей
+реализацией. Они зафиксированы в [ADR 0010](adr/0010-architecture-evolution.md)
+и не выполняются в рамках этой документационной задачи.
+
+### EVOLVE
+
+1. **Runtime Capability Registry** — существующий `orbis-capabilities` пока не
+   является полноценным runtime discovery system. Capabilities должны строиться
+   из фактических providers/probes; read/write/constraints/backend/requirements
+   должны моделироваться отдельно.
+2. **Application/worker composition** — flat service injection заменён
+   `ApplicationRuntime`/composition module в Task 2.1; дальнейшее расширение
+   runtime capabilities всё равно не должно превращать composition в неявный
+   global registry.
+3. **GPU architecture** — concept-specific provider traits являются целевым
+   направлением; legacy monolithic `GpuProvider` остаётся временным migration
+   artifact; product `GpuMode` должен в будущем быть policy layer, а не raw
+   hardware/backend enum.
+4. **State architecture** — в дальнейшем требуется явное разделение
+   `ObservedState` / `DesiredState` / `PendingState` / `CapabilityState`.
+5. **Telemetry** — authoritative configuration state и telemetry имеют разные
+   semantics; configuration reads остаются fresh/authoritative; telemetry в
+   будущем может использовать timestamped samples/subscriptions; telemetry cache
+   не должен трактоваться как authoritative configuration cache.
+6. **Provider selection** — не фиксировать один глобальный порядок backend для
+   всего приложения; ownership/provider priority определяется **per capability**
+   (например: Performance → kernel `platform_profile`; Battery configured →
+   asusd; Battery effective → kernel `power_supply`; Battery general telemetry →
+   UPower; GPU staged lifecycle → supergfxd compatibility backend). Одна product
+   capability может использовать несколько authoritative sources для разных
+   semantics.
+
+### REPLACE / REMOVE LATER
+
+- legacy `GpuProvider` должен быть завершённой миграцией заменён
+  capability-specific interfaces;
+- production composition dependency на `MockProvider` устранена в Task 3;
+  `MockProvider` остаётся для tests/offscreen/deterministic scenarios;
+- `ApplicationRuntime` должен эволюционировать вместе с новыми capability
+  domains, сохраняя grouped composition и не возвращаясь к flat positional
+  service injection;
+- dead module options и устаревшие helpers должны быть удалены отдельными
+  mechanical tasks после проверки usages.
+
+### DEFER
+
+Не объявлять готовыми и не проектировать write implementation без evidence:
+power limits; окончательный product GPU Eco/Standard/Ultimate/Optimized mapping;
+live GPU mutation; automation privilege semantics.

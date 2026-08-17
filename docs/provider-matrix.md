@@ -77,7 +77,8 @@ Production Performance evidence:
 - post-write: fresh Session1 read-back, без optimistic state;
 - live GUI cycle `Balanced → Silent → Balanced` подтвердил ровно два valid
   Hardware1 calls/writes (`wire 0`, затем `wire 1`);
-- Battery и GPU mutations остаются отдельными незавершёнными направлениями.
+- Battery mutation — **COMPLETED / LIVE-VALIDATED** (см. §4); GPU mutation
+  остаётся отдельным незавершённым направлением.
 
 Дополнительно (asusd): `PlatformProfileOnAc`, `PlatformProfileOnBattery`,
 `Profile{Quiet,Balanced,Performance}Epp`, `PlatformProfileLinkedEpp`.
@@ -152,7 +153,7 @@ authoritative configured value.
 
 ---
 
-## 5. GpuProvider
+## 5. GPU capability providers
 
 Три независимых сущности (физический MUX / доступ приложений / power state).
 Провайдер разбит на под-провайдеры:
@@ -230,7 +231,10 @@ backend/provider need not own all GPU concepts.
 отображает Power/MUX/Access через session-client capability providers
 (`SessionGpuPowerProvider` / `SessionGpuMuxProvider` / `SessionGpuAccessProvider`
 из одной session connection/runtime); без mock fallback; initial refresh only.
-Product `GpuMode` (Eco/Standard/Ultimate/Optimized) остаётся MOCK-ONLY.
+Product `GpuMode` (Eco/Standard/Ultimate/Optimized) не является production
+capability: backend/policy mapping не доказаны, поэтому production semantics
+`Unsupported`/`Unavailable`. `MockProvider` для product mode существует только
+в tests, deterministic fixtures и offscreen scenarios.
 
 ### 5.5 Остальные GPU concepts (отдельно, не объединять)
 
@@ -248,6 +252,19 @@ Provider ownership (ADR 0005): `ArmouryGpuProvider` owns MUX + access
 capabilities только; `SupergfxdGpuPowerProvider` owns runtime power только;
 product mode policy — отдельный future provider. One backend/provider need not
 own all GPU concepts.
+
+### 5.5 Product GPU policy (future)
+
+| Capability | Production status | Required evidence before implementation |
+|---|---|---|
+| `GpuProductPolicy` | **NOT IMPLEMENTED / UNSUPPORTED** | отдельный proven backend и product semantics |
+| Eco/Standard/Ultimate/Optimized mapping | **NOT PROVEN** | versioned mapping tests, hardware evidence и policy decision |
+| Product GPU mutation | **NOT IMPLEMENTED** | validated transition contract, authorization, backend ownership и read-back |
+| Transition/pending contract | **FUTURE / STAGED ONLY** | отдельный contract/provider после product policy; live mutation не следует автоматически |
+
+Primitive support не является product support: `GpuPowerProvider`,
+`GpuMuxProvider` и `GpuAccessProvider` доказывают только соответствующие
+independent reads и не создают `GpuProductPolicy`.
 
 ---
 

@@ -95,6 +95,18 @@ Tradeoffs:
 - aggregate `gpu_state()` пока остаётся fail-fast (limitation legacy aggregate,
   не blocker для independent power API).
 
+## Amendment — production composition status (Task 3)
+
+Более поздняя production composition завершила предусмотренную incremental
+migration для текущего runtime path: `ApplicationRuntime` использует
+`GpuPrimitiveServices` с независимыми Power/MUX/Access providers и не создаёт
+`MockProvider` для GPU product state. Legacy `GpuProvider` и mock-backed full path
+сохраняются для tests, deterministic fixtures и offscreen scenarios.
+
+Это amendment deployment/composition status, а не отмена решения сохранять
+legacy trait для incremental migration. Product policy, mapping и mutation по-
+прежнему требуют отдельного доказательства.
+
 ## Rejected alternatives
 
 A. Только добавить independent `AppService` getters, оставив monolithic

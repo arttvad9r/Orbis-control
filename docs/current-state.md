@@ -99,8 +99,10 @@ Mutation controls в production:
 
 GPU product mode:
 
-- всё ещё mock-only внутри legacy code (MockProvider обслуживает worker path и
-  offscreen/mock тесты);
+- production product-mode backend не доказан: `SetGpuMode` возвращает
+  `Unsupported`, а UI остаётся `Unavailable`/disabled;
+- `MockProvider` используется только legacy tests, deterministic fixtures и
+  offscreen/mock scenarios;
 - production controls disabled; fake selected state скрыт;
 - строка `GPU mode control unavailable`.
 
@@ -123,7 +125,7 @@ Live MVP validation (packaged GUI + packaged sessiond):
 | Provider contracts | IMPLEMENTED | Traits и error model существуют |
 | Broad provider implementation | MOCK-ONLY | `MockProvider` покрывает UI/application scenarios |
 | Application layer | IMPLEMENTED | Performance/GPU/Battery commands + authoritative read-back |
-| UI | PARTIAL | Slint main window + sequential worker; Battery, Performance mutation, GPU hardware status (Power/MUX/Access) — real session paths (LIVE-VALIDATED); product GpuMode — mock-only в legacy, production controls disabled |
+| UI | PARTIAL | Slint main window + sequential worker; Battery, Performance mutation, GPU hardware status (Power/MUX/Access) — real session paths (LIVE-VALIDATED); product GpuMode — Unsupported/Unavailable, production controls disabled |
 | Session protocol | IMPLEMENTED | Getter-only `Session1.ChargeLimit`, `(bbybyyy)` |
 | Session client | IMPLEMENTED | Fresh Session1 reads, validation и direct Hardware1 Performance client |
 | sessiond | LIVE-VALIDATED | Discovery, UPower read, server, runtime, signals, Nix user service |
@@ -135,18 +137,18 @@ Live MVP validation (packaged GUI + packaged sessiond):
 
 ### IMPLEMENTED / LIVE-VALIDATED
 
-Production GUI composition (split worker, один sequential loop):
+Production GUI composition (`ApplicationRuntime`, один sequential loop):
 
-- GPU product mode → `MockProvider` (`main_service`);
+- GPU primitive services → `GpuPrimitiveServices` (`GpuPowerProvider`,
+  `GpuMuxProvider`, `GpuAccessProvider`); product GPU mode backend отсутствует;
 - Battery → `SessionChargeLimitProvider` через
   `ZbusSessionChargeLimitSource` (`battery_service`);
 - Performance read/write → real `SessionHardwarePerformanceProvider`
   (`performance_service`): Session1 read + direct Hardware1 mutation;
 - GPU hardware status → три независимых session-client capability providers
   (`gpu_power`/`gpu_mux`/`gpu_access` services);
-- `run_worker` принимает независимые сервисы: main (GPU product), battery, три
-  GPU capability-сервиса и performance read/write-сервис; один
-  provider не обязан реализовывать все traits;
+- `run_worker` принимает `ApplicationRuntime`; один provider не обязан
+  реализовывать все traits;
 - FIFO/barriers/Battery adjacent coalescing сохранены.
 
 UI Battery state semantics:
@@ -239,7 +241,8 @@ released, процесс отсутствует.
 
 ### Gaps
 
-- Performance/GPU production backends остаются mock (см. ниже).
+- GPU primitive production reads — real; product GPU mode backend остаётся
+  `Unsupported`/`Unavailable` (см. ниже).
 - Battery mutation backend — **COMPLETED / LIVE-VALIDATED**.
 - Battery GUI mutation control — **COMPLETED / LIVE-VALIDATED**.
 - sysfs fallback/write provider — **NOT IMPLEMENTED**.
@@ -329,9 +332,13 @@ choices на этой машине во время validation и не выдаё
 - power-only provider regression-tested (PowerOnlyProvider без legacy
   `GpuProvider`);
 - legacy `GpuProvider` не изменён;
-- worker/production GUI product GpuMode path (requested mode cards) остаётся на
-  legacy `GpuProvider` / `MockProvider`; read-only hardware status (Power/MUX/
-  Access) использует независимые session-client capability providers (см. ниже).
+- production `ApplicationRuntime` использует `GpuPrimitiveServices` только для
+  независимых read-only Power/MUX/Access capabilities; `MockProvider` в него не
+  входит;
+- product GpuMode path возвращает `Unsupported` без доказанного backend; UI
+  сохраняет `gpu_mode_state=Unavailable` и не разрешает mutation;
+- legacy `GpuProvider`/`MockProvider` остаются только для unit tests,
+  deterministic fixtures и offscreen scenarios.
 
 ### GPU hardware GUI slice (read-only)
 
@@ -359,24 +366,26 @@ Live validation (2026-08-09, packaged GUI + packaged sessiond):
   sysfs `gpu_mux_mode=1`, sysfs `dgpu_disable=0`;
 - никаких GPU writes/mutation.
 
-Technical note (worker composition): `run_worker` теперь принимает несколько
-independent services (main, battery, gpu_power, gpu_mux, gpu_access). Это не
-blocker, но дальнейшее бесконечное расширение `run_worker` может потребовать
-отдельного composition refactor.
+Technical note (worker composition): `run_worker` теперь принимает единый
+`ApplicationRuntime`; GPU primitive services сгруппированы в
+`GpuPrimitiveServices`. Дальнейшее расширение не должно смешивать primitive
+capability reads с product policy.
 
 ### Product GpuMode GUI path
 
-**MOCK-ONLY внутри legacy code; production controls DISABLED**
+**NOT IMPLEMENTED / UNSUPPORTED in production; controls DISABLED**
 
 - Product Eco/Standard/Ultimate/Optimized backend mapping — **NOT PROVEN**;
   production GUI не показывает fake selected state и не разрешает mutation:
   `gpu_mode_state=Unavailable`, `gpu_mode_writable=false`, строка
   `GPU mode control unavailable`.
-- Legacy `MockProvider` по-прежнему обслуживает worker path (`SetGpuMode`) и
-  offscreen/mock тесты, но production click-защита не отправляет `SetGpuMode`.
+- Production `GpuPrimitiveServices` не содержит product-mode provider;
+  `SetGpuMode` в этой composition возвращает `Unsupported` и не выполняет
+  hardware mutation. Mock-backed `GpuProvider` используется только тестами и
+  deterministic/offscreen scenarios.
 - Domain разделяет requested mode, physical MUX, access policy и power state.
-- `GpuProvider`, application state/read-back, worker и UI states
-  (pending/disabled/error) реализованы.
+- Legacy `GpuProvider` application state/read-back path сохраняется для tests;
+  production product policy не считается реализованной.
 - Mock tests сохраняют applied state при pending Ultimate/Eco.
 - `AppService::gpu_state()` legacy aggregate остаётся fail-fast
   (requested→mux→access→power). Это limitation legacy aggregate; он больше не

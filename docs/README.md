@@ -71,16 +71,26 @@ Accepted ADR:
 
 - [`0001-rust-and-slint.md`](adr/0001-rust-and-slint.md) — Rust + Slint;
 - [`0002-daemon-boundaries.md`](adr/0002-daemon-boundaries.md) — GUI/sessiond/
-  optional hardwared boundaries;
+  hardwared boundaries (положение о «hardwared не создаётся» частично
+  superseded ADR 0006/0007/0008);
 - [`0003-gpu-provider-strategy.md`](adr/0003-gpu-provider-strategy.md) — GPU
   concepts и backend strategy;
 - [`0004-authoritative-read-only-session.md`](adr/0004-authoritative-read-only-session.md)
   — read-only session semantics, unknown bounds, no-cache reads и lifecycle;
 - [`0005-split-gpu-provider-capabilities.md`](adr/0005-split-gpu-provider-capabilities.md)
   — split GPU provider capabilities по hardware concepts;
+- [`0006-privileged-performance-write.md`](adr/0006-privileged-performance-write.md)
+  — первый привилегированный write path (Performance profile) и введение
+  `orbis-hardwared` в workspace;
+- [`0007-battery-mutation-backend.md`](adr/0007-battery-mutation-backend.md)
+  — Battery mutation backend через asusd (COMPLETED / LIVE-VALIDATED);
 - [`0008-supergfxd-staged-gpu-mutation.md`](adr/0008-supergfxd-staged-gpu-mutation.md)
   — staged GPU mutation contract через supergfxd; live mutation ещё не
-  реализована.
+  реализована;
+- [`0009-native-asus-eco-backend.md`](adr/0009-native-asus-eco-backend.md)
+  — native ASUS Eco read-only preflight foundation;
+- [`0010-architecture-evolution.md`](adr/0010-architecture-evolution.md)
+  — архитектурный verdict после source audit (KEEP/EVOLVE/REPLACE/DEFER).
 
 Hardware fixtures FA707NV собраны 2026-08-06 read-only. В частности, наличие
 `xyz.ljones.Platform` и `xyz.ljones.FanCurves` доказано introspection evidence.

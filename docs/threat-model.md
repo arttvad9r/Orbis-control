@@ -4,7 +4,9 @@
 > design baseline, но не все перечисленные компоненты и mitigations реализованы.
 > Фактический статус — в [`current-state.md`](current-state.md).
 >
-> Дата: 2026-08-06. Статус: черновик Этапа 1.
+> Дата: 2026-08-06 (обновлено 2026-08-17: актуализирован статус hardwared и
+> Hardware1/original-caller model). Статус: baseline; hardwared реализован для
+> Performance и Battery mutation.
 > Методология: STRIDE по компонентам; отдельные модели для user-space (GUI,
 > sessiond) и root-границы (hardwared). Обновляется при добавлении функций.
 
@@ -28,6 +30,12 @@ Trust level 4: orbis-hardwared (root helper)          — доверенный, 
 - **TL1 → TL3**: чтение sysfs/hwmon (read-only). Записи в sysfs напрямую — только
   через hardwared (TL4) при необходимости root.
 - **TL2/TL3 → TL4**: hardwared принимает только allowlist-команды с polkit.
+
+Interactive privileged mutations идут **напрямую от original application caller
+→ Hardware1 → hardwared → polkit(original system-bus-name) → bounded backend →
+read-back**. `orbis-sessiond` (TL1) не является privileged mutation deputy:
+второй D-Bus hop теряет original caller identity и создаёт confused-deputy risk
+(ADR 0006 amendment).
 
 ## 2. Ассеты
 
@@ -104,6 +112,14 @@ AmbientCapabilities=
 > Возможен запуск от выделенного пользователя `orbis-hardware` с группой доступа к
 > конкретным sysfs-файлам вместо root — решение принимается при первом реальном
 > использовании hardwared.
+>
+> **Текущий статус (2026-08-17):** hardwared реализован и live-validated для
+> Performance profile write и Battery charge-limit mutation (ADR 0006/0007).
+> Production deployment: system D-Bus name owned, UID root, CapEff=0, CapBnd=0,
+> sandbox live-validated. Polkit авторизует `system-bus-name` **original
+> Hardware1 caller**; `orbis-sessiond` не является mutation deputy (confused-
+> deputy защита, ADR 0006 amendment). Запуск от выделенного пользователя
+> остаётся открытым future option, не текущим состоянием.
 
 ### 3.4 Внешние сервисы (asusd, UPower, supergfxd, cardwire, fwupd, logind)
 

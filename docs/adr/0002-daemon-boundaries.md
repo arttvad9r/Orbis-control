@@ -64,3 +64,21 @@
 hardwared: **не создаётся**. При необходимости (например, write
 `charge_control_end_threshold` без asusd на read-only системах) — отдельный ADR и
 реализация с полным набором требований §5.4.
+
+## Amendment — hardwared введён (2026-08-09 / 2026-08-13)
+
+Положение данного ADR о том, что `orbis-hardwared` не создаётся, было корректным
+для момента его принятия (Этап 0/1, 2026-08-06). Оно было **частично superseded**
+более поздними решениями:
+
+- [ADR 0006](0006-privileged-performance-write.md) — ввёл `orbis-hardwared` для
+  первой доказанной privileged capability (Performance profile write);
+  `orbis-hardwared` добавлен в workspace members.
+- [ADR 0007](0007-battery-mutation-backend.md) — добавил Battery charge-limit
+  mutation через typed asusd D-Bus setter в hardwared.
+- [ADR 0008](0008-supergfxd-staged-gpu-mutation.md) — зафиксировал staged GPU
+  mutation contract через hardwared (live mutation не реализована).
+
+Остальные принципы ADR 0002 (GUI без root, sessiond как user daemon, hardwared
+как узкий helper с allowlist/polkit/sandbox, каждая новая capability требует
+отдельного ADR) остаются действующими.

@@ -19,8 +19,9 @@
 `orbis-session-client → sessiond → UPower` path, сохранив mock для tests и
 offscreen screenshots.
 
-**Why:** daemon/client vertical slice уже live-validated, но пользовательский UI
-по-прежнему показывает mock state. Это ближайший подтверждённый integration gap.
+**Why (на момент планирования):** daemon/client vertical slice уже
+live-validated, но пользовательский UI показывал mock state. Этот integration gap
+закрыт данным milestone; формулировка сохраняет историческую мотивацию.
 
 **Entry conditions:**
 
@@ -42,9 +43,10 @@ offscreen screenshots.
   slider behavior зафиксирован исторически, а production mutation control
   закрыт отдельным Battery GUI milestone.
 
-**Result/notes:** split composition `run_worker<M, B, F>` реализован
-(Performance/GPU → MockProvider; Battery → SessionChargeLimitProvider; один
-sequential loop; FIFO/barriers/coalescing сохранены). Обнаружены два gap'а,
+**Result/notes:** split composition реализован (`ApplicationRuntime` с
+primitive GPU services, Battery и Performance; один sequential loop;
+FIFO/barriers/coalescing сохранены). MockProvider используется только в
+tests/offscreen/deterministic scenarios. Обнаружены два gap'а,
 вынесены в отдельные milestones: packaging runtime correctness (LD_LIBRARY_PATH)
 и GUI diagnostics (tracing initialization).
 
@@ -150,8 +152,9 @@ selection на реальном hardware.
    fallback; Scenario A daemon absent → три Unavailable; Scenario B packaged
    sessiond → Power=Active, MUX=Integrated, Access=Unblocked — совпало с raw
    supergfxd Power=0, sysfs mux=1, dgpu_disable=0; product
-   Eco/Standard/Ultimate/Optimized path остаётся MOCK-ONLY в legacy, production
-   controls disabled; никаких writes).
+    Eco/Standard/Ultimate/Optimized product path остаётся
+    `Unsupported`/`Unavailable` в production, controls disabled; MockProvider
+    остаётся только для tests/fixtures; никаких writes).
 3. fan/other proven ASUS reads — pending.
 4. telemetry только по доказанным источникам — pending.
 
@@ -160,16 +163,15 @@ selection на реальном hardware.
 **Performance controlled mutation — COMPLETED / LIVE-VALIDATED** (Milestone 5
 foundations): узкий write path через Hardware1/hardwared, polkit, fixed kernel
 writer и authoritative read-back доказан production GUI cycle. Незавершёнными
-остаются Battery mutation, GPU product policy/mutation, fan/telemetry (substeps
-3–4) и UX/polish (Milestone 7).
+остаются GPU product policy/mutation, fan/telemetry (substeps 3–4) и UX/polish
+(Milestone 7); Battery mutation завершена и live-validated.
 
 Milestone 4 целиком **НЕ закрывается**: fan/telemetry (substeps 3–4) остаются
 pending; product GPU policy/mutation — pending.
 
-Technical note: worker composition теперь имеет несколько independent services
-(main, battery, gpu_power, gpu_mux, gpu_access, performance); это не blocker,
-но дальнейшее бесконечное расширение `run_worker` может потребовать отдельного
-composition refactor.
+Technical note: worker composition теперь проходит через
+`ApplicationRuntime`/composition module; дальнейшее расширение не должно
+создавать неявную global registry и остаётся отдельным архитектурным вопросом.
 
 Pending остаётся: pending/action provider (отдельно: текущий `ActionRequirement`
 относится к product requested mode и НЕ должен автоматически использоваться
@@ -343,3 +345,41 @@ compatibility, duplicated service ownership.
 
 **Risks/dependencies:** firmware/kernel/backend drift, privacy of probe exports,
 малое количество доступных test devices.
+
+## Architecture consolidation (архитектурный этап)
+
+**Status: ACTIVE — composition refactor и production Mock isolation COMPLETED;
+Capability Registry и legacy GPU migration PLANNED.** Направление зафиксировано в
+[ADR 0010](adr/0010-architecture-evolution.md) после source audit. Это
+архитектурный этап, а не отдельный feature milestone; его пункты выполняются
+отдельными последующими задачами и не входят в scope текущей
+документационной работы.
+
+**Goal:** устранить накопленный архитектурный долг, не меняя runtime-поведение
+в рамках этого этапа.
+
+**Scope (без реализации сейчас):**
+
+- **application composition refactor** — **COMPLETED**: `run_worker` принимает
+  `ApplicationRuntime`, construction вынесен в composition module;
+- **runtime Capability Registry** — превратить `orbis-capabilities` из
+  report/fixture assembly в полноценный runtime discovery system, строящий
+  capabilities из фактических providers/probes;
+- **production Mock removal** — **COMPLETED**: production GPU composition
+  использует `GpuPrimitiveServices` без `MockProvider`; `MockProvider` остаётся
+  для tests/offscreen/deterministic scenarios;
+- **GPU split migration** — завершить миграцию с legacy `GpuProvider` на
+  capability-specific interfaces.
+
+**Definition of done (для будущего этапа):**
+
+- `run_worker` composition вынесен в отдельный слой — **COMPLETED**;
+- runtime capability discovery реализован и покрыт tests;
+- production path не использует `MockProvider` — **COMPLETED**;
+- legacy `GpuProvider` заменён capability-specific interfaces (после проверки
+  usages).
+
+**Risks/dependencies:** миграция legacy `GpuProvider` требует проверки всех
+usages; runtime Capability Registry не должен ломать authoritative read-back и
+no-cache semantics. Production GPU product policy/backend остаётся отдельным
+future/deferred этапом и не следует автоматически из Mock isolation.

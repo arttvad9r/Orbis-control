@@ -40,9 +40,10 @@ Orbis не предполагает, что наличие ASUS-модели, ba
 - явное состояние `Loading`, `Ready` или `Unavailable`, когда real backend
   доступен или недоступен.
 
-Эти real sections не должны молча заменяться mock fallback. Product GPU mode
-остаётся mock-only в legacy path, а production mutation controls в текущем MVP
-read-only/disabled. Детали текущего состояния не дублируются здесь и находятся в
+Эти real sections не должны молча заменяться mock fallback. Product GPU mode не
+имеет доказанного production backend и остаётся `Unsupported`/`Unavailable`;
+MockProvider используется только в tests, fixtures и offscreen path. Production
+mutation controls read-only/disabled. Детали текущего состояния не дублируются здесь и находятся в
 [`current-state.md`](current-state.md).
 
 ### Intended product outcomes
