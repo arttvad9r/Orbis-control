@@ -231,16 +231,6 @@ where
     }
 }
 
-impl<S> SysfsFanCurveProvider<S>
-where
-    S: FanCurveSource,
-{
-    /// Прочитать активную кривую вентилятора (read-only, без profile).
-    pub async fn active_curve(&self, fan: &FanId) -> Result<FanCurve, ProviderError> {
-        self.source.read_active_curve(fan).await
-    }
-}
-
 #[async_trait]
 impl<S> FanProvider for SysfsFanCurveProvider<S>
 where
@@ -285,6 +275,10 @@ where
         Err(ProviderError::Unsupported(
             "asus_custom_fan_curve: sysfs хранит только активную кривую, не profile-specific; используйте active_curve(fan)".into(),
         ))
+    }
+
+    async fn active_curve(&self, fan: &FanId) -> Result<FanCurve, ProviderError> {
+        self.source.read_active_curve(fan).await
     }
 
     async fn set_fan_curve(

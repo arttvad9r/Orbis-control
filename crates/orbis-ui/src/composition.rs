@@ -483,18 +483,19 @@ impl std::fmt::Display for RegistryAssemblyError {
 
 impl std::error::Error for RegistryAssemblyError {}
 
-/// Run all five capability probes against the provided services and assemble
+/// Run all capability probes against the provided services and assemble
 /// a deterministic immutable snapshot for the requested `generation`.
 ///
 /// Ordinary provider evidence does not abort the assembly. `ProbeError`
 /// aborts the assembly without producing a partial snapshot.
 #[allow(clippy::too_many_arguments)]
-pub async fn probe_capability_registry<Bp, Pp, Gpow, Gmux, Gacc>(
+pub async fn probe_capability_registry<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     battery_provider: &Bp,
     performance_provider: &Pp,
     gpu_power_provider: &Gpow,
     gpu_mux_provider: &Gmux,
     gpu_access_provider: &Gacc,
+    fan_provider: &Fp,
     generation: u64,
     checked_at: SystemTime,
 ) -> Result<CapabilityRegistrySnapshot, ProbeError>
@@ -504,6 +505,7 @@ where
     Gpow: orbis_providers::traits::GpuPowerProvider + ?Sized,
     Gmux: orbis_providers::traits::GpuMuxProvider + ?Sized,
     Gacc: orbis_providers::traits::GpuAccessProvider + ?Sized,
+    Fp: orbis_providers::traits::FanProvider + ?Sized,
 {
     let mut builder = CapabilityRegistryBuilder::new(generation, checked_at);
 
@@ -577,6 +579,24 @@ where
             }
         })?;
 
+    // Fan curve read capabilities: CPU and GPU active curve reads, write
+    // always Unsupported (read-only backend). Curve points never enter the
+    // registry — only support metadata.
+    let cpu_curve =
+        orbis_providers::probe_fan_curve(fan_provider, &orbis_core::fan::FanId::Cpu).await?;
+    builder
+        .add(orbis_core::FeatureId::FanCurves, cpu_curve)
+        .map_err(|err| match err {
+            orbis_capabilities::RegistryError::DuplicateCapability { feature } => {
+                ProbeError::ContractViolation(format!(
+                    "fan curve capability reported twice: {feature:?}"
+                ))
+            }
+            orbis_capabilities::RegistryError::InconsistentCapability { message, .. } => {
+                ProbeError::ContractViolation(message)
+            }
+        })?;
+
     builder
         .build()
         .map_err(|err| ProbeError::ContractViolation(err.to_string()))
@@ -588,12 +608,13 @@ where
 /// production must not commit to a partially-trustworthy registry on
 /// initial discovery.
 #[allow(clippy::too_many_arguments)]
-pub async fn build_initial_registry_snapshot<Bp, Pp, Gpow, Gmux, Gacc>(
+pub async fn build_initial_registry_snapshot<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     battery_provider: &Bp,
     performance_provider: &Pp,
     gpu_power_provider: &Gpow,
     gpu_mux_provider: &Gmux,
     gpu_access_provider: &Gacc,
+    fan_provider: &Fp,
 ) -> Result<CapabilityRegistrySnapshot, RegistryAssemblyError>
 where
     Bp: orbis_providers::traits::BatteryProvider + ?Sized,
@@ -601,6 +622,7 @@ where
     Gpow: orbis_providers::traits::GpuPowerProvider + ?Sized,
     Gmux: orbis_providers::traits::GpuMuxProvider + ?Sized,
     Gacc: orbis_providers::traits::GpuAccessProvider + ?Sized,
+    Fp: orbis_providers::traits::FanProvider + ?Sized,
 {
     let checked_at = SystemTime::now();
     probe_capability_registry(
@@ -609,6 +631,7 @@ where
         gpu_power_provider,
         gpu_mux_provider,
         gpu_access_provider,
+        fan_provider,
         1,
         checked_at,
     )
@@ -616,18 +639,19 @@ where
     .map_err(RegistryAssemblyError::Probe)
 }
 
-/// Re-probe all five capabilities and produce a deterministic snapshot for
+/// Re-probe all capabilities and produce a deterministic snapshot for
 /// the requested next generation. The returned `Result<CapabilityRegistrySnapshot, RefreshError>`
 /// is `Err` only when our own probe pipeline reports a software failure
 /// (`ProbeError::Internal`/`ContractViolation`); ordinary provider evidence
 /// always results in `Ok`.
 #[allow(clippy::too_many_arguments)]
-pub async fn refresh_capability_registry<Bp, Pp, Gpow, Gmux, Gacc>(
+pub async fn refresh_capability_registry<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     battery_provider: &Bp,
     performance_provider: &Pp,
     gpu_power_provider: &Gpow,
     gpu_mux_provider: &Gmux,
     gpu_access_provider: &Gacc,
+    fan_provider: &Fp,
     next_generation: u64,
 ) -> Result<CapabilityRegistrySnapshot, RefreshError>
 where
@@ -636,6 +660,7 @@ where
     Gpow: orbis_providers::traits::GpuPowerProvider + ?Sized,
     Gmux: orbis_providers::traits::GpuMuxProvider + ?Sized,
     Gacc: orbis_providers::traits::GpuAccessProvider + ?Sized,
+    Fp: orbis_providers::traits::FanProvider + ?Sized,
 {
     let checked_at = SystemTime::now();
     probe_capability_registry(
@@ -644,6 +669,7 @@ where
         gpu_power_provider,
         gpu_mux_provider,
         gpu_access_provider,
+        fan_provider,
         next_generation,
         checked_at,
     )
@@ -714,12 +740,19 @@ pub async fn build_production_runtime(
     // writes, no privileged APIs. Construction performs no I/O.
     let telemetry = AppService::new(Arc::new(orbis_providers::SysfsTelemetryProvider::default()));
 
+    // Read-only fan curve provider: dynamic asus_custom_fan_curve discovery,
+    // active curve read, write Unsupported. No writes, no privileged APIs.
+    let fan_provider = orbis_sessiond::fans::SysfsFanCurveProvider::new(
+        orbis_sessiond::fans::SysfsFanCurveSource::default(),
+    );
+
     let snapshot = build_initial_registry_snapshot(
         &*battery_arc,
         &*performance_arc,
         gpu.primitive_power_provider(),
         gpu.primitive_mux_provider(),
         gpu.primitive_access_provider(),
+        &fan_provider,
     )
     .await?;
 
@@ -818,7 +851,7 @@ mod tests {
             build_state_arc("zephyrus-full").expect("profile exists"),
         ));
         let snapshot = build_initial_registry_snapshot(
-            &*provider, &*provider, &*provider, &*provider, &*provider,
+            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider,
         )
         .await
         .expect("scripted provider must produce a coherent snapshot");
@@ -853,12 +886,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn initial_runtime_snapshot_contains_all_five_capabilities() {
+    async fn initial_runtime_snapshot_contains_all_capabilities() {
         let provider = std::sync::Arc::new(MockProvider::new(
             build_state_arc("zephyrus-full").expect("profile exists"),
         ));
         let snapshot = build_initial_registry_snapshot(
-            &*provider, &*provider, &*provider, &*provider, &*provider,
+            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider,
         )
         .await
         .expect("scripted provider must produce a coherent snapshot");
@@ -867,13 +900,32 @@ mod tests {
         assert!(snapshot.contains(FeatureId::GpuPower));
         assert!(snapshot.contains(FeatureId::GpuMux));
         assert!(snapshot.contains(FeatureId::GpuAccess));
+        assert!(snapshot.contains(FeatureId::FanCurves));
         assert!(!snapshot.contains(FeatureId::GpuProductPolicy));
+    }
+
+    #[tokio::test]
+    async fn fan_curve_capability_is_read_only() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let snapshot = build_initial_registry_snapshot(
+            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider,
+        )
+        .await
+        .expect("scripted provider must produce a coherent snapshot");
+        let fan = snapshot
+            .capability(FeatureId::FanCurves)
+            .expect("fan curve capability present");
+        // Read-only: read Supported, write Unsupported.
+        assert_eq!(fan.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(fan.operations.write.status, CapabilityStatus::Unsupported);
     }
 
     async fn build_initial_snapshot_for_refresh(
         provider: &MockProvider,
     ) -> CapabilityRegistrySnapshot {
-        build_initial_registry_snapshot(provider, provider, provider, provider, provider)
+        build_initial_registry_snapshot(provider, provider, provider, provider, provider, provider)
             .await
             .expect("scripted provider must produce a coherent snapshot")
     }
@@ -907,6 +959,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
+            &*provider,
             runtime.capabilities().generation() + 1,
         )
         .await
@@ -917,6 +970,7 @@ mod tests {
         assert_eq!(runtime.capabilities().generation(), 2);
 
         let third = refresh_capability_registry(
+            &*provider,
             &*provider,
             &*provider,
             &*provider,
@@ -956,6 +1010,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
+            &*provider,
             pre_generation + 1,
         )
         .await
@@ -978,6 +1033,7 @@ mod tests {
         runtime.replace_capabilities(initial);
 
         let next = refresh_capability_registry(
+            &*provider,
             &*provider,
             &*provider,
             &*provider,

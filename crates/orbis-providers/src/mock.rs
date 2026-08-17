@@ -396,6 +396,12 @@ impl FanProvider for MockProvider {
         .await
     }
 
+    async fn active_curve(&self, fan: &FanId) -> Result<FanCurve, ProviderError> {
+        // Mock хранит profile-specific curves; активная кривая — Balanced
+        // (mock semantics, не hardware evidence).
+        self.fan_curve(PerformanceProfile::Balanced, fan).await
+    }
+
     async fn set_fan_curve(&self, curve: &FanCurve) -> Result<ApplyResult, ProviderError> {
         self.validate_curve(curve).into_result()?;
         self.mutate(|s| {

@@ -93,6 +93,14 @@ pub trait FanProvider: Provider {
         fan: &orbis_core::fan::FanId,
     ) -> Result<FanCurve, ProviderError>;
 
+    /// Активная кривая вентилятора (read-only, без profile).
+    ///
+    /// Некоторые backends (например, kernel `asus_custom_fan_curve`) хранят
+    /// только одну активную кривую, НЕ profile-specific storage. Такой backend
+    /// возвращает `Unsupported` из `fan_curve(profile, fan)` (не фальсифицирует
+    /// profile semantics) и предоставляет активную кривую через этот метод.
+    async fn active_curve(&self, fan: &orbis_core::fan::FanId) -> Result<FanCurve, ProviderError>;
+
     /// Установить кривую.
     async fn set_fan_curve(&self, curve: &FanCurve) -> Result<ApplyResult, ProviderError>;
 

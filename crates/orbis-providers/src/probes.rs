@@ -20,7 +20,8 @@ use orbis_core::capability::{
 
 use crate::error::{ProviderError, ValidationResult};
 use crate::traits::{
-    BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
+    BatteryProvider, FanProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
+    PerformanceProvider,
 };
 
 fn operation_from_error(
@@ -181,6 +182,31 @@ where
     let read = ProbeOperationResult::classified(ProbeClassification::Supported).into_operation();
     let write = write_from_validation(provider.validate_charge_limit(representative));
     Ok(capability_from_read(read, write, constraints))
+}
+
+/// Probe fan curve read capability for a specific fan.
+///
+/// Reads the active curve (read-only) to establish the read contract; the
+/// curve points are discarded and never enter the capability metadata. Write
+/// is always `Unsupported` (read-only fan curve backend).
+pub async fn probe_fan_curve<P>(
+    provider: &P,
+    fan: &orbis_core::fan::FanId,
+) -> Result<Capability, ProbeError>
+where
+    P: FanProvider + ?Sized,
+{
+    match provider.active_curve(fan).await {
+        Ok(_) => Ok(supported_read_only()),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            Ok(capability_from_read(
+                read,
+                unsupported_write(),
+                CapabilityConstraints::Unknown,
+            ))
+        }
+    }
 }
 
 /// Probe GPU runtime power capability.
