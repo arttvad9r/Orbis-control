@@ -647,4 +647,88 @@ mod tests {
             "setter не должен вызываться при невалидной кривой"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // Regression: wire order + PWM >100 roundtrip
+    // -----------------------------------------------------------------------
+
+    /// Verify that wire order is (name, temps, pwms, enabled) by writing a
+    /// curve with PWM > 100 and reading it back. If arrays were swapped,
+    /// the readback would return temps where pwms should be and vice versa.
+    #[tokio::test]
+    async fn wire_roundtrip_pwm_above_100_preserves_arrays() {
+        let asusd = FakeAsusd::new();
+        let backend = AsusdFanCurveMutationBackend::new(&asusd);
+        // PWM 112 > 100 — raw hwmon value, not percent.
+        let input = curve(
+            [40, 42, 43, 60, 65, 69, 74, 78],
+            [5, 20, 38, 43, 56, 66, 84, 112],
+        );
+        let result = backend
+            .set_fan_curve(AsusdFanProfile::Balanced, &FanId::Gpu, &input)
+            .await
+            .expect("success");
+        assert_eq!(result.result, ApplyResult::Applied);
+
+        // Read back: FakeAsusd returns the exact wire that was stored.
+        let raw = asusd.read_curves(AsusdFanProfile::Balanced).await.unwrap();
+        let gpu = raw.iter().find(|(n, _, _, _)| n == "GPU").expect("GPU entry");
+        // temps must remain temps (not pwms), pwms must remain pwms.
+        assert_eq!(gpu.1, [40, 42, 43, 60, 65, 69, 74, 78], "temps array must match input temps");
+        assert_eq!(gpu.2, [5, 20, 38, 43, 56, 66, 84, 112], "pwms array must match input pwms");
+    }
+
+    /// Verify that FakeAsusd roundtrip preserves per-fan isolation:
+    /// writing CPU does not affect GPU and vice versa, even with PWM > 100.
+    #[tokio::test]
+    async fn per_fan_wire_roundtrip_pwm_above_100() {
+        let asusd = FakeAsusd::new();
+        let backend = AsusdFanCurveMutationBackend::new(&asusd);
+        let cpu_curve = curve(
+            [45, 49, 54, 68, 74, 79, 84, 89],
+            [5, 22, 38, 45, 56, 63, 81, 94],
+        );
+        let gpu_curve = curve(
+            [40, 42, 43, 60, 65, 69, 74, 78],
+            [5, 20, 38, 43, 56, 66, 84, 112],
+        );
+        backend
+            .set_fan_curve(AsusdFanProfile::Balanced, &FanId::Cpu, &cpu_curve)
+            .await
+            .unwrap();
+        backend
+            .set_fan_curve(AsusdFanProfile::Balanced, &FanId::Gpu, &gpu_curve)
+            .await
+            .unwrap();
+
+        let raw = asusd.read_curves(AsusdFanProfile::Balanced).await.unwrap();
+        let cpu_entry = raw.iter().find(|(n, _, _, _)| n == "CPU").expect("CPU");
+        let gpu_entry = raw.iter().find(|(n, _, _, _)| n == "GPU").expect("GPU");
+
+        // CPU temps must not be confused with GPU pwms.
+        assert_eq!(cpu_entry.1, [45, 49, 54, 68, 74, 79, 84, 89]);
+        assert_eq!(cpu_entry.2, [5, 22, 38, 45, 56, 63, 81, 94]);
+        // GPU pwms 112 must survive roundtrip.
+        assert_eq!(gpu_entry.1, [40, 42, 43, 60, 65, 69, 74, 78]);
+        assert_eq!(gpu_entry.2, [5, 20, 38, 43, 56, 66, 84, 112]);
+    }
+
+    /// FanCurveWire decode roundtrip with PWM > 100.
+    #[test]
+    fn fan_curve_from_wire_pwm_above_100_roundtrip() {
+        use super::{FanCurveWire, fan_curve_from_wire};
+        let input = FanCurveWire {
+            temps: vec![40, 42, 43, 60, 65, 69, 74, 78],
+            pwms: vec![5, 20, 38, 43, 56, 66, 84, 112],
+        };
+        let decoded = fan_curve_from_wire(&input).expect("decode");
+        assert_eq!(decoded.temps[7].get(), 78);
+        assert_eq!(decoded.pwms[7].get(), 112);
+        // Encode back.
+        let encoded = FanCurveWire {
+            temps: decoded.temps.iter().map(|t| t.get() as u8).collect(),
+            pwms: decoded.pwms.iter().map(|p| p.get()).collect(),
+        };
+        assert_eq!(encoded, input, "roundtrip must be lossless");
+    }
 }
