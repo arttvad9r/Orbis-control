@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # deploy-dev-hardwared — standalone Orbis Hardware1 deployment.
 #
-# Скрипт выполняется через sudo; НЕ импортирует NixOS module
-# и НЕ управляет lifecycle через nixos-rebuild switch.
+# Использует НАРЯДНЫЙ пакет orbis-hardwared (без GUI/Slint deps).
+# Сборка занимает ~1-2 минуты вместо ~20 минут полного orbis-control.
 #
 # Идемпотентен: повторный запуск обновляет binary + policies + unit.
 #
@@ -37,10 +37,12 @@ if [[ "${1:-}" == "--stop" ]]; then
   echo "✓ Service остановлен"
 fi
 
-# ─── 1. Сборка пакета через Nix ────────────────────────────────────
-echo "→ Собираем Orbis Control через nix build…"
+# ─── BUILD ─────────────────────────────────────────────────────────
+# Собираем НАРЯДНЫЙ пакет orbis-hardwared (только daemon, без GUI/Slint).
+# Build time: ~1-2 min (clean) / ~10-20s (incremental).
+echo "→ [BUILD] Собираем orbis-hardwared через nix build…"
 cd "$PROJECT_ROOT"
-nix build .#orbis-control --max-jobs 1 --cores 4 --print-out-paths \
+nix build .#orbis-hardwared --max-jobs 1 --cores 4 --print-out-paths \
   > /tmp/orbis-build-path.txt 2>&1
 
 BUILD_PATH="$(cat /tmp/orbis-build-path.txt)"
@@ -49,47 +51,38 @@ if [[ ! -d "$BUILD_PATH" ]]; then
   cat /tmp/orbis-build-path.txt
   exit 1
 fi
-echo "✓ Пакет: $BUILD_PATH"
+echo "✓ [BUILD] Пакет: $BUILD_PATH"
 
-# ─── 2. Persistent GC root ──────────────────────────────────────────
-# nix build создаёт GC root по умолчанию в ~/.local/state/nix/profiles/.
-# Мы создаём дополнительный explicit GC root в /nix/var/nix/gcroots/.
-echo "→ Создаём GC root…"
+# ─── INSTALL ────────────────────────────────────────────────────────
+echo "→ [INSTALL] Создаём persistent GC root…"
 nix-store --add-root "$GC_ROOT" -r "$BUILD_PATH" >/dev/null 2>&1
-# Примечание: nix-store -r возвращает уже существующий путь,
-# если GC root уже есть — это безопасно.
 if [[ -L "$GC_ROOT" ]]; then
   echo "✓ GC root: $GC_ROOT → $(readlink "$GC_ROOT")"
 else
   echo "✓ GC root создан: $GC_ROOT"
 fi
 
-# ─── 3. Установка бинарников ────────────────────────────────────────
-echo "→ Устанавливаем бинарники в ${STABLE_BIN}…"
-for bin in orbis-hardwared orbis-sessiond orbisctl; do
-  if [[ -f "$BUILD_PATH/bin/$bin" ]]; then
-    cp -f "$BUILD_PATH/bin/$bin" "${STABLE_BIN}/${bin}"
-    chmod 755 "${STABLE_BIN}/${bin}"
-    echo "  ✓ ${bin}"
-  fi
-done
+echo "→ [INSTALL] Устанавливаем бинарник…"
+cp -f "$BUILD_PATH/bin/orbis-hardwared" "${STABLE_BIN}/orbis-hardwared"
+chmod 755 "${STABLE_BIN}/orbis-hardwared"
+echo "✓ ${STABLE_BIN}/orbis-hardwared"
 
-# ─── 4. D-Bus system policy ────────────────────────────────────────
-echo "→ Устанавливаем D-Bus policy…"
+# ─── DBUS ───────────────────────────────────────────────────────────
+echo "→ [DBUS] Устанавливаем D-Bus policy…"
 cp -f "$BUILD_PATH/share/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf" \
       "${DBUS_CONF}/io.github.orbiscontrol.Hardware.conf"
 chmod 644 "${DBUS_CONF}/io.github.orbiscontrol.Hardware.conf"
 echo "✓ D-Bus policy: ${DBUS_CONF}/io.github.orbiscontrol.Hardware.conf"
 
-# ─── 5. Polkit actions ─────────────────────────────────────────────
-echo "→ Устанавливаем polkit actions…"
+# ─── POLKIT ─────────────────────────────────────────────────────────
+echo "→ [POLKIT] Устанавливаем polkit actions…"
 cp -f "$BUILD_PATH/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy" \
       "${POLKIT_DIR}/io.github.orbiscontrol.hardware.policy"
 chmod 644 "${POLKIT_DIR}/io.github.orbiscontrol.hardware.policy"
 echo "✓ Polkit: ${POLKIT_DIR}/io.github.orbiscontrol.hardware.policy"
 
-# ─── 6. Systemd unit ───────────────────────────────────────────────
-echo "→ Устанавливаем systemd unit…"
+# ─── SYSTEMD ────────────────────────────────────────────────────────
+echo "→ [SYSTEMD] Устанавливаем systemd unit…"
 cat > "${SERVICE_FILE}" << 'UNIT'
 [Unit]
 Description=Orbis Control hardware helper (standalone dev deployment)
@@ -125,13 +118,13 @@ UNIT
 chmod 644 "${SERVICE_FILE}"
 echo "✓ Unit: ${SERVICE_FILE}"
 
-# ─── 7. Reload + enable + start ────────────────────────────────────
-echo "→ daemon-reload + enable + restart…"
+# ─── START ──────────────────────────────────────────────────────────
+echo "→ [START] daemon-reload + enable + restart…"
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}.service"
 systemctl restart "${SERVICE_NAME}.service"
 
-# ─── 8. Проверка ───────────────────────────────────────────────────
+# ─── Проверка ───────────────────────────────────────────────────────
 echo ""
 echo "=== Проверка ==="
 systemctl is-active "${SERVICE_NAME}.service" && echo "✓ Service active" || echo "✗ Service NOT active"

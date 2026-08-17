@@ -16,11 +16,14 @@
         pkgs = import nixpkgs { inherit system; };
         lib = nixpkgs.lib;
         orbis-control = pkgs.callPackage ./packaging/nix/package.nix { };
+        orbis-hardwared = pkgs.callPackage ./packaging/nix/hardwared.nix { };
       in
       {
         # nix build .#orbis-control
         packages.default = orbis-control;
         packages.orbis-control = orbis-control;
+        # nix build .#orbis-hardwared  (fast standalone daemon)
+        packages.orbis-hardwared = orbis-hardwared;
 
         # nix run .#orbis-control -- --mock-device zephyrus-full
         apps.default = {
