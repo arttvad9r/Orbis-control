@@ -18,29 +18,25 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Persist Slint graph grid corrections
+      - name: Align audit snapshot sizes with native windows
         shell: python
         run: |
           from pathlib import Path
-          path = Path("ui/audited/fan-curve-editor-v3.slint")
+          path = Path("crates/orbis-ui/examples/ui_snapshot.rs")
           text = path.read_text()
           replacements = {
-              "y: 25%;": "y: parent.height * 0.25;",
-              "y: 50%;": "y: parent.height * 0.50;",
-              "y: 75%;": "y: parent.height * 0.75;",
-              "x: 25%;": "x: parent.width * 0.25;",
-              "x: 50%;": "x: parent.width * 0.50;",
-              "x: 75%;": "x: parent.width * 0.75;",
+              '"automation" => (700, 540),': '"automation" => (700, 600),',
+              '"preferences" => (580, 530),': '"preferences" => (580, 550),',
           }
           for old, new in replacements.items():
               if old not in text:
-                  raise SystemExit(f"expected graph coordinate not found: {old}")
+                  raise SystemExit(f"expected snapshot size not found: {old}")
               text = text.replace(old, new, 1)
           path.write_text(text)
       - name: Commit correction
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ui/audited/fan-curve-editor-v3.slint
-          git commit -m "ui: use explicit fan graph grid coordinates"
+          git add crates/orbis-ui/examples/ui_snapshot.rs
+          git commit -m "test: render secondary windows at native sizes"
           git push origin HEAD:agent/full-visual-ui
