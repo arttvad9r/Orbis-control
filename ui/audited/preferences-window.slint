@@ -4,9 +4,9 @@ import { Palette } from "../themes/dark.slint";
 
 export component PreferencesWindow inherits Window {
     width: 580px;
-    height: 530px;
+    height: 550px;
     min-width: 540px;
-    min-height: 500px;
+    min-height: 520px;
     title: "Orbis Control — Preferences";
     background: Palette.window-background;
 
@@ -26,9 +26,9 @@ export component PreferencesWindow inherits Window {
         padding: 10px; spacing: 7px;
         WindowHeader { title: "Preferences"; subtitle: "Application behavior and presentation"; }
         LocalStatus { text: root.local-status; accent: Palette.warning; }
-        HorizontalLayout { spacing: 10px;
+        HorizontalLayout { height: 190px; spacing: 10px;
             SectionCard {
-                horizontal-stretch: 1; height: 190px;
+                horizontal-stretch: 1;
                 VerticalLayout { padding: 9px; spacing: 2px;
                     SectionTitle { title: "General"; }
                     SelectRow { label: "Language"; model: ["System", "English", "Русский", "Deutsch", "Français"]; current-index <=> root.language; }
@@ -38,7 +38,7 @@ export component PreferencesWindow inherits Window {
                 }
             }
             SectionCard {
-                horizontal-stretch: 1; height: 190px;
+                horizontal-stretch: 1;
                 VerticalLayout { padding: 9px; spacing: 1px;
                     SectionTitle { title: "Startup / notifications"; }
                     ToggleRow { label: "Run on startup"; checked <=> root.startup; }
@@ -49,7 +49,7 @@ export component PreferencesWindow inherits Window {
             }
         }
         SectionCard {
-            height: 142px;
+            height: 168px;
             VerticalLayout { padding: 9px; spacing: 2px;
                 SectionTitle { title: "Updates / sampling"; }
                 SelectRow { label: "Update channel"; model: ["Stable", "Preview", "Development"]; current-index <=> root.update-channel; }
@@ -57,6 +57,7 @@ export component PreferencesWindow inherits Window {
                 PreviewSliderRow { label: "UI scale preview"; unit: "%"; minimum: 80; maximum: 160; step: 5; value <=> root.ui-scale; }
             }
         }
+        Rectangle { vertical-stretch: 1; background: transparent; }
         HorizontalLayout { height: 28px; spacing: 6px;
             Rectangle { horizontal-stretch: 1; background: transparent; }
             ActionButton { width: 92px; label: "Reset"; clicked => { root.reset-values(); } }
