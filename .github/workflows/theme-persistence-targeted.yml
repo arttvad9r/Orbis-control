@@ -1,0 +1,284 @@
+name: Theme persistence targeted validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    if: github.head_ref == 'agent/theme-persistence-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout implementation base
+        uses: actions/checkout@v5
+        with:
+          ref: agent/theme-persistence
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply theme persistence patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}: {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          cargo = Path("crates/orbis-ui/Cargo.toml")
+          text = cargo.read_text()
+          needle = 'orbis-core = { workspace = true }\n'
+          if text.count(needle) != 1:
+              raise SystemExit("orbis-ui Cargo.toml dependency anchor changed")
+          cargo.write_text(text.replace(needle, needle + 'orbis-config = { workspace = true }\n', 1))
+
+          main = Path("crates/orbis-ui/src/main.rs")
+          text = main.read_text()
+          needle = 'use orbis_core::action::{ActionRequirement, ApplyResult};\n'
+          imports = '''use orbis_config::{\n    PreferencesConfig, PreferencesError, PreferencesLoad, PreferencesWarning, ThemePreference,\n    load_preferences, save_preferences,\n};\n'''
+          if text.count(needle) != 1:
+              raise SystemExit("main.rs import anchor changed")
+          text = text.replace(needle, imports + needle, 1)
+
+          old = '''fn current_theme_light() -> bool {\n    THEME_LIGHT.with(Cell::get)\n}\n'''
+          new = '''fn current_theme_light() -> bool {\n    THEME_LIGHT.with(Cell::get)\n}\n\nfn current_theme_mode() -> ThemeMode {\n    theme_mode(current_theme_light())\n}\n\nfn set_current_theme_light(light: bool) {\n    THEME_LIGHT.with(|state| state.set(light));\n}\n\nfn initial_theme_light_with(\n    load: impl FnOnce() -> Result<PreferencesLoad, PreferencesError>,\n) -> bool {\n    match load() {\n        Ok(load) => {\n            if let Some(warning) = &load.warning {\n                tracing::warn!(\n                    path = ?warning.path,\n                    kind = ?warning.kind,\n                    "preferences load warning; using safe runtime theme"\n                );\n            }\n            matches!(load.preferences.appearance.theme, ThemePreference::Light)\n        }\n        Err(error) => {\n            tracing::warn!(error = %error, "preferences load failed; using dark theme");\n            false\n        }\n    }\n}\n\nfn initialize_runtime_theme_with(\n    load: impl FnOnce() -> Result<PreferencesLoad, PreferencesError>,\n) -> bool {\n    let light = initial_theme_light_with(load);\n    set_current_theme_light(light);\n    light\n}\n\nfn initialize_runtime_theme() {\n    initialize_runtime_theme_with(load_preferences);\n}\n\n#[derive(Debug)]\nenum ThemePersistenceFailure {\n    Load(PreferencesError),\n    Preserve(PreferencesWarning),\n    Save(PreferencesError),\n}\n\nimpl std::fmt::Display for ThemePersistenceFailure {\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n        match self {\n            Self::Load(error) => write!(f, "failed to load preferences before saving theme: {error}"),\n            Self::Preserve(warning) => write!(\n                f,\n                "refusing to overwrite preserved preferences source {:?}: {:?}",\n                warning.path, warning.kind\n            ),\n            Self::Save(error) => write!(f, "failed to save theme preference: {error}"),\n        }\n    }\n}\n\nimpl std::error::Error for ThemePersistenceFailure {}\n\nfn persist_theme_with<L, S>(light: bool, load: L, save: S) -> Result<(), ThemePersistenceFailure>\nwhere\n    L: FnOnce() -> Result<PreferencesLoad, PreferencesError>,\n    S: FnOnce(&PreferencesConfig) -> Result<std::path::PathBuf, PreferencesError>,\n{\n    let load = load().map_err(ThemePersistenceFailure::Load)?;\n    if let Some(warning) = load.warning {\n        return Err(ThemePersistenceFailure::Preserve(warning));\n    }\n\n    let mut preferences = load.preferences;\n    preferences.appearance.theme = if light {\n        ThemePreference::Light\n    } else {\n        ThemePreference::Dark\n    };\n    save(&preferences).map_err(ThemePersistenceFailure::Save)?;\n    Ok(())\n}\n\nfn persist_theme(light: bool) -> Result<(), ThemePersistenceFailure> {\n    persist_theme_with(light, load_preferences, save_preferences)\n}\n\nfn apply_theme_if_open<T>(\n    window: Option<&T>,\n    light: bool,\n    apply: impl FnOnce(&T, ThemeMode),\n) {\n    if let Some(window) = window {\n        apply(window, theme_mode(light));\n    }\n}\n'''
+          if text.count(old) != 1:
+              raise SystemExit("main.rs theme state anchor changed")
+          text = text.replace(old, new, 1)
+          text = text.replace('.set_mode(theme_mode(current_theme_light()));', '.set_mode(current_theme_mode());')
+          text = text.replace('    THEME_LIGHT.with(|state| state.set(light));\n    app.global::<ThemeState>().set_mode(theme_mode(light));', '    set_current_theme_light(light);\n    app.global::<ThemeState>().set_mode(theme_mode(light));', 1)
+
+          for slot in [
+              "FANS_WINDOW", "EXTRA_WINDOW", "AUTOMATION_WINDOW", "PREFERENCES_WINDOW",
+              "DIAGNOSTICS_WINDOW", "UPDATES_WINDOW", "PREVIEW_DIALOG_WINDOW",
+          ]:
+              old_block = f'''    {slot}.with(|slot| {{\n        if let Some(window) = slot.borrow().as_ref() {{\n            window.global::<ThemeState>().set_mode(theme_mode(light));\n        }}\n    }});'''
+              new_block = f'''    {slot}.with(|slot| {{\n        let slot = slot.borrow();\n        apply_theme_if_open(slot.as_ref(), light, |window, mode| {{\n            window.global::<ThemeState>().set_mode(mode);\n        }});\n    }});'''
+              if text.count(old_block) != 1:
+                  raise SystemExit(f"main.rs fan-out anchor changed for {slot}")
+              text = text.replace(old_block, new_block, 1)
+
+          old_callback = '''            let app_weak = app.as_weak();\n            window.on_theme_changed(move |light| {\n                if let Some(app) = app_weak.upgrade() {\n                    apply_theme_to_all(&app, light);\n                }\n            });'''
+          new_callback = '''            let app_weak = app.as_weak();\n            let window_weak = window.as_weak();\n            window.on_theme_changed(move |light| {\n                if let Some(app) = app_weak.upgrade() {\n                    apply_theme_to_all(&app, light);\n                }\n\n                match persist_theme(light) {\n                    Ok(()) => {\n                        if let Some(window) = window_weak.upgrade() {\n                            let status = if light {\n                                "Light theme active · saved"\n                            } else {\n                                "Dark theme active · saved"\n                            };\n                            window.set_local_status(status.into());\n                        }\n                    }\n                    Err(error) => {\n                        tracing::warn!(\n                            error = %error,\n                            "theme preference save failed; runtime theme remains active"\n                        );\n                        if let Some(window) = window_weak.upgrade() {\n                            window.set_local_status(\n                                "Theme active for this session · save failed; see logs".into(),\n                            );\n                        }\n                    }\n                }\n            });'''
+          if text.count(old_callback) != 1:
+              raise SystemExit("main.rs preferences theme callback anchor changed")
+          text = text.replace(old_callback, new_callback, 1)
+
+          startup = '    init_tracing();\n    let runtime = tokio::runtime::Runtime::new()?;'
+          startup_new = '    init_tracing();\n    initialize_runtime_theme();\n    let runtime = tokio::runtime::Runtime::new()?;'
+          if text.count(startup) != 1:
+              raise SystemExit("main.rs startup anchor changed")
+          text = text.replace(startup, startup_new, 1)
+          main.write_text(text)
+
+          preferences_ui = Path("ui/audited/preferences-window.slint")
+          text = preferences_ui.read_text()
+          replacements = {
+              'property <string> local-status: "Theme changes apply immediately · persistence not connected";':
+                  'property <string> local-status: "Theme changes save immediately · other controls remain preview-only";',
+              'root.local-status = light ? "Light theme active · session only" : "Dark theme active · session only";':
+                  'root.local-status = light ? "Light theme active · saving…" : "Dark theme active · saving…";',
+              'clicked => { root.local-status = "Preferences saved locally · theme persistence not connected"; }':
+                  'clicked => { root.local-status = "Other preferences remain preview-only · theme saves immediately"; }',
+          }
+          for old_text, new_text in replacements.items():
+              if text.count(old_text) != 1:
+                  raise SystemExit(f"preferences-window.slint anchor changed: {old_text}")
+              text = text.replace(old_text, new_text, 1)
+          preferences_ui.write_text(text)
+
+          tests = Path("crates/orbis-ui/src/main_tests.rs")
+          test_text = r'''
+
+#[test]
+fn missing_preferences_initialize_dark_before_first_render() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let light = initialize_runtime_theme_with(|| orbis_config::load_preferences_from_dir(td.path()));
+
+    assert!(!light);
+    assert!(matches!(current_theme_mode(), ThemeMode::Dark));
+}
+
+#[test]
+fn persisted_dark_initializes_dark_before_first_render() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let preferences = orbis_config::PreferencesConfig::default();
+    orbis_config::save_preferences_to_dir(&preferences, td.path()).expect("save dark preferences");
+
+    let light = initialize_runtime_theme_with(|| orbis_config::load_preferences_from_dir(td.path()));
+
+    assert!(!light);
+    assert!(matches!(current_theme_mode(), ThemeMode::Dark));
+}
+
+#[test]
+fn persisted_light_initializes_light_before_first_render() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let mut preferences = orbis_config::PreferencesConfig::default();
+    preferences.appearance.theme = orbis_config::ThemePreference::Light;
+    orbis_config::save_preferences_to_dir(&preferences, td.path()).expect("save light preferences");
+
+    let light = initialize_runtime_theme_with(|| orbis_config::load_preferences_from_dir(td.path()));
+
+    assert!(light);
+    assert!(matches!(current_theme_mode(), ThemeMode::Light));
+}
+
+#[test]
+fn theme_toggle_persists_only_theme_field() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let mut preferences = orbis_config::PreferencesConfig::default();
+    preferences.window.close_action = orbis_config::CloseAction::Ask;
+    preferences.window.start_minimized = true;
+    preferences.window.remember_position = false;
+    orbis_config::save_preferences_to_dir(&preferences, td.path()).expect("save fixture");
+
+    persist_theme_with(
+        true,
+        || orbis_config::load_preferences_from_dir(td.path()),
+        |preferences| orbis_config::save_preferences_to_dir(preferences, td.path()),
+    )
+    .expect("persist light theme");
+
+    let reloaded = orbis_config::load_preferences_from_dir(td.path()).expect("reload preferences");
+    assert_eq!(
+        reloaded.preferences.appearance.theme,
+        orbis_config::ThemePreference::Light
+    );
+    assert_eq!(
+        reloaded.preferences.window.close_action,
+        orbis_config::CloseAction::Ask
+    );
+    assert!(reloaded.preferences.window.start_minimized);
+    assert!(!reloaded.preferences.window.remember_position);
+}
+
+#[test]
+fn all_open_theme_targets_receive_same_runtime_theme() {
+    let targets = [
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+    ];
+
+    for target in &targets {
+        apply_theme_if_open(Some(target), true, |target, mode| {
+            target.set(matches!(mode, ThemeMode::Light));
+        });
+    }
+
+    assert!(targets.iter().all(Cell::get));
+}
+
+#[test]
+fn new_window_theme_is_derived_from_current_runtime_theme() {
+    set_current_theme_light(true);
+    assert!(matches!(current_theme_mode(), ThemeMode::Light));
+
+    set_current_theme_light(false);
+    assert!(matches!(current_theme_mode(), ThemeMode::Dark));
+}
+
+#[test]
+fn theme_save_error_preserves_runtime_theme_and_is_diagnosable() {
+    set_current_theme_light(true);
+
+    let result = persist_theme_with(
+        true,
+        || {
+            Ok(orbis_config::PreferencesLoad {
+                preferences: orbis_config::PreferencesConfig::default(),
+                source: orbis_config::PreferencesLoadSource::Defaults,
+                warning: None,
+            })
+        },
+        |_| {
+            Err(orbis_config::PreferencesError::Io {
+                operation: "test theme save",
+                path: std::path::PathBuf::from("/test/preferences.toml"),
+                source: std::io::Error::other("simulated save failure"),
+            })
+        },
+    );
+
+    let error = result.expect_err("save must fail");
+    assert!(error.to_string().contains("failed to save theme preference"));
+    assert!(current_theme_light());
+    // Theme persistence has no worker/provider input, so this failure path cannot
+    // enqueue a Hardware1/sessiond/hardwared operation.
+}
+'''
+          original = tests.read_text()
+          marker = "fn missing_preferences_initialize_dark_before_first_render()"
+          if marker in original:
+              raise SystemExit("theme persistence tests already present")
+          tests.write_text(original + test_text)
+          PY
+
+      - name: Targeted formatting and checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all
+            cargo fmt --all -- --check
+            cargo check -p orbis-config --all-targets
+            cargo check -p orbis-ui --all-targets
+            cargo test -p orbis-config
+            cargo test -p orbis-ui
+            cargo clippy -p orbis-config --all-targets -- -D warnings
+            cargo clippy -p orbis-ui --all-targets -- -D warnings
+            git diff --check
+          '
+
+      - name: Assert narrow scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only | sort > /tmp/changed.txt
+          cat >/tmp/allowed.txt <<'EOF'
+          Cargo.lock
+          crates/orbis-ui/Cargo.toml
+          crates/orbis-ui/src/main.rs
+          crates/orbis-ui/src/main_tests.rs
+          ui/audited/preferences-window.slint
+          EOF
+          sort -o /tmp/allowed.txt /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
+
+      - name: Stage patched source artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/theme-persistence-artifact/crates/orbis-ui/src /tmp/theme-persistence-artifact/ui/audited
+          cp Cargo.lock /tmp/theme-persistence-artifact/Cargo.lock
+          cp crates/orbis-ui/Cargo.toml /tmp/theme-persistence-artifact/crates/orbis-ui/Cargo.toml
+          cp crates/orbis-ui/src/main.rs /tmp/theme-persistence-artifact/crates/orbis-ui/src/main.rs
+          cp crates/orbis-ui/src/main_tests.rs /tmp/theme-persistence-artifact/crates/orbis-ui/src/main_tests.rs
+          cp ui/audited/preferences-window.slint /tmp/theme-persistence-artifact/ui/audited/preferences-window.slint
+
+      - name: Upload patched source
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-persistence-patched-source
+          path: /tmp/theme-persistence-artifact
+          if-no-files-found: error
