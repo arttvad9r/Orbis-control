@@ -45,6 +45,8 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    security.polkit.enable = lib.mkDefault true;
+
     systemd.user.services.orbis-sessiond = {
       description = "Orbis Control session daemon";
       wantedBy = [ "graphical-session.target" ];
