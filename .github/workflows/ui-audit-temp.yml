@@ -1,16 +1,16 @@
 name: UI audit temporary
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/full-visual-ui
+      - agent/fan-curve-editor-ui
 
 concurrency:
-  group: ui-audit-${{ github.ref }}
+  group: ui-audit-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   ui-audit:
@@ -24,60 +24,6 @@ jobs:
           rustup override set stable
           rustc --version
           cargo --version
-      - name: Apply audited UI-only corrections
-        shell: python
-        run: |
-          from pathlib import Path
-
-          def replace_required(path, old, new):
-              p = Path(path)
-              text = p.read_text()
-              if old not in text:
-                  if new in text:
-                      return
-                  raise SystemExit(f"expected text not found in {path}: {old!r}")
-              p.write_text(text.replace(old, new))
-
-          replace_required("crates/orbis-ui/src/main.rs",
-              "let height = window_height(state) as u32;",
-              "let height = 680u32;")
-          replace_required("crates/orbis-ui/src/main.rs",
-              "PhysicalSize::new(425, height)",
-              "PhysicalSize::new(500, height)")
-          replace_required("crates/orbis-ui/src/main.rs",
-              "app.window().set_size(LogicalSize::new(425.0, height as f32));",
-              "app.window().set_size(LogicalSize::new(500.0, height as f32));")
-          replace_required("crates/orbis-ui/src/main.rs",
-              "app.window().set_size(LogicalSize::new(425.0, window_height(&state)));",
-              "app.window().set_size(LogicalSize::new(500.0, 680.0));")
-
-          replace_required("ui/audited/fan-curve-editor-v3.slint",
-              "touch := TouchArea { clicked => { root.selected(root.fan-id); } }",
-              "touch := TouchArea { enabled: !root.active; clicked => { root.selected(root.fan-id); } }")
-
-          labels = {
-              'label: "USB-C charger profile"': 'label: "Keep GPU disabled on USB-C charger in Optimized mode"',
-              'label: "Warn about GPU applications"': 'label: "Stop all apps using GPU when switching to Eco"',
-              'label: "NVIDIA platform integration"': 'label: "Stop/Start NVIDIA services based on dGPU state"',
-              'label: "Status LEDs"': 'label: "LED Status Indicators"',
-              'label: "NumberPad"': 'label: "Touchpad NumberPad"',
-              'label: "PCIe ASPM"': 'label: "Disable PCIe Link State Management (plugged in)"',
-              'label: "Standby networking"': 'label: "Disable networking in Modern Standby"',
-          }
-          for old, new in labels.items():
-              replace_required("ui/audited/extra-window.slint", old, new)
-
-      - name: Persist UI corrections on branch
-        run: |
-          if git diff --quiet; then
-            echo "UI corrections already persisted"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crates/orbis-ui/src/main.rs ui/audited/fan-curve-editor-v3.slint ui/audited/extra-window.slint
-          git commit -m "ui: align runtime geometry and audited interactions"
-          git push origin HEAD:agent/full-visual-ui
       - name: Work around inherited manifest syntax
         shell: python
         run: |
