@@ -7,8 +7,8 @@
   <action id="io.github.orbiscontrol.hardware.set-performance-profile">
     <description>Change the Orbis Control performance profile</description>
     <description xml:lang="ru">Изменить профиль производительности Orbis Control</description>
-    <message>Authentication is required to change the performance profile</message>
-    <message xml:lang="ru">Требуется аутентификация для изменения профиля производительности</message>
+    <message>Permission is required to change the performance profile</message>
+    <message xml:lang="ru">Для изменения профиля производительности требуется разрешение</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
@@ -18,8 +18,8 @@
   <action id="io.github.orbiscontrol.hardware.set-charge-limit">
     <description>Change the Orbis Control battery charge limit</description>
     <description xml:lang="ru">Изменить лимит заряда батареи Orbis Control</description>
-    <message>Authentication is required to change the battery charge limit</message>
-    <message xml:lang="ru">Требуется аутентификация для изменения лимита заряда батареи</message>
+    <message>Permission is required to change the battery charge limit</message>
+    <message xml:lang="ru">Для изменения лимита заряда батареи требуется разрешение</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
@@ -29,8 +29,8 @@
   <action id="io.github.orbiscontrol.hardware.set-gpu-mode">
     <description>Change the Orbis Control GPU backend mode</description>
     <description xml:lang="ru">Изменить backend-режим GPU Orbis Control</description>
-    <message>Authentication is required to change the GPU backend mode</message>
-    <message xml:lang="ru">Требуется аутентификация для изменения backend-режима GPU</message>
+    <message>Permission is required to change the GPU backend mode</message>
+    <message xml:lang="ru">Для изменения backend-режима GPU требуется разрешение</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
@@ -40,8 +40,8 @@
   <action id="io.github.orbiscontrol.hardware.set-fan-curve">
     <description>Change the Orbis Control fan curve</description>
     <description xml:lang="ru">Изменить кривую вентилятора Orbis Control</description>
-    <message>Authentication is required to change the fan curve</message>
-    <message xml:lang="ru">Требуется аутентификация для изменения кривой вентилятора</message>
+    <message>Permission is required to change the fan curve</message>
+    <message xml:lang="ru">Для изменения кривой вентилятора требуется разрешение</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
