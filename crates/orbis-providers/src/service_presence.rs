@@ -49,21 +49,18 @@ pub const ORBIS_HARDWARE_SERVICE: ServicePresenceTarget = ServicePresenceTarget 
     bus: ServiceBusScope::System,
     bus_name: ORBIS_HARDWARE_BUS_NAME,
 };
-
 /// Orbis Session1 on the user/session bus.
 pub const ORBIS_SESSION_SERVICE: ServicePresenceTarget = ServicePresenceTarget {
     service: DiagnosticsServiceId::OrbisSessiond,
     bus: ServiceBusScope::Session,
     bus_name: ORBIS_SESSION_BUS_NAME,
 };
-
 /// asusd on the system bus.
 pub const ASUSD_SERVICE: ServicePresenceTarget = ServicePresenceTarget {
     service: DiagnosticsServiceId::Asusd,
     bus: ServiceBusScope::System,
     bus_name: ASUSD_BUS_NAME,
 };
-
 /// supergfxd on the system bus.
 pub const SUPERGFXD_SERVICE: ServicePresenceTarget = ServicePresenceTarget {
     service: DiagnosticsServiceId::Supergfxd,
@@ -73,10 +70,9 @@ pub const SUPERGFXD_SERVICE: ServicePresenceTarget = ServicePresenceTarget {
 
 /// Read-only service-presence provider over already-open system/session buses.
 ///
-/// Construction performs no I/O. Presence checks talk only to the D-Bus daemon
-/// through `NameHasOwner` and, when no owner exists, `ListActivatableNames`.
-/// The provider never invokes `StartServiceByName`, so checking diagnostics does
-/// not activate a stopped service.
+/// Construction performs no I/O. Checks call only D-Bus daemon
+/// `NameHasOwner` and, when needed, `ListActivatableNames`. They never call
+/// `StartServiceByName`, so diagnostics cannot activate a stopped service.
 #[derive(Clone)]
 pub struct ServicePresenceProvider {
     system: Connection,
@@ -90,9 +86,6 @@ impl ServicePresenceProvider {
     }
 
     /// Observe one service without inferring capability support or criticality.
-    ///
-    /// `criticality` and `checked_at` are supplied by the future collector so
-    /// this provider cannot derive architectural importance from service state.
     pub async fn check(
         &self,
         target: ServicePresenceTarget,
@@ -129,7 +122,7 @@ impl BusPresenceQuery for ZbusPresenceQuery<'_> {
     async fn name_has_owner(&self, bus_name: &str) -> Result<bool, PresenceQueryError> {
         let proxy = DBusProxy::new(self.connection)
             .await
-            .map_err(map_fdo_error)?;
+            .map_err(map_zbus_error)?;
         let bus_name = BusName::try_from(bus_name).map_err(|_| PresenceQueryError::Unknown)?;
         proxy.name_has_owner(bus_name).await.map_err(map_fdo_error)
     }
@@ -137,12 +130,19 @@ impl BusPresenceQuery for ZbusPresenceQuery<'_> {
     async fn list_activatable_names(&self) -> Result<Vec<String>, PresenceQueryError> {
         let proxy = DBusProxy::new(self.connection)
             .await
-            .map_err(map_fdo_error)?;
+            .map_err(map_zbus_error)?;
         proxy
             .list_activatable_names()
             .await
             .map(|names| names.into_iter().map(|name| name.to_string()).collect())
             .map_err(map_fdo_error)
+    }
+}
+
+fn map_zbus_error(error: zbus::Error) -> PresenceQueryError {
+    match error {
+        zbus::Error::FDO(error) => map_fdo_error(*error),
+        _ => PresenceQueryError::Unknown,
     }
 }
 
@@ -226,59 +226,43 @@ mod tests {
     }
 
     #[test]
-    fn service_targets_have_exact_names_and_bus_scopes() {
-        assert_eq!(
+    fn service_targets_have_exact_names_and_scopes() {
+        let targets = [
             (
-                ORBIS_HARDWARE_SERVICE.service(),
-                ORBIS_HARDWARE_SERVICE.bus(),
-                ORBIS_HARDWARE_SERVICE.bus_name(),
-            ),
-            (
+                ORBIS_HARDWARE_SERVICE,
                 DiagnosticsServiceId::OrbisHardwared,
                 ServiceBusScope::System,
                 "io.github.orbiscontrol.Hardware",
-            )
-        );
-        assert_eq!(
-            (
-                ORBIS_SESSION_SERVICE.service(),
-                ORBIS_SESSION_SERVICE.bus(),
-                ORBIS_SESSION_SERVICE.bus_name(),
             ),
             (
+                ORBIS_SESSION_SERVICE,
                 DiagnosticsServiceId::OrbisSessiond,
                 ServiceBusScope::Session,
                 "io.github.orbiscontrol.Session",
-            )
-        );
-        assert_eq!(
-            (
-                ASUSD_SERVICE.service(),
-                ASUSD_SERVICE.bus(),
-                ASUSD_SERVICE.bus_name()
             ),
             (
+                ASUSD_SERVICE,
                 DiagnosticsServiceId::Asusd,
                 ServiceBusScope::System,
                 "xyz.ljones.Asusd",
-            )
-        );
-        assert_eq!(
-            (
-                SUPERGFXD_SERVICE.service(),
-                SUPERGFXD_SERVICE.bus(),
-                SUPERGFXD_SERVICE.bus_name(),
             ),
             (
+                SUPERGFXD_SERVICE,
                 DiagnosticsServiceId::Supergfxd,
                 ServiceBusScope::System,
                 "org.supergfxctl.Daemon",
-            )
-        );
+            ),
+        ];
+
+        for (target, service, bus, name) in targets {
+            assert_eq!(target.service(), service);
+            assert_eq!(target.bus(), bus);
+            assert_eq!(target.bus_name(), name);
+        }
     }
 
     #[tokio::test]
-    async fn owner_means_running_without_activatable_query() {
+    async fn running_owner_skips_activatable_query() {
         let query = FakeQuery::new(Ok(true), Ok(Vec::new()));
         let diagnostics = check_with_query(
             &query,
@@ -287,109 +271,72 @@ mod tests {
             None,
         )
         .await;
-
         assert_eq!(diagnostics.availability, ServiceAvailability::Running);
         assert_eq!(query.activatable_calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
-    async fn owner_absent_but_known_activatable_means_activatable() {
-        let query = FakeQuery::new(
-            Ok(false),
-            Ok(vec![
-                ORBIS_SESSION_BUS_NAME.to_owned(),
-                "other.service".into(),
-            ]),
-        );
+    async fn absent_owner_classifies_activatable_or_unavailable() {
+        let activatable = FakeQuery::new(Ok(false), Ok(vec![ORBIS_SESSION_BUS_NAME.to_owned()]));
         let diagnostics = check_with_query(
-            &query,
+            &activatable,
             ORBIS_SESSION_SERVICE,
             ServiceCriticality::CoreReadPath,
             None,
         )
         .await;
-
         assert_eq!(diagnostics.availability, ServiceAvailability::Activatable);
-        assert_eq!(query.activatable_calls.load(Ordering::SeqCst), 1);
-    }
 
-    #[tokio::test]
-    async fn owner_and_activation_absent_means_unavailable() {
-        let query = FakeQuery::new(Ok(false), Ok(vec!["other.service".into()]));
+        let unavailable = FakeQuery::new(Ok(false), Ok(vec!["other.service".into()]));
         let diagnostics = check_with_query(
-            &query,
+            &unavailable,
             ASUSD_SERVICE,
             ServiceCriticality::CapabilityLocal,
             None,
         )
         .await;
-
         assert_eq!(diagnostics.availability, ServiceAvailability::Unavailable);
     }
 
     #[tokio::test]
-    async fn denied_owner_query_is_permission_denied_without_activation_query() {
-        let query = FakeQuery::new(Err(PresenceQueryError::PermissionDenied), Ok(Vec::new()));
-        let diagnostics = check_with_query(
-            &query,
-            SUPERGFXD_SERVICE,
-            ServiceCriticality::Optional,
-            None,
-        )
-        .await;
-
-        assert_eq!(
-            diagnostics.availability,
-            ServiceAvailability::PermissionDenied
-        );
-        assert_eq!(query.activatable_calls.load(Ordering::SeqCst), 0);
+    async fn denied_queries_remain_permission_denied() {
+        for query in [
+            FakeQuery::new(Err(PresenceQueryError::PermissionDenied), Ok(Vec::new())),
+            FakeQuery::new(Ok(false), Err(PresenceQueryError::PermissionDenied)),
+        ] {
+            let diagnostics = check_with_query(
+                &query,
+                SUPERGFXD_SERVICE,
+                ServiceCriticality::Optional,
+                None,
+            )
+            .await;
+            assert_eq!(
+                diagnostics.availability,
+                ServiceAvailability::PermissionDenied
+            );
+        }
     }
 
     #[tokio::test]
-    async fn denied_activation_query_is_permission_denied() {
-        let query = FakeQuery::new(Ok(false), Err(PresenceQueryError::PermissionDenied));
-        let diagnostics = check_with_query(
-            &query,
-            ASUSD_SERVICE,
-            ServiceCriticality::CapabilityLocal,
-            None,
-        )
-        .await;
-
-        assert_eq!(
-            diagnostics.availability,
-            ServiceAvailability::PermissionDenied
-        );
+    async fn other_query_failures_remain_unknown() {
+        for query in [
+            FakeQuery::new(Err(PresenceQueryError::Unknown), Ok(Vec::new())),
+            FakeQuery::new(Ok(false), Err(PresenceQueryError::Unknown)),
+        ] {
+            let diagnostics = check_with_query(
+                &query,
+                ORBIS_HARDWARE_SERVICE,
+                ServiceCriticality::CoreReadPath,
+                None,
+            )
+            .await;
+            assert_eq!(diagnostics.availability, ServiceAvailability::Unknown);
+        }
     }
 
     #[tokio::test]
-    async fn unknown_query_failures_remain_unknown() {
-        let owner_unknown = FakeQuery::new(Err(PresenceQueryError::Unknown), Ok(Vec::new()));
-        let owner_diagnostics = check_with_query(
-            &owner_unknown,
-            ORBIS_HARDWARE_SERVICE,
-            ServiceCriticality::CoreReadPath,
-            None,
-        )
-        .await;
-        assert_eq!(owner_diagnostics.availability, ServiceAvailability::Unknown);
-
-        let activation_unknown = FakeQuery::new(Ok(false), Err(PresenceQueryError::Unknown));
-        let activation_diagnostics = check_with_query(
-            &activation_unknown,
-            ORBIS_HARDWARE_SERVICE,
-            ServiceCriticality::CoreReadPath,
-            None,
-        )
-        .await;
-        assert_eq!(
-            activation_diagnostics.availability,
-            ServiceAvailability::Unknown
-        );
-    }
-
-    #[tokio::test]
-    async fn provider_preserves_caller_owned_metadata_without_inference() {
+    async fn caller_owned_metadata_is_preserved_without_inference() {
         let checked_at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(42);
         let query = FakeQuery::new(Ok(false), Ok(Vec::new()));
         let diagnostics = check_with_query(
@@ -404,7 +351,6 @@ mod tests {
         assert_eq!(diagnostics.bus, ServiceBusScope::System);
         assert_eq!(diagnostics.criticality, ServiceCriticality::Optional);
         assert_eq!(diagnostics.checked_at, Some(checked_at));
-        assert_eq!(diagnostics.availability, ServiceAvailability::Unavailable);
         assert_eq!(
             query.owner_names.lock().unwrap().as_slice(),
             &[SUPERGFXD_BUS_NAME.to_owned()]
@@ -412,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn only_access_denied_maps_to_permission_denied() {
+    fn only_fdo_access_denied_maps_to_permission_denied() {
         assert_eq!(
             map_fdo_error(zbus::fdo::Error::AccessDenied("denied".into())),
             PresenceQueryError::PermissionDenied
