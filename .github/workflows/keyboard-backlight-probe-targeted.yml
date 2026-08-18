@@ -1,0 +1,40 @@
+name: Keyboard backlight capability probe validation
+
+on:
+  pull_request:
+    branches:
+      - agent/keyboard-backlight-capability-probe-validate
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Targeted Rust checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all -- --check
+            cargo check -p orbis-hardwared --all-targets
+            cargo test -p orbis-hardwared keyboard_backlight
+            cargo clippy -p orbis-hardwared --all-targets -- -D warnings
+          '
+
+      - name: Check implementation diff whitespace
+        shell: bash
+        run: git diff --check ea286e32d7e86f7965ba101865d2feee5dcf0342 dcde910b5cdde7c4c6f29d6a33dfc88f4a41e75f
