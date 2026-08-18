@@ -37,10 +37,8 @@ pub trait KeyboardBacklightIo: Send + Sync {
 }
 
 /// Read-only IO used only to prove structural keyboard backlight capability.
-pub trait KeyboardBacklightProbeIo: Send + Sync {
-    /// Fresh read of current brightness. Must never write.
+trait KeyboardBacklightProbeIo: Send + Sync {
     fn probe_read_brightness(&self) -> Result<u32, ProviderError>;
-    /// Fresh read of max brightness. Must never write.
     fn probe_read_max_brightness(&self) -> Result<u32, ProviderError>;
 }
 
@@ -69,7 +67,7 @@ impl SysfsKeyboardBacklightIo {
     }
 }
 
-/// Map an access error on the LED path into the typed provider error.
+/// Map a read error on the LED path into the typed provider error.
 fn map_led_error(path: &Path, error: std::io::Error) -> ProviderError {
     match error.kind() {
         std::io::ErrorKind::NotFound => ProviderError::Unsupported(format!(
@@ -77,7 +75,7 @@ fn map_led_error(path: &Path, error: std::io::Error) -> ProviderError {
             path.display()
         )),
         std::io::ErrorKind::PermissionDenied => ProviderError::PermissionDenied(format!(
-            "asus kbd_backlight access denied: {}",
+            "asus kbd_backlight write denied: {}",
             path.display()
         )),
         _ => ProviderError::Io(error),
@@ -130,11 +128,10 @@ pub trait KeyboardBacklightMutationBackend: Send + Sync {
         level: u8,
     ) -> Result<KeyboardBacklightMutationReadback, ProviderError>;
 
-    /// Read-only structural backend availability.
+    /// Typed mutation backend availability.
     ///
-    /// `Supported` proves only that the kernel LED ABI is present, readable,
-    /// parseable and internally consistent. It does not predict that a later
-    /// authorized write will succeed.
+    /// `Supported` is structural evidence only: the LED ABI is readable,
+    /// parseable and internally consistent. A later write can still fail.
     fn mutation_status(&self) -> KeyboardBacklightMutationStatus;
 }
 
@@ -152,8 +149,6 @@ pub struct KeyboardBacklightMutationReadback {
 /// Typed runtime evidence for keyboard backlight mutation availability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyboardBacklightMutationStatus {
-    /// The LED ABI is structurally present and readable. This is not a promise
-    /// that a subsequent write will succeed.
     Supported,
     Unsupported,
     TemporarilyUnavailable,
@@ -244,29 +239,19 @@ fn probe_mutation_status(io: &dyn KeyboardBacklightProbeIo) -> KeyboardBacklight
 }
 
 /// Sysfs-based keyboard backlight mutation backend.
-pub struct SysfsKeyboardBacklightMutationBackend<I = SysfsKeyboardBacklightIo> {
-    io: I,
+#[derive(Default)]
+pub struct SysfsKeyboardBacklightMutationBackend {
+    io: SysfsKeyboardBacklightIo,
 }
 
-impl Default for SysfsKeyboardBacklightMutationBackend<SysfsKeyboardBacklightIo> {
-    fn default() -> Self {
-        Self {
-            io: SysfsKeyboardBacklightIo::default(),
-        }
-    }
-}
-
-impl<I> SysfsKeyboardBacklightMutationBackend<I> {
-    pub fn new(io: I) -> Self {
+impl SysfsKeyboardBacklightMutationBackend {
+    pub fn new(io: SysfsKeyboardBacklightIo) -> Self {
         Self { io }
     }
 }
 
 #[async_trait]
-impl<I> KeyboardBacklightMutationBackend for SysfsKeyboardBacklightMutationBackend<I>
-where
-    I: KeyboardBacklightIo + KeyboardBacklightProbeIo,
-{
+impl KeyboardBacklightMutationBackend for SysfsKeyboardBacklightMutationBackend {
     async fn set_brightness(
         &self,
         level: u8,
@@ -372,6 +357,7 @@ mod tests {
             &self,
             level: u8,
         ) -> Result<KeyboardBacklightMutationReadback, ProviderError> {
+            // Validation: level <= max
             if level as u32 > self.max {
                 return Err(ProviderError::InvalidRequest(format!(
                     "level ({level}) > max ({})",
@@ -379,12 +365,14 @@ mod tests {
                 )));
             }
 
+            // Write
             self.writes.fetch_add(1, Ordering::SeqCst);
             if let Some(e) = self.write_errors.lock().unwrap().clone() {
                 return Err(ProviderError::Dbus(e));
             }
             *self.brightness.lock().unwrap() = level as u32;
 
+            // Read-back
             if let Some(e) = self.read_errors.lock().unwrap().clone() {
                 return Err(ProviderError::Dbus(e));
             }
@@ -521,12 +509,9 @@ mod tests {
 
     #[test]
     fn probe_valid_brightness_and_max_is_supported() {
-        let backend = SysfsKeyboardBacklightMutationBackend::new(ProbeIo::new(
-            ProbeRead::Value(2),
-            ProbeRead::Value(3),
-        ));
+        let io = ProbeIo::new(ProbeRead::Value(2), ProbeRead::Value(3));
         assert_eq!(
-            backend.mutation_status(),
+            probe_mutation_status(&io),
             KeyboardBacklightMutationStatus::Supported
         );
     }
@@ -537,9 +522,9 @@ mod tests {
             (ProbeRead::Missing, ProbeRead::Value(3)),
             (ProbeRead::Value(1), ProbeRead::Missing),
         ] {
-            let backend = SysfsKeyboardBacklightMutationBackend::new(ProbeIo::new(brightness, max));
+            let io = ProbeIo::new(brightness, max);
             assert_eq!(
-                backend.mutation_status(),
+                probe_mutation_status(&io),
                 KeyboardBacklightMutationStatus::Unsupported
             );
         }
@@ -547,24 +532,18 @@ mod tests {
 
     #[test]
     fn probe_permission_error_is_preserved() {
-        let backend = SysfsKeyboardBacklightMutationBackend::new(ProbeIo::new(
-            ProbeRead::PermissionDenied,
-            ProbeRead::Value(3),
-        ));
+        let io = ProbeIo::new(ProbeRead::PermissionDenied, ProbeRead::Value(3));
         assert_eq!(
-            backend.mutation_status(),
+            probe_mutation_status(&io),
             KeyboardBacklightMutationStatus::PermissionDenied
         );
     }
 
     #[test]
     fn probe_transient_io_is_temporarily_unavailable() {
-        let backend = SysfsKeyboardBacklightMutationBackend::new(ProbeIo::new(
-            ProbeRead::Transient,
-            ProbeRead::Value(3),
-        ));
+        let io = ProbeIo::new(ProbeRead::Transient, ProbeRead::Value(3));
         assert_eq!(
-            backend.mutation_status(),
+            probe_mutation_status(&io),
             KeyboardBacklightMutationStatus::TemporarilyUnavailable
         );
     }
@@ -575,9 +554,9 @@ mod tests {
             (ProbeRead::Malformed, ProbeRead::Value(3)),
             (ProbeRead::Value(1), ProbeRead::Malformed),
         ] {
-            let backend = SysfsKeyboardBacklightMutationBackend::new(ProbeIo::new(brightness, max));
+            let io = ProbeIo::new(brightness, max);
             assert_eq!(
-                backend.mutation_status(),
+                probe_mutation_status(&io),
                 KeyboardBacklightMutationStatus::Unknown
             );
         }
@@ -585,24 +564,18 @@ mod tests {
 
     #[test]
     fn probe_brightness_above_max_is_rejected() {
-        let backend = SysfsKeyboardBacklightMutationBackend::new(ProbeIo::new(
-            ProbeRead::Value(4),
-            ProbeRead::Value(3),
-        ));
+        let io = ProbeIo::new(ProbeRead::Value(4), ProbeRead::Value(3));
         assert_eq!(
-            backend.mutation_status(),
+            probe_mutation_status(&io),
             KeyboardBacklightMutationStatus::Unknown
         );
     }
 
     #[test]
     fn probe_zero_max_is_rejected() {
-        let backend = SysfsKeyboardBacklightMutationBackend::new(ProbeIo::new(
-            ProbeRead::Value(0),
-            ProbeRead::Value(0),
-        ));
+        let io = ProbeIo::new(ProbeRead::Value(0), ProbeRead::Value(0));
         assert_eq!(
-            backend.mutation_status(),
+            probe_mutation_status(&io),
             KeyboardBacklightMutationStatus::Unknown
         );
     }
@@ -664,6 +637,7 @@ mod tests {
     #[tokio::test]
     async fn readback_mismatch_is_not_applied() {
         let tb = TestBackend::new(0, 3);
+        // Simulate readback returning different value by using read_error
         tb.set_read_error("mismatch");
         let result = tb.set_brightness(2).await;
         assert!(matches!(result, Err(ProviderError::Dbus(_))));
