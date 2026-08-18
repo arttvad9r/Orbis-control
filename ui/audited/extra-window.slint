@@ -1,5 +1,5 @@
 import { ScrollView } from "std-widgets.slint";
-import { BindingRow, SelectRow, NumericRow, TextInputRow, ToggleRow, ChoiceChip } from "../components/visual-controls.slint";
+import { BindingRow, SelectRow, NumericRow, TextInputRow, ToggleRow, ChoiceChip, PreviewSliderRow } from "../components/visual-controls.slint";
 import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 
@@ -16,9 +16,11 @@ export component ExtraWindow inherits Window {
     property <int> fnf4-action: 0; property <int> fnc-action: 0; property <int> fnv-action: 0; property <int> fnenter-action: 0;
     property <string> m1-param: ""; property <string> m2-param: ""; property <string> m3-param: ""; property <string> m4-param: ""; property <string> m5-param: "";
     property <string> fnf4-param: ""; property <string> fnc-param: ""; property <string> fnv-param: ""; property <string> fnenter-param: "";
+    property <float> backlight-brightness: 3;
     property <int> keyboard-speed: 1;
     property <int> battery-timeout: 60;
     property <int> plugged-timeout: 0;
+    property <bool> xg-mobile: false;
     property <bool> auto-clamshell: false; property <bool> topmost: false; property <bool> no-overdrive: false;
     property <bool> boot-sound: true; property <bool> keystone-sound: true; property <bool> usb-c: true; property <bool> gpu-apps: true;
     property <bool> nv-platform: true; property <bool> status-led: true; property <bool> number-pad: true; property <bool> aspm: false; property <bool> standby-networking: false;
@@ -43,11 +45,11 @@ export component ExtraWindow inherits Window {
         width: parent.width;
         height: parent.height;
         viewport-width: scroll.width - 18px;
-        viewport-height: 2010px;
+        viewport-height: 2100px;
 
         VerticalLayout {
             width: scroll.width - 18px;
-            height: 2010px;
+            height: 2100px;
             padding-left: 10px; padding-right: 10px; padding-top: 10px; padding-bottom: 10px;
             spacing: 7px;
 
@@ -66,7 +68,7 @@ export component ExtraWindow inherits Window {
                     BindingRow { key-label: "Fn+F4"; actions: root.binding-actions; action-index <=> root.fnf4-action; parameter <=> root.fnf4-param; }
                     BindingRow { key-label: "Fn+C"; actions: root.binding-actions; action-index <=> root.fnc-action; parameter <=> root.fnc-param; }
                     BindingRow { key-label: "Fn+V"; actions: root.binding-actions; action-index <=> root.fnv-action; parameter <=> root.fnv-param; }
-                    BindingRow { key-label: "Fn+Enter"; actions: root.binding-actions; action-index <=> root.fnenter-action; parameter <=> root.fnenter-param; }
+                    BindingRow { key-label: "Fn+NmEnt"; actions: root.binding-actions; action-index <=> root.fnenter-action; parameter <=> root.fnenter-param; }
                     HorizontalLayout { height: 28px; spacing: 6px;
                         ActionButton { width: 100px; label: "Reset"; clicked => { root.reset-bindings(); } }
                         ActionButton { width: 100px; label: "Help"; clicked => { root.local-status = "Choose an action; parameter is optional for commands"; } }
@@ -75,18 +77,20 @@ export component ExtraWindow inherits Window {
                 }
             }
 
-            SectionTitle { title: "Backlight"; }
+            SectionTitle { title: "Backlight"; detail: "Brightness / device states"; }
             SectionCard {
-                height: 282px;
+                height: 356px;
                 VerticalLayout { padding: 9px; spacing: 3px;
-                    SelectRow { label: "Animation speed"; model: ["Slow", "Medium", "Fast"]; current-index <=> root.keyboard-speed; }
-                    NumericRow { label: "Battery timeout"; unit: "sec"; minimum: 0; maximum: 600; step-size: 5; value <=> root.battery-timeout; }
-                    NumericRow { label: "Plugged timeout"; unit: "sec"; minimum: 0; maximum: 600; step-size: 5; value <=> root.plugged-timeout; }
+                    PreviewSliderRow { label: "Brightness"; unit: " / 3"; minimum: 0; maximum: 3; step: 1; value <=> root.backlight-brightness; }
                     SectionTitle { title: "Device states"; detail: "Awake / Boot / Sleep / Battery"; }
                     HorizontalLayout { height: 28px; spacing: 4px; Text { width: 76px; text: "Keyboard"; font-size: 9px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.key-awake; clicked => { root.key-awake = !root.key-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.key-boot; clicked => { root.key-boot = !root.key-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.key-sleep; clicked => { root.key-sleep = !root.key-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.key-battery; clicked => { root.key-battery = !root.key-battery; } } }
                     HorizontalLayout { height: 28px; spacing: 4px; Text { width: 76px; text: "Logo"; font-size: 9px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.logo-awake; clicked => { root.logo-awake = !root.logo-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.logo-boot; clicked => { root.logo-boot = !root.logo-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.logo-sleep; clicked => { root.logo-sleep = !root.logo-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.logo-battery; clicked => { root.logo-battery = !root.logo-battery; } } }
                     HorizontalLayout { height: 28px; spacing: 4px; Text { width: 76px; text: "Lightbar"; font-size: 9px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.bar-awake; clicked => { root.bar-awake = !root.bar-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.bar-boot; clicked => { root.bar-boot = !root.bar-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.bar-sleep; clicked => { root.bar-sleep = !root.bar-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.bar-battery; clicked => { root.bar-battery = !root.bar-battery; } } }
                     HorizontalLayout { height: 28px; spacing: 4px; Text { width: 76px; text: "Lid"; font-size: 9px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.lid-awake; clicked => { root.lid-awake = !root.lid-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.lid-boot; clicked => { root.lid-boot = !root.lid-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.lid-sleep; clicked => { root.lid-sleep = !root.lid-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.lid-battery; clicked => { root.lid-battery = !root.lid-battery; } } }
+                    ToggleRow { label: "XG Mobile"; checked <=> root.xg-mobile; }
+                    SelectRow { label: "Animation speed"; model: ["Slow", "Normal", "Fast"]; current-index <=> root.keyboard-speed; }
+                    NumericRow { label: "Plugged timeout"; unit: "sec"; minimum: 0; maximum: 3600; step-size: 5; value <=> root.plugged-timeout; }
+                    NumericRow { label: "Battery timeout"; unit: "sec"; minimum: 0; maximum: 3600; step-size: 5; value <=> root.battery-timeout; }
                 }
             }
 
