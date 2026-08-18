@@ -1,16 +1,16 @@
 name: UI audit temporary
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/full-visual-ui
+      - agent/fan-curve-editor-ui
 
 concurrency:
-  group: ui-audit-${{ github.ref }}
+  group: ui-audit-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   ui-audit:
@@ -18,21 +18,44 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Persist preview dialog lifecycle wiring
+      - name: Use current stable Rust for UI audit
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup override set stable
+          rustc --version
+          cargo --version
+      - name: Work around inherited manifest syntax
         shell: python
         run: |
           from pathlib import Path
-          path = Path("crates/orbis-ui/src/main.rs")
+          path = Path("crates/orbis-ui/Cargo.toml")
           text = path.read_text()
-          old = '''        if slot.is_none() {\n            *slot = Some(PreviewDialogWindow::new()?);\n        }\n        let window = slot.as_ref().expect("PreviewDialogWindow initialized");\n'''
-          new = '''        if slot.is_none() {\n            let window = PreviewDialogWindow::new()?;\n            let weak = window.as_weak();\n            window.on_dismiss_clicked(move || {\n                if let Some(window) = weak.upgrade() {\n                    let _ = window.hide();\n                }\n            });\n            *slot = Some(window);\n        }\n        let window = slot.as_ref().expect("PreviewDialogWindow initialized");\n'''
+          old = "orbis-providers = {\n    path = \"../orbis-providers\",\n    version = \"0.1.0\",\n    default-features = false,\n    features = [\"mock\"],\n}"
+          new = 'orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }'
           if old not in text:
-              raise SystemExit("expected PreviewDialogWindow initialization not found")
-          path.write_text(text.replace(old, new, 1))
-      - name: Commit correction
+              raise SystemExit("expected inherited manifest block not found")
+          path.write_text(text.replace(old, new))
+      - name: Formatting
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+      - name: Check UI crate
+        run: cargo check -p orbis-ui --all-targets
+      - name: Test UI crate
+        run: cargo test -p orbis-ui
+      - name: Render audited windows
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crates/orbis-ui/src/main.rs
-          git commit -m "ui: wire preview dialog dismiss callback"
-          git push origin HEAD:agent/full-visual-ui
+          mkdir -p snapshots
+          cargo run -p orbis-ui -- --ui-state default --screenshot snapshots/main-default.png
+          cargo run -p orbis-ui -- --ui-state pending --screenshot snapshots/main-pending.png
+          cargo run -p orbis-ui --example ui_snapshot -- fans snapshots/fans.png
+          cargo run -p orbis-ui --example ui_snapshot -- extra snapshots/extra.png
+          cargo run -p orbis-ui --example ui_snapshot -- automation snapshots/automation.png
+          cargo run -p orbis-ui --example ui_snapshot -- preferences snapshots/preferences.png
+          cargo run -p orbis-ui --example ui_snapshot -- diagnostics snapshots/diagnostics.png
+          cargo run -p orbis-ui --example ui_snapshot -- updates snapshots/updates.png
+          cargo run -p orbis-ui --example ui_snapshot -- dialog snapshots/dialog.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-audit-snapshots
+          path: snapshots/*.png
+          if-no-files-found: error
