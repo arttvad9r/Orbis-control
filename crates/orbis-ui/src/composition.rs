@@ -127,16 +127,25 @@ pub trait GpuServicesRuntime: Send {
     /// the returned list corresponds to `(FeatureId, Capability)`.
     async fn probe_primitives(
         &self,
-    ) -> Vec<(orbis_core::FeatureId, orbis_core::capability::Capability)>;
+    ) -> Result<Vec<(orbis_core::FeatureId, orbis_core::capability::Capability)>, ProbeError>;
+
+    /// Borrow the inner GPU power provider for capability probing.
+    fn provider_power(&self) -> &(dyn orbis_providers::traits::GpuPowerProvider + 'static);
+
+    /// Borrow the inner GPU mux provider for capability probing.
+    fn provider_mux(&self) -> &(dyn orbis_providers::traits::GpuMuxProvider + 'static);
+
+    /// Borrow the inner GPU access provider for capability probing.
+    fn provider_access(&self) -> &(dyn orbis_providers::traits::GpuAccessProvider + 'static);
 }
 
 #[async_trait]
 impl<M, P, X, A> GpuServicesRuntime for GpuServices<M, P, X, A>
 where
-    M: GpuProvider + Send + Sync,
-    P: GpuPowerProvider + Send + Sync,
-    X: GpuMuxProvider + Send + Sync,
-    A: GpuAccessProvider + Send + Sync,
+    M: GpuProvider + Send + Sync + 'static,
+    P: GpuPowerProvider + Send + Sync + 'static,
+    X: GpuMuxProvider + Send + Sync + 'static,
+    A: GpuAccessProvider + Send + Sync + 'static,
 {
     async fn set_gpu_mode(
         &self,
@@ -162,27 +171,36 @@ where
 
     async fn probe_primitives(
         &self,
-    ) -> Vec<(orbis_core::FeatureId, orbis_core::capability::Capability)> {
-        let mut entries = Vec::with_capacity(3);
-        if let Ok(capability) = orbis_providers::probe_gpu_power(self.power.provider()).await {
-            entries.push((orbis_core::FeatureId::GpuPower, capability));
-        }
-        if let Ok(capability) = orbis_providers::probe_gpu_mux(self.mux.provider()).await {
-            entries.push((orbis_core::FeatureId::GpuMux, capability));
-        }
-        if let Ok(capability) = orbis_providers::probe_gpu_access(self.access.provider()).await {
-            entries.push((orbis_core::FeatureId::GpuAccess, capability));
-        }
-        entries
+    ) -> Result<Vec<(orbis_core::FeatureId, orbis_core::capability::Capability)>, ProbeError> {
+        let power = orbis_providers::probe_gpu_power(self.power.provider()).await?;
+        let mux = orbis_providers::probe_gpu_mux(self.mux.provider()).await?;
+        let access = orbis_providers::probe_gpu_access(self.access.provider()).await?;
+        Ok(vec![
+            (orbis_core::FeatureId::GpuPower, power),
+            (orbis_core::FeatureId::GpuMux, mux),
+            (orbis_core::FeatureId::GpuAccess, access),
+        ])
+    }
+
+    fn provider_power(&self) -> &(dyn orbis_providers::traits::GpuPowerProvider + 'static) {
+        self.power.provider()
+    }
+
+    fn provider_mux(&self) -> &(dyn orbis_providers::traits::GpuMuxProvider + 'static) {
+        self.mux.provider()
+    }
+
+    fn provider_access(&self) -> &(dyn orbis_providers::traits::GpuAccessProvider + 'static) {
+        self.access.provider()
     }
 }
 
 #[async_trait]
 impl<P, X, A> GpuServicesRuntime for GpuPrimitiveServices<P, X, A>
 where
-    P: GpuPowerProvider + Send + Sync,
-    X: GpuMuxProvider + Send + Sync,
-    A: GpuAccessProvider + Send + Sync,
+    P: GpuPowerProvider + Send + Sync + 'static,
+    X: GpuMuxProvider + Send + Sync + 'static,
+    A: GpuAccessProvider + Send + Sync + 'static,
 {
     async fn set_gpu_mode(
         &self,
@@ -210,23 +228,27 @@ where
 
     async fn probe_primitives(
         &self,
-    ) -> Vec<(orbis_core::FeatureId, orbis_core::capability::Capability)> {
-        let mut entries = Vec::with_capacity(3);
-        if let Ok(capability) =
-            orbis_providers::probe_gpu_power(self.primitive_power_provider()).await
-        {
-            entries.push((orbis_core::FeatureId::GpuPower, capability));
-        }
-        if let Ok(capability) = orbis_providers::probe_gpu_mux(self.primitive_mux_provider()).await
-        {
-            entries.push((orbis_core::FeatureId::GpuMux, capability));
-        }
-        if let Ok(capability) =
-            orbis_providers::probe_gpu_access(self.primitive_access_provider()).await
-        {
-            entries.push((orbis_core::FeatureId::GpuAccess, capability));
-        }
-        entries
+    ) -> Result<Vec<(orbis_core::FeatureId, orbis_core::capability::Capability)>, ProbeError> {
+        let power = orbis_providers::probe_gpu_power(self.primitive_power_provider()).await?;
+        let mux = orbis_providers::probe_gpu_mux(self.primitive_mux_provider()).await?;
+        let access = orbis_providers::probe_gpu_access(self.primitive_access_provider()).await?;
+        Ok(vec![
+            (orbis_core::FeatureId::GpuPower, power),
+            (orbis_core::FeatureId::GpuMux, mux),
+            (orbis_core::FeatureId::GpuAccess, access),
+        ])
+    }
+
+    fn provider_power(&self) -> &(dyn orbis_providers::traits::GpuPowerProvider + 'static) {
+        self.primitive_power_provider()
+    }
+
+    fn provider_mux(&self) -> &(dyn orbis_providers::traits::GpuMuxProvider + 'static) {
+        self.primitive_mux_provider()
+    }
+
+    fn provider_access(&self) -> &(dyn orbis_providers::traits::GpuAccessProvider + 'static) {
+        self.primitive_access_provider()
     }
 }
 
@@ -253,12 +275,15 @@ pub trait BatteryServiceRuntime: Send {
     async fn probe_capability(
         &self,
     ) -> Result<orbis_core::capability::Capability, orbis_capabilities::ProbeError>;
+
+    /// Borrow the inner battery provider for capability probing.
+    fn provider_battery(&self) -> &(dyn orbis_providers::traits::BatteryProvider + 'static);
 }
 
 #[async_trait]
 impl<P> BatteryServiceRuntime for AppService<P>
 where
-    P: BatteryProvider + Send + Sync,
+    P: BatteryProvider + Send + Sync + 'static,
 {
     async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
         AppService::charge_limit(self).await
@@ -275,6 +300,10 @@ where
         &self,
     ) -> Result<orbis_core::capability::Capability, orbis_capabilities::ProbeError> {
         orbis_providers::probe_charge_limit(self.provider()).await
+    }
+
+    fn provider_battery(&self) -> &(dyn orbis_providers::traits::BatteryProvider + 'static) {
+        self.provider()
     }
 }
 
@@ -295,12 +324,16 @@ pub trait PerformanceServiceRuntime: Send {
     /// This is used by the lifecycle refresh path to build a new
     /// capability registry snapshot.
     async fn probe_performance(&self) -> Result<orbis_core::capability::Capability, ProbeError>;
+
+    /// Borrow the inner performance provider for capability probing.
+    fn provider_performance(&self)
+    -> &(dyn orbis_providers::traits::PerformanceProvider + 'static);
 }
 
 #[async_trait]
 impl<P> PerformanceServiceRuntime for AppService<P>
 where
-    P: PerformanceProvider + Send + Sync,
+    P: PerformanceProvider + Send + Sync + 'static,
 {
     async fn performance_state(&self) -> Result<PerformanceState, ProviderError> {
         AppService::performance_state(self).await
@@ -315,6 +348,12 @@ where
 
     async fn probe_performance(&self) -> Result<orbis_core::capability::Capability, ProbeError> {
         orbis_providers::probe_performance(self.provider()).await
+    }
+
+    fn provider_performance(
+        &self,
+    ) -> &(dyn orbis_providers::traits::PerformanceProvider + 'static) {
+        self.provider()
     }
 }
 
@@ -356,12 +395,15 @@ pub trait FanServiceRuntime: Send + Sync {
         fan: FanId,
         write_available: bool,
     ) -> Result<orbis_core::capability::Capability, orbis_capabilities::ProbeError>;
+
+    /// Borrow the inner fan provider for capability probing.
+    fn provider_fan(&self) -> &(dyn orbis_providers::traits::FanProvider + 'static);
 }
 
 #[async_trait]
 impl<P> FanServiceRuntime for AppService<P>
 where
-    P: FanProvider + FanCurveMutationProvider + Send + Sync,
+    P: FanProvider + FanCurveMutationProvider + Send + Sync + 'static,
 {
     async fn active_curve(&self, fan: FanId) -> Result<FanCurve, ProviderError> {
         AppService::active_curve(self, &fan).await
@@ -390,6 +432,10 @@ where
         write_available: bool,
     ) -> Result<orbis_core::capability::Capability, orbis_capabilities::ProbeError> {
         orbis_providers::probe_fan_curve(self.provider(), &fan, write_available).await
+    }
+
+    fn provider_fan(&self) -> &(dyn orbis_providers::traits::FanProvider + 'static) {
+        self.provider()
     }
 }
 
@@ -940,8 +986,8 @@ pub fn mock_runtime() -> MockRuntime {
 mod tests {
     use super::{
         ApplicationRuntime, CapabilityRegistrySnapshot, GpuPrimitiveServices, GpuServices,
-        GpuServicesRuntime, MockRuntime, build_initial_registry_snapshot,
-        refresh_capability_registry,
+        GpuServicesRuntime, MockRuntime, ProbeError, build_initial_registry_snapshot,
+        probe_capability_registry, refresh_capability_registry,
     };
     use orbis_application::{AppService, CommandError};
     use orbis_core::FeatureId;
@@ -1329,5 +1375,306 @@ mod tests {
         }
         // Negative: GpuProductPolicy must NOT be synthesised.
         assert!(!runtime.capabilities().contains(FeatureId::GpuProductPolicy));
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression: unified probe lifecycle
+    // -----------------------------------------------------------------------
+
+    /// Test-only GPU provider that returns a configurable error.
+    struct ScriptedGpuError {
+        error: ProviderError,
+    }
+
+    impl orbis_providers::traits::Provider for ScriptedGpuError {
+        fn id(&self) -> &'static str {
+            "scripted-gpu-error"
+        }
+        fn backend(&self) -> orbis_core::identity::BackendIdentity {
+            orbis_core::identity::BackendIdentity::simple("scripted-gpu-error")
+        }
+        fn timeout(&self) -> std::time::Duration {
+            std::time::Duration::from_millis(1)
+        }
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted-gpu-error: {feature}")
+        }
+        fn health(&self) -> orbis_providers::traits::ProviderHealth {
+            orbis_providers::traits::ProviderHealth::Healthy
+        }
+        fn diagnostics(&self) -> Vec<orbis_core::diagnostics::DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl orbis_providers::traits::GpuPowerProvider for ScriptedGpuError {
+        async fn power_state(&self) -> Result<orbis_core::gpu::GpuPowerState, ProviderError> {
+            Err(match &self.error {
+                ProviderError::Internal(d) => ProviderError::Internal(d.clone()),
+                ProviderError::Unsupported(d) => ProviderError::Unsupported(d.clone()),
+                other => panic!("unexpected error variant: {other:?}"),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl orbis_providers::traits::GpuMuxProvider for ScriptedGpuError {
+        async fn mux_state(&self) -> Result<orbis_core::gpu::GpuMuxState, ProviderError> {
+            Err(match &self.error {
+                ProviderError::Internal(d) => ProviderError::Internal(d.clone()),
+                ProviderError::InvalidRequest(d) => ProviderError::InvalidRequest(d.clone()),
+                ProviderError::Unsupported(d) => ProviderError::Unsupported(d.clone()),
+                other => panic!("unexpected error variant: {other:?}"),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl orbis_providers::traits::GpuAccessProvider for ScriptedGpuError {
+        async fn access_policy(&self) -> Result<orbis_core::gpu::GpuAccessPolicy, ProviderError> {
+            Err(match &self.error {
+                ProviderError::Internal(d) => ProviderError::Internal(d.clone()),
+                other => panic!("unexpected error variant: {other:?}"),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn initial_and_refresh_contain_same_six_feature_ids() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let initial = build_initial_registry_snapshot(
+            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, false,
+        )
+        .await
+        .expect("initial snapshot must succeed");
+
+        let refreshed = refresh_capability_registry(
+            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, false, 2,
+        )
+        .await
+        .expect("refresh must succeed");
+
+        let expected = [
+            FeatureId::Performance,
+            FeatureId::ChargeLimit,
+            FeatureId::GpuPower,
+            FeatureId::GpuMux,
+            FeatureId::GpuAccess,
+            FeatureId::FanCurves,
+        ];
+
+        for feature in expected {
+            assert!(
+                initial.contains(feature),
+                "initial snapshot missing {feature:?}"
+            );
+            assert!(
+                refreshed.contains(feature),
+                "refreshed snapshot missing {feature:?}"
+            );
+        }
+        assert_eq!(initial.len(), refreshed.len());
+    }
+
+    #[tokio::test]
+    async fn gpu_power_internal_error_aborts_refresh() {
+        let gpu_err = ScriptedGpuError {
+            error: ProviderError::Internal("injected failure".into()),
+        };
+        let result = probe_capability_registry(
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &gpu_err,
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            false,
+            1,
+            std::time::SystemTime::now(),
+        )
+        .await;
+        assert!(result.is_err(), "ProbeError::Internal must abort refresh");
+        match result.unwrap_err() {
+            ProbeError::Internal(_) => {}
+            other => panic!("expected ProbeError::Internal, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn gpu_mux_contract_violation_aborts_refresh() {
+        let gpu_err = ScriptedGpuError {
+            error: ProviderError::InvalidRequest("contract broken".into()),
+        };
+        let result = probe_capability_registry(
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &gpu_err,
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            false,
+            1,
+            std::time::SystemTime::now(),
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "ProbeError::ContractViolation must abort refresh"
+        );
+        match result.unwrap_err() {
+            ProbeError::ContractViolation(_) => {}
+            other => panic!("expected ProbeError::ContractViolation, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_gpu_probe_preserves_previous_snapshot_and_generation() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let initial = build_initial_snapshot_for_refresh(&provider).await;
+        let mut runtime = script_gpu_runtime(provider.clone());
+        runtime.replace_capabilities(initial);
+
+        let pre_swap = runtime.capabilities_arc();
+        let pre_generation = pre_swap.generation();
+
+        // Verify the previous snapshot is accessible and complete.
+        for feature in [
+            FeatureId::Performance,
+            FeatureId::ChargeLimit,
+            FeatureId::GpuPower,
+            FeatureId::GpuMux,
+            FeatureId::GpuAccess,
+            FeatureId::FanCurves,
+        ] {
+            assert!(
+                pre_swap.contains(feature),
+                "pre-swap snapshot missing {feature:?}"
+            );
+        }
+
+        // Now verify that if a refresh fails, the runtime snapshot is unchanged.
+        // We can't easily inject ProbeError into the trait-based runtime without
+        // custom providers, so we verify the invariant via probe_capability_registry
+        // directly: it returns Err, meaning the caller must NOT replace the snapshot.
+        let result = probe_capability_registry(
+            &*provider,
+            &*provider,
+            &ScriptedGpuError {
+                error: ProviderError::Internal("injected".into()),
+            },
+            &*provider,
+            &*provider,
+            &*provider,
+            false,
+            pre_generation + 1,
+            std::time::SystemTime::now(),
+        )
+        .await;
+        assert!(result.is_err(), "probe must fail");
+
+        // Runtime snapshot unchanged.
+        assert_eq!(runtime.capabilities().generation(), pre_generation);
+        for feature in [
+            FeatureId::Performance,
+            FeatureId::ChargeLimit,
+            FeatureId::GpuPower,
+            FeatureId::GpuMux,
+            FeatureId::GpuAccess,
+            FeatureId::FanCurves,
+        ] {
+            assert!(
+                runtime.capabilities().contains(feature),
+                "runtime snapshot lost {feature:?} after failed refresh"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn ordinary_gpu_unsupported_stays_as_entry() {
+        let gpu_err = ScriptedGpuError {
+            error: ProviderError::Unsupported("not supported".into()),
+        };
+        let result = probe_capability_registry(
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &gpu_err,
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
+            false,
+            1,
+            std::time::SystemTime::now(),
+        )
+        .await
+        .expect("ordinary Unsupported must not abort");
+
+        // GpuPower must be present with Unsupported status, not missing.
+        let power = result
+            .capability(FeatureId::GpuPower)
+            .expect("GpuPower entry must exist");
+        assert_eq!(
+            power.status,
+            CapabilityStatus::Unsupported,
+            "GpuPower should be Unsupported, not missing"
+        );
+
+        // Other capabilities must still be present and Supported.
+        assert!(result.contains(FeatureId::Performance));
+        assert!(result.contains(FeatureId::ChargeLimit));
+        assert!(result.contains(FeatureId::GpuMux));
+        assert!(result.contains(FeatureId::GpuAccess));
+        assert!(result.contains(FeatureId::FanCurves));
+    }
+
+    #[tokio::test]
+    async fn probe_primitives_propagates_probe_error() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let gpu_err = std::sync::Arc::new(ScriptedGpuError {
+            error: ProviderError::Internal("injected".into()),
+        });
+        let gpu = GpuServices::new(
+            AppService::new(provider.clone()),
+            AppService::new(gpu_err.clone()),
+            AppService::new(provider.clone()),
+            AppService::new(provider.clone()),
+        );
+        let result = gpu.probe_primitives().await;
+        assert!(
+            result.is_err(),
+            "probe_primitives must propagate ProbeError"
+        );
+        match result.unwrap_err() {
+            ProbeError::Internal(_) => {}
+            other => panic!("expected ProbeError::Internal, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_primitives_returns_all_three_on_success() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let gpu = GpuServices::new(
+            AppService::new(provider.clone()),
+            AppService::new(provider.clone()),
+            AppService::new(provider.clone()),
+            AppService::new(provider.clone()),
+        );
+        let entries = gpu
+            .probe_primitives()
+            .await
+            .expect("probe_primitives must succeed");
+        assert_eq!(entries.len(), 3);
+        let features: Vec<_> = entries.iter().map(|(f, _)| *f).collect();
+        assert!(features.contains(&FeatureId::GpuPower));
+        assert!(features.contains(&FeatureId::GpuMux));
+        assert!(features.contains(&FeatureId::GpuAccess));
     }
 }

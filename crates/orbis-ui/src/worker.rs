@@ -425,7 +425,7 @@ async fn run_worker_inner<G, B, R, F>(
     }
 }
 
-/// Re-probe all five capabilities and return a deterministic snapshot.
+/// Re-probe all capabilities and return a deterministic snapshot.
 ///
 /// This helper exists so that the main `run_worker` dispatch can release the
 /// service-field borrows before touching `runtime.capabilities`.
@@ -434,6 +434,10 @@ async fn run_worker_inner<G, B, R, F>(
 /// `ProbeError::Internal` or `ProbeError::ContractViolation` aborts the refresh
 /// cycle without producing a partial snapshot, and the caller is responsible
 /// for keeping the previous snapshot authoritative.
+///
+/// Uses `probe_capability_registry` — the same canonical probe function
+/// used by `build_initial_registry_snapshot` — to ensure the initial and
+/// refresh paths are identical.
 async fn run_capability_refresh<G, B, R>(
     runtime: &mut ApplicationRuntime<G, B, R>,
     next_generation: u64,
@@ -443,45 +447,18 @@ where
     B: BatteryServiceRuntime,
     R: PerformanceServiceRuntime,
 {
-    use orbis_capabilities::CapabilityRegistryBuilder;
-
-    let checked_at = std::time::SystemTime::now();
-    let mut builder = CapabilityRegistryBuilder::new(next_generation, checked_at);
-
-    // Performance probe: use the trait method that returns fully typed capability
-    let performance = runtime.performance.probe_performance().await?;
-    builder
-        .add(orbis_core::FeatureId::Performance, performance)
-        .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))?;
-
-    // Battery probe: use the trait method that returns fully typed capability
-    let battery = runtime.battery.probe_capability().await?;
-    builder
-        .add(orbis_core::FeatureId::ChargeLimit, battery)
-        .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))?;
-
-    // GPU probes: power, mux, access
-    let gpu_entries = runtime.gpu.probe_primitives().await;
-    for (feature, capability) in gpu_entries {
-        builder
-            .add(feature, capability)
-            .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))?;
-    }
-
-    // Fan curve probe: read capability from the fan provider, write capability
-    // controlled by Hardware1 evidence (fan_write_available) preserved from
-    // startup. This matches the initial registry assembly policy.
-    let fan_curve = runtime
-        .fan
-        .probe_fan_capability(orbis_core::fan::FanId::Cpu, runtime.fan_write_available())
-        .await?;
-    builder
-        .add(orbis_core::FeatureId::FanCurves, fan_curve)
-        .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))?;
-
-    builder
-        .build()
-        .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))
+    crate::composition::probe_capability_registry(
+        runtime.battery.provider_battery(),
+        runtime.performance.provider_performance(),
+        runtime.gpu.provider_power(),
+        runtime.gpu.provider_mux(),
+        runtime.gpu.provider_access(),
+        runtime.fan.provider_fan(),
+        runtime.fan_write_available(),
+        next_generation,
+        std::time::SystemTime::now(),
+    )
+    .await
 }
 
 #[cfg(test)]
