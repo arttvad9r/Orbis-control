@@ -1,0 +1,31 @@
+import { WindowHeader, SectionCard, ActionButton } from "common.slint";
+import { Palette } from "../themes/dark.slint";
+
+export component PreviewDialogWindow inherits Window {
+    width: 430px;
+    height: 220px;
+    title: "Orbis Control";
+    background: Palette.window-background;
+    in-out property <int> kind: 0;
+
+    VerticalLayout {
+        padding: 12px; spacing: 9px;
+        WindowHeader { title: root.kind == 0 ? "Reboot required" : root.kind == 1 ? "Logout required" : root.kind == 2 ? "Action failed" : "Confirm action"; subtitle: "Product-state dialog"; }
+        SectionCard {
+            vertical-stretch: 1;
+            Text {
+                x: 12px; y: 12px; width: parent.width - 24px; height: parent.height - 24px;
+                text: root.kind == 0 ? "The requested GPU mode is staged and requires a reboot before it becomes effective."
+                    : root.kind == 1 ? "The requested GPU transition requires logging out before the desktop session can switch safely."
+                    : root.kind == 2 ? "The backend did not confirm the requested operation. The previously observed state is preserved."
+                    : "This preview represents a confirmation dialog. No visual-only control performs a privileged mutation.";
+                font-size: 10px; color: root.kind == 2 ? Palette.error : Palette.text-primary; wrap: word-wrap;
+            }
+        }
+        HorizontalLayout { height: 28px; spacing: 6px;
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            if (root.kind != 2) : ActionButton { width: 90px; label: "Cancel"; clicked => { root.hide(); } }
+            ActionButton { width: 112px; label: root.kind == 0 ? "Reboot Later" : root.kind == 1 ? "Logout Later" : root.kind == 2 ? "Close" : "Confirm"; accent: root.kind != 2; clicked => { root.hide(); } }
+        }
+    }
+}
