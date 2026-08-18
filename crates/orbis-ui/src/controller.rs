@@ -575,8 +575,8 @@ impl UiState {
         let mut temps = [0i32; 8];
         let mut pwms = [0i32; 8];
         for (i, pt) in curve.points.iter().take(8).enumerate() {
-            temps[i] = pt.temp.get() as i32;
-            pwms[i] = pt.pwm.get() as i32;
+            temps[i] = i32::from(pt.temp.get());
+            pwms[i] = i32::from(pt.pwm.get());
         }
         self.fan_curve_temps = temps;
         self.fan_curve_pwms = pwms;
@@ -585,14 +585,18 @@ impl UiState {
 
     /// Build `FanCurvePoints` from editor state for mutation.
     ///
-    /// Returns `None` if any temp/pwm value is out of the valid newtype range.
+    /// Returns `None` if any temp/pwm value cannot be represented by the wire
+    /// primitive or violates the domain newtype range. Narrowing is checked
+    /// before constructing newtypes so values such as PWM 256 cannot wrap to 0.
     pub fn build_fan_curve_points(&self) -> Option<orbis_providers::traits::FanCurvePoints> {
         use orbis_core::newtypes::{FanPwm, TemperatureC};
         let mut temps = [TemperatureC::new(0).ok()?; 8];
         let mut pwms = [FanPwm::new(0).ok()?; 8];
         for i in 0..8 {
-            temps[i] = TemperatureC::new(self.fan_curve_temps[i] as i16).ok()?;
-            pwms[i] = FanPwm::new(self.fan_curve_pwms[i] as u8).ok()?;
+            let temp = i16::try_from(self.fan_curve_temps[i]).ok()?;
+            let pwm = u8::try_from(self.fan_curve_pwms[i]).ok()?;
+            temps[i] = TemperatureC::new(temp).ok()?;
+            pwms[i] = FanPwm::new(pwm).ok()?;
         }
         Some(orbis_providers::traits::FanCurvePoints { temps, pwms })
     }
@@ -1264,5 +1268,23 @@ mod tests {
             orbis_core::profile::AsusdFanProfile::Quiet,
             orbis_core::profile::AsusdFanProfile::LowPower
         );
+    }
+
+    #[test]
+    fn fan_curve_points_reject_integer_narrowing_overflow() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.fan_curve_temps = [50; 8];
+        s.fan_curve_pwms = [100; 8];
+        assert!(s.build_fan_curve_points().is_some());
+
+        s.fan_curve_temps[0] = i32::from(i16::MAX) + 1;
+        assert!(s.build_fan_curve_points().is_none());
+
+        s.fan_curve_temps[0] = 50;
+        s.fan_curve_pwms[0] = 256;
+        assert!(s.build_fan_curve_points().is_none());
+
+        s.fan_curve_pwms[0] = -1;
+        assert!(s.build_fan_curve_points().is_none());
     }
 }
