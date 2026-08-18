@@ -181,4 +181,217 @@ mod tests {
         let back: HardwareSnapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(back, s);
     }
+
+    // -----------------------------------------------------------------------
+    // Telemetry roundtrip tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn telemetry_roundtrip_preserves_all_values() {
+        let t = Telemetry {
+            cpu_temp: Some(TemperatureC::new(46).unwrap()),
+            gpu_temp: Some(TemperatureC::new(43).unwrap()),
+            fans: vec![
+                FanTelemetry {
+                    fan: FanId::Cpu,
+                    rpm: Rpm::new(2600).unwrap(),
+                    percent: None,
+                },
+                FanTelemetry {
+                    fan: FanId::Gpu,
+                    rpm: Rpm::new(2100).unwrap(),
+                    percent: None,
+                },
+            ],
+            power: PowerTelemetry {
+                ac: None,
+                battery: None,
+                total: None,
+                gpu: Some(MilliWatt::new(13_073).unwrap()),
+            },
+            ac_online: Some(true),
+            battery: Some(BatteryTelemetry {
+                percent: Percent::new(100).unwrap(),
+                capacity: Some(Percent::new(87).unwrap()),
+                energy_now: None,
+                energy_full: None,
+                charge_cycles: Some(5),
+                state: "Full".into(),
+            }),
+            gpu_power_state: GpuPowerState::Unknown,
+            ts: SystemTime::UNIX_EPOCH,
+        };
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, t);
+    }
+
+    #[test]
+    fn cpu_temp_none_roundtrip() {
+        let mut t = Telemetry::empty();
+        t.cpu_temp = None;
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.cpu_temp, None);
+    }
+
+    #[test]
+    fn gpu_power_none_roundtrip() {
+        let mut t = Telemetry::empty();
+        t.power.gpu = None;
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.power.gpu, None);
+    }
+
+    #[test]
+    fn ac_online_false_roundtrip() {
+        let mut t = Telemetry::empty();
+        t.ac_online = Some(false);
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.ac_online, Some(false));
+    }
+
+    #[test]
+    fn ac_online_none_roundtrip() {
+        let mut t = Telemetry::empty();
+        t.ac_online = None;
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.ac_online, None);
+    }
+
+    #[test]
+    fn fan_rpm_zero_roundtrip() {
+        let mut t = Telemetry::empty();
+        t.fans = vec![FanTelemetry {
+            fan: FanId::Cpu,
+            rpm: Rpm::new(0).unwrap(),
+            percent: None,
+        }];
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.fans.len(), 1);
+        assert_eq!(back.fans[0].rpm.get(), 0);
+        assert_eq!(back.fans[0].fan, FanId::Cpu);
+    }
+
+    #[test]
+    fn single_gpu_fan_identity_preserved() {
+        // Only GPU fan present → identity must remain Gpu, not renumbered.
+        let mut t = Telemetry::empty();
+        t.fans = vec![FanTelemetry {
+            fan: FanId::Gpu,
+            rpm: Rpm::new(3200).unwrap(),
+            percent: None,
+        }];
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.fans.len(), 1);
+        assert_eq!(back.fans[0].fan, FanId::Gpu);
+        assert_eq!(back.fans[0].rpm.get(), 3200);
+    }
+
+    #[test]
+    fn mixed_fans_preserve_identity() {
+        let mut t = Telemetry::empty();
+        t.fans = vec![
+            FanTelemetry {
+                fan: FanId::Gpu,
+                rpm: Rpm::new(3200).unwrap(),
+                percent: None,
+            },
+            FanTelemetry {
+                fan: FanId::Other("custom".into()),
+                rpm: Rpm::new(1500).unwrap(),
+                percent: None,
+            },
+        ];
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.fans.len(), 2);
+        assert_eq!(back.fans[0].fan, FanId::Gpu);
+        assert_eq!(back.fans[1].fan, FanId::Other("custom".to_string()));
+    }
+
+    #[test]
+    fn battery_optional_metadata_none_roundtrip() {
+        let mut t = Telemetry::empty();
+        t.battery = Some(BatteryTelemetry {
+            percent: Percent::new(80).unwrap(),
+            capacity: None,
+            energy_now: None,
+            energy_full: None,
+            charge_cycles: None,
+            state: "Discharging".into(),
+        });
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        let b = back.battery.unwrap();
+        assert_eq!(b.percent.get(), 80);
+        assert_eq!(b.capacity, None);
+        assert_eq!(b.charge_cycles, None);
+        assert_eq!(b.state, "Discharging");
+    }
+
+    #[test]
+    fn numeric_edge_values_roundtrip() {
+        let mut t = Telemetry::empty();
+        t.cpu_temp = Some(TemperatureC::new(-50).unwrap());
+        t.gpu_temp = Some(TemperatureC::new(150).unwrap());
+        t.power.gpu = Some(MilliWatt::new(10_000_000).unwrap());
+        t.fans = vec![FanTelemetry {
+            fan: FanId::Cpu,
+            rpm: Rpm::new(65535).unwrap(),
+            percent: Some(Percent::new(100).unwrap()),
+        }];
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.cpu_temp, Some(TemperatureC::new(-50).unwrap()));
+        assert_eq!(back.gpu_temp, Some(TemperatureC::new(150).unwrap()));
+        assert_eq!(back.power.gpu, Some(MilliWatt::new(10_000_000).unwrap()));
+        assert_eq!(back.fans[0].rpm.get(), 65535);
+    }
+
+    #[test]
+    fn partial_telemetry_survives_roundtrip() {
+        // Partial: only cpu_temp and battery present, rest None.
+        let t = Telemetry {
+            cpu_temp: Some(TemperatureC::new(46).unwrap()),
+            gpu_temp: None,
+            fans: vec![],
+            power: PowerTelemetry::default(),
+            ac_online: None,
+            battery: Some(BatteryTelemetry {
+                percent: Percent::new(80).unwrap(),
+                capacity: None,
+                energy_now: None,
+                energy_full: None,
+                charge_cycles: None,
+                state: "Discharging".into(),
+            }),
+            gpu_power_state: GpuPowerState::Unknown,
+            ts: SystemTime::UNIX_EPOCH,
+        };
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, t);
+        // Verify None fields are preserved, not collapsed.
+        assert!(back.fans.is_empty());
+        assert_eq!(back.ac_online, None);
+        assert_eq!(back.power.gpu, None);
+    }
+
+    #[test]
+    fn malformed_json_does_not_become_valid_default() {
+        // Malformed JSON for numeric fields should fail to parse, not produce
+        // a default valid value.
+        let result: Result<Telemetry, _> =
+            serde_json::from_str(r#"{"cpu_temp":"not_a_number","fans":[],"power":{}}"#);
+        assert!(
+            result.is_err(),
+            "malformed JSON must not produce valid Telemetry"
+        );
+    }
 }
