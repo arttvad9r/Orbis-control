@@ -1287,4 +1287,198 @@ mod tests {
         s.fan_curve_pwms[0] = -1;
         assert!(s.build_fan_curve_points().is_none());
     }
+
+    // -----------------------------------------------------------------------
+    // Runtime capability mapping: registry → controller state
+    // -----------------------------------------------------------------------
+
+    /// Build a `CapabilityRegistrySnapshot` with the given capabilities
+    /// and return it. Helper for controller capability mapping tests.
+    fn registry_with(
+        entries: Vec<(orbis_core::FeatureId, orbis_core::capability::Capability)>,
+    ) -> orbis_capabilities::CapabilityRegistrySnapshot {
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        for (id, cap) in entries {
+            builder.add(id, cap).unwrap();
+        }
+        builder.build().unwrap()
+    }
+
+    fn cap(
+        status: CapabilityStatus,
+        read: CapabilityStatus,
+        write: CapabilityStatus,
+    ) -> orbis_core::capability::Capability {
+        use orbis_core::capability::{CapabilityOperations, OperationCapability};
+        orbis_core::capability::Capability::new(status).with_operations(CapabilityOperations {
+            read: OperationCapability::new(read),
+            write: OperationCapability::new(write),
+        })
+    }
+
+    #[test]
+    fn battery_read_write_supported_maps_to_controller() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.charge_limit_capability, CapabilityAvailability::Supported);
+        assert!(s.charge_limit_writable);
+    }
+
+    #[test]
+    fn battery_read_supported_write_unsupported_maps_to_controller() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Unsupported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        // Overall status is Supported (read is Supported), but write is
+        // Unsupported → not writable. Controller uses write status for gating.
+        assert_eq!(s.charge_limit_capability, CapabilityAvailability::Supported);
+        assert!(!s.charge_limit_writable);
+    }
+
+    #[test]
+    fn battery_backend_missing_maps_to_controller() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(
+            s.charge_limit_capability,
+            CapabilityAvailability::BackendMissing
+        );
+        assert!(!s.charge_limit_writable);
+    }
+
+    #[test]
+    fn battery_permission_denied_maps_to_controller() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        // PermissionDenied on read → overall PermissionDenied.
+        // Write stays Unsupported (no write evidence).
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::Unsupported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(
+            s.charge_limit_capability,
+            CapabilityAvailability::PermissionDenied
+        );
+        assert!(!s.charge_limit_writable);
+    }
+
+    #[test]
+    fn performance_read_write_supported_maps_to_controller() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::Performance,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.perf_capability, CapabilityAvailability::Supported);
+        assert!(s.perf_writable);
+    }
+
+    #[test]
+    fn one_unavailable_domain_does_not_affect_others() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![
+            (
+                orbis_core::FeatureId::ChargeLimit,
+                cap(
+                    CapabilityStatus::BackendMissing,
+                    CapabilityStatus::BackendMissing,
+                    CapabilityStatus::BackendMissing,
+                ),
+            ),
+            (
+                orbis_core::FeatureId::Performance,
+                cap(
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                ),
+            ),
+            (
+                orbis_core::FeatureId::GpuPower,
+                cap(
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Unsupported,
+                ),
+            ),
+        ]);
+        s.update_capabilities(&snapshot);
+        // Battery is BackendMissing.
+        assert_eq!(
+            s.charge_limit_capability,
+            CapabilityAvailability::BackendMissing
+        );
+        assert!(!s.charge_limit_writable);
+        // Performance is Supported + writable — independent of Battery.
+        assert_eq!(s.perf_capability, CapabilityAvailability::Supported);
+        assert!(s.perf_writable);
+        // GPU Power is Supported but read-only — independent of Battery.
+        assert_eq!(s.gpu_power_capability, CapabilityAvailability::Supported);
+    }
+
+    #[test]
+    fn fan_curve_writable_matches_write_operation_status() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        // Write = Supported.
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.fan_curve_capability, CapabilityAvailability::Supported);
+        assert!(s.fan_curve_writable);
+
+        // Write = Unsupported.
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::ReadOnly,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Unsupported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.fan_curve_capability, CapabilityAvailability::ReadOnly);
+        assert!(!s.fan_curve_writable);
+    }
 }

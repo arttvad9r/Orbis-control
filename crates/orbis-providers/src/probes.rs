@@ -1094,6 +1094,148 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn charge_limit_probe_reports_write_unsupported_when_mutation_path_not_proven() {
+        let bounds =
+            ChargeLimitBounds::new(Percent::new(40).unwrap(), Percent::new(100).unwrap(), 1)
+                .unwrap();
+        let provider = ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds))));
+        // write_supported = false: validate_charge_limit returns Invalid.
+        let capability = probe_charge_limit(&provider).await.unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+        // Overall status is Supported (read is Supported), but write is
+        // Unsupported. The controller uses operations.write.status for gating.
+        assert_eq!(capability.status, CapabilityStatus::Supported);
+    }
+
+    #[tokio::test]
+    async fn battery_backend_missing_does_not_corrupt_performance_in_registry() {
+        // Multi-domain independence: Battery BackendMissing must not prevent
+        // Performance from being Supported in the same registry snapshot.
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let performance = probe_performance(&ScriptedProvider::performance(Scripted::Value(vec![
+            PerformanceProfile::Silent,
+            PerformanceProfile::Balanced,
+            PerformanceProfile::Turbo,
+        ])))
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::Performance, performance)
+            .unwrap();
+
+        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
+            ScriptedError::BackendMissing,
+        )))
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::ChargeLimit, battery)
+            .unwrap();
+
+        let snapshot = builder.build().unwrap();
+        // Performance is fully Supported.
+        let perf = snapshot
+            .capability(orbis_core::FeatureId::Performance)
+            .unwrap();
+        assert_eq!(perf.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(perf.operations.write.status, CapabilityStatus::Unsupported);
+        assert_eq!(perf.status, CapabilityStatus::Supported);
+
+        // Battery is BackendMissing — independently classified.
+        let bat = snapshot
+            .capability(orbis_core::FeatureId::ChargeLimit)
+            .unwrap();
+        assert_eq!(bat.operations.read.status, CapabilityStatus::BackendMissing);
+        assert_eq!(
+            bat.operations.write.status,
+            CapabilityStatus::BackendMissing
+        );
+        assert_eq!(bat.status, CapabilityStatus::BackendMissing);
+    }
+
+    #[tokio::test]
+    async fn battery_permission_denied_does_not_affect_gpu_in_registry() {
+        // PermissionDenied on Battery read is evidence about reads only.
+        // GPU primitives in the same registry remain independently classified.
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
+            ScriptedError::PermissionDenied,
+        )))
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::ChargeLimit, battery)
+            .unwrap();
+
+        let gpu_power = probe_gpu_power(&ScriptedProvider::gpu(
+            Scripted::Value(GpuPowerState::Active),
+            Scripted::Error(ScriptedError::Unsupported),
+            Scripted::Error(ScriptedError::Unsupported),
+        ))
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::GpuPower, gpu_power)
+            .unwrap();
+
+        let snapshot = builder.build().unwrap();
+        let bat = snapshot
+            .capability(orbis_core::FeatureId::ChargeLimit)
+            .unwrap();
+        assert_eq!(
+            bat.operations.read.status,
+            CapabilityStatus::PermissionDenied
+        );
+        // Write stays Unsupported: PermissionDenied on read does NOT invent
+        // a denied write — we have no evidence about write authorization.
+        assert_eq!(bat.operations.write.status, CapabilityStatus::Unsupported);
+
+        let gpu = snapshot
+            .capability(orbis_core::FeatureId::GpuPower)
+            .unwrap();
+        assert_eq!(gpu.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(gpu.operations.write.status, CapabilityStatus::Unsupported);
+    }
+
+    #[tokio::test]
+    async fn no_optimistic_available_without_evidence() {
+        // An empty registry must not claim any capability is Supported.
+        let builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let snapshot = builder.build().unwrap();
+        assert!(snapshot.is_empty());
+        // Unknown is the default for absent capabilities (via DeviceCapabilities).
+        let device_caps = snapshot.device_capabilities();
+        assert_eq!(
+            device_caps.status(orbis_core::FeatureId::Performance),
+            CapabilityStatus::Unknown
+        );
+        assert_eq!(
+            device_caps.status(orbis_core::FeatureId::ChargeLimit),
+            CapabilityStatus::Unknown
+        );
+        assert_eq!(
+            device_caps.status(orbis_core::FeatureId::GpuPower),
+            CapabilityStatus::Unknown
+        );
+    }
+
+    #[tokio::test]
     async fn fan_curve_probe_write_mirrors_backend_missing_when_read_fails() {
         let provider = ScriptedFanProvider::backend_missing();
         let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, true)
