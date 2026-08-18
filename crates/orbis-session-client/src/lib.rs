@@ -688,6 +688,51 @@ impl HardwareBatterySource for ZbusHardwareBatterySource {
     }
 }
 
+/// Decode the Hardware1 `BatteryMutationStatus` wire value into the canonical
+/// domain capability status.
+///
+/// Unknown wire values and the explicit `Unknown` evidence both map to
+/// `CapabilityStatus::Unknown` — never to a guessed known state.
+pub fn battery_mutation_status_from_wire(raw: u8) -> orbis_core::capability::CapabilityStatus {
+    use orbis_core::capability::CapabilityStatus;
+    use orbis_hardwared::battery::{BatteryMutationStatus, battery_mutation_wire};
+    match battery_mutation_wire::from_wire(raw) {
+        Some(BatteryMutationStatus::Supported) => CapabilityStatus::Supported,
+        Some(BatteryMutationStatus::Unsupported) => CapabilityStatus::Unsupported,
+        Some(BatteryMutationStatus::TemporarilyUnavailable) => {
+            CapabilityStatus::TemporarilyUnavailable
+        }
+        Some(BatteryMutationStatus::PermissionDenied) => CapabilityStatus::PermissionDenied,
+        Some(BatteryMutationStatus::Unknown) | None => CapabilityStatus::Unknown,
+    }
+}
+
+/// Read-only typed Battery mutation backend status from the production
+/// Hardware1 daemon.
+///
+/// This performs no mutation and requires no authorization. When the daemon is
+/// absent, the method is not exposed, or the reply is malformed, the result is
+/// `CapabilityStatus::Unknown` — the honest no-evidence state, never a guessed
+/// `Supported`.
+pub async fn hardware1_battery_mutation_status(
+    connection: &zbus::Connection,
+) -> orbis_core::capability::CapabilityStatus {
+    let proxy = match Hardware1Proxy::builder(connection)
+        .path(DBUS_OBJECT_PATH)
+        .expect("valid hardware object path")
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+    {
+        Ok(proxy) => proxy,
+        Err(_) => return orbis_core::capability::CapabilityStatus::Unknown,
+    };
+    match proxy.battery_mutation_status().await {
+        Ok(raw) => battery_mutation_status_from_wire(raw),
+        Err(_) => orbis_core::capability::CapabilityStatus::Unknown,
+    }
+}
+
 /// Реальный zbus источник Performance через generated `Session1Proxy`.
 ///
 /// Хранит переданную извне готовую `Connection`; I/O начинается только в
@@ -1468,6 +1513,39 @@ mod tests {
     fn generic_zbus_error_maps_to_dbus() {
         let err = zbus_error_to_provider(zbus::Error::Failure("transport".into()));
         assert!(matches!(err, ProviderError::Dbus(_)));
+    }
+
+    #[test]
+    fn battery_mutation_status_wire_maps_to_capability_status() {
+        use orbis_core::capability::CapabilityStatus;
+        use orbis_hardwared::battery::battery_mutation_wire;
+
+        assert_eq!(
+            battery_mutation_status_from_wire(battery_mutation_wire::SUPPORTED),
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            battery_mutation_status_from_wire(battery_mutation_wire::UNSUPPORTED),
+            CapabilityStatus::Unsupported
+        );
+        assert_eq!(
+            battery_mutation_status_from_wire(battery_mutation_wire::TEMPORARILY_UNAVAILABLE),
+            CapabilityStatus::TemporarilyUnavailable
+        );
+        assert_eq!(
+            battery_mutation_status_from_wire(battery_mutation_wire::PERMISSION_DENIED),
+            CapabilityStatus::PermissionDenied
+        );
+        // Explicit unknown evidence and malformed wire both map to Unknown —
+        // never to a guessed known state.
+        assert_eq!(
+            battery_mutation_status_from_wire(battery_mutation_wire::UNKNOWN),
+            CapabilityStatus::Unknown
+        );
+        assert_eq!(
+            battery_mutation_status_from_wire(99),
+            CapabilityStatus::Unknown
+        );
     }
 
     #[test]

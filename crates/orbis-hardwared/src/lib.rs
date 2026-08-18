@@ -746,6 +746,22 @@ impl HardwareService {
         .await
     }
 
+    /// Read-only typed evidence about Battery mutation backend availability.
+    ///
+    /// This is capability metadata, not a mutation: no authorization is
+    /// required and no hardware I/O occurs. The returned wire value is one of
+    /// `battery::battery_mutation_wire::*` so the GUI can honestly gate its
+    /// mutation controls instead of guessing from `validate_charge_limit`.
+    fn battery_mutation_status(&self) -> u8 {
+        use battery::battery_mutation_wire;
+        battery_mutation_wire::to_wire(
+            self.battery_backend
+                .as_deref()
+                .map(|b| b.mutation_status())
+                .unwrap_or(battery::BatteryMutationStatus::Unknown),
+        )
+    }
+
     /// Установить одну fan curve (profile wire 0..3, fan 0/1, ровно 8 точек);
     /// возвращает подтверждённый profile после asusd setter + read-back.
     async fn set_fan_curve(
@@ -794,6 +810,9 @@ pub trait Hardware1 {
 
     /// Set one supergfxd backend mode and return staged observation.
     fn set_gpu_mode(&self, requested_mode: u32) -> zbus::Result<GpuMutationResult>;
+
+    /// Read-only typed Battery mutation backend availability (wire enum).
+    fn battery_mutation_status(&self) -> zbus::Result<u8>;
 
     /// Установить одну fan curve; возвращает подтверждённый profile wire.
     fn set_fan_curve(&self, profile: u32, fan: u8, curve: fans::FanCurveWire) -> zbus::Result<u32>;
@@ -1141,6 +1160,10 @@ mod tests {
                 Err(error) => Err(ProviderError::Internal(error.to_string())),
             }
         }
+
+        fn mutation_status(&self) -> battery::BatteryMutationStatus {
+            battery::BatteryMutationStatus::Supported
+        }
     }
 
     fn battery_backend(configured: u8, effective: u8) -> FakeBatteryBackend {
@@ -1223,6 +1246,28 @@ mod tests {
                 .await
                 .expect("configured read-back confirmed"),
             80
+        );
+    }
+
+    #[test]
+    fn battery_mutation_status_reflects_backend_presence() {
+        // Proven backend installed → SUPPORTED wire evidence.
+        let service = HardwareService::with_battery_backend(
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+            Box::new(battery_backend(80, 100)),
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+        );
+        assert_eq!(
+            service.battery_mutation_status(),
+            battery::battery_mutation_wire::SUPPORTED
+        );
+
+        // No battery backend configured → UNKNOWN wire (no evidence, never a
+        // guessed Supported).
+        let service = HardwareService::new(Box::new(FakeAuthorizer::new(AuthOutcome::Ok)));
+        assert_eq!(
+            service.battery_mutation_status(),
+            battery::battery_mutation_wire::UNKNOWN
         );
     }
 

@@ -20,7 +20,7 @@ use orbis_hardwared::{
     HardwareService, PolkitAuthorizer,
     battery::{
         AsusdBatteryMutationBackend, BatteryMutationBackend, BatteryMutationReadback,
-        ZbusAsusdBatteryClient, discover_effective_reader,
+        BatteryMutationStatus, ZbusAsusdBatteryClient, discover_effective_reader,
     },
     fans::{AsusdFanCurveMutationBackend, ZbusAsusdFanCurveClient},
     supergfxd::{MutationObservation, SupergfxdMutationOperation},
@@ -97,6 +97,14 @@ impl BatteryMutationBackend for DisabledBatteryMutationBackend {
             DisabledBatteryReason::PermissionDenied(message) => {
                 Err(ProviderError::PermissionDenied(message.clone()))
             }
+        }
+    }
+
+    fn mutation_status(&self) -> BatteryMutationStatus {
+        match &self.reason {
+            DisabledBatteryReason::Unsupported(_) => BatteryMutationStatus::Unsupported,
+            DisabledBatteryReason::Unavailable(_) => BatteryMutationStatus::TemporarilyUnavailable,
+            DisabledBatteryReason::PermissionDenied(_) => BatteryMutationStatus::PermissionDenied,
         }
     }
 }
@@ -208,5 +216,51 @@ mod tests {
             .await
             .expect_err("temporary failure must remain unavailable");
         assert!(matches!(error, ProviderError::BackendUnavailable(_)));
+    }
+
+    #[test]
+    fn disabled_battery_mutation_status_preserves_typed_reason() {
+        // The typed mutation status must mirror the discovery classification:
+        // Unsupported stays Unsupported, permission stays PermissionDenied,
+        // temporary discovery failure stays TemporarilyUnavailable.
+        let unsupported = DisabledBatteryMutationBackend::from_discovery_error(
+            ProviderError::Unsupported("no effective threshold source".into()),
+        );
+        assert_eq!(
+            unsupported.mutation_status(),
+            BatteryMutationStatus::Unsupported
+        );
+
+        let denied = DisabledBatteryMutationBackend::from_discovery_error(ProviderError::Io(
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        ));
+        assert_eq!(
+            denied.mutation_status(),
+            BatteryMutationStatus::PermissionDenied
+        );
+
+        let unavailable = DisabledBatteryMutationBackend::from_discovery_error(ProviderError::Io(
+            std::io::Error::other("temporary read failure"),
+        ));
+        assert_eq!(
+            unavailable.mutation_status(),
+            BatteryMutationStatus::TemporarilyUnavailable
+        );
+    }
+
+    #[test]
+    fn battery_mutation_wire_roundtrip_is_total() {
+        use orbis_hardwared::battery::battery_mutation_wire;
+        for status in [
+            BatteryMutationStatus::Supported,
+            BatteryMutationStatus::Unsupported,
+            BatteryMutationStatus::TemporarilyUnavailable,
+            BatteryMutationStatus::PermissionDenied,
+            BatteryMutationStatus::Unknown,
+        ] {
+            let wire = battery_mutation_wire::to_wire(status);
+            assert_eq!(battery_mutation_wire::from_wire(wire), Some(status));
+        }
+        assert_eq!(battery_mutation_wire::from_wire(99), None);
     }
 }
