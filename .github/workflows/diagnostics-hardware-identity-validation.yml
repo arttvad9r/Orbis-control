@@ -1,0 +1,47 @@
+name: Diagnostics hardware identity validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    if: github.head_ref == 'agent/diagnostics-hardware-identity-provider-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/diagnostics-hardware-identity-provider
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Targeted orbis-providers checks
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all -- --check
+            cargo check -p orbis-providers --all-targets
+            cargo test -p orbis-providers hardware_identity
+            cargo clippy -p orbis-providers --all-targets -- -D warnings
+          '
+
+      - name: Check narrow diff
+        run: |
+          set -euo pipefail
+          git diff --check 65bd079221e9dfcc6f32d7f552cee8f4cf953df2..HEAD
+          git diff --name-only 65bd079221e9dfcc6f32d7f552cee8f4cf953df2..HEAD | sort > /tmp/changed.txt
+          cat >/tmp/allowed.txt <<'EOF'
+          crates/orbis-providers/src/hardware_identity.rs
+          crates/orbis-providers/src/lib.rs
+          EOF
+          sort -o /tmp/allowed.txt /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
