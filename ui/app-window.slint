@@ -1,18 +1,36 @@
-// Orbis Control — compact G-Helper-inspired application surface.
-// Existing production callbacks/state are preserved. Future controls remain
-// local Slint preview state until their capability/backend contracts exist.
+// Orbis Control — главное окно (минимальный визуальный прототип).
+// Ширина 425 logical px, без боковой панели. Секции: Performance, GPU,
+// Battery Charge Limit, Telemetry, нижний служебный блок.
 
-import { ComboBox, Slider, CheckBox } from "std-widgets.slint";
 import { ModeCard } from "components/mode-card.slint";
+import { SectionHeader } from "components/section-header.slint";
 import { ValueSlider } from "components/value-slider.slint";
 import { FanCurveEditor, FanCurveHwState } from "components/fan-curve-editor.slint";
-import { PreviewButton, ChoiceChip, ToggleRow, PreviewSliderRow, SelectRow, NumericRow, TextInputRow, BindingRow, ColorSwatch, StatusBadge, MetricTile, PreviewNotice } from "components/visual-controls.slint";
 import { Palette } from "themes/dark.slint";
 
-export enum ChargeLimitState { Loading, Ready, Unavailable }
-export enum GpuHwState { Loading, Ready, Unavailable }
-export enum PerformanceHwState { Loading, Ready, Unavailable }
-export enum GpuModeHwState { Loading, Ready, Unavailable }
+export enum ChargeLimitState {
+    Loading,
+    Ready,
+    Unavailable,
+}
+
+export enum GpuHwState {
+    Loading,
+    Ready,
+    Unavailable,
+}
+
+export enum PerformanceHwState {
+    Loading,
+    Ready,
+    Unavailable,
+}
+
+export enum GpuModeHwState {
+    Loading,
+    Ready,
+    Unavailable,
+}
 
 export struct UiState {
     perf-selected: int,
@@ -73,43 +91,45 @@ export struct UiState {
     fan-pwm-7: int,
 }
 
-component WindowHeader inherits Rectangle {
-    in property <string> title;
-    in property <string> subtitle: "";
-    height: 42px;
-    border-radius: 5px;
-    background: Palette.titlebar-background;
+component TelemetryCell {
+    in property <string> value;
+    in property <string> label;
+
     HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        spacing: 8px;
+        spacing: 6px;
         alignment: center;
-        VerticalLayout {
-            alignment: center;
-            Text { text: root.title; font-size: 14px; font-weight: 700; color: Palette.text-primary; }
-            if (root.subtitle != "") : Text { text: root.subtitle; font-size: 8px; color: Palette.text-secondary; }
+        Text {
+            text: root.value;
+            font-size: 13px;
+            font-weight: 600;
+            color: Palette.text-primary;
         }
-        Rectangle { horizontal-stretch: 1; background: transparent; }
+        Text {
+            text: root.label;
+            font-size: 12px;
+            color: Palette.text-secondary;
+        }
     }
 }
 
-component SectionCard inherits Rectangle {
-    border-radius: 5px;
-    border-width: 1px;
-    border-color: Palette.border-default;
-    background: Palette.surface-default;
-}
+component HwStatusCell {
+    in property <string> label;
+    in property <string> text;
 
-component SectionTitle inherits Rectangle {
-    in property <string> title;
-    in property <string> detail: "";
-    height: 18px;
-    background: transparent;
     HorizontalLayout {
+        spacing: 6px;
         alignment: center;
-        Text { text: root.title; font-size: 11px; font-weight: 700; color: Palette.text-primary; }
-        Rectangle { horizontal-stretch: 1; background: transparent; }
-        if (root.detail != "") : Text { text: root.detail; font-size: 9px; color: Palette.text-secondary; vertical-alignment: center; }
+        Text {
+            text: root.label + ":";
+            font-size: 12px;
+            color: Palette.text-secondary;
+        }
+        Text {
+            text: root.text;
+            font-size: 12px;
+            font-weight: 600;
+            color: Palette.text-primary;
+        }
     }
 }
 
@@ -118,6 +138,7 @@ component FansActionButton inherits Rectangle {
     in property <bool> disabled: false;
     in property <bool> accent: false;
     callback clicked;
+
     height: 30px;
     min-width: 112px;
     border-radius: 3px;
@@ -126,28 +147,35 @@ component FansActionButton inherits Rectangle {
     background: root.disabled ? Palette.surface-disabled
         : touch.pressed ? Palette.surface-pressed
         : touch.has-hover ? Palette.surface-hover
-        : root.accent ? Palette.accent-default : Palette.surface-default;
-    Text { text: root.label; font-size: 10px; font-weight: 600; color: root.disabled ? Palette.text-disabled : Palette.text-primary; horizontal-alignment: center; vertical-alignment: center; }
-    touch := TouchArea { enabled: !root.disabled; clicked => { root.clicked(); } }
+        : root.accent ? Palette.accent-default
+        : Palette.surface-default;
+
+    Text {
+        text: root.label;
+        font-size: 11px;
+        font-weight: 600;
+        color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.clicked(); }
+    }
 }
 
-// ---------------------------------------------------------------------------
-// Fans + Power
-// ---------------------------------------------------------------------------
-
+// Separate native window for fan-curve editing. Factory Defaults is staged in
+// this window only: pressing it performs no hardware write. The reset boolean
+// reaches Rust only when the user explicitly presses Apply.
 export component FansWindow inherits Window {
-    width: 760px;
-    height: 600px;
-    min-width: 720px;
-    min-height: 560px;
+    width: 675px;
+    height: 550px;
     title: "Orbis Control — Fans + Power";
     background: Palette.window-background;
 
     in-out property <UiState> ui-state;
     property <bool> factory-reset-pending: false;
-    property <bool> fan-clamp-preview: true;
-    property <float> hysteresis-up-preview: 3;
-    property <float> hysteresis-down-preview: 3;
 
     callback fan-changed(int);
     callback fan-profile-changed(int);
@@ -156,34 +184,61 @@ export component FansWindow inherits Window {
     callback fan-apply-clicked(bool);
 
     VerticalLayout {
-        padding: 10px;
-        spacing: 7px;
-        FanCurveEditor {
-            height: 442px;
-            state: root.ui-state.fan-curve-state;
-            writable: root.ui-state.fan-curve-writable;
-            error-state: root.ui-state.fan-curve-error;
-            dirty: root.ui-state.fan-curve-dirty;
-            fan-selected: root.ui-state.fan-selected;
-            profile-selected: root.ui-state.fan-profile-selected;
-            temp-0: root.ui-state.fan-temp-0; temp-1: root.ui-state.fan-temp-1; temp-2: root.ui-state.fan-temp-2; temp-3: root.ui-state.fan-temp-3;
-            temp-4: root.ui-state.fan-temp-4; temp-5: root.ui-state.fan-temp-5; temp-6: root.ui-state.fan-temp-6; temp-7: root.ui-state.fan-temp-7;
-            pwm-0: root.ui-state.fan-pwm-0; pwm-1: root.ui-state.fan-pwm-1; pwm-2: root.ui-state.fan-pwm-2; pwm-3: root.ui-state.fan-pwm-3;
-            pwm-4: root.ui-state.fan-pwm-4; pwm-5: root.ui-state.fan-pwm-5; pwm-6: root.ui-state.fan-pwm-6; pwm-7: root.ui-state.fan-pwm-7;
-            fan-changed(i) => { root.factory-reset-pending = false; root.fan-changed(i); }
-            profile-changed(i) => { root.factory-reset-pending = false; root.fan-profile-changed(i); }
-            temp-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-temp-point-changed(i, v); }
-            pwm-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-pwm-point-changed(i, v); }
-        }
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 8px;
 
-        SectionCard {
-            height: 66px;
-            HorizontalLayout {
-                padding-left: 8px; padding-right: 8px; padding-top: 3px; padding-bottom: 3px; spacing: 10px;
-                ToggleRow { width: 160px; label: "Clamp to Grid"; checked <=> root.fan-clamp-preview; }
-                PreviewSliderRow { horizontal-stretch: 1; label: "Hysteresis up"; unit: "°"; minimum: 0; maximum: 10; value <=> root.hysteresis-up-preview; }
-                PreviewSliderRow { horizontal-stretch: 1; label: "Hysteresis down"; unit: "°"; minimum: 0; maximum: 10; value <=> root.hysteresis-down-preview; }
-                PreviewButton { width: 90px; label: "Calibrate"; compact: true; }
+        // FanCurveEditor still owns the graph and point controls. Its legacy
+        // bottom action row is clipped; the window owns the staged-reset action
+        // row below so Factory Defaults can remain non-mutating until Apply.
+        Rectangle {
+            height: 440px;
+            clip: true;
+            background: transparent;
+
+            FanCurveEditor {
+                width: parent.width;
+                height: 482px;
+                state: root.ui-state.fan-curve-state;
+                writable: root.ui-state.fan-curve-writable;
+                error-state: root.ui-state.fan-curve-error;
+                dirty: root.ui-state.fan-curve-dirty;
+                fan-selected: root.ui-state.fan-selected;
+                profile-selected: root.ui-state.fan-profile-selected;
+                temp-0: root.ui-state.fan-temp-0;
+                temp-1: root.ui-state.fan-temp-1;
+                temp-2: root.ui-state.fan-temp-2;
+                temp-3: root.ui-state.fan-temp-3;
+                temp-4: root.ui-state.fan-temp-4;
+                temp-5: root.ui-state.fan-temp-5;
+                temp-6: root.ui-state.fan-temp-6;
+                temp-7: root.ui-state.fan-temp-7;
+                pwm-0: root.ui-state.fan-pwm-0;
+                pwm-1: root.ui-state.fan-pwm-1;
+                pwm-2: root.ui-state.fan-pwm-2;
+                pwm-3: root.ui-state.fan-pwm-3;
+                pwm-4: root.ui-state.fan-pwm-4;
+                pwm-5: root.ui-state.fan-pwm-5;
+                pwm-6: root.ui-state.fan-pwm-6;
+                pwm-7: root.ui-state.fan-pwm-7;
+                fan-changed(i) => {
+                    root.factory-reset-pending = false;
+                    root.fan-changed(i);
+                }
+                profile-changed(i) => {
+                    root.factory-reset-pending = false;
+                    root.fan-profile-changed(i);
+                }
+                temp-point-changed(i, v) => {
+                    root.factory-reset-pending = false;
+                    root.fan-temp-point-changed(i, v);
+                }
+                pwm-point-changed(i, v) => {
+                    root.factory-reset-pending = false;
+                    root.fan-pwm-point-changed(i, v);
+                }
             }
         }
 
@@ -191,614 +246,476 @@ export component FansWindow inherits Window {
             height: 32px;
             spacing: 8px;
             alignment: center;
-            Rectangle { width: 3px; height: 16px; border-radius: 1.5px; background: root.ui-state.fan-curve-error ? Palette.error : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning : Palette.success; }
+
+            Rectangle {
+                width: 3px;
+                height: 16px;
+                border-radius: 1.5px;
+                background: root.ui-state.fan-curve-error ? Palette.error
+                    : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning
+                    : Palette.success;
+            }
             Text {
-                text: root.ui-state.fan-curve-error ? "Apply failed" : root.factory-reset-pending ? "Factory defaults pending · no hardware write yet" : !root.ui-state.fan-curve-writable ? "Read only" : root.ui-state.fan-curve-dirty ? "Modified" : "Current";
-                font-size: 9px;
-                color: root.ui-state.fan-curve-error ? Palette.error : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning : Palette.text-secondary;
+                text: root.ui-state.fan-curve-error ? "Apply failed"
+                    : root.factory-reset-pending ? "Factory defaults pending · no hardware write yet"
+                    : !root.ui-state.fan-curve-writable ? "Read only"
+                    : root.ui-state.fan-curve-dirty ? "Modified"
+                    : "Current";
+                font-size: 10px;
+                color: root.ui-state.fan-curve-error ? Palette.error
+                    : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning
+                    : Palette.text-secondary;
                 vertical-alignment: center;
             }
+
             Rectangle { horizontal-stretch: 1; background: transparent; }
-            FansActionButton { label: "Factory Defaults"; disabled: !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error; clicked => { root.factory-reset-pending = true; } }
+
+            FansActionButton {
+                label: "Factory Defaults";
+                disabled: !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error;
+                clicked => { root.factory-reset-pending = true; }
+            }
             FansActionButton {
                 label: root.factory-reset-pending ? "Apply Factory Defaults" : "Apply Custom Fan Curve";
                 accent: true;
-                disabled: !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
-                clicked => { let reset = root.factory-reset-pending; root.fan-apply-clicked(reset); if (reset) { root.factory-reset-pending = false; } }
+                disabled: !root.ui-state.fan-curve-writable
+                    || root.ui-state.fan-curve-error
+                    || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
+                clicked => {
+                    let reset = root.factory-reset-pending;
+                    root.fan-apply-clicked(reset);
+                    if (reset) { root.factory-reset-pending = false; }
+                }
             }
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Extra — tabbed instead of one very long scrolling sheet.
-// ---------------------------------------------------------------------------
-
-export component ExtraWindow inherits Window {
-    width: 560px;
-    height: 760px;
-    min-width: 540px;
-    min-height: 700px;
-    title: "Orbis Control — Extra";
-    background: Palette.window-background;
-
-    property <int> page: 0;
-    property <[string]> binding-actions: ["Default", "None", "Mute", "Volume Up", "Volume Down", "Mic", "Screen", "Aura", "Performance Mode", "GPU Mode", "Custom Command"];
-    property <int> m1-action: 0; property <int> m2-action: 0; property <int> m3-action: 0; property <int> m4-action: 0; property <int> m5-action: 0;
-    property <int> fnf4-action: 0; property <int> fnc-action: 0; property <int> fnv-action: 0; property <int> fnenter-action: 0;
-    property <string> m1-param: ""; property <string> m2-param: ""; property <string> m3-param: ""; property <string> m4-param: ""; property <string> m5-param: "";
-    property <string> fnf4-param: ""; property <string> fnc-param: ""; property <string> fnv-param: ""; property <string> fnenter-param: "";
-    property <int> keyboard-speed: 1;
-    property <int> battery-timeout: 60;
-    property <int> plugged-timeout: 0;
-    property <bool> auto-clamshell: false; property <bool> topmost: false; property <bool> no-overdrive: false;
-    property <bool> boot-sound: true; property <bool> keystone-sound: true; property <bool> usb-c: true; property <bool> gpu-apps: true;
-    property <bool> nv-platform: true; property <bool> status-led: true; property <bool> number-pad: true; property <bool> aspm: false; property <bool> standby-networking: false;
-    property <int> hibernate-after: 60; property <int> igpu-memory: 0; property <int> p-cores: 8; property <int> e-cores: 8;
-    property <string> acpi-command: ""; property <string> acpi-param: ""; property <int> optimal-brightness: 1;
-    property <bool> asusd-service: true; property <bool> supergfx-service: true;
-    property <bool> key-awake: true; property <bool> key-boot: true; property <bool> key-sleep: false; property <bool> key-battery: true;
-    property <bool> logo-awake: true; property <bool> logo-boot: false; property <bool> logo-sleep: false; property <bool> logo-battery: false;
-    property <bool> bar-awake: true; property <bool> bar-boot: true; property <bool> bar-sleep: true; property <bool> bar-battery: false;
-    property <bool> lid-awake: true; property <bool> lid-boot: true; property <bool> lid-sleep: false; property <bool> lid-battery: false;
-
-    VerticalLayout {
-        padding: 10px;
-        spacing: 7px;
-        WindowHeader { title: "Extra"; subtitle: "Bindings, backlight, system and device settings"; }
-        PreviewNotice { text: "Visual-only controls until capability/backend support is implemented"; }
-        HorizontalLayout {
-            height: 30px;
-            spacing: 5px;
-            ChoiceChip { horizontal-stretch: 1; label: "Bindings"; selected: root.page == 0; clicked => { root.page = 0; } }
-            ChoiceChip { horizontal-stretch: 1; label: "Backlight"; selected: root.page == 1; clicked => { root.page = 1; } }
-            ChoiceChip { horizontal-stretch: 1; label: "System"; selected: root.page == 2; clicked => { root.page = 2; } }
-            ChoiceChip { horizontal-stretch: 1; label: "Device"; selected: root.page == 3; clicked => { root.page = 3; } }
-        }
-
-        if (root.page == 0) : SectionCard {
-            vertical-stretch: 1;
-            VerticalLayout {
-                padding: 10px;
-                spacing: 3px;
-                SectionTitle { title: "Key bindings"; detail: "Action + optional parameter"; }
-                BindingRow { key-label: "M1"; actions: root.binding-actions; action-index <=> root.m1-action; parameter <=> root.m1-param; }
-                BindingRow { key-label: "M2"; actions: root.binding-actions; action-index <=> root.m2-action; parameter <=> root.m2-param; }
-                BindingRow { key-label: "M3"; actions: root.binding-actions; action-index <=> root.m3-action; parameter <=> root.m3-param; }
-                BindingRow { key-label: "M4"; actions: root.binding-actions; action-index <=> root.m4-action; parameter <=> root.m4-param; }
-                BindingRow { key-label: "M5"; actions: root.binding-actions; action-index <=> root.m5-action; parameter <=> root.m5-param; }
-                BindingRow { key-label: "Fn+F4"; actions: root.binding-actions; action-index <=> root.fnf4-action; parameter <=> root.fnf4-param; }
-                BindingRow { key-label: "Fn+C"; actions: root.binding-actions; action-index <=> root.fnc-action; parameter <=> root.fnc-param; }
-                BindingRow { key-label: "Fn+V"; actions: root.binding-actions; action-index <=> root.fnv-action; parameter <=> root.fnv-param; }
-                BindingRow { key-label: "Fn+Enter"; actions: root.binding-actions; action-index <=> root.fnenter-action; parameter <=> root.fnenter-param; }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-                HorizontalLayout { spacing: 6px; PreviewButton { width: 112px; label: "Reset"; compact: true; } PreviewButton { width: 112px; label: "Help"; compact: true; } Rectangle { horizontal-stretch: 1; background: transparent; } }
-            }
-        }
-
-        if (root.page == 1) : SectionCard {
-            vertical-stretch: 1;
-            VerticalLayout {
-                padding: 10px;
-                spacing: 4px;
-                SectionTitle { title: "Backlight behavior"; }
-                SelectRow { label: "Animation speed"; model: ["Slow", "Medium", "Fast"]; current-index <=> root.keyboard-speed; }
-                NumericRow { label: "Battery timeout"; unit: "sec"; minimum: 0; maximum: 600; step-size: 5; value <=> root.battery-timeout; }
-                NumericRow { label: "Plugged timeout"; unit: "sec"; minimum: 0; maximum: 600; step-size: 5; value <=> root.plugged-timeout; }
-                SectionTitle { title: "Device states"; detail: "Awake / Boot / Sleep / Battery"; }
-                HorizontalLayout { height: 30px; spacing: 4px; Text { width: 80px; text: "Keyboard"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.key-awake; clicked => { root.key-awake = !root.key-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.key-boot; clicked => { root.key-boot = !root.key-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.key-sleep; clicked => { root.key-sleep = !root.key-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.key-battery; clicked => { root.key-battery = !root.key-battery; } } }
-                HorizontalLayout { height: 30px; spacing: 4px; Text { width: 80px; text: "Logo"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.logo-awake; clicked => { root.logo-awake = !root.logo-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.logo-boot; clicked => { root.logo-boot = !root.logo-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.logo-sleep; clicked => { root.logo-sleep = !root.logo-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.logo-battery; clicked => { root.logo-battery = !root.logo-battery; } } }
-                HorizontalLayout { height: 30px; spacing: 4px; Text { width: 80px; text: "Lightbar"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.bar-awake; clicked => { root.bar-awake = !root.bar-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.bar-boot; clicked => { root.bar-boot = !root.bar-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.bar-sleep; clicked => { root.bar-sleep = !root.bar-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.bar-battery; clicked => { root.bar-battery = !root.bar-battery; } } }
-                HorizontalLayout { height: 30px; spacing: 4px; Text { width: 80px; text: "Lid"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.lid-awake; clicked => { root.lid-awake = !root.lid-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.lid-boot; clicked => { root.lid-boot = !root.lid-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.lid-sleep; clicked => { root.lid-sleep = !root.lid-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.lid-battery; clicked => { root.lid-battery = !root.lid-battery; } } }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-            }
-        }
-
-        if (root.page == 2) : SectionCard {
-            vertical-stretch: 1;
-            VerticalLayout {
-                padding: 10px;
-                spacing: 5px;
-                SectionTitle { title: "System behavior"; }
-                HorizontalLayout {
-                    spacing: 12px;
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        spacing: 1px;
-                        ToggleRow { label: "Auto clamshell mode"; checked <=> root.auto-clamshell; }
-                        ToggleRow { label: "Always on top"; checked <=> root.topmost; }
-                        ToggleRow { label: "Disable panel OD automation"; checked <=> root.no-overdrive; }
-                        ToggleRow { label: "Boot sound"; checked <=> root.boot-sound; }
-                        ToggleRow { label: "Keystone sound"; checked <=> root.keystone-sound; }
-                        ToggleRow { label: "USB-C charger profile"; checked <=> root.usb-c; }
-                    }
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        spacing: 1px;
-                        ToggleRow { label: "Warn about GPU applications"; checked <=> root.gpu-apps; }
-                        ToggleRow { label: "NVIDIA platform integration"; checked <=> root.nv-platform; }
-                        ToggleRow { label: "Status LEDs"; checked <=> root.status-led; }
-                        ToggleRow { label: "NumberPad"; checked <=> root.number-pad; }
-                        ToggleRow { label: "PCIe ASPM"; checked <=> root.aspm; }
-                        ToggleRow { label: "Standby networking"; checked <=> root.standby-networking; }
-                    }
-                }
-                SectionTitle { title: "Power / memory"; }
-                NumericRow { label: "Hibernate after"; unit: "min"; minimum: 0; maximum: 1440; step-size: 5; value <=> root.hibernate-after; }
-                SelectRow { label: "UMA frame buffer"; model: ["Auto", "512 MB", "1 GB", "2 GB", "4 GB", "8 GB"]; current-index <=> root.igpu-memory; }
-                SelectRow { label: "Optimal brightness"; model: ["Off", "Balanced", "Adaptive", "Maximum savings"]; current-index <=> root.optimal-brightness; }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-            }
-        }
-
-        if (root.page == 3) : SectionCard {
-            vertical-stretch: 1;
-            VerticalLayout {
-                padding: 10px;
-                spacing: 5px;
-                SectionTitle { title: "CPU cores"; }
-                NumericRow { label: "Performance cores"; minimum: 1; maximum: 32; value <=> root.p-cores; }
-                NumericRow { label: "Efficiency cores"; minimum: 0; maximum: 32; value <=> root.e-cores; }
-                HorizontalLayout { PreviewButton { width: 112px; label: "Apply Cores"; compact: true; selected: true; } Rectangle { horizontal-stretch: 1; background: transparent; } }
-                SectionTitle { title: "ACPI DEVS"; }
-                TextInputRow { label: "Command"; placeholder: "Device command"; text <=> root.acpi-command; }
-                TextInputRow { label: "Parameter"; placeholder: "Value / parameter"; text <=> root.acpi-param; }
-                HorizontalLayout { PreviewButton { width: 112px; label: "Send"; compact: true; selected: true; } Rectangle { horizontal-stretch: 1; background: transparent; } }
-                SectionTitle { title: "ASUS services"; }
-                ToggleRow { label: "asusd"; description: "ASUS platform service"; checked <=> root.asusd-service; }
-                ToggleRow { label: "supergfxd"; description: "GPU lifecycle service"; checked <=> root.supergfx-service; }
-                HorizontalLayout { PreviewButton { width: 112px; label: "Start Services"; compact: true; } Rectangle { horizontal-stretch: 1; background: transparent; } }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Automation / Preferences / Diagnostics / Updates
-// ---------------------------------------------------------------------------
-
-export component AutomationWindow inherits Window {
-    width: 720px;
-    height: 620px;
-    min-width: 680px;
-    min-height: 580px;
-    title: "Orbis Control — Automation";
-    background: Palette.window-background;
-
-    property <bool> enabled: true;
-    property <int> ac-profile: 2; property <int> battery-profile: 0;
-    property <int> ac-gpu: 1; property <int> battery-gpu: 0;
-    property <int> ac-display: 2; property <int> battery-display: 0;
-    property <int> ac-lighting: 2; property <int> battery-lighting: 1;
-    property <bool> on-resume: true; property <bool> on-ac-change: true; property <bool> reconcile-only: true; property <bool> notify-transitions: true;
-
-    VerticalLayout {
-        padding: 10px;
-        spacing: 7px;
-        WindowHeader { title: "Automation"; subtitle: "Desired-state rules"; }
-        PreviewNotice { text: "Visual-only · no background privileged mutation path is enabled"; }
-        ToggleRow { label: "Enable automation policies"; description: "Master policy preview"; checked <=> root.enabled; }
-        HorizontalLayout {
-            spacing: 10px;
-            SectionCard {
-                horizontal-stretch: 1;
-                height: 205px;
-                VerticalLayout { padding: 9px; spacing: 2px;
-                    SectionTitle { title: "AC Power"; }
-                    SelectRow { label: "Performance"; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index <=> root.ac-profile; disabled: !root.enabled; }
-                    SelectRow { label: "GPU policy"; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index <=> root.ac-gpu; disabled: !root.enabled; }
-                    SelectRow { label: "Display"; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index <=> root.ac-display; disabled: !root.enabled; }
-                    SelectRow { label: "Lighting"; model: ["Off", "Dim", "Normal", "Keep current"]; current-index <=> root.ac-lighting; disabled: !root.enabled; }
-                }
-            }
-            SectionCard {
-                horizontal-stretch: 1;
-                height: 205px;
-                VerticalLayout { padding: 9px; spacing: 2px;
-                    SectionTitle { title: "Battery"; }
-                    SelectRow { label: "Performance"; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index <=> root.battery-profile; disabled: !root.enabled; }
-                    SelectRow { label: "GPU policy"; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index <=> root.battery-gpu; disabled: !root.enabled; }
-                    SelectRow { label: "Display"; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index <=> root.battery-display; disabled: !root.enabled; }
-                    SelectRow { label: "Lighting"; model: ["Off", "Dim", "Normal", "Keep current"]; current-index <=> root.battery-lighting; disabled: !root.enabled; }
-                }
-            }
-        }
-        SectionCard {
-            height: 160px;
-            VerticalLayout { padding: 8px; spacing: 1px;
-                SectionTitle { title: "Triggers / Reconciliation"; }
-                ToggleRow { label: "Apply on AC / battery change"; checked <=> root.on-ac-change; disabled: !root.enabled; }
-                ToggleRow { label: "Reconcile after resume"; checked <=> root.on-resume; disabled: !root.enabled; }
-                ToggleRow { label: "Write only when observed state differs"; checked <=> root.reconcile-only; disabled: !root.enabled; }
-                ToggleRow { label: "Notify about staged transitions"; checked <=> root.notify-transitions; disabled: !root.enabled; }
-            }
-        }
-        HorizontalLayout { height: 32px; spacing: 6px; Rectangle { horizontal-stretch: 1; background: transparent; } PreviewButton { width: 100px; label: "Reset"; compact: true; } PreviewButton { width: 120px; label: "Save Rules"; compact: true; selected: true; } }
-    }
-}
-
-export component PreferencesWindow inherits Window {
-    width: 580px;
-    height: 560px;
-    min-width: 540px;
-    min-height: 520px;
-    title: "Orbis Control — Preferences";
-    background: Palette.window-background;
-
-    property <int> language: 0; property <int> appearance: 0; property <int> update-channel: 0; property <int> close-action: 0;
-    property <bool> startup: true; property <bool> notifications: true; property <bool> update-check: true; property <bool> tray: true; property <bool> restore-window: true;
-    property <float> telemetry-rate: 1; property <float> ui-scale: 100;
-
-    VerticalLayout {
-        padding: 10px;
-        spacing: 7px;
-        WindowHeader { title: "Preferences"; subtitle: "Application behavior and presentation"; }
-        PreviewNotice { text: "Visual preference model only · persistence is not connected"; }
-        HorizontalLayout {
-            spacing: 10px;
-            SectionCard {
-                horizontal-stretch: 1;
-                height: 195px;
-                VerticalLayout { padding: 9px; spacing: 2px;
-                    SectionTitle { title: "General"; }
-                    SelectRow { label: "Language"; model: ["System", "English", "Русский", "Deutsch", "Français"]; current-index <=> root.language; }
-                    SelectRow { label: "Appearance"; model: ["Dark", "System", "Light"]; current-index <=> root.appearance; }
-                    SelectRow { label: "Close button"; model: ["Hide to tray", "Quit", "Ask every time"]; current-index <=> root.close-action; }
-                    ToggleRow { label: "Restore window position"; checked <=> root.restore-window; }
-                }
-            }
-            SectionCard {
-                horizontal-stretch: 1;
-                height: 195px;
-                VerticalLayout { padding: 9px; spacing: 1px;
-                    SectionTitle { title: "Startup / notifications"; }
-                    ToggleRow { label: "Run on startup"; checked <=> root.startup; }
-                    ToggleRow { label: "Desktop notifications"; checked <=> root.notifications; }
-                    ToggleRow { label: "Tray indicator"; checked <=> root.tray; }
-                    ToggleRow { label: "Automatic update checks"; checked <=> root.update-check; }
-                }
-            }
-        }
-        SectionCard {
-            height: 145px;
-            VerticalLayout { padding: 9px; spacing: 2px;
-                SectionTitle { title: "Updates / sampling"; }
-                SelectRow { label: "Update channel"; model: ["Stable", "Preview", "Development"]; current-index <=> root.update-channel; }
-                PreviewSliderRow { label: "Telemetry refresh"; unit: " Hz"; minimum: 0.5; maximum: 5; step: 0.5; value <=> root.telemetry-rate; }
-                PreviewSliderRow { label: "UI scale preview"; unit: "%"; minimum: 80; maximum: 160; step: 5; value <=> root.ui-scale; }
-            }
-        }
-        HorizontalLayout { height: 32px; spacing: 6px; Rectangle { horizontal-stretch: 1; background: transparent; } PreviewButton { width: 100px; label: "Reset"; compact: true; } PreviewButton { width: 100px; label: "Save"; compact: true; selected: true; } }
-    }
-}
-
-export component DiagnosticsWindow inherits Window {
-    width: 640px;
-    height: 560px;
-    min-width: 600px;
-    min-height: 520px;
-    title: "Orbis Control — Diagnostics";
-    background: Palette.window-background;
-    in property <string> version: "0.1.0";
-
-    VerticalLayout {
-        padding: 10px;
-        spacing: 7px;
-        WindowHeader { title: "Diagnostics"; subtitle: "Capabilities, providers and support report"; }
-        PreviewNotice { text: "Preview values only · diagnostics export backend is not connected"; }
-        HorizontalLayout { height: 52px; spacing: 6px; MetricTile { label: "Kernel"; value: "Linux"; detail: "runtime"; } MetricTile { label: "Platform"; value: "ASUS"; detail: "detected"; } MetricTile { label: "Orbis"; value: "v" + root.version; detail: "dev"; } }
-        HorizontalLayout {
-            spacing: 10px;
-            SectionCard {
-                horizontal-stretch: 1;
-                height: 285px;
-                VerticalLayout { padding: 10px; spacing: 10px;
-                    SectionTitle { title: "Capability Registry"; }
-                    HorizontalLayout { Text { text: "Performance"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Supported"; accent: Palette.success; } }
-                    HorizontalLayout { Text { text: "Battery threshold"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Supported"; accent: Palette.success; } }
-                    HorizontalLayout { Text { text: "GPU primitives"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Mixed"; accent: Palette.warning; } }
-                    HorizontalLayout { Text { text: "Fan curves"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Detected"; accent: Palette.accent-default; } }
-                    HorizontalLayout { Text { text: "Power limits"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
-                    HorizontalLayout { Text { text: "Display / Lighting"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
-                }
-            }
-            SectionCard {
-                width: 220px;
-                height: 285px;
-                VerticalLayout { padding: 10px; spacing: 12px;
-                    SectionTitle { title: "Providers"; }
-                    HorizontalLayout { Text { text: "asusd"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Connected"; accent: Palette.success; } }
-                    HorizontalLayout { Text { text: "supergfxd"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Available"; accent: Palette.success; } }
-                    HorizontalLayout { Text { text: "Hardware1"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "On demand"; accent: Palette.accent-default; } }
-                    Rectangle { vertical-stretch: 1; background: transparent; }
-                }
-            }
-        }
-        HorizontalLayout { height: 32px; spacing: 6px; PreviewButton { label: "Copy Summary"; compact: true; } PreviewButton { label: "Open Logs"; compact: true; } Rectangle { horizontal-stretch: 1; background: transparent; } PreviewButton { label: "Export Report"; compact: true; selected: true; } }
-    }
-}
-
-export component UpdatesWindow inherits Window {
-    width: 460px;
-    height: 360px;
-    min-width: 430px;
-    min-height: 340px;
-    title: "Orbis Control — Updates";
-    background: Palette.window-background;
-    in property <string> version: "0.1.0";
-    property <int> channel: 0;
-
-    VerticalLayout {
-        padding: 10px;
-        spacing: 7px;
-        WindowHeader { title: "Updates"; subtitle: "Release and package status"; }
-        PreviewNotice { text: "Network update checks are not connected"; }
-        SectionCard {
-            height: 110px;
-            VerticalLayout { padding: 9px; spacing: 4px;
-                HorizontalLayout { Text { text: "Installed version"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } Text { text: "v" + root.version; font-size: 11px; font-weight: 600; color: Palette.text-primary; } }
-                SelectRow { label: "Channel"; model: ["Stable", "Preview", "Development"]; current-index <=> root.channel; }
-                HorizontalLayout { Text { text: "Latest release"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Not checked"; accent: Palette.text-disabled; } }
-            }
-        }
-        SectionCard {
-            vertical-stretch: 1;
-            Text { x: 10px; y: 9px; width: parent.width - 20px; height: parent.height - 18px; text: "Release notes will appear here after an update check. The surface is reserved for package-aware NixOS update information and future distro channels."; font-size: 9px; color: Palette.text-secondary; wrap: word-wrap; }
-        }
-        HorizontalLayout { height: 32px; spacing: 6px; PreviewButton { label: "Check"; compact: true; selected: true; } PreviewButton { label: "Release Notes"; compact: true; } Rectangle { horizontal-stretch: 1; background: transparent; } PreviewButton { label: "Install Update"; compact: true; disabled: true; } }
-    }
-}
-
-export component PreviewDialogWindow inherits Window {
-    width: 430px;
-    height: 230px;
-    title: "Orbis Control";
-    background: Palette.window-background;
-    in-out property <int> kind: 0;
-
-    VerticalLayout {
-        padding: 12px;
-        spacing: 9px;
-        WindowHeader { title: root.kind == 0 ? "Reboot required" : root.kind == 1 ? "Logout required" : root.kind == 2 ? "Action failed" : "Confirm action"; subtitle: "Product-state dialog"; }
-        SectionCard {
-            vertical-stretch: 1;
-            Text {
-                x: 12px; y: 12px; width: parent.width - 24px; height: parent.height - 24px;
-                text: root.kind == 0 ? "The requested GPU mode is staged and requires a reboot before it becomes effective."
-                    : root.kind == 1 ? "The requested GPU transition requires logging out before the desktop session can switch safely."
-                    : root.kind == 2 ? "The backend did not confirm the requested operation. The previously observed state is preserved."
-                    : "This operation changes a hardware setting. Review the requested values before applying.";
-                font-size: 10px; color: root.kind == 2 ? Palette.error : Palette.text-primary; wrap: word-wrap;
-            }
-        }
-        HorizontalLayout { height: 32px; spacing: 6px; Rectangle { horizontal-stretch: 1; background: transparent; } PreviewButton { width: 90px; label: "Cancel"; compact: true; } PreviewButton { width: 110px; label: root.kind == 0 ? "Reboot Later" : root.kind == 1 ? "Logout Later" : root.kind == 2 ? "Close" : "Confirm"; compact: true; selected: root.kind != 2; } }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Main window — deliberately fixed and compact, like the G-Helper reference.
-// Detailed controls live in the secondary windows above.
-// ---------------------------------------------------------------------------
 
 export component AppWindow inherits Window {
-    width: 500px;
-    height: 820px;
-    min-width: 500px;
-    min-height: 820px;
-    max-width: 500px;
+    width: 425px;
+    height: 381px;
     title: "Orbis Control";
     background: Palette.window-background;
 
     in-out property <UiState> ui-state: {
-        perf-selected: 1, available-perf-mask: 0, perf-state: PerformanceHwState.Loading, perf-writable: false,
-        gpu-selected: 1, available-gpu-mask: 0, gpu-ultimate-pending: false, gpu-ultimate-disabled: false,
-        gpu-section-error: false, gpu-mode-state: GpuModeHwState.Loading, gpu-mode-writable: false,
-        charge-limit: 80, charge-limit-enabled: false, charge-limit-writable: false, charge-limit-state: ChargeLimitState.Loading,
-        gpu-power-state: GpuHwState.Loading, gpu-mux-state: GpuHwState.Loading, gpu-access-state: GpuHwState.Loading,
-        gpu-power-value: 0, gpu-mux-value: 0, gpu-access-value: 0,
-        cpu-temp: "—", gpu-temp: "—", cpu-fan-rpm: "—", gpu-fan-rpm: "—",
-        battery-percent: "—", power-ac-mw: "—", battery-health: "—", battery-cycles: "—",
-        battery-status: "", ac-online: "—", gpu-power: "—", version: "0.1.0", mock-profile: "zephyrus-full",
-        fan-curve-state: FanCurveHwState.Loading, fan-curve-writable: false, fan-curve-error: false, fan-curve-dirty: false,
-        fan-selected: 0, fan-profile-selected: 0,
-        fan-temp-0: 0, fan-temp-1: 0, fan-temp-2: 0, fan-temp-3: 0, fan-temp-4: 0, fan-temp-5: 0, fan-temp-6: 0, fan-temp-7: 0,
-        fan-pwm-0: 0, fan-pwm-1: 0, fan-pwm-2: 0, fan-pwm-3: 0, fan-pwm-4: 0, fan-pwm-5: 0, fan-pwm-6: 0, fan-pwm-7: 0,
+        perf-selected: 1,
+        available-perf-mask: 0,
+        perf-state: PerformanceHwState.Loading,
+        perf-writable: false,
+        gpu-selected: 1,
+        available-gpu-mask: 0,
+        gpu-ultimate-pending: false,
+        gpu-ultimate-disabled: false,
+        gpu-section-error: false,
+        gpu-mode-state: GpuModeHwState.Loading,
+        gpu-mode-writable: false,
+        charge-limit: 80,
+        charge-limit-enabled: false,
+        charge-limit-writable: false,
+        charge-limit-state: ChargeLimitState.Loading,
+        gpu-power-state: GpuHwState.Loading,
+        gpu-mux-state: GpuHwState.Loading,
+        gpu-access-state: GpuHwState.Loading,
+        gpu-power-value: 0,
+        gpu-mux-value: 0,
+        gpu-access-value: 0,
+        cpu-temp: "—",
+        gpu-temp: "—",
+        cpu-fan-rpm: "—",
+        gpu-fan-rpm: "—",
+        battery-percent: "—",
+        power-ac-mw: "—",
+        battery-health: "—",
+        battery-cycles: "—",
+        battery-status: "",
+        ac-online: "—",
+        gpu-power: "—",
+        version: "0.1.0",
+        mock-profile: "zephyrus-full",
+        fan-curve-state: FanCurveHwState.Loading,
+        fan-curve-writable: false,
+        fan-curve-error: false,
+        fan-curve-dirty: false,
+        fan-selected: 0,
+        fan-profile-selected: 0,
+        fan-temp-0: 0,
+        fan-temp-1: 0,
+        fan-temp-2: 0,
+        fan-temp-3: 0,
+        fan-temp-4: 0,
+        fan-temp-5: 0,
+        fan-temp-6: 0,
+        fan-temp-7: 0,
+        fan-pwm-0: 0,
+        fan-pwm-1: 0,
+        fan-pwm-2: 0,
+        fan-pwm-3: 0,
+        fan-pwm-4: 0,
+        fan-pwm-5: 0,
+        fan-pwm-6: 0,
+        fan-pwm-7: 0,
     };
 
     callback perf-clicked(int);
     callback gpu-clicked(int);
     callback charge-changed(float);
     callback fans-clicked;
+
     callback fan-changed(int);
     callback fan-profile-changed(int);
     callback fan-temp-point-changed(int, int);
     callback fan-pwm-point-changed(int, int);
     callback fan-apply-clicked(bool);
 
-    callback extra-clicked;
-    callback automation-clicked;
-    callback preferences-clicked;
-    callback diagnostics-clicked;
-    callback updates-clicked;
-    callback preview-dialog-clicked(int);
-
-    property <int> screen-preview: 2;
-    property <float> dimming-preview: 100;
-    property <int> visual-preview: 0;
-    property <int> color-temp-preview: 1;
-    property <int> gamut-preview: 0;
-    property <int> slash-effect-preview: 0;
-    property <int> slash-mode-preview: 0;
-    property <int> slash-interval-preview: 0;
-    property <bool> slash-battery-preview: false;
-    property <bool> slash-lid-preview: false;
-    property <int> keyboard-mode-preview: 0;
-    property <int> keyboard-color-preview: 0;
-    property <bool> fn-lock-preview: false;
-    property <bool> startup-preview: true;
-
     function bit-set(mask: int, bit: int) -> bool {
         let shifted = Math.floor(mask / bit);
         return shifted - 2 * Math.floor(shifted / 2) == 1;
     }
 
-    function perf-label() -> string {
-        if (root.ui-state.perf-state != PerformanceHwState.Ready) { return "Mode: unavailable"; }
-        if (root.ui-state.perf-selected == 0) { return "Mode: Silent"; }
-        if (root.ui-state.perf-selected == 2) { return "Mode: Turbo"; }
-        return "Mode: Balanced";
+    function gpu-power-text(state: GpuHwState, value: int) -> string {
+        if (state == GpuHwState.Unavailable) { return "Unavailable"; }
+        if (state == GpuHwState.Loading) { return "…"; }
+        if (value == 0) { return "Active"; }
+        if (value == 1) { return "Suspended"; }
+        if (value == 2) { return "Off"; }
+        if (value == 3) { return "Stale"; }
+        return "Unknown";
     }
 
-    function gpu-label() -> string {
-        if (root.ui-state.gpu-mode-state != GpuModeHwState.Ready) { return "GPU Mode: unavailable"; }
-        if (root.ui-state.gpu-selected == 0) { return "GPU Mode: Eco"; }
-        if (root.ui-state.gpu-selected == 2) { return "GPU Mode: Ultimate"; }
-        if (root.ui-state.gpu-selected == 3) { return "GPU Mode: Optimized"; }
-        return "GPU Mode: Standard";
+    function gpu-mux-text(state: GpuHwState, value: int) -> string {
+        if (state == GpuHwState.Unavailable) { return "Unavailable"; }
+        if (state == GpuHwState.Loading) { return "…"; }
+        if (value == 0) { return "Integrated"; }
+        if (value == 1) { return "Discrete"; }
+        return "Unknown";
+    }
+
+    function gpu-access-text(state: GpuHwState, value: int) -> string {
+        if (state == GpuHwState.Unavailable) { return "Unavailable"; }
+        if (state == GpuHwState.Loading) { return "…"; }
+        if (value == 0) { return "Unblocked"; }
+        if (value == 1) { return "Blocked"; }
+        if (value == 2) { return "Pending"; }
+        return "Unknown";
     }
 
     VerticalLayout {
-        padding: 10px;
-        spacing: 7px;
-
-        Rectangle {
-            height: 42px;
-            border-radius: 5px;
-            background: Palette.titlebar-background;
-            HorizontalLayout {
-                padding-left: 10px; padding-right: 10px; alignment: center;
-                Text { text: "ORBiS CONTROL"; font-size: 14px; font-weight: 700; color: Palette.text-primary; }
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                Text { text: root.ui-state.cpu-temp + "  Fan: " + root.ui-state.cpu-fan-rpm; font-size: 9px; color: Palette.text-secondary; vertical-alignment: center; }
-            }
-        }
-
         VerticalLayout {
-            spacing: 4px;
-            SectionTitle { title: root.perf-label(); detail: "CPU: " + root.ui-state.cpu-temp + " · " + root.ui-state.cpu-fan-rpm; }
-            HorizontalLayout {
-                height: 60px;
-                spacing: 5px;
-                ModeCard { title: "Silent"; compact: true; accent: Palette.silent; icon-kind: 0; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0; disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 1); clicked => { root.perf-clicked(0); } }
-                ModeCard { title: "Balanced"; compact: true; accent: Palette.balanced; icon-kind: 1; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1; disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 2); clicked => { root.perf-clicked(1); } }
-                ModeCard { title: "Turbo"; compact: true; accent: Palette.turbo; icon-kind: 2; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 2; disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 4); clicked => { root.perf-clicked(2); } }
-                ModeCard { title: "Fans + Power"; compact: true; accent: Palette.accent-default; icon-kind: 0; clicked => { root.fans-clicked(); } }
-            }
-        }
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            spacing: 8px;
 
-        VerticalLayout {
-            spacing: 4px;
-            SectionTitle { title: root.gpu-label(); detail: "GPU: " + root.ui-state.gpu-temp + " · " + root.ui-state.gpu-fan-rpm; }
-            HorizontalLayout {
-                height: 60px;
-                spacing: 5px;
-                ModeCard { title: "Eco"; compact: true; accent: Palette.eco; icon-kind: 0; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1); clicked => { root.gpu-clicked(0); } }
-                ModeCard { title: "Standard"; compact: true; accent: Palette.standard; icon-kind: 1; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2); clicked => { root.gpu-clicked(1); } }
-                ModeCard { title: "Ultimate"; compact: true; accent: Palette.ultimate; icon-kind: 2; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2; pending: root.ui-state.gpu-ultimate-pending; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4); clicked => { root.gpu-clicked(2); } }
-                ModeCard { title: "Optimized"; compact: true; accent: Palette.optimized; icon-kind: 1; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 8); clicked => { root.gpu-clicked(3); } }
-            }
-        }
-
-        VerticalLayout {
-            spacing: 4px;
-            SectionTitle { title: "Laptop Screen"; detail: root.screen-preview == 0 ? "Auto" : root.screen-preview == 1 ? "60 Hz" : "120 Hz + Overdrive"; }
-            HorizontalLayout {
-                height: 30px;
-                spacing: 5px;
-                ChoiceChip { horizontal-stretch: 1; label: "Auto"; selected: root.screen-preview == 0; clicked => { root.screen-preview = 0; } }
-                ChoiceChip { horizontal-stretch: 1; label: "60 Hz"; selected: root.screen-preview == 1; clicked => { root.screen-preview = 1; } }
-                ChoiceChip { horizontal-stretch: 1; label: "120 Hz + OD"; selected: root.screen-preview == 2; clicked => { root.screen-preview = 2; } }
-            }
-        }
-
-        VerticalLayout {
-            spacing: 4px;
-            SectionTitle { title: "Flicker-free Dimming / Visual Mode"; detail: Math.round(root.dimming-preview) + "%"; }
-            SectionCard {
-                height: 74px;
-                VerticalLayout {
-                    padding-left: 6px; padding-right: 6px; padding-top: 4px; padding-bottom: 4px; spacing: 4px;
-                    Slider { minimum: 0; maximum: 100; step: 1; value <=> root.dimming-preview; }
+            VerticalLayout {
+                spacing: 4px;
+                SectionHeader { title: "Performance Mode"; }
+                HorizontalLayout {
+                    spacing: 4px;
+                    ModeCard {
+                        title: "Silent";
+                        compact: true;
+                        accent: Palette.silent;
+                        icon-kind: 0;
+                        selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0;
+                        disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 1);
+                        clicked => { root.perf-clicked(0); }
+                    }
+                    ModeCard {
+                        title: "Balanced";
+                        compact: true;
+                        accent: Palette.balanced;
+                        icon-kind: 1;
+                        selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1;
+                        disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 2);
+                        clicked => { root.perf-clicked(1); }
+                    }
+                    ModeCard {
+                        title: "Turbo";
+                        compact: true;
+                        accent: Palette.turbo;
+                        icon-kind: 2;
+                        selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 2;
+                        disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 4);
+                        clicked => { root.perf-clicked(2); }
+                    }
+                    ModeCard {
+                        title: "Fans";
+                        subtitle: "Curves";
+                        compact: true;
+                        accent: Palette.accent-default;
+                        icon-kind: 1;
+                        clicked => { root.fans-clicked(); }
+                    }
+                }
+                if (root.ui-state.perf-state == PerformanceHwState.Loading) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
                     HorizontalLayout {
-                        height: 30px;
-                        spacing: 5px;
-                        ComboBox { horizontal-stretch: 1; model: ["Default", "Vivid", "Cinema", "Eye Care", "Racing", "Scenery"]; current-index <=> root.visual-preview; }
-                        ComboBox { horizontal-stretch: 1; model: ["Cool", "Neutral", "Warm"]; current-index <=> root.color-temp-preview; }
-                        ComboBox { horizontal-stretch: 1; model: ["Gamut: Native", "sRGB", "DCI-P3", "Display P3"]; current-index <=> root.gamut-preview; }
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: "Loading performance state…";
+                            font-size: 12px;
+                            color: Palette.text-secondary;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if (root.ui-state.perf-state == PerformanceHwState.Unavailable) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Rectangle {
+                            width: 3px;
+                            height: 14px;
+                            border-radius: 1.5px;
+                            background: Palette.error;
+                            y: (parent.height - 14px) / 2;
+                        }
+                        Text {
+                            text: "Performance backend unavailable";
+                            font-size: 12px;
+                            color: Palette.text-primary;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }
-        }
 
-        VerticalLayout {
-            spacing: 4px;
-            SectionTitle { title: "Slash Lighting / AniMe"; }
-            SectionCard {
-                height: 68px;
+            VerticalLayout {
+                spacing: 4px;
+                SectionHeader { title: "GPU Mode"; }
+                if (root.ui-state.gpu-section-error) : Rectangle {
+                    height: 24px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.error;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 8px;
+                        Rectangle {
+                            width: 3px;
+                            height: 14px;
+                            border-radius: 1.5px;
+                            background: Palette.error;
+                            y: (parent.height - 14px) / 2;
+                        }
+                        Text {
+                            text: "GPU backend error";
+                            font-size: 12px;
+                            color: Palette.text-primary;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 4px;
+                    ModeCard {
+                        title: "Eco";
+                        compact: true;
+                        accent: Palette.eco;
+                        icon-kind: 0;
+                        selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0;
+                        disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1);
+                        clicked => { root.gpu-clicked(0); }
+                    }
+                    ModeCard {
+                        title: "Standard";
+                        compact: true;
+                        accent: Palette.standard;
+                        icon-kind: 1;
+                        selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1;
+                        disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2);
+                        clicked => { root.gpu-clicked(1); }
+                    }
+                    ModeCard {
+                        title: "Ultimate";
+                        compact: true;
+                        accent: Palette.ultimate;
+                        icon-kind: 2;
+                        selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2;
+                        pending: root.ui-state.gpu-ultimate-pending;
+                        disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4);
+                        subtitle: root.ui-state.gpu-ultimate-disabled ? "MUX unavailable" : "";
+                        clicked => { root.gpu-clicked(2); }
+                    }
+                    ModeCard {
+                        title: "Optimized";
+                        compact: true;
+                        accent: Palette.optimized;
+                        icon-kind: 1;
+                        selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3;
+                        disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 8);
+                        clicked => { root.gpu-clicked(3); }
+                    }
+                }
+                if (root.ui-state.gpu-mode-state == GpuModeHwState.Loading) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: "Loading GPU mode…";
+                            font-size: 12px;
+                            color: Palette.text-secondary;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if (root.ui-state.gpu-mode-state == GpuModeHwState.Unavailable) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: "GPU mode control unavailable";
+                            font-size: 12px;
+                            color: Palette.text-primary;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    HwStatusCell {
+                        label: "Power";
+                        text: root.gpu-power-text(root.ui-state.gpu-power-state, root.ui-state.gpu-power-value);
+                    }
+                    HwStatusCell {
+                        label: "MUX";
+                        text: root.gpu-mux-text(root.ui-state.gpu-mux-state, root.ui-state.gpu-mux-value);
+                    }
+                    HwStatusCell {
+                        label: "Access";
+                        text: root.gpu-access-text(root.ui-state.gpu-access-state, root.ui-state.gpu-access-value);
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 4px;
+                SectionHeader { title: "Battery Charge Limit"; }
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : ValueSlider {
+                    min: 20;
+                    max: 100;
+                    step: 1;
+                    value: root.ui-state.charge-limit;
+                    disabled: !root.ui-state.charge-limit-writable;
+                    changed(v) => { root.charge-changed(v); }
+                }
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : Text {
+                    text: root.ui-state.charge-limit-enabled
+                        ? "UPower threshold policy: On"
+                        : "UPower threshold policy: Off";
+                    height: 18px;
+                    font-size: 11px;
+                    color: Palette.text-secondary;
+                    vertical-alignment: center;
+                }
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Loading) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    Text {
+                        text: "Loading battery state…";
+                        font-size: 12px;
+                        color: Palette.text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Unavailable) : Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    Text {
+                        text: "Battery backend unavailable";
+                        font-size: 12px;
+                        color: Palette.text-primary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 4px;
+                SectionHeader { title: "Telemetry"; }
                 VerticalLayout {
-                    padding: 6px;
                     spacing: 4px;
                     HorizontalLayout {
-                        height: 30px;
-                        spacing: 5px;
-                        ComboBox { horizontal-stretch: 1; model: ["Off", "Static", "Breathing", "Banner", "Picture / GIF"]; current-index <=> root.slash-effect-preview; }
-                        ComboBox { horizontal-stretch: 1; model: ["Battery Level", "Clock", "Audio", "Notification"]; current-index <=> root.slash-mode-preview; }
-                        ComboBox { horizontal-stretch: 1; model: ["Interval Off", "Slow", "Medium", "Fast"]; current-index <=> root.slash-interval-preview; }
+                        spacing: 14px;
+                        TelemetryCell { value: root.ui-state.cpu-temp; label: "CPU"; }
+                        TelemetryCell { value: root.ui-state.gpu-temp; label: "GPU"; }
                     }
-                    HorizontalLayout { height: 22px; spacing: 12px; CheckBox { text: "Disable on battery"; checked <=> root.slash-battery-preview; } CheckBox { text: "Disable on lid close"; checked <=> root.slash-lid-preview; } Rectangle { horizontal-stretch: 1; background: transparent; } }
+                    HorizontalLayout {
+                        spacing: 14px;
+                        TelemetryCell { value: root.ui-state.cpu-fan-rpm; label: "CPU fan"; }
+                        TelemetryCell { value: root.ui-state.gpu-fan-rpm; label: "GPU fan"; }
+                    }
+                    HorizontalLayout {
+                        spacing: 14px;
+                        TelemetryCell { value: root.ui-state.battery-percent; label: "Battery"; }
+                        TelemetryCell { value: root.ui-state.power-ac-mw; label: "Power (AC)"; }
+                    }
                 }
             }
-        }
 
-        VerticalLayout {
-            spacing: 4px;
-            SectionTitle { title: "Laptop Keyboard"; }
-            SectionCard {
-                height: 54px;
+            Rectangle {
+                height: 26px;
+                border-radius: 4px;
+                background: Palette.surface-pressed;
+                border-width: 1px;
+                border-color: Palette.border-default;
                 HorizontalLayout {
-                    padding: 7px;
-                    spacing: 6px;
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 8px;
                     alignment: center;
-                    ComboBox { horizontal-stretch: 1; model: ["Static", "Breathing", "Color Cycle", "Strobing", "Rainbow"]; current-index <=> root.keyboard-mode-preview; }
-                    HorizontalLayout { width: 118px; spacing: 4px; ColorSwatch { swatch-color: #2DA8F2; selected: root.keyboard-color-preview == 0; clicked => { root.keyboard-color-preview = 0; } } ColorSwatch { swatch-color: #EF6376; selected: root.keyboard-color-preview == 1; clicked => { root.keyboard-color-preview = 1; } } ColorSwatch { swatch-color: #49C6A5; selected: root.keyboard-color-preview == 2; clicked => { root.keyboard-color-preview = 2; } } ColorSwatch { swatch-color: #E6A04B; selected: root.keyboard-color-preview == 3; clicked => { root.keyboard-color-preview = 3; } } }
-                    ChoiceChip { width: 70px; label: "FN-Lock"; selected: root.fn-lock-preview; clicked => { root.fn-lock-preview = !root.fn-lock-preview; } }
-                    PreviewButton { width: 72px; label: "Extra"; compact: true; clicked => { root.extra-clicked(); } }
+                    Text {
+                        text: "v" + root.ui-state.version;
+                        font-size: 11px;
+                        color: Palette.text-disabled;
+                    }
+                    Text {
+                        text: "•";
+                        font-size: 11px;
+                        color: Palette.text-disabled;
+                    }
+                    Text {
+                        text: "Mock: " + root.ui-state.mock-profile;
+                        font-size: 11px;
+                        color: Palette.text-disabled;
+                    }
                 }
             }
-        }
-
-        VerticalLayout {
-            spacing: 4px;
-            SectionTitle { title: "Battery Charge Limit: " + root.ui-state.charge-limit + "%"; detail: root.ui-state.power-ac-mw; }
-            SectionCard {
-                height: 62px;
-                VerticalLayout {
-                    padding-left: 7px; padding-right: 7px; padding-top: 4px; padding-bottom: 4px; spacing: 2px;
-                    if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : ValueSlider { min: 20; max: 100; step: 1; value: root.ui-state.charge-limit; disabled: !root.ui-state.charge-limit-writable; changed(v) => { root.charge-changed(v); } }
-                    if (root.ui-state.charge-limit-state != ChargeLimitState.Ready) : Text { height: 28px; text: root.ui-state.charge-limit-state == ChargeLimitState.Loading ? "Loading battery threshold…" : "Battery threshold unavailable"; font-size: 9px; color: Palette.text-secondary; vertical-alignment: center; }
-                    HorizontalLayout { height: 22px; CheckBox { text: "Run on Startup"; checked <=> root.startup-preview; } Rectangle { horizontal-stretch: 1; background: transparent; } Text { text: root.ui-state.battery_percent + " · " + root.ui-state.battery_health; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; } }
-                }
-            }
-        }
-
-        HorizontalLayout {
-            height: 30px;
-            spacing: 5px;
-            PreviewButton { horizontal-stretch: 1; label: "Automation"; compact: true; clicked => { root.automation-clicked(); } }
-            PreviewButton { horizontal-stretch: 1; label: "Preferences"; compact: true; clicked => { root.preferences-clicked(); } }
-            PreviewButton { horizontal-stretch: 1; label: "Diagnostics"; compact: true; clicked => { root.diagnostics-clicked(); } }
-        }
-
-        HorizontalLayout {
-            height: 34px;
-            spacing: 6px;
-            alignment: center;
-            Text { text: "Version: " + root.ui-state.version; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-            PreviewButton { width: 94px; label: "Donate"; compact: true; }
-            PreviewButton { width: 94px; label: "Updates"; compact: true; clicked => { root.updates-clicked(); } }
-            PreviewButton { width: 94px; label: "Quit"; compact: true; }
         }
     }
 }
