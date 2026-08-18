@@ -246,6 +246,11 @@ pub struct UiState {
     /// Хранятся как display-строки: "—" = значение ещё не получено или
     /// отсутствует у backend. Production не показывает mock/placeholder
     /// значения до первого refresh.
+    ///
+    /// `telemetry_fresh` — true после успешного authoritative refresh, false
+    /// после failed refresh. Когда false, отображаемые значения являются
+    /// последним успешным снимком и НЕ должны выглядеть как актуальные.
+    pub telemetry_fresh: bool,
     pub cpu_temp: String,
     /// Температура dGPU, °C ("—" = неизвестно).
     pub gpu_temp: String,
@@ -423,6 +428,7 @@ impl UiState {
             gpu_power_capability: CapabilityAvailability::Unknown,
             gpu_mux_capability: CapabilityAvailability::Unknown,
             gpu_access_capability: CapabilityAvailability::Unknown,
+            telemetry_fresh: false,
             cpu_temp,
             gpu_temp,
             cpu_fan_rpm,
@@ -505,6 +511,7 @@ impl UiState {
     /// Используется production interactive startup: до первого authoritative
     /// `Telemetry` refresh mock fixture значения не должны отображаться.
     pub fn reset_telemetry(&mut self) {
+        self.telemetry_fresh = false;
         self.cpu_temp = "—".into();
         self.gpu_temp = "—".into();
         self.cpu_fan_rpm = "—".into();
@@ -518,6 +525,15 @@ impl UiState {
         self.power_ac = "—".into();
     }
 
+    /// Пометить telemetry как stale после failed refresh.
+    ///
+    /// Отображаемые значения остаются последним успешным снимком, но
+    /// `telemetry_fresh` становится false, чтобы UI не показывал их как
+    /// актуальные.
+    pub fn mark_telemetry_stale(&mut self) {
+        self.telemetry_fresh = false;
+    }
+
     /// Обновить telemetry-поля из authoritative `Telemetry` snapshot.
     ///
     /// Каждое поле обновляется независимо: отсутствующие (None) поля
@@ -526,6 +542,7 @@ impl UiState {
     pub fn update_telemetry(&mut self, telemetry: &orbis_core::telemetry::Telemetry) {
         use orbis_core::fan::FanId;
 
+        self.telemetry_fresh = true;
         self.cpu_temp = format_celsius(telemetry.cpu_temp);
         self.gpu_temp = format_celsius(telemetry.gpu_temp);
 
@@ -1224,6 +1241,78 @@ mod tests {
         assert_eq!(s.perf_selected, before.perf_selected);
         assert_eq!(s.charge_limit, before.charge_limit);
         assert_eq!(s.gpu_selected, before.gpu_selected);
+    }
+
+    #[test]
+    fn telemetry_freshness_tracks_refresh_success() {
+        // Initially not fresh (no authoritative refresh yet).
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.reset_telemetry();
+        assert!(!s.telemetry_fresh);
+
+        // Successful refresh marks fresh.
+        s.update_telemetry(&sample_telemetry());
+        assert!(s.telemetry_fresh);
+
+        // Failed refresh marks stale but preserves the last values.
+        s.mark_telemetry_stale();
+        assert!(!s.telemetry_fresh);
+        assert_eq!(s.cpu_temp, "46°C"); // last successful value preserved
+        assert_eq!(s.battery_percent, "100%");
+    }
+
+    #[test]
+    fn ac_online_false_differs_from_unavailable() {
+        // Some(false) = on battery (a real value), None = unavailable.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.reset_telemetry();
+
+        let mut t = sample_telemetry();
+        t.ac_online = Some(false);
+        s.update_telemetry(&t);
+        assert_eq!(s.ac_online, "On battery");
+
+        let mut t = sample_telemetry();
+        t.ac_online = None;
+        s.update_telemetry(&t);
+        assert_eq!(s.ac_online, "—");
+    }
+
+    #[test]
+    fn fan_rpm_zero_is_valid_not_no_data() {
+        // RPM 0 is a valid physical value (fan stopped), distinct from "no data".
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.reset_telemetry();
+
+        let mut t = sample_telemetry();
+        t.fans = vec![orbis_core::telemetry::FanTelemetry {
+            fan: orbis_core::fan::FanId::Cpu,
+            rpm: orbis_core::newtypes::Rpm::new(0).unwrap(),
+            percent: None,
+        }];
+        s.update_telemetry(&t);
+        assert_eq!(s.cpu_fan_rpm, "0 rpm");
+
+        // No fan data at all → unknown placeholder.
+        let mut t = sample_telemetry();
+        t.fans.clear();
+        s.update_telemetry(&t);
+        assert_eq!(s.cpu_fan_rpm, "—");
+    }
+
+    #[test]
+    fn absent_telemetry_shows_unknown_not_zero() {
+        // Missing telemetry must render as the unknown placeholder, never "0".
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.reset_telemetry();
+        let t = orbis_core::telemetry::Telemetry::empty();
+        s.update_telemetry(&t);
+        assert_eq!(s.cpu_temp, "—");
+        assert_eq!(s.gpu_temp, "—");
+        assert_eq!(s.battery_percent, "—");
+        assert_eq!(s.ac_online, "—");
+        assert_eq!(s.cpu_fan_rpm, "—");
+        assert_eq!(s.gpu_fan_rpm, "—");
     }
 
     // -----------------------------------------------------------------------

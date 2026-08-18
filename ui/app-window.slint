@@ -67,6 +67,7 @@ export struct UiState {
     battery-status: string,
     ac-online: string,
     gpu-power: string,
+    telemetry-fresh: bool,
     version: string,
     mock-profile: string,
 
@@ -179,6 +180,7 @@ export component AppWindow inherits Window {
         battery-status: "",
         ac-online: "—",
         gpu-power: "—",
+        telemetry-fresh: false,
         version: "0.1.0",
         mock-profile: "zephyrus-full",
         fan-curve-state: FanCurveHwState.Loading,
@@ -611,6 +613,13 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 spacing: 4px;
                 SectionHeader { title: "Telemetry"; }
+                if (!root.ui-state.telemetry-fresh) : Text {
+                    text: "Telemetry stale (last refresh failed)";
+                    height: 16px;
+                    font-size: 11px;
+                    color: Palette.text-secondary;
+                    vertical-alignment: center;
+                }
                 VerticalLayout {
                     spacing: 4px;
                     HorizontalLayout {

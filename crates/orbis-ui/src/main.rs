@@ -171,6 +171,7 @@ fn to_slint(state: &controller::UiState) -> UiState {
         battery_status: state.battery_status.clone().into(),
         ac_online: state.ac_online.clone().into(),
         gpu_power: state.gpu_power_display.clone().into(),
+        telemetry_fresh: state.telemetry_fresh,
         version: state.version.clone().into(),
         mock_profile: state.mock_profile.clone().into(),
         // Fan Curve Editor
@@ -275,6 +276,7 @@ fn from_slint(state: &UiState) -> controller::UiState {
         battery_status: state.battery_status.to_string(),
         ac_online: state.ac_online.to_string(),
         gpu_power_display: state.gpu_power.to_string(),
+        telemetry_fresh: state.telemetry_fresh,
         // Fan Curve Editor
         fan_curve_state: match state.fan_curve_state {
             FanCurveHwState::Loading => controller::FanCurveHwState::Loading,
@@ -803,8 +805,11 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             state.update_telemetry(&telemetry);
         }
         WorkerEvent::TelemetryRefresh(Err(e)) => {
-            // Ошибка read: НЕ затираем последний успешный telemetry state.
+            // Ошибка read: НЕ затираем последний успешный telemetry state, но
+            // помечаем его stale, чтобы UI не показывал старые значения как
+            // актуальные.
             tracing::warn!("telemetry refresh failed: {e:?}");
+            state.mark_telemetry_stale();
         }
         WorkerEvent::FanCurve(Ok(apply_result)) => {
             // Mutation результат: Ok(ApplyResult) — read-back подтвердил
