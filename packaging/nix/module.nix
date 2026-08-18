@@ -97,13 +97,15 @@ in
         # а systemd интерпретирует `CapabilityBoundingSet=` (без значения) как
         # сброс bounding set в пустое множество.
         CapabilityBoundingSet = "";
-        # /sys read-only, на write открыт ТОЛЬКО platform_profile;
-        # platform_profile_choices остаётся read-only.
-        # Префикс "-": путь игнорируется, если файл отсутствует (например,
-        # VM/машина без ACPI platform_profile), но НЕ расширяет writable
-        # surface при его наличии.
+        # /sys остаётся read-only; writable только два точных атрибута.
+        # platform_profile_choices и keyboard max_brightness остаются read-only.
+        # Префикс "-": путь игнорируется, если файл отсутствует, но НЕ расширяет
+        # writable surface при его наличии.
         ReadOnlyPaths = [ "/sys" ];
-        ReadWritePaths = [ "-/sys/firmware/acpi/platform_profile" ];
+        ReadWritePaths = [
+          "-/sys/firmware/acpi/platform_profile"
+          "-/sys/class/leds/asus::kbd_backlight/brightness"
+        ];
       };
     };
 

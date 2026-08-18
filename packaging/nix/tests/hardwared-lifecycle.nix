@@ -88,7 +88,10 @@
       "RestrictAddressFamilies": "AF_UNIX",
       "MemoryDenyWriteExecute": "yes",
       "ReadOnlyPaths": "/sys",
-      "ReadWritePaths": "-/sys/firmware/acpi/platform_profile",
+      "ReadWritePaths": (
+          "-/sys/firmware/acpi/platform_profile "
+          "-/sys/class/leds/asus::kbd_backlight/brightness"
+      ),
       "CapabilityBoundingSet": "",
     }
     for key, expected in props.items():
@@ -98,5 +101,13 @@
       assert actual == expected, (
           f"sandbox {key}: expected {expected!r}, got {actual!r}"
       )
+
+    read_write_paths = machine.succeed(
+        "systemctl show -p ReadWritePaths --value orbis-hardwared.service"
+    ).strip().split()
+    assert "-/sys/firmware/acpi/platform_profile" in read_write_paths
+    assert "-/sys/class/leds/asus::kbd_backlight/brightness" in read_write_paths
+    assert "-/sys/class/leds/asus::kbd_backlight/max_brightness" not in read_write_paths
+    assert "-/sys/class/leds" not in read_write_paths
   '';
 }
