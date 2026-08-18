@@ -1394,6 +1394,29 @@ mod tests {
     }
 
     #[test]
+    fn battery_write_temporarily_unavailable_does_not_enable_mutation() {
+        // Read is fine, but the mutation backend is temporarily unavailable:
+        // the UI must NOT enable the write control. The distinction is
+        // preserved in the capability availability, not collapsed to a bool.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.charge_limit_capability, CapabilityAvailability::Supported);
+        assert!(!s.charge_limit_writable);
+        // write_allows_mutation rejects TemporarilyUnavailable directly.
+        assert!(!write_allows_mutation(
+            CapabilityStatus::TemporarilyUnavailable
+        ));
+    }
+
+    #[test]
     fn performance_read_write_supported_maps_to_controller() {
         let mut s = UiState::from_mock_profile("zephyrus-full");
         let snapshot = registry_with(vec![(

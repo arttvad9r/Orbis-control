@@ -455,6 +455,7 @@ where
         runtime.gpu.provider_access(),
         runtime.fan.provider_fan(),
         runtime.fan_write_available(),
+        runtime.battery_mutation_status(),
         next_generation,
         std::time::SystemTime::now(),
     )
@@ -472,6 +473,7 @@ mod tests {
     use orbis_core::action::{ActionRequirement, ApplyResult};
     use orbis_core::battery::ChargeLimit;
     use orbis_core::battery::ChargeLimitBounds;
+    use orbis_core::capability::CapabilityStatus;
     use orbis_core::diagnostics::DiagnosticEntry;
     use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
     use orbis_core::identity::BackendIdentity;
@@ -565,6 +567,7 @@ mod tests {
                 telemetry_service,
                 snapshot,
                 false,
+                CapabilityStatus::Unsupported,
             ),
             receiver,
             emit,
@@ -666,6 +669,7 @@ mod tests {
             telemetry,
             snapshot,
             false,
+            CapabilityStatus::Unsupported,
         )
     }
 
@@ -2900,7 +2904,14 @@ mod tests {
 
         // Build initial snapshot with FanCurves via the shared assembly path.
         let initial_snapshot = crate::composition::build_initial_registry_snapshot(
-            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, false,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            false,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("initial snapshot must succeed");
@@ -2932,6 +2943,7 @@ mod tests {
                     telemetry_service,
                     initial_snapshot,
                     false,
+                    CapabilityStatus::Unsupported,
                 ),
                 rx,
                 move |event| {
@@ -2989,7 +3001,14 @@ mod tests {
         let performance_service = AppService::new(provider.clone());
 
         let initial_snapshot = crate::composition::build_initial_registry_snapshot(
-            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, false,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            false,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("initial snapshot must succeed");
@@ -3018,6 +3037,7 @@ mod tests {
                     telemetry_service,
                     initial_snapshot,
                     false,
+                    CapabilityStatus::Unsupported,
                 ),
                 rx,
                 move |event| {

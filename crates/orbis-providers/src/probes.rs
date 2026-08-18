@@ -152,9 +152,15 @@ where
 ///
 /// The returned `ChargeLimit` is used only for support/bounds metadata. Its
 /// enabled/configured/effective values never enter the capability result.
-/// Write support is derived from `validate_charge_limit` with a representative
-/// value inside the reported bounds (or 80 when bounds are unknown).
-pub async fn probe_charge_limit<P>(provider: &P) -> Result<Capability, ProbeError>
+///
+/// Write capability comes from typed runtime evidence about the mutation
+/// backend (`mutation_status`), NOT from `validate_charge_limit`: validation
+/// only answers whether an input could be sent if mutation were available; it
+/// never proves the mutation path exists or is currently available.
+pub async fn probe_charge_limit<P>(
+    provider: &P,
+    mutation_status: CapabilityStatus,
+) -> Result<Capability, ProbeError>
 where
     P: BatteryProvider + ?Sized,
 {
@@ -175,13 +181,30 @@ where
         .bounds
         .map(CapabilityConstraints::ChargeLimit)
         .unwrap_or(CapabilityConstraints::Unknown);
-    let representative = charge_limit
-        .bounds
-        .map(|bounds| bounds.min.get())
-        .unwrap_or(80);
     let read = ProbeOperationResult::classified(ProbeClassification::Supported).into_operation();
-    let write = write_from_validation(provider.validate_charge_limit(representative));
+    let write = write_from_mutation_status(mutation_status);
     Ok(capability_from_read(read, write, constraints))
+}
+
+/// Derive write operation capability from typed runtime mutation-backend
+/// evidence.
+///
+/// The evidence status is preserved exactly — `Supported`, `Unsupported`,
+/// `TemporarilyUnavailable`/`BackendMissing`, `PermissionDenied` and
+/// `Unknown` stay distinguishable. Validation results are never used here.
+fn write_from_mutation_status(status: CapabilityStatus) -> OperationCapability {
+    OperationCapability {
+        status,
+        reason: Some(orbis_core::capability::CapabilityReason {
+            reason: "Hardware1 Battery mutation backend runtime evidence".into(),
+            suggestion: String::new(),
+            backend: None,
+            endpoint: None,
+            requirement: None,
+            risk: orbis_core::capability::RiskLevel::Safe,
+            checked_at: None,
+        }),
+    }
 }
 
 /// Probe fan curve read capability for a specific fan.
@@ -578,9 +601,10 @@ mod tests {
         let bounds =
             ChargeLimitBounds::new(Percent::new(40).unwrap(), Percent::new(100).unwrap(), 1)
                 .unwrap();
-        let known = probe_charge_limit(&ScriptedProvider::battery(Scripted::Value(charge_limit(
-            Some(bounds),
-        ))))
+        let known = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds)))),
+            CapabilityStatus::Unsupported,
+        )
         .await
         .unwrap();
         assert_eq!(known.operations.read.status, CapabilityStatus::Supported);
@@ -589,9 +613,10 @@ mod tests {
             CapabilityConstraints::ChargeLimit(bounds)
         );
 
-        let unknown = probe_charge_limit(&ScriptedProvider::battery(Scripted::Value(
-            charge_limit(None),
-        )))
+        let unknown = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Value(charge_limit(None))),
+            CapabilityStatus::Unsupported,
+        )
         .await
         .unwrap();
         assert_eq!(unknown.constraints, CapabilityConstraints::Unknown);
@@ -599,9 +624,10 @@ mod tests {
 
     #[tokio::test]
     async fn battery_probe_preserves_backend_and_permission_errors() {
-        let missing = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
-            ScriptedError::BackendMissing,
-        )))
+        let missing = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::BackendMissing)),
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -609,9 +635,10 @@ mod tests {
             CapabilityStatus::BackendMissing
         );
 
-        let denied = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
-            ScriptedError::PermissionDenied,
-        )))
+        let denied = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::PermissionDenied)),
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -645,9 +672,12 @@ mod tests {
         let bounds =
             ChargeLimitBounds::new(Percent::new(40).unwrap(), Percent::new(100).unwrap(), 1)
                 .unwrap();
-        let mut provider = ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds))));
-        provider.write_supported = true;
-        let capability = probe_charge_limit(&provider).await.unwrap();
+        let provider = ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds))));
+        // Mutation backend evidence = Supported (Hardware1 reports a proven
+        // production battery mutation backend).
+        let capability = probe_charge_limit(&provider, CapabilityStatus::Supported)
+            .await
+            .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::Supported
@@ -677,9 +707,12 @@ mod tests {
             CapabilityStatus::BackendMissing
         );
 
-        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
-            ScriptedError::BackendMissing,
-        )))
+        let battery = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::BackendMissing)),
+            // Even positive mutation evidence must not override a structural
+            // read failure: write mirrors the read classification.
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -710,9 +743,12 @@ mod tests {
             CapabilityStatus::Unsupported
         );
 
-        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
-            ScriptedError::PermissionDenied,
-        )))
+        let battery = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::PermissionDenied)),
+            // Read PermissionDenied is evidence about reads only. Even positive
+            // mutation evidence must not invent a denied write.
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -738,9 +774,12 @@ mod tests {
             CapabilityStatus::Supported
         );
 
-        let mut battery = ScriptedProvider::battery(Scripted::Value(charge_limit(None)));
-        battery.write_supported = true;
-        let charge = probe_charge_limit(&battery).await.unwrap();
+        let battery = ScriptedProvider::battery(Scripted::Value(charge_limit(None)));
+        // Mutation evidence = Supported; the probe must derive write from the
+        // evidence without ever calling set_charge_limit.
+        let charge = probe_charge_limit(&battery, CapabilityStatus::Supported)
+            .await
+            .unwrap();
         assert_eq!(charge.operations.write.status, CapabilityStatus::Supported);
     }
 
@@ -752,9 +791,10 @@ mod tests {
         ])))
         .await
         .unwrap();
-        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Value(
-            charge_limit(None),
-        )))
+        let battery = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Value(charge_limit(None))),
+            CapabilityStatus::Unsupported,
+        )
         .await
         .unwrap();
 
@@ -1098,9 +1138,14 @@ mod tests {
         let bounds =
             ChargeLimitBounds::new(Percent::new(40).unwrap(), Percent::new(100).unwrap(), 1)
                 .unwrap();
-        let provider = ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds))));
-        // write_supported = false: validate_charge_limit returns Invalid.
-        let capability = probe_charge_limit(&provider).await.unwrap();
+        // validate_charge_limit would accept the value (write_supported=true),
+        // but the runtime mutation evidence says Unsupported. Validation alone
+        // must never make write Supported.
+        let mut provider = ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds))));
+        provider.write_supported = true;
+        let capability = probe_charge_limit(&provider, CapabilityStatus::Unsupported)
+            .await
+            .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::Supported
@@ -1112,6 +1157,45 @@ mod tests {
         // Overall status is Supported (read is Supported), but write is
         // Unsupported. The controller uses operations.write.status for gating.
         assert_eq!(capability.status, CapabilityStatus::Supported);
+    }
+
+    #[tokio::test]
+    async fn charge_limit_probe_write_status_matches_runtime_evidence() {
+        // Read is Supported in all cases; only the mutation evidence varies.
+        // Each evidence class must be preserved exactly — never collapsed to
+        // a bool or a generic error.
+        let bounds =
+            ChargeLimitBounds::new(Percent::new(40).unwrap(), Percent::new(100).unwrap(), 1)
+                .unwrap();
+        for (evidence, expected_write) in [
+            (CapabilityStatus::Supported, CapabilityStatus::Supported),
+            (CapabilityStatus::Unsupported, CapabilityStatus::Unsupported),
+            (
+                CapabilityStatus::TemporarilyUnavailable,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+            (
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::PermissionDenied,
+            ),
+            (CapabilityStatus::Unknown, CapabilityStatus::Unknown),
+        ] {
+            let provider = ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds))));
+            let capability = probe_charge_limit(&provider, evidence).await.unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported,
+                "read must stay Supported for evidence {evidence:?}"
+            );
+            assert_eq!(
+                capability.operations.write.status, expected_write,
+                "write must mirror evidence {evidence:?}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1133,9 +1217,10 @@ mod tests {
             .add(orbis_core::FeatureId::Performance, performance)
             .unwrap();
 
-        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
-            ScriptedError::BackendMissing,
-        )))
+        let battery = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::BackendMissing)),
+            CapabilityStatus::Unsupported,
+        )
         .await
         .unwrap();
         builder
@@ -1171,9 +1256,10 @@ mod tests {
             1,
             std::time::SystemTime::UNIX_EPOCH,
         );
-        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
-            ScriptedError::PermissionDenied,
-        )))
+        let battery = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::PermissionDenied)),
+            CapabilityStatus::PermissionDenied,
+        )
         .await
         .unwrap();
         builder
