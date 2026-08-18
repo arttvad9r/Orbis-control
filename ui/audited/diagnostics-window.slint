@@ -1,0 +1,55 @@
+import { StatusBadge, MetricTile } from "../components/visual-controls.slint";
+import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
+import { Palette } from "../themes/dark.slint";
+
+export component DiagnosticsWindow inherits Window {
+    width: 640px;
+    height: 540px;
+    title: "Orbis Control — Diagnostics";
+    background: Palette.window-background;
+    in property <string> version: "0.1.0";
+    property <string> local-status: "Preview values · diagnostics backend not connected";
+    property <bool> show-logs: false;
+
+    VerticalLayout {
+        padding: 10px; spacing: 7px;
+        WindowHeader { title: "Diagnostics"; subtitle: "Capabilities, providers and support report"; }
+        LocalStatus { text: root.local-status; accent: Palette.warning; }
+        HorizontalLayout { height: 48px; spacing: 6px;
+            MetricTile { label: "Kernel"; value: "Linux"; detail: "preview"; }
+            MetricTile { label: "Platform"; value: "ASUS"; detail: "preview"; }
+            MetricTile { label: "Orbis"; value: "v" + root.version; detail: "dev"; }
+        }
+        HorizontalLayout { spacing: 10px;
+            SectionCard {
+                horizontal-stretch: 1; height: 260px;
+                VerticalLayout { padding: 10px; spacing: 9px;
+                    SectionTitle { title: root.show-logs ? "Log Preview" : "Capability Registry"; }
+                    if (!root.show-logs) : HorizontalLayout { Text { text: "Performance"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    if (!root.show-logs) : HorizontalLayout { Text { text: "Battery threshold"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    if (!root.show-logs) : HorizontalLayout { Text { text: "GPU primitives"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    if (!root.show-logs) : HorizontalLayout { Text { text: "Fan curves"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    if (!root.show-logs) : HorizontalLayout { Text { text: "Power limits"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    if (!root.show-logs) : HorizontalLayout { Text { text: "Display / Lighting"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    if (root.show-logs) : Text { text: "[preview] Session1 status not queried\n[preview] Hardware1 status not queried\n[preview] No diagnostics log transport is wired yet."; font-size: 9px; color: Palette.text-secondary; wrap: word-wrap; }
+                }
+            }
+            SectionCard {
+                width: 220px; height: 260px;
+                VerticalLayout { padding: 10px; spacing: 11px;
+                    SectionTitle { title: "Providers"; }
+                    HorizontalLayout { Text { text: "asusd"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    HorizontalLayout { Text { text: "supergfxd"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    HorizontalLayout { Text { text: "Hardware1"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                }
+            }
+        }
+        HorizontalLayout { height: 28px; spacing: 6px;
+            ActionButton { label: "Copy Summary"; clicked => { root.local-status = "Summary prepared in preview · clipboard backend not connected"; } }
+            ActionButton { label: root.show-logs ? "Capabilities" : "Open Logs"; clicked => { root.show-logs = !root.show-logs; root.local-status = root.show-logs ? "Showing local log preview" : "Showing capability preview"; } }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            ActionButton { label: "Export Report"; accent: true; clicked => { root.local-status = "Report prepared in preview · file export backend not connected"; } }
+        }
+    }
+}

@@ -1,14 +1,14 @@
-//! Компиляция Slint-интерфейса.
+//! Compile the audited Orbis Control Slint interface.
 //!
-//! `app-window.slint` импортирует компоненты относительно `ui/`, поэтому
-//! include-path указывает на каталог `ui`.
+//! The entrypoint re-exports the stable public types expected by Rust while
+//! selecting the screenshot-audited window implementations under `ui/audited`.
 
 use std::path::PathBuf;
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     let ui_dir = PathBuf::from(&manifest_dir).join("../../ui");
-    let entry = ui_dir.join("app-window.slint");
+    let entry = ui_dir.join("app-entry.slint");
 
     let entry_str = entry.to_string_lossy().to_string();
 

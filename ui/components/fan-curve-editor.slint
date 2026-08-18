@@ -118,7 +118,7 @@ component DisabledPowerBar inherits Rectangle {
     }
 
     Rectangle {
-        x: 25 * parent.width / 100;
+        x: 25%;
         y: 22px;
         width: 7px;
         height: 14px;
@@ -371,17 +371,17 @@ component CurveGraph inherits Rectangle {
         border-color: Palette.border-default;
         clip: true;
 
-        Rectangle { x: 0px; y: 20 * parent.height / 100; width: parent.width; height: 1px; background: Palette.border-default; }
-        Rectangle { x: 0px; y: 40 * parent.height / 100; width: parent.width; height: 1px; background: Palette.border-default; }
-        Rectangle { x: 0px; y: 60 * parent.height / 100; width: parent.width; height: 1px; background: Palette.border-default; }
-        Rectangle { x: 0px; y: 80 * parent.height / 100; width: parent.width; height: 1px; background: Palette.border-default; }
-        Rectangle { x: 12.5 * parent.width / 100; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
-        Rectangle { x: 25 * parent.width / 100; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
-        Rectangle { x: 37.5 * parent.width / 100; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
-        Rectangle { x: 50 * parent.width / 100; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
-        Rectangle { x: 62.5 * parent.width / 100; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
-        Rectangle { x: 75 * parent.width / 100; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
-        Rectangle { x: 87.5 * parent.width / 100; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
+        Rectangle { x: 0px; y: 20%; width: parent.width; height: 1px; background: Palette.border-default; }
+        Rectangle { x: 0px; y: 40%; width: parent.width; height: 1px; background: Palette.border-default; }
+        Rectangle { x: 0px; y: 60%; width: parent.width; height: 1px; background: Palette.border-default; }
+        Rectangle { x: 0px; y: 80%; width: parent.width; height: 1px; background: Palette.border-default; }
+        Rectangle { x: 12.5%; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
+        Rectangle { x: 25%; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
+        Rectangle { x: 37.5%; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
+        Rectangle { x: 50%; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
+        Rectangle { x: 62.5%; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
+        Rectangle { x: 75%; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
+        Rectangle { x: 87.5%; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
 
         curve := Path {
             width: parent.width;
@@ -390,9 +390,11 @@ component CurveGraph inherits Rectangle {
             viewbox-y: 0;
             viewbox-width: 100;
             viewbox-height: 100;
+            fit: fill;
             stroke: root.curve-color;
             stroke-width: 2px;
             stroke-line-cap: round;
+            stroke-line-join: round;
             MoveTo { x: root.x-pos(root.temp-0); y: root.y-pos(0); }
             LineTo { x: root.x-pos(root.temp-1); y: root.y-pos(1); }
             LineTo { x: root.x-pos(root.temp-2); y: root.y-pos(2); }
@@ -478,6 +480,7 @@ export component FanCurveEditor inherits Rectangle {
     callback apply-clicked;
 
     height: 530px;
+    min-height: 530px;
     background: Palette.window-background;
 
     if (root.state == FanCurveHwState.Loading) : Rectangle {
@@ -513,7 +516,6 @@ export component FanCurveEditor inherits Rectangle {
             vertical-alignment: center;
         }
 
-        // Row 1: Profile + Fan selectors
         HorizontalLayout {
             height: 32px;
             spacing: 7px;

@@ -1,17 +1,9 @@
-//! Orbis Control — минимальный визуальный прототип главного окна.
+//! Orbis Control — GUI entry point.
 //!
-//! Режимы запуска:
-//!   orbis-control [--ui-state default|pending|disabled|error]
-//!   orbis-control --ui-state default --screenshot <path.png>
-//!
-//! `--ui-state` меняет только локальное состояние интерфейса; без `--screenshot`
-//! окно запускается через штатный winit-бэкенд. Скриншоты рендерятся
-//! детерминированно через `slint::platform` + SoftwareRenderer (масштаб 100%,
-//! без окна, без новых зависимостей).
+//! Existing hardware-backed controls keep their worker/provider paths. The
+//! additional visual windows are local UI prototypes only and never perform
+//! hardware, D-Bus, sysfs, or persistence operations.
 
-// UiAction::Perf, UiAction::Gpu и UiAction::Charge больше не конструируются в
-// production: Performance, GPU Mode и Battery Charge Limit идут через worker.
-// Контроллер сохраняется как boundary/model helper для legacy unit tests.
 #[allow(dead_code)]
 mod controller;
 
@@ -42,6 +34,12 @@ thread_local! {
     // handle here allows the window to be hidden/reshown without rebuilding it
     // and lets worker events synchronize its UiState with AppWindow.
     static FANS_WINDOW: RefCell<Option<FansWindow>> = const { RefCell::new(None) };
+    static EXTRA_WINDOW: RefCell<Option<ExtraWindow>> = const { RefCell::new(None) };
+    static AUTOMATION_WINDOW: RefCell<Option<AutomationWindow>> = const { RefCell::new(None) };
+    static PREFERENCES_WINDOW: RefCell<Option<PreferencesWindow>> = const { RefCell::new(None) };
+    static DIAGNOSTICS_WINDOW: RefCell<Option<DiagnosticsWindow>> = const { RefCell::new(None) };
+    static UPDATES_WINDOW: RefCell<Option<UpdatesWindow>> = const { RefCell::new(None) };
+    static PREVIEW_DIALOG_WINDOW: RefCell<Option<PreviewDialogWindow>> = const { RefCell::new(None) };
 }
 
 /// Context for the explicit Factory Defaults mutation. The provider keeps the
@@ -60,7 +58,6 @@ struct Args {
     screenshot: Option<String>,
 }
 
-/// Парсинг аргументов через `std::env::args` (без clap).
 fn parse_args() -> Args {
     let mut ui_state = "default".to_string();
     let mut screenshot = None;
@@ -73,9 +70,7 @@ fn parse_args() -> Args {
                 }
             }
             "--screenshot" => screenshot = it.next(),
-            other => {
-                eprintln!("orbis-control: игнорирую неизвестный аргумент '{other}'");
-            }
+            other => eprintln!("orbis-control: игнорирую неизвестный аргумент '{other}'"),
         }
     }
     Args {
@@ -84,24 +79,17 @@ fn parse_args() -> Args {
     }
 }
 
-/// Начальное состояние для сценария `--ui-state`.
 fn state_for_scenario(name: &str) -> controller::UiState {
     let mut s = controller::UiState::from_mock_profile("zephyrus-full");
     match name {
         "default" => {}
         "pending" => {
-            s.gpu_selected = 2; // Ultimate
+            s.gpu_selected = 2;
             s.gpu_ultimate_pending = true;
         }
-        "disabled" => {
-            s.gpu_ultimate_disabled = true; // MUX unavailable
-        }
-        "error" => {
-            s.gpu_section_error = true;
-        }
-        other => {
-            eprintln!("orbis-control: неизвестное состояние '{other}', использую default");
-        }
+        "disabled" => s.gpu_ultimate_disabled = true,
+        "error" => s.gpu_section_error = true,
+        other => eprintln!("orbis-control: неизвестное состояние '{other}', использую default"),
     }
     s
 }
@@ -109,6 +97,7 @@ fn state_for_scenario(name: &str) -> controller::UiState {
 /// Высота главного окна. До добавления встроенного Fan Curve редактора
 /// AppWindow использовал 441px (466px с GPU error banner); возвращаем именно
 /// этот бюджет, потому что редактор теперь живёт в отдельном FansWindow.
+#[cfg(test)]
 fn window_height(state: &controller::UiState) -> f32 {
     if state.gpu_section_error {
         466.0
@@ -116,10 +105,6 @@ fn window_height(state: &controller::UiState) -> f32 {
         441.0
     }
 }
-
-// ---------------------------------------------------------------------------
-// Маппинг controller::UiState <-> сгенерированный Slint UiState
-// ---------------------------------------------------------------------------
 
 fn to_slint(state: &controller::UiState) -> UiState {
     UiState {
@@ -330,7 +315,6 @@ fn from_slint(state: &UiState) -> controller::UiState {
     }
 }
 
-/// Создать окно, установить состояние и подключить обработчики.
 fn build_app(
     state: &controller::UiState,
     worker_tx: Option<UnboundedSender<WorkerCommand>>,
@@ -421,6 +405,79 @@ fn show_fans_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
 }
 
 /// UI-boundary: преобразование UI-индекса карточки в доменный профиль.
+fn show_extra_window() -> Result<(), slint::PlatformError> {
+    EXTRA_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(ExtraWindow::new()?);
+        }
+        slot.as_ref().expect("ExtraWindow initialized").show()
+    })
+}
+
+fn show_automation_window() -> Result<(), slint::PlatformError> {
+    AUTOMATION_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(AutomationWindow::new()?);
+        }
+        slot.as_ref().expect("AutomationWindow initialized").show()
+    })
+}
+
+fn show_preferences_window() -> Result<(), slint::PlatformError> {
+    PREFERENCES_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(PreferencesWindow::new()?);
+        }
+        slot.as_ref().expect("PreferencesWindow initialized").show()
+    })
+}
+
+fn show_diagnostics_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
+    DIAGNOSTICS_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(DiagnosticsWindow::new()?);
+        }
+        let window = slot.as_ref().expect("DiagnosticsWindow initialized");
+        window.set_version(app.get_ui_state().version.clone());
+        window.show()
+    })
+}
+
+fn show_updates_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
+    UPDATES_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(UpdatesWindow::new()?);
+        }
+        let window = slot.as_ref().expect("UpdatesWindow initialized");
+        window.set_version(app.get_ui_state().version.clone());
+        window.show()
+    })
+}
+
+fn show_preview_dialog(kind: i32) -> Result<(), slint::PlatformError> {
+    PREVIEW_DIALOG_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            let window = PreviewDialogWindow::new()?;
+            let weak = window.as_weak();
+            window.on_dismiss_clicked(move || {
+                if let Some(window) = weak.upgrade() {
+                    let _ = window.hide();
+                }
+            });
+            *slot = Some(window);
+        }
+        let window = slot.as_ref().expect("PreviewDialogWindow initialized");
+        window.set_kind(kind.clamp(0, 3));
+        window.show()
+    })
+}
+
 fn performance_profile_from_index(index: i32) -> Option<PerformanceProfile> {
     match index {
         0 => Some(PerformanceProfile::Silent),
@@ -600,11 +657,9 @@ fn apply_charge_limit_outcome(
             state.charge_limit = i32::from(percent.get());
             tracing::debug!("battery: лимит применён: percent={}", percent.get());
         }
-        None => {
-            tracing::warn!(
-                "battery: authoritative percent отсутствует (None); UI сохраняет прежнее значение"
-            );
-        }
+        None => tracing::warn!(
+            "battery: authoritative percent отсутствует (None); UI сохраняет прежнее значение"
+        ),
     }
     if !matches!(outcome.result, ApplyResult::Applied) {
         tracing::warn!("battery: результат не Applied: {:?}", outcome.result);
@@ -617,9 +672,7 @@ fn apply_charge_limit_result(
 ) {
     match result {
         Ok(outcome) => apply_charge_limit_outcome(state, &outcome),
-        Err(CommandError::Command(e)) => {
-            tracing::warn!("battery: команда не выполнена: {e:?}");
-        }
+        Err(CommandError::Command(e)) => tracing::warn!("battery: команда не выполнена: {e:?}"),
         Err(CommandError::ReadBack { result, source }) => {
             tracing::warn!(
                 "battery: команда выполнена ({result:?}), но read-back не удался: {source:?}"
@@ -772,7 +825,7 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             }
         }
         WorkerEvent::Performance(Err(CommandError::Command(e))) => {
-            tracing::warn!("performance: команда не выполнена: {e:?}");
+            tracing::warn!("performance: команда не выполнена: {e:?}")
         }
         WorkerEvent::Performance(Err(CommandError::ReadBack { result, source })) => {
             tracing::warn!(
@@ -930,6 +983,91 @@ fn wire_callbacks(
             };
             if let Err(e) = show_fans_window(&app) {
                 tracing::warn!("не удалось открыть FansWindow: {e:?}");
+            }
+        });
+    }
+    app.on_extra_clicked(move || {
+        if let Err(e) = show_extra_window() {
+            tracing::warn!("не удалось открыть ExtraWindow: {e:?}");
+        }
+    });
+    app.on_automation_clicked(move || {
+        if let Err(e) = show_automation_window() {
+            tracing::warn!("не удалось открыть AutomationWindow: {e:?}");
+        }
+    });
+    app.on_preferences_clicked(move || {
+        if let Err(e) = show_preferences_window() {
+            tracing::warn!("не удалось открыть PreferencesWindow: {e:?}");
+        }
+    });
+    {
+        let app_weak = app.as_weak();
+        app.on_diagnostics_clicked(move || {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            if let Err(e) = show_diagnostics_window(&app) {
+                tracing::warn!("не удалось открыть DiagnosticsWindow: {e:?}");
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        app.on_updates_clicked(move || {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            if let Err(e) = show_updates_window(&app) {
+                tracing::warn!("не удалось открыть UpdatesWindow: {e:?}");
+            }
+        });
+    }
+    app.on_preview_dialog_clicked(move |kind| {
+        if let Err(e) = show_preview_dialog(kind) {
+            tracing::warn!("не удалось открыть PreviewDialogWindow: {e:?}");
+        }
+    });
+    {
+        let app_weak = app.as_weak();
+        app.on_quit_clicked(move || {
+            FANS_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() {
+                    let _ = window.hide();
+                }
+            });
+            EXTRA_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() {
+                    let _ = window.hide();
+                }
+            });
+            AUTOMATION_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() {
+                    let _ = window.hide();
+                }
+            });
+            PREFERENCES_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() {
+                    let _ = window.hide();
+                }
+            });
+            DIAGNOSTICS_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() {
+                    let _ = window.hide();
+                }
+            });
+            UPDATES_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() {
+                    let _ = window.hide();
+                }
+            });
+            PREVIEW_DIALOG_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() {
+                    let _ = window.hide();
+                }
+            });
+            if let Some(app) = app_weak.upgrade() {
+                let _ = app.hide();
             }
         });
     }
@@ -1128,7 +1266,7 @@ fn wire_callbacks(
                 tracing::warn!("fan-apply rejected: not writable, not dirty, error, or invalid curve");
                 return;
             }
-            let Some(profile) = controller::UiState::asusd_profile_from_index(s.fan_profile_selected)
+let Some(profile) = controller::UiState::asusd_profile_from_index(s.fan_profile_selected)
             else {
                 tracing::warn!("fan-apply: invalid profile index {}", s.fan_profile_selected);
                 return;
@@ -1143,11 +1281,7 @@ fn wire_callbacks(
             };
             match &worker_tx {
                 Some(tx) => {
-                    if let Err(e) = tx.send(WorkerCommand::SetFanCurve {
-                        profile,
-                        fan: fan_id,
-                        curve,
-                    }) {
+                    if let Err(e) = tx.send(WorkerCommand::SetFanCurve { profile, fan: fan_id, curve }) {
                         tracing::warn!("worker закрыт, fan mutation не отправлена: {e:?}");
                     }
                 }
@@ -1206,12 +1340,12 @@ impl Platform for SoftwarePlatform {
 }
 
 fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<()> {
-    let height = window_height(state) as u32;
+    let height = 680u32;
     let renderer = Rc::new(slint::platform::software_renderer::SoftwareRenderer::new());
     let adapter = Rc::new(SoftwareWindowAdapter {
         renderer: renderer.clone(),
         window: OnceCell::new(),
-        size: Cell::new(PhysicalSize::new(425, height)),
+        size: Cell::new(PhysicalSize::new(500, height)),
     });
     {
         let dyn_adapter: Rc<dyn WindowAdapter> = adapter.clone();
@@ -1223,7 +1357,7 @@ fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<
 
     let app = build_app(state, None, None)?;
     app.window()
-        .set_size(LogicalSize::new(425.0, height as f32));
+        .set_size(LogicalSize::new(500.0, height as f32));
     app.show()?;
 
     let size = app.window().size();
@@ -1286,8 +1420,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let app = build_app(&state, Some(worker_tx.clone()), Some(fan_defaults))?;
-    app.window()
-        .set_size(LogicalSize::new(425.0, window_height(&state)));
+    app.window().set_size(LogicalSize::new(500.0, 680.0));
 
     let weak = app.as_weak();
     let event_sink = move |event: WorkerEvent| {
@@ -1331,9 +1464,13 @@ fn main() -> anyhow::Result<()> {
     app.show()?;
     slint::run_event_loop()?;
 
-    FANS_WINDOW.with(|slot| {
-        *slot.borrow_mut() = None;
-    });
+    FANS_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    EXTRA_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    AUTOMATION_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    PREFERENCES_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    DIAGNOSTICS_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    UPDATES_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    PREVIEW_DIALOG_WINDOW.with(|slot| *slot.borrow_mut() = None);
     drop(app);
     drop(worker_tx);
     drop(runtime);
