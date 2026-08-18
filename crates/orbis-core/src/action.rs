@@ -37,6 +37,10 @@ impl ActionRequirement {
 pub enum ApplyResult {
     /// Применено и подтверждено read-back.
     Applied,
+    /// Принято backend-ом и подтверждено config-level read-back; hardware
+    /// state не подтверждён (write-only ABI, например Aura RGB
+    /// `kbd_rgb_mode`). Не является `Applied`.
+    Accepted,
     /// Применено, но требует reboot/logout (pending).
     Pending {
         /// требование
@@ -57,7 +61,10 @@ pub enum ApplyResult {
 }
 
 impl ApplyResult {
-    /// Успех без pending?
+    /// Подтверждённое hardware state без pending?
+    ///
+    /// [`ApplyResult::Accepted`] (config-level подтверждение) не считается
+    /// applied: hardware state не подтверждён.
     pub fn is_applied(&self) -> bool {
         matches!(self, Self::Applied)
     }
@@ -98,6 +105,17 @@ mod tests {
         };
         assert!(!pending.is_applied());
         assert_eq!(pending.requirement(), Some(ActionRequirement::Reboot));
+    }
+
+    #[test]
+    fn accepted_is_not_hardware_applied() {
+        let accepted = ApplyResult::Accepted;
+        assert!(!accepted.is_applied());
+        assert_eq!(accepted.requirement(), None);
+        let json = serde_json::to_string(&accepted).unwrap();
+        assert_eq!(json, r#"{"kind":"accepted"}"#);
+        let back: ApplyResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ApplyResult::Accepted);
     }
 
     #[test]

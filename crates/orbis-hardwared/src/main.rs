@@ -16,8 +16,10 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use orbis_hardwared::{
-    BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION, GPU_POLKIT_ACTION,
-    HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION, PolkitAuthorizer,
+    AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION,
+    GPU_POLKIT_ACTION, HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
+    PolkitAuthorizer,
+    aura::{AsusdAuraStaticRgbMutationBackend, ZbusAsusdAuraClient},
     battery::{
         AsusdBatteryMutationBackend, BatteryMutationBackend, BatteryMutationReadback,
         BatteryMutationStatus, ZbusAsusdBatteryClient, discover_effective_reader,
@@ -270,6 +272,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             KEYBOARD_BACKLIGHT_POLKIT_ACTION,
+        )),
+    )
+    .with_aura_static_rgb(
+        Box::new(AsusdAuraStaticRgbMutationBackend::new(
+            ZbusAsusdAuraClient::new(connection.clone()),
+        )),
+        Box::new(PolkitAuthorizer::with_action(
+            connection.clone(),
+            AURA_POLKIT_ACTION,
         )),
     );
 

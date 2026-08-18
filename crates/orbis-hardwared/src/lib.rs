@@ -17,10 +17,12 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
+use orbis_core::aura::AuraRgb;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 use orbis_providers::supergfxd::{SupergfxdMode, SupergfxdStagedState, SupergfxdUserAction};
 
+pub mod aura;
 pub mod battery;
 pub mod fans;
 pub mod keyboard_backlight;
@@ -216,6 +218,9 @@ pub const PANEL_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-panel
 /// Polkit action id for keyboard backlight brightness mutation.
 pub const KEYBOARD_BACKLIGHT_POLKIT_ACTION: &str =
     "io.github.orbiscontrol.hardware.set-keyboard-backlight";
+/// Polkit action id for Aura Static RGB mutation (separate RGB capability/
+/// security domain; mirrors per-capability action pattern).
+pub const AURA_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-aura-static-rgb";
 
 /// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
 pub mod wire {
@@ -647,6 +652,8 @@ pub struct HardwareService {
     panel_backend: Option<Box<dyn panel::PanelOverdriveMutationBackend>>,
     kb_authorizer: Box<dyn Authorizer>,
     kb_backend: Option<Box<dyn keyboard_backlight::KeyboardBacklightMutationBackend>>,
+    aura_authorizer: Box<dyn Authorizer>,
+    aura_backend: Option<Box<dyn aura::AuraStaticRgbMutationBackend>>,
 }
 
 impl HardwareService {
@@ -665,6 +672,8 @@ impl HardwareService {
             panel_backend: None,
             kb_authorizer: Box::new(DisabledAuthorizer),
             kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
     }
 
@@ -687,6 +696,8 @@ impl HardwareService {
             panel_backend: None,
             kb_authorizer: Box::new(DisabledAuthorizer),
             kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
     }
 
@@ -711,6 +722,8 @@ impl HardwareService {
             panel_backend: None,
             kb_authorizer: Box::new(DisabledAuthorizer),
             kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
     }
 
@@ -733,6 +746,8 @@ impl HardwareService {
             panel_backend: None,
             kb_authorizer: Box::new(DisabledAuthorizer),
             kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
     }
 
@@ -759,6 +774,8 @@ impl HardwareService {
             panel_backend: None,
             kb_authorizer: Box::new(DisabledAuthorizer),
             kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
     }
 
@@ -782,6 +799,8 @@ impl HardwareService {
             panel_backend: None,
             kb_authorizer: Box::new(DisabledAuthorizer),
             kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
     }
 
@@ -808,6 +827,21 @@ impl HardwareService {
     ) -> Self {
         self.kb_backend = Some(kb_backend);
         self.kb_authorizer = kb_authorizer;
+        self
+    }
+
+    /// Attach the Aura Static RGB mutation backend to an existing service.
+    ///
+    /// Builder-style so production main can keep the proven combined
+    /// constructor and attach the new capability without a 10-argument
+    /// constructor.
+    pub fn with_aura_static_rgb(
+        mut self,
+        aura_backend: Box<dyn aura::AuraStaticRgbMutationBackend>,
+        aura_authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.aura_backend = Some(aura_backend);
+        self.aura_authorizer = aura_authorizer;
         self
     }
 }
@@ -1033,6 +1067,48 @@ impl HardwareService {
                 .unwrap_or(keyboard_backlight::KeyboardBacklightMutationStatus::Unknown),
         )
     }
+
+    /// Установить Aura Static RGB; возвращает честный config-level результат
+    /// (`Accepted`), hardware state не подтверждается (`kbd_rgb_mode`
+    /// write-only).
+    async fn set_aura_static_rgb(
+        &self,
+        r: u8,
+        g: u8,
+        b: u8,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<aura::AuraMutationResult> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.aura_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("aura static rgb backend unavailable".into())
+        })?;
+        aura::handle_set_aura_static_rgb(
+            self.aura_authorizer.as_ref(),
+            backend,
+            AuraRgb { r, g, b },
+            &sender,
+        )
+        .await
+    }
+
+    /// Read-only typed evidence about Aura Static RGB mutation backend
+    /// availability.
+    ///
+    /// This is capability metadata, not a mutation: no authorization is
+    /// required and no hardware I/O occurs. The returned wire value is one of
+    /// `aura::aura_mutation_wire::*`.
+    fn aura_mutation_status(&self) -> u8 {
+        use aura::aura_mutation_wire;
+        aura_mutation_wire::to_wire(
+            self.aura_backend
+                .as_deref()
+                .map(|b| b.mutation_status())
+                .unwrap_or(aura::AuraMutationStatus::Unknown),
+        )
+    }
 }
 
 #[zbus::proxy(
@@ -1073,6 +1149,14 @@ pub trait Hardware1 {
 
     /// Read-only typed keyboard backlight mutation backend availability.
     fn keyboard_backlight_mutation_status(&self) -> zbus::Result<u8>;
+
+    /// Установить Aura Static RGB; возвращает честный config-level результат
+    /// (`Accepted`), hardware state не подтверждается (`kbd_rgb_mode`
+    /// write-only).
+    fn set_aura_static_rgb(&self, r: u8, g: u8, b: u8) -> zbus::Result<aura::AuraMutationResult>;
+
+    /// Read-only typed Aura Static RGB mutation backend availability (wire enum).
+    fn aura_mutation_status(&self) -> zbus::Result<u8>;
 }
 
 #[cfg(test)]

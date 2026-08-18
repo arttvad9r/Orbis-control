@@ -221,6 +221,16 @@ impl AuraSpeed {
             other => Self::Unknown(other.to_string()),
         }
     }
+
+    /// Encode back to the wire string (lossless for `Unknown`).
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Low => "Low",
+            Self::Med => "Med",
+            Self::High => "High",
+            Self::Unknown(other) => other.as_str(),
+        }
+    }
 }
 
 /// Aura effect direction, 1:1 with upstream `Direction` wire values (string on
@@ -249,6 +259,17 @@ impl AuraDirection {
             "Up" => Self::Up,
             "Down" => Self::Down,
             other => Self::Unknown(other.to_string()),
+        }
+    }
+
+    /// Encode back to the wire string (lossless for `Unknown`).
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Right => "Right",
+            Self::Left => "Left",
+            Self::Up => "Up",
+            Self::Down => "Down",
+            Self::Unknown(other) => other.as_str(),
         }
     }
 }
@@ -343,6 +364,27 @@ mod tests {
             AuraDirection::from_str("Diagonal"),
             AuraDirection::Unknown("Diagonal".to_string())
         );
+    }
+
+    #[test]
+    fn speed_and_direction_wire_roundtrip_is_lossless() {
+        for speed in [
+            AuraSpeed::Low,
+            AuraSpeed::Med,
+            AuraSpeed::High,
+            AuraSpeed::Unknown("Turbo".to_string()),
+        ] {
+            assert_eq!(AuraSpeed::from_str(speed.as_str()), speed);
+        }
+        for direction in [
+            AuraDirection::Right,
+            AuraDirection::Left,
+            AuraDirection::Up,
+            AuraDirection::Down,
+            AuraDirection::Unknown("Diagonal".to_string()),
+        ] {
+            assert_eq!(AuraDirection::from_str(direction.as_str()), direction);
+        }
     }
 
     #[test]
