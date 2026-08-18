@@ -8,6 +8,10 @@ on:
     branches:
       - agent/fan-curve-editor-ui
 
+concurrency:
+  group: ui-audit-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -39,7 +43,6 @@ jobs:
                   raise SystemExit(f"expected text not found in {path}: {old!r}")
               p.write_text(text.replace(old, new))
 
-          # The audited Slint main is 500x680. Do not force the old 425x441/466 viewport.
           replace_required("crates/orbis-ui/src/main.rs",
               "let height = window_height(state) as u32;",
               "let height = 680u32;")
@@ -53,12 +56,10 @@ jobs:
               "app.window().set_size(LogicalSize::new(425.0, window_height(&state)));",
               "app.window().set_size(LogicalSize::new(500.0, 680.0));")
 
-          # The inactive chart may be clicked to select a fan; the active chart must leave pointer events to drag points.
           replace_required("ui/audited/fan-curve-editor-v3.slint",
               "touch := TouchArea { clicked => { root.selected(root.fan-id); } }",
               "touch := TouchArea { enabled: !root.active; clicked => { root.selected(root.fan-id); } }")
 
-          # Match current G-Helper Extra wording instead of abbreviated placeholder labels.
           labels = {
               'label: "USB-C charger profile"': 'label: "Keep GPU disabled on USB-C charger in Optimized mode"',
               'label: "Warn about GPU applications"': 'label: "Stop all apps using GPU when switching to Eco"',
