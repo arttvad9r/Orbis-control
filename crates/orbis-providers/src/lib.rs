@@ -17,6 +17,7 @@ pub mod asus_armoury;
 pub mod aura;
 pub mod error;
 pub mod fan_defaults;
+pub mod hardware_identity;
 pub mod keyboard_backlight;
 pub mod native_asus_eco;
 pub mod probes;
@@ -33,6 +34,7 @@ pub use asus_armoury::*;
 pub use aura::*;
 pub use error::{OperationId, ProviderError, ValidationResult};
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
+pub use hardware_identity::HardwareIdentityProvider;
 pub use keyboard_backlight::*;
 pub use native_asus_eco::*;
 pub use probes::{
