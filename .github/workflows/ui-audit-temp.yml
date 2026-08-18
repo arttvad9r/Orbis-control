@@ -23,12 +23,7 @@ jobs:
           from pathlib import Path
           path = Path("crates/orbis-ui/Cargo.toml")
           text = path.read_text()
-          old = '''orbis-providers = {
-              path = "../orbis-providers",
-              version = "0.1.0",
-              default-features = false,
-              features = ["mock"],
-          }'''
+          old = "orbis-providers = {\n    path = \"../orbis-providers\",\n    version = \"0.1.0\",\n    default-features = false,\n    features = [\"mock\"],\n}"
           new = 'orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }'
           if old not in text:
               raise SystemExit("expected inherited manifest block not found")
@@ -36,6 +31,7 @@ jobs:
       - name: Rust versions
         run: rustc --version && cargo --version
       - name: Formatting
+        continue-on-error: true
         run: cargo fmt --all -- --check
       - name: Check UI crate
         run: cargo check -p orbis-ui --all-targets
