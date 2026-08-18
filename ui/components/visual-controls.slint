@@ -1,0 +1,417 @@
+import { ComboBox, Slider, SpinBox, LineEdit } from "std-widgets.slint";
+import { Palette } from "../themes/dark.slint";
+
+export component PreviewButton inherits Rectangle {
+    in property <string> label;
+    in property <string> subtitle: "";
+    in property <bool> selected: false;
+    in property <bool> disabled: false;
+    in property <bool> compact: false;
+    in property <color> accent: Palette.accent-default;
+    callback clicked;
+
+    height: root.compact ? 30px : 40px;
+    min-width: 72px;
+    border-radius: 4px;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? root.accent : Palette.border-default;
+    background: root.disabled ? Palette.surface-disabled
+        : touch.pressed ? Palette.surface-pressed
+        : touch.has-hover ? Palette.surface-hover
+        : Palette.surface-default;
+
+    VerticalLayout {
+        padding-left: 7px;
+        padding-right: 7px;
+        padding-top: root.compact ? 3px : 5px;
+        padding-bottom: root.compact ? 3px : 5px;
+        alignment: center;
+        Text {
+            text: root.label;
+            font-size: root.compact ? 10px : 11px;
+            font-weight: 600;
+            color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if (root.subtitle != "") : Text {
+            text: root.subtitle;
+            font-size: 8px;
+            color: root.disabled ? Palette.text-disabled : Palette.text-secondary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component ChoiceChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    in property <bool> disabled: false;
+    callback clicked;
+
+    height: 28px;
+    min-width: 58px;
+    border-radius: 4px;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Palette.accent-default : Palette.border-default;
+    background: root.disabled ? Palette.surface-disabled
+        : touch.pressed ? Palette.surface-pressed
+        : touch.has-hover ? Palette.surface-hover
+        : Palette.surface-default;
+
+    Text {
+        text: root.label;
+        font-size: 10px;
+        font-weight: root.selected ? 600 : 500;
+        color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component ToggleRow inherits Rectangle {
+    in property <string> label;
+    in property <string> description: "";
+    in-out property <bool> checked: false;
+    in property <bool> disabled: false;
+
+    height: root.description == "" ? 32px : 42px;
+    border-radius: 4px;
+    background: touch.has-hover && !root.disabled ? Palette.surface-hover : transparent;
+
+    HorizontalLayout {
+        padding-left: 5px;
+        padding-right: 5px;
+        spacing: 8px;
+        alignment: center;
+        VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            Text {
+                text: root.label;
+                font-size: 10px;
+                font-weight: 500;
+                color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if (root.description != "") : Text {
+                text: root.description;
+                font-size: 8px;
+                color: Palette.text-secondary;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+        Rectangle {
+            width: 34px;
+            height: 18px;
+            border-radius: 9px;
+            border-width: 1px;
+            border-color: root.checked && !root.disabled ? Palette.accent-default : Palette.border-default;
+            background: root.checked && !root.disabled ? Palette.accent-default : Palette.surface-pressed;
+            Rectangle {
+                width: 14px;
+                height: 14px;
+                x: root.checked ? 18px : 2px;
+                y: 2px;
+                border-radius: 7px;
+                background: root.disabled ? Palette.text-disabled : Palette.text-primary;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.checked = !root.checked; }
+    }
+}
+
+export component StaticSlider inherits Rectangle {
+    in property <string> label;
+    in property <string> value-text;
+    in property <float> progress: 0.5;
+    in property <bool> disabled: false;
+
+    height: 34px;
+    background: transparent;
+    VerticalLayout {
+        spacing: 2px;
+        HorizontalLayout {
+            height: 14px;
+            Text { text: root.label; font-size: 9px; color: root.disabled ? Palette.text-disabled : Palette.text-primary; }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text { text: root.value-text; font-size: 9px; font-weight: 600; color: root.disabled ? Palette.text-disabled : Palette.text-primary; }
+        }
+        Rectangle {
+            height: 5px;
+            border-radius: 2.5px;
+            background: Palette.surface-pressed;
+            Rectangle {
+                width: parent.width * Math.max(0, Math.min(1, root.progress));
+                height: parent.height;
+                border-radius: 2.5px;
+                background: root.disabled ? Palette.text-disabled : Palette.accent-default;
+            }
+        }
+    }
+}
+
+export component PreviewSliderRow inherits Rectangle {
+    in property <string> label;
+    in property <string> unit: "";
+    in property <float> minimum: 0;
+    in property <float> maximum: 100;
+    in property <float> step: 1;
+    in-out property <float> value: 50;
+    in property <bool> disabled: false;
+
+    height: 42px;
+    background: transparent;
+    VerticalLayout {
+        spacing: 1px;
+        HorizontalLayout {
+            height: 15px;
+            Text { text: root.label; font-size: 9px; color: root.disabled ? Palette.text-disabled : Palette.text-primary; overflow: elide; }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text { text: Math.round(root.value) + root.unit; font-size: 9px; font-weight: 600; color: root.disabled ? Palette.text-disabled : Palette.text-primary; }
+        }
+        Slider {
+            enabled: !root.disabled;
+            minimum: root.minimum;
+            maximum: root.maximum;
+            step: root.step;
+            value <=> root.value;
+        }
+    }
+}
+
+export component SelectRow inherits Rectangle {
+    in property <string> label;
+    in property <[string]> model;
+    in-out property <int> current-index: 0;
+    in property <bool> disabled: false;
+
+    height: 36px;
+    background: transparent;
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: center;
+        Text {
+            width: 138px;
+            text: root.label;
+            font-size: 10px;
+            font-weight: 500;
+            color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        ComboBox {
+            horizontal-stretch: 1;
+            enabled: !root.disabled;
+            model: root.model;
+            current-index <=> root.current-index;
+        }
+    }
+}
+
+export component NumericRow inherits Rectangle {
+    in property <string> label;
+    in property <string> unit: "";
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> step-size: 1;
+    in-out property <int> value: 0;
+    in property <bool> disabled: false;
+
+    height: 36px;
+    background: transparent;
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: center;
+        Text {
+            width: 138px;
+            text: root.label;
+            font-size: 10px;
+            font-weight: 500;
+            color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        SpinBox {
+            width: 112px;
+            enabled: !root.disabled;
+            minimum: root.minimum;
+            maximum: root.maximum;
+            step-size: root.step-size;
+            value <=> root.value;
+        }
+        if (root.unit != "") : Text {
+            width: 42px;
+            text: root.unit;
+            font-size: 9px;
+            color: Palette.text-secondary;
+            vertical-alignment: center;
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+    }
+}
+
+export component TextInputRow inherits Rectangle {
+    in property <string> label;
+    in property <string> placeholder: "";
+    in-out property <string> text: "";
+    in property <bool> disabled: false;
+
+    height: 36px;
+    background: transparent;
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: center;
+        Text {
+            width: 138px;
+            text: root.label;
+            font-size: 10px;
+            font-weight: 500;
+            color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        LineEdit {
+            horizontal-stretch: 1;
+            enabled: !root.disabled;
+            placeholder-text: root.placeholder;
+            text <=> root.text;
+        }
+    }
+}
+
+export component BindingRow inherits Rectangle {
+    in property <string> key-label;
+    in property <[string]> actions;
+    in-out property <int> action-index: 0;
+    in-out property <string> parameter: "";
+    in property <bool> disabled: false;
+
+    height: 38px;
+    background: transparent;
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: center;
+        Text {
+            width: 66px;
+            text: root.key-label;
+            font-size: 10px;
+            font-weight: 600;
+            color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+            vertical-alignment: center;
+        }
+        ComboBox {
+            width: 188px;
+            enabled: !root.disabled;
+            model: root.actions;
+            current-index <=> root.action-index;
+        }
+        LineEdit {
+            horizontal-stretch: 1;
+            enabled: !root.disabled;
+            placeholder-text: "Parameter / command";
+            text <=> root.parameter;
+        }
+    }
+}
+
+export component ColorSwatch inherits Rectangle {
+    in property <color> swatch-color;
+    in property <bool> selected: false;
+    in property <bool> disabled: false;
+    callback clicked;
+
+    width: 27px;
+    height: 27px;
+    border-radius: 4px;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Palette.text-primary : Palette.border-default;
+    background: root.disabled ? Palette.surface-disabled : root.swatch-color;
+    touch := TouchArea { enabled: !root.disabled; clicked => { root.clicked(); } }
+}
+
+export component StatusBadge inherits Rectangle {
+    in property <string> text;
+    in property <color> accent: Palette.accent-default;
+
+    height: 20px;
+    min-width: 62px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: root.accent;
+    background: Palette.surface-pressed;
+    Text {
+        x: 7px;
+        width: parent.width - 14px;
+        text: root.text;
+        font-size: 8px;
+        font-weight: 600;
+        color: root.accent;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+export component MetricTile inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <string> detail: "";
+
+    height: 48px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Palette.border-default;
+    background: Palette.surface-default;
+    VerticalLayout {
+        padding: 6px;
+        spacing: 1px;
+        Text { text: root.label; font-size: 8px; color: Palette.text-secondary; }
+        HorizontalLayout {
+            Text { text: root.value; font-size: 11px; font-weight: 600; color: Palette.text-primary; }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text { text: root.detail; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; }
+        }
+    }
+}
+
+export component PreviewNotice inherits Rectangle {
+    in property <string> text;
+
+    height: 28px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Palette.warning;
+    background: Palette.surface-pressed;
+    Text {
+        x: 8px;
+        width: parent.width - 16px;
+        text: root.text;
+        font-size: 8px;
+        color: Palette.warning;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}

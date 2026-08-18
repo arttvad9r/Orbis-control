@@ -1,17 +1,9 @@
-//! Orbis Control — минимальный визуальный прототип главного окна.
+//! Orbis Control — GUI entry point.
 //!
-//! Режимы запуска:
-//!   orbis-control [--ui-state default|pending|disabled|error]
-//!   orbis-control --ui-state default --screenshot <path.png>
-//!
-//! `--ui-state` меняет только локальное состояние интерфейса; без `--screenshot`
-//! окно запускается через штатный winit-бэкенд. Скриншоты рендерятся
-//! детерминированно через `slint::platform` + SoftwareRenderer (масштаб 100%,
-//! без окна, без новых зависимостей).
+//! Existing hardware-backed controls keep their worker/provider paths. The
+//! additional visual windows are local UI prototypes only and never perform
+//! hardware, D-Bus, sysfs, or persistence operations.
 
-// UiAction::Perf, UiAction::Gpu и UiAction::Charge больше не конструируются в
-// production: Performance, GPU Mode и Battery Charge Limit идут через worker.
-// Контроллер сохраняется как boundary/model helper для legacy unit tests.
 #[allow(dead_code)]
 mod controller;
 
@@ -38,15 +30,15 @@ use tokio::sync::mpsc::UnboundedSender;
 slint::include_modules!();
 
 thread_local! {
-    // One lazily-created native fan editor window per UI thread. Keeping the
-    // handle here allows the window to be hidden/reshown without rebuilding it
-    // and lets worker events synchronize its UiState with AppWindow.
     static FANS_WINDOW: RefCell<Option<FansWindow>> = const { RefCell::new(None) };
+    static EXTRA_WINDOW: RefCell<Option<ExtraWindow>> = const { RefCell::new(None) };
+    static AUTOMATION_WINDOW: RefCell<Option<AutomationWindow>> = const { RefCell::new(None) };
+    static PREFERENCES_WINDOW: RefCell<Option<PreferencesWindow>> = const { RefCell::new(None) };
+    static DIAGNOSTICS_WINDOW: RefCell<Option<DiagnosticsWindow>> = const { RefCell::new(None) };
+    static UPDATES_WINDOW: RefCell<Option<UpdatesWindow>> = const { RefCell::new(None) };
+    static PREVIEW_DIALOG_WINDOW: RefCell<Option<PreviewDialogWindow>> = const { RefCell::new(None) };
 }
 
-/// Context for the explicit Factory Defaults mutation. The provider keeps the
-/// original GUI process as the Hardware1 caller; the Tokio handle guarantees
-/// that the D-Bus/polkit operation never runs on a Slint callback thread.
 #[derive(Clone)]
 struct FanDefaultsContext {
     runtime: tokio::runtime::Handle,
@@ -54,13 +46,11 @@ struct FanDefaultsContext {
     worker_tx: UnboundedSender<WorkerCommand>,
 }
 
-/// Разобранные аргументы командной строки.
 struct Args {
     ui_state: String,
     screenshot: Option<String>,
 }
 
-/// Парсинг аргументов через `std::env::args` (без clap).
 fn parse_args() -> Args {
     let mut ui_state = "default".to_string();
     let mut screenshot = None;
@@ -73,9 +63,7 @@ fn parse_args() -> Args {
                 }
             }
             "--screenshot" => screenshot = it.next(),
-            other => {
-                eprintln!("orbis-control: игнорирую неизвестный аргумент '{other}'");
-            }
+            other => eprintln!("orbis-control: игнорирую неизвестный аргумент '{other}'"),
         }
     }
     Args {
@@ -84,42 +72,24 @@ fn parse_args() -> Args {
     }
 }
 
-/// Начальное состояние для сценария `--ui-state`.
 fn state_for_scenario(name: &str) -> controller::UiState {
     let mut s = controller::UiState::from_mock_profile("zephyrus-full");
     match name {
         "default" => {}
         "pending" => {
-            s.gpu_selected = 2; // Ultimate
+            s.gpu_selected = 2;
             s.gpu_ultimate_pending = true;
         }
-        "disabled" => {
-            s.gpu_ultimate_disabled = true; // MUX unavailable
-        }
-        "error" => {
-            s.gpu_section_error = true;
-        }
-        other => {
-            eprintln!("orbis-control: неизвестное состояние '{other}', использую default");
-        }
+        "disabled" => s.gpu_ultimate_disabled = true,
+        "error" => s.gpu_section_error = true,
+        other => eprintln!("orbis-control: неизвестное состояние '{other}', использую default"),
     }
     s
 }
 
-/// Высота главного окна. До добавления встроенного Fan Curve редактора
-/// AppWindow использовал 441px (466px с GPU error banner); возвращаем именно
-/// этот бюджет, потому что редактор теперь живёт в отдельном FansWindow.
 fn window_height(state: &controller::UiState) -> f32 {
-    if state.gpu_section_error {
-        466.0
-    } else {
-        441.0
-    }
+    if state.gpu_section_error { 466.0 } else { 441.0 }
 }
-
-// ---------------------------------------------------------------------------
-// Маппинг controller::UiState <-> сгенерированный Slint UiState
-// ---------------------------------------------------------------------------
 
 fn to_slint(state: &controller::UiState) -> UiState {
     UiState {
@@ -309,7 +279,6 @@ fn from_slint(state: &UiState) -> controller::UiState {
     }
 }
 
-/// Создать окно, установить состояние и подключить обработчики.
 fn build_app(
     state: &controller::UiState,
     worker_tx: Option<UnboundedSender<WorkerCommand>>,
@@ -321,8 +290,6 @@ fn build_app(
     Ok(app)
 }
 
-/// Copy the authoritative state held by AppWindow into the secondary fan
-/// window if it has already been created.
 fn sync_fans_window(app: &AppWindow) {
     let state = from_slint(&app.get_ui_state());
     FANS_WINDOW.with(|slot| {
@@ -332,9 +299,6 @@ fn sync_fans_window(app: &AppWindow) {
     });
 }
 
-/// FansWindow is deliberately a thin UI surface. Its callbacks proxy to the
-/// already existing AppWindow callbacks, so all mutation guards, worker
-/// commands and authoritative read-back semantics remain in one place.
 fn wire_fans_window(window: &FansWindow, app: &AppWindow) {
     {
         let app_weak = app.as_weak();
@@ -392,14 +356,78 @@ fn show_fans_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
             wire_fans_window(&window, app);
             *slot = Some(window);
         }
-
         let window = slot.as_ref().expect("FansWindow initialized");
         window.set_ui_state(to_slint(&from_slint(&app.get_ui_state())));
         window.show()
     })
 }
 
-/// UI-boundary: преобразование UI-индекса карточки в доменный профиль.
+fn show_extra_window() -> Result<(), slint::PlatformError> {
+    EXTRA_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(ExtraWindow::new()?);
+        }
+        slot.as_ref().expect("ExtraWindow initialized").show()
+    })
+}
+
+fn show_automation_window() -> Result<(), slint::PlatformError> {
+    AUTOMATION_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(AutomationWindow::new()?);
+        }
+        slot.as_ref().expect("AutomationWindow initialized").show()
+    })
+}
+
+fn show_preferences_window() -> Result<(), slint::PlatformError> {
+    PREFERENCES_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(PreferencesWindow::new()?);
+        }
+        slot.as_ref().expect("PreferencesWindow initialized").show()
+    })
+}
+
+fn show_diagnostics_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
+    DIAGNOSTICS_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(DiagnosticsWindow::new()?);
+        }
+        let window = slot.as_ref().expect("DiagnosticsWindow initialized");
+        window.set_version(app.get_ui_state().version.clone());
+        window.show()
+    })
+}
+
+fn show_updates_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
+    UPDATES_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(UpdatesWindow::new()?);
+        }
+        let window = slot.as_ref().expect("UpdatesWindow initialized");
+        window.set_version(app.get_ui_state().version.clone());
+        window.show()
+    })
+}
+
+fn show_preview_dialog(kind: i32) -> Result<(), slint::PlatformError> {
+    PREVIEW_DIALOG_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(PreviewDialogWindow::new()?);
+        }
+        let window = slot.as_ref().expect("PreviewDialogWindow initialized");
+        window.set_kind(kind.clamp(0, 3));
+        window.show()
+    })
+}
+
 fn performance_profile_from_index(index: i32) -> Option<PerformanceProfile> {
     match index {
         0 => Some(PerformanceProfile::Silent),
@@ -553,9 +581,7 @@ fn apply_gpu_result(
         }
         Err(CommandError::ReadBack { result, source }) => {
             state.gpu_section_error = true;
-            tracing::warn!(
-                "gpu: команда выполнена ({result:?}), но read-back не удался: {source:?}"
-            );
+            tracing::warn!("gpu: команда выполнена ({result:?}), но read-back не удался: {source:?}");
         }
     }
 }
@@ -569,11 +595,7 @@ fn apply_charge_limit_outcome(
             state.charge_limit = i32::from(percent.get());
             tracing::debug!("battery: лимит применён: percent={}", percent.get());
         }
-        None => {
-            tracing::warn!(
-                "battery: authoritative percent отсутствует (None); UI сохраняет прежнее значение"
-            );
-        }
+        None => tracing::warn!("battery: authoritative percent отсутствует (None); UI сохраняет прежнее значение"),
     }
     if !matches!(outcome.result, ApplyResult::Applied) {
         tracing::warn!("battery: результат не Applied: {:?}", outcome.result);
@@ -586,13 +608,9 @@ fn apply_charge_limit_result(
 ) {
     match result {
         Ok(outcome) => apply_charge_limit_outcome(state, &outcome),
-        Err(CommandError::Command(e)) => {
-            tracing::warn!("battery: команда не выполнена: {e:?}");
-        }
+        Err(CommandError::Command(e)) => tracing::warn!("battery: команда не выполнена: {e:?}"),
         Err(CommandError::ReadBack { result, source }) => {
-            tracing::warn!(
-                "battery: команда выполнена ({result:?}), но read-back не удался: {source:?}"
-            );
+            tracing::warn!("battery: команда выполнена ({result:?}), но read-back не удался: {source:?}");
         }
     }
 }
@@ -612,18 +630,12 @@ fn apply_charge_limit_refresh(
                     controller::ChargeLimitState::Ready,
                     &limit,
                 );
-                tracing::debug!(
-                    "battery: refresh OK, percent={}, enabled={}",
-                    percent.get(),
-                    limit.enabled
-                );
+                tracing::debug!("battery: refresh OK, percent={}, enabled={}", percent.get(), limit.enabled);
             }
             None => {
                 state.charge_limit_state = controller::ChargeLimitState::Unavailable;
                 state.charge_limit_writable = false;
-                tracing::warn!(
-                    "battery: refresh OK, но authoritative percent отсутствует (None); не подставляю fixture/default"
-                );
+                tracing::warn!("battery: refresh OK, но authoritative percent отсутствует (None); не подставляю fixture/default");
             }
         },
         Err(e) => {
@@ -643,11 +655,7 @@ fn apply_performance_refresh(
             state.perf_state = controller::PerformanceHwState::Ready;
             state.perf_selected = perf_selected_index(s.current);
             state.available_perf_mask = performance_available_mask(&s.available);
-            tracing::debug!(
-                "performance: refresh OK, current={:?}, available={:?}",
-                s.current,
-                s.available
-            );
+            tracing::debug!("performance: refresh OK, current={:?}, available={:?}", s.current, s.available);
         }
         Err(e) => {
             state.perf_state = controller::PerformanceHwState::Unavailable;
@@ -740,13 +748,9 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
                 r => tracing::warn!("performance: результат не Applied: {r:?}"),
             }
         }
-        WorkerEvent::Performance(Err(CommandError::Command(e))) => {
-            tracing::warn!("performance: команда не выполнена: {e:?}");
-        }
+        WorkerEvent::Performance(Err(CommandError::Command(e))) => tracing::warn!("performance: команда не выполнена: {e:?}"),
         WorkerEvent::Performance(Err(CommandError::ReadBack { result, source })) => {
-            tracing::warn!(
-                "performance: команда выполнена ({result:?}), но read-back не удался: {source:?}"
-            );
+            tracing::warn!("performance: команда выполнена ({result:?}), но read-back не удался: {source:?}");
         }
         WorkerEvent::Gpu(result) => apply_gpu_result(state, result),
         WorkerEvent::ChargeLimit(result) => apply_charge_limit_result(state, result),
@@ -759,13 +763,9 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             tracing::debug!("capability registry refreshed: generation={}", generation);
             state.update_capabilities(&snapshot);
         }
-        WorkerEvent::RegistryChange(Err(e)) => {
-            tracing::warn!("capability registry refresh failed: {e:?}");
-        }
+        WorkerEvent::RegistryChange(Err(e)) => tracing::warn!("capability registry refresh failed: {e:?}"),
         WorkerEvent::TelemetryRefresh(Ok(telemetry)) => state.update_telemetry(&telemetry),
-        WorkerEvent::TelemetryRefresh(Err(e)) => {
-            tracing::warn!("telemetry refresh failed: {e:?}");
-        }
+        WorkerEvent::TelemetryRefresh(Err(e)) => tracing::warn!("telemetry refresh failed: {e:?}"),
         WorkerEvent::FanCurve(Ok(apply_result)) => match &apply_result {
             ApplyResult::Applied => {
                 tracing::debug!("fan curve: mutation applied (read-back confirmed)");
@@ -882,14 +882,50 @@ fn wire_callbacks(
     {
         let app_weak = app.as_weak();
         app.on_fans_clicked(move || {
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
+            let Some(app) = app_weak.upgrade() else { return; };
             if let Err(e) = show_fans_window(&app) {
                 tracing::warn!("не удалось открыть FansWindow: {e:?}");
             }
         });
     }
+    app.on_extra_clicked(move || {
+        if let Err(e) = show_extra_window() {
+            tracing::warn!("не удалось открыть ExtraWindow: {e:?}");
+        }
+    });
+    app.on_automation_clicked(move || {
+        if let Err(e) = show_automation_window() {
+            tracing::warn!("не удалось открыть AutomationWindow: {e:?}");
+        }
+    });
+    app.on_preferences_clicked(move || {
+        if let Err(e) = show_preferences_window() {
+            tracing::warn!("не удалось открыть PreferencesWindow: {e:?}");
+        }
+    });
+    {
+        let app_weak = app.as_weak();
+        app.on_diagnostics_clicked(move || {
+            let Some(app) = app_weak.upgrade() else { return; };
+            if let Err(e) = show_diagnostics_window(&app) {
+                tracing::warn!("не удалось открыть DiagnosticsWindow: {e:?}");
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        app.on_updates_clicked(move || {
+            let Some(app) = app_weak.upgrade() else { return; };
+            if let Err(e) = show_updates_window(&app) {
+                tracing::warn!("не удалось открыть UpdatesWindow: {e:?}");
+            }
+        });
+    }
+    app.on_preview_dialog_clicked(move |kind| {
+        if let Err(e) = show_preview_dialog(kind) {
+            tracing::warn!("не удалось открыть PreviewDialogWindow: {e:?}");
+        }
+    });
     {
         let worker_tx = worker_tx.clone();
         let app_weak = app.as_weak();
@@ -903,8 +939,7 @@ fn wire_callbacks(
                 tracing::warn!("fan-changed с неизвестным индексом: {i}");
                 return;
             };
-            let Some(profile) = controller::UiState::asusd_profile_from_index(s.fan_profile_selected)
-            else {
+            let Some(profile) = controller::UiState::asusd_profile_from_index(s.fan_profile_selected) else {
                 tracing::warn!("fan-changed: invalid profile index {}", s.fan_profile_selected);
                 return;
             };
@@ -924,9 +959,7 @@ fn wire_callbacks(
         let worker_tx = worker_tx.clone();
         let app_weak = app.as_weak();
         app.on_fan_profile_changed(move |i| {
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
+            let Some(app) = app_weak.upgrade() else { return; };
             let mut s = from_slint(&app.get_ui_state());
             let Some(profile) = controller::UiState::asusd_profile_from_index(i) else {
                 tracing::warn!("fan-profile-changed: invalid profile index {i}");
@@ -951,9 +984,7 @@ fn wire_callbacks(
     {
         let app_weak = app.as_weak();
         app.on_fan_temp_point_changed(move |index, value| {
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
+            let Some(app) = app_weak.upgrade() else { return; };
             let mut s = from_slint(&app.get_ui_state());
             if (0..8).contains(&index) {
                 s.fan_curve_temps[index as usize] = value;
@@ -965,9 +996,7 @@ fn wire_callbacks(
     {
         let app_weak = app.as_weak();
         app.on_fan_pwm_point_changed(move |index, value| {
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
+            let Some(app) = app_weak.upgrade() else { return; };
             let mut s = from_slint(&app.get_ui_state());
             if (0..8).contains(&index) {
                 s.fan_curve_pwms[index as usize] = value;
@@ -981,9 +1010,7 @@ fn wire_callbacks(
         let fan_defaults = fan_defaults.clone();
         let app_weak = app.as_weak();
         app.on_fan_apply_clicked(move |reset_defaults| {
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
+            let Some(app) = app_weak.upgrade() else { return; };
             let s = from_slint(&app.get_ui_state());
 
             if reset_defaults {
@@ -994,13 +1021,8 @@ fn wire_callbacks(
                     tracing::warn!("fan factory reset rejected: unavailable/read-only/error");
                     return;
                 }
-                let Some(profile) =
-                    controller::UiState::asusd_profile_from_index(s.fan_profile_selected)
-                else {
-                    tracing::warn!(
-                        "fan factory reset: invalid profile index {}",
-                        s.fan_profile_selected
-                    );
+                let Some(profile) = controller::UiState::asusd_profile_from_index(s.fan_profile_selected) else {
+                    tracing::warn!("fan factory reset: invalid profile index {}", s.fan_profile_selected);
                     return;
                 };
                 let Some(fan_id) = controller::UiState::fan_id_from_index(s.fan_selected) else {
@@ -1016,40 +1038,29 @@ fn wire_callbacks(
                     let result = ctx.provider.reset_fan_curves_to_defaults(profile).await;
                     match result {
                         Ok(ApplyResult::Applied) => {
-                            if let Err(error) = ctx.worker_tx.send(WorkerCommand::RefreshFanCurve {
-                                profile,
-                                fan: fan_id,
-                            }) {
+                            if let Err(error) = ctx.worker_tx.send(WorkerCommand::RefreshFanCurve { profile, fan: fan_id }) {
                                 let weak = weak.clone();
                                 if let Err(ui_error) = weak.upgrade_in_event_loop(move |app| {
-                                    tracing::warn!(
-                                        "fan factory reset applied but refresh enqueue failed: {error:?}"
-                                    );
+                                    tracing::warn!("fan factory reset applied but refresh enqueue failed: {error:?}");
                                     let mut state = from_slint(&app.get_ui_state());
                                     state.fan_curve_error = true;
                                     app.set_ui_state(to_slint(&state));
                                     sync_fans_window(&app);
                                 }) {
-                                    tracing::warn!(
-                                        "fan factory reset: failed to report refresh enqueue error: {ui_error:?}"
-                                    );
+                                    tracing::warn!("fan factory reset: failed to report refresh enqueue error: {ui_error:?}");
                                 }
                             }
                         }
                         Ok(other) => {
                             let weak = weak.clone();
                             if let Err(ui_error) = weak.upgrade_in_event_loop(move |app| {
-                                tracing::warn!(
-                                    "fan factory reset returned non-applied result: {other:?}"
-                                );
+                                tracing::warn!("fan factory reset returned non-applied result: {other:?}");
                                 let mut state = from_slint(&app.get_ui_state());
                                 state.fan_curve_error = true;
                                 app.set_ui_state(to_slint(&state));
                                 sync_fans_window(&app);
                             }) {
-                                tracing::warn!(
-                                    "fan factory reset: failed to report non-applied result: {ui_error:?}"
-                                );
+                                tracing::warn!("fan factory reset: failed to report non-applied result: {ui_error:?}");
                             }
                         }
                         Err(error) => {
@@ -1061,9 +1072,7 @@ fn wire_callbacks(
                                 app.set_ui_state(to_slint(&state));
                                 sync_fans_window(&app);
                             }) {
-                                tracing::warn!(
-                                    "fan factory reset: failed to report provider error: {ui_error:?}"
-                                );
+                                tracing::warn!("fan factory reset: failed to report provider error: {ui_error:?}");
                             }
                         }
                     }
@@ -1075,8 +1084,7 @@ fn wire_callbacks(
                 tracing::warn!("fan-apply rejected: not writable, not dirty, error, or invalid curve");
                 return;
             }
-            let Some(profile) = controller::UiState::asusd_profile_from_index(s.fan_profile_selected)
-            else {
+            let Some(profile) = controller::UiState::asusd_profile_from_index(s.fan_profile_selected) else {
                 tracing::warn!("fan-apply: invalid profile index {}", s.fan_profile_selected);
                 return;
             };
@@ -1090,11 +1098,7 @@ fn wire_callbacks(
             };
             match &worker_tx {
                 Some(tx) => {
-                    if let Err(e) = tx.send(WorkerCommand::SetFanCurve {
-                        profile,
-                        fan: fan_id,
-                        curve,
-                    }) {
+                    if let Err(e) = tx.send(WorkerCommand::SetFanCurve { profile, fan: fan_id, curve }) {
                         tracing::warn!("worker закрыт, fan mutation не отправлена: {e:?}");
                     }
                 }
@@ -1103,10 +1107,6 @@ fn wire_callbacks(
         });
     }
 }
-
-// ---------------------------------------------------------------------------
-// Детерминированный оффскрин-рендер (SoftwareRenderer)
-// ---------------------------------------------------------------------------
 
 struct SoftwareWindowAdapter {
     renderer: Rc<slint::platform::software_renderer::SoftwareRenderer>,
@@ -1133,8 +1133,7 @@ impl WindowAdapter for SoftwareWindowAdapter {
             WindowSize::Logical(l) => (l, l.to_physical(1.0)),
         };
         self.size.set(phys);
-        self.window()
-            .dispatch_event(WindowEvent::Resized { size: logical });
+        self.window().dispatch_event(WindowEvent::Resized { size: logical });
     }
 
     fn set_visible(&self, _visible: bool) -> Result<(), PlatformError> {
@@ -1169,8 +1168,7 @@ fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<
     slint::platform::set_platform(Box::new(SoftwarePlatform { adapter })).expect("platform once");
 
     let app = build_app(state, None, None)?;
-    app.window()
-        .set_size(LogicalSize::new(425.0, height as f32));
+    app.window().set_size(LogicalSize::new(425.0, height as f32));
     app.show()?;
 
     let size = app.window().size();
@@ -1234,8 +1232,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let app = build_app(&state, Some(worker_tx.clone()), Some(fan_defaults))?;
-    app.window()
-        .set_size(LogicalSize::new(425.0, window_height(&state)));
+    app.window().set_size(LogicalSize::new(425.0, window_height(&state)));
 
     let weak = app.as_weak();
     let event_sink = move |event: WorkerEvent| {
@@ -1279,9 +1276,13 @@ fn main() -> anyhow::Result<()> {
     app.show()?;
     slint::run_event_loop()?;
 
-    FANS_WINDOW.with(|slot| {
-        *slot.borrow_mut() = None;
-    });
+    FANS_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    EXTRA_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    AUTOMATION_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    PREFERENCES_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    DIAGNOSTICS_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    UPDATES_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    PREVIEW_DIALOG_WINDOW.with(|slot| *slot.borrow_mut() = None);
     drop(app);
     drop(worker_tx);
     drop(runtime);
