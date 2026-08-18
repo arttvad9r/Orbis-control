@@ -36,6 +36,12 @@ pub trait KeyboardBacklightIo: Send + Sync {
     async fn write_brightness(&self, level: u32) -> Result<(), ProviderError>;
 }
 
+/// Read-only IO used only to prove structural keyboard backlight capability.
+trait KeyboardBacklightProbeIo: Send + Sync {
+    fn probe_read_brightness(&self) -> Result<u32, ProviderError>;
+    fn probe_read_max_brightness(&self) -> Result<u32, ProviderError>;
+}
+
 /// Sysfs implementation of keyboard backlight IO.
 pub struct SysfsKeyboardBacklightIo {
     brightness_path: PathBuf,
@@ -76,29 +82,40 @@ fn map_led_error(path: &Path, error: std::io::Error) -> ProviderError {
     }
 }
 
+fn parse_led_value(raw: &str, what: &str) -> Result<u32, ProviderError> {
+    raw.trim().parse::<u32>().map_err(|error| {
+        ProviderError::Internal(format!("asus kbd_backlight: malformed {what}: {error}"))
+    })
+}
+
+fn read_led_value(path: &Path, what: &str) -> Result<u32, ProviderError> {
+    let raw = std::fs::read_to_string(path).map_err(|e| map_led_error(path, e))?;
+    parse_led_value(&raw, what)
+}
+
 #[async_trait]
 impl KeyboardBacklightIo for SysfsKeyboardBacklightIo {
     async fn read_brightness(&self) -> Result<u32, ProviderError> {
-        let raw = std::fs::read_to_string(&self.brightness_path)
-            .map_err(|e| map_led_error(&self.brightness_path, e))?;
-        raw.trim().parse::<u32>().map_err(|error| {
-            ProviderError::Internal(format!("asus kbd_backlight: malformed brightness: {error}"))
-        })
+        read_led_value(&self.brightness_path, "brightness")
     }
 
     async fn read_max_brightness(&self) -> Result<u32, ProviderError> {
-        let raw = std::fs::read_to_string(&self.max_path)
-            .map_err(|e| map_led_error(&self.max_path, e))?;
-        raw.trim().parse::<u32>().map_err(|error| {
-            ProviderError::Internal(format!(
-                "asus kbd_backlight: malformed max_brightness: {error}"
-            ))
-        })
+        read_led_value(&self.max_path, "max_brightness")
     }
 
     async fn write_brightness(&self, level: u32) -> Result<(), ProviderError> {
         std::fs::write(&self.brightness_path, format!("{level}\n"))
             .map_err(|e| map_led_error(&self.brightness_path, e))
+    }
+}
+
+impl KeyboardBacklightProbeIo for SysfsKeyboardBacklightIo {
+    fn probe_read_brightness(&self) -> Result<u32, ProviderError> {
+        read_led_value(&self.brightness_path, "brightness")
+    }
+
+    fn probe_read_max_brightness(&self) -> Result<u32, ProviderError> {
+        read_led_value(&self.max_path, "max_brightness")
     }
 }
 
@@ -112,6 +129,9 @@ pub trait KeyboardBacklightMutationBackend: Send + Sync {
     ) -> Result<KeyboardBacklightMutationReadback, ProviderError>;
 
     /// Typed mutation backend availability.
+    ///
+    /// `Supported` is structural evidence only: the LED ABI is readable,
+    /// parseable and internally consistent. A later write can still fail.
     fn mutation_status(&self) -> KeyboardBacklightMutationStatus;
 }
 
@@ -170,6 +190,54 @@ pub mod keyboard_backlight_mutation_wire {
     }
 }
 
+fn probe_error_status(what: &str, error: ProviderError) -> KeyboardBacklightMutationStatus {
+    match error {
+        ProviderError::Unsupported(_) => KeyboardBacklightMutationStatus::Unsupported,
+        ProviderError::PermissionDenied(_) => KeyboardBacklightMutationStatus::PermissionDenied,
+        ProviderError::Io(_) | ProviderError::BackendUnavailable(_) | ProviderError::Timeout(_) => {
+            KeyboardBacklightMutationStatus::TemporarilyUnavailable
+        }
+        other => {
+            tracing::warn!(
+                field = what,
+                error = %other,
+                "keyboard backlight structural probe failed closed"
+            );
+            KeyboardBacklightMutationStatus::Unknown
+        }
+    }
+}
+
+fn probe_mutation_status(io: &dyn KeyboardBacklightProbeIo) -> KeyboardBacklightMutationStatus {
+    let brightness = match io.probe_read_brightness() {
+        Ok(value) => value,
+        Err(error) => return probe_error_status("brightness", error),
+    };
+    let max = match io.probe_read_max_brightness() {
+        Ok(value) => value,
+        Err(error) => return probe_error_status("max_brightness", error),
+    };
+
+    if max == 0 {
+        tracing::warn!(
+            brightness,
+            max_brightness = max,
+            "keyboard backlight structural probe found zero max_brightness"
+        );
+        return KeyboardBacklightMutationStatus::Unknown;
+    }
+    if brightness > max {
+        tracing::warn!(
+            brightness,
+            max_brightness = max,
+            "keyboard backlight structural probe found inconsistent LED ABI"
+        );
+        return KeyboardBacklightMutationStatus::Unknown;
+    }
+
+    KeyboardBacklightMutationStatus::Supported
+}
+
 /// Sysfs-based keyboard backlight mutation backend.
 #[derive(Default)]
 pub struct SysfsKeyboardBacklightMutationBackend {
@@ -212,7 +280,7 @@ impl KeyboardBacklightMutationBackend for SysfsKeyboardBacklightMutationBackend 
     }
 
     fn mutation_status(&self) -> KeyboardBacklightMutationStatus {
-        KeyboardBacklightMutationStatus::Supported
+        probe_mutation_status(&self.io)
     }
 }
 
@@ -328,6 +396,82 @@ mod tests {
     }
 
     #[derive(Clone, Copy)]
+    enum ProbeRead {
+        Value(u32),
+        Missing,
+        PermissionDenied,
+        Transient,
+        Malformed,
+    }
+
+    impl ProbeRead {
+        fn into_result(self, what: &str) -> Result<u32, ProviderError> {
+            match self {
+                Self::Value(value) => Ok(value),
+                Self::Missing => Err(map_led_error(
+                    Path::new("/test/kbd_backlight"),
+                    std::io::Error::from(std::io::ErrorKind::NotFound),
+                )),
+                Self::PermissionDenied => Err(map_led_error(
+                    Path::new("/test/kbd_backlight"),
+                    std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+                )),
+                Self::Transient => Err(map_led_error(
+                    Path::new("/test/kbd_backlight"),
+                    std::io::Error::from(std::io::ErrorKind::WouldBlock),
+                )),
+                Self::Malformed => parse_led_value("not-a-number", what),
+            }
+        }
+    }
+
+    struct ProbeIo {
+        brightness: ProbeRead,
+        max: ProbeRead,
+        writes: Arc<AtomicUsize>,
+    }
+
+    impl ProbeIo {
+        fn new(brightness: ProbeRead, max: ProbeRead) -> Self {
+            Self {
+                brightness,
+                max,
+                writes: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+
+        fn writes(&self) -> usize {
+            self.writes.load(Ordering::SeqCst)
+        }
+    }
+
+    impl KeyboardBacklightProbeIo for ProbeIo {
+        fn probe_read_brightness(&self) -> Result<u32, ProviderError> {
+            self.brightness.into_result("brightness")
+        }
+
+        fn probe_read_max_brightness(&self) -> Result<u32, ProviderError> {
+            self.max.into_result("max_brightness")
+        }
+    }
+
+    #[async_trait]
+    impl KeyboardBacklightIo for ProbeIo {
+        async fn read_brightness(&self) -> Result<u32, ProviderError> {
+            self.brightness.into_result("brightness")
+        }
+
+        async fn read_max_brightness(&self) -> Result<u32, ProviderError> {
+            self.max.into_result("max_brightness")
+        }
+
+        async fn write_brightness(&self, _level: u32) -> Result<(), ProviderError> {
+            self.writes.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Copy)]
     enum AuthOutcome {
         Ok,
         Denied,
@@ -361,6 +505,89 @@ mod tests {
                 AuthOutcome::Failed => Err(AuthorizeError::Failed("polkit down".into())),
             }
         }
+    }
+
+    #[test]
+    fn probe_valid_brightness_and_max_is_supported() {
+        let io = ProbeIo::new(ProbeRead::Value(2), ProbeRead::Value(3));
+        assert_eq!(
+            probe_mutation_status(&io),
+            KeyboardBacklightMutationStatus::Supported
+        );
+    }
+
+    #[test]
+    fn probe_missing_brightness_or_max_is_unsupported() {
+        for (brightness, max) in [
+            (ProbeRead::Missing, ProbeRead::Value(3)),
+            (ProbeRead::Value(1), ProbeRead::Missing),
+        ] {
+            let io = ProbeIo::new(brightness, max);
+            assert_eq!(
+                probe_mutation_status(&io),
+                KeyboardBacklightMutationStatus::Unsupported
+            );
+        }
+    }
+
+    #[test]
+    fn probe_permission_error_is_preserved() {
+        let io = ProbeIo::new(ProbeRead::PermissionDenied, ProbeRead::Value(3));
+        assert_eq!(
+            probe_mutation_status(&io),
+            KeyboardBacklightMutationStatus::PermissionDenied
+        );
+    }
+
+    #[test]
+    fn probe_transient_io_is_temporarily_unavailable() {
+        let io = ProbeIo::new(ProbeRead::Transient, ProbeRead::Value(3));
+        assert_eq!(
+            probe_mutation_status(&io),
+            KeyboardBacklightMutationStatus::TemporarilyUnavailable
+        );
+    }
+
+    #[test]
+    fn probe_malformed_values_fail_closed() {
+        for (brightness, max) in [
+            (ProbeRead::Malformed, ProbeRead::Value(3)),
+            (ProbeRead::Value(1), ProbeRead::Malformed),
+        ] {
+            let io = ProbeIo::new(brightness, max);
+            assert_eq!(
+                probe_mutation_status(&io),
+                KeyboardBacklightMutationStatus::Unknown
+            );
+        }
+    }
+
+    #[test]
+    fn probe_brightness_above_max_is_rejected() {
+        let io = ProbeIo::new(ProbeRead::Value(4), ProbeRead::Value(3));
+        assert_eq!(
+            probe_mutation_status(&io),
+            KeyboardBacklightMutationStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn probe_zero_max_is_rejected() {
+        let io = ProbeIo::new(ProbeRead::Value(0), ProbeRead::Value(0));
+        assert_eq!(
+            probe_mutation_status(&io),
+            KeyboardBacklightMutationStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn probe_never_calls_write() {
+        let io = ProbeIo::new(ProbeRead::Value(1), ProbeRead::Value(3));
+        assert_eq!(
+            probe_mutation_status(&io),
+            KeyboardBacklightMutationStatus::Supported
+        );
+        assert_eq!(io.writes(), 0);
     }
 
     #[tokio::test]
