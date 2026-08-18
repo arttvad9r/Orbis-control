@@ -13,6 +13,7 @@
 
 let
   cfg = config.services.orbis-hardwared-policies;
+  hardwaredPolicies = pkgs.callPackage ./hardwared-policies.nix { };
 in
 {
   options.services.orbis-hardwared-policies = {
@@ -23,13 +24,11 @@ in
     # D-Bus system policy попадает в system-path/share/dbus-1/system.d/
     # через environment.systemPackages. dbus-daemon читает includedir
     # system-path (см. /etc/dbus-1/system.conf).
-    environment.systemPackages = [
-      pkgs.orbis-hardwared-policies
-    ];
+    environment.systemPackages = [ hardwaredPolicies ];
 
     # Polkit actions. /etc/polkit-1 — обычный каталог (не symlink),
     # environment.etc работает напрямую.
     environment.etc."polkit-1/actions/io.github.orbiscontrol.hardware.policy".source =
-      "${pkgs.orbis-hardwared-policies}/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy";
+      "${hardwaredPolicies}/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy";
   };
 }
