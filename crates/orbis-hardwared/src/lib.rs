@@ -168,6 +168,32 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
 
         Ok(ApplyResult::Applied)
     }
+
+    /// Read-only typed evidence about Performance mutation backend availability.
+    ///
+    /// Performs a single fresh read of `platform_profile_choices` — the same
+    /// read the mutation path performs — and classifies the result. Never
+    /// writes and never mutates hardware.
+    pub fn mutation_status(&self) -> PerformanceMutationStatus {
+        match self.read_trimmed(&self.choices_path, "platform_profile_choices") {
+            Ok(choices) if choices.split_whitespace().next().is_some() => {
+                PerformanceMutationStatus::Supported
+            }
+            // Empty choices file is malformed — no usable backend evidence.
+            Ok(_) => PerformanceMutationStatus::Unknown,
+            Err(ProviderError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                PerformanceMutationStatus::Unsupported
+            }
+            Err(ProviderError::Io(error))
+                if error.kind() == std::io::ErrorKind::PermissionDenied =>
+            {
+                PerformanceMutationStatus::PermissionDenied
+            }
+            Err(ProviderError::Io(_)) => PerformanceMutationStatus::TemporarilyUnavailable,
+            // Empty/malformed content is reported by read_trimmed as Internal.
+            Err(_) => PerformanceMutationStatus::Unknown,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +243,73 @@ pub fn profile_to_wire(profile: PerformanceProfile) -> u8 {
         PerformanceProfile::Silent => wire::SILENT,
         PerformanceProfile::Balanced => wire::BALANCED,
         PerformanceProfile::Turbo => wire::TURBO,
+    }
+}
+
+/// Typed runtime evidence for Performance mutation backend availability.
+///
+/// Unlike the Battery backend, the Performance writer is always constructed;
+/// its real availability is proven by a read-only fresh read of
+/// `platform_profile_choices` (the same read the writer performs at mutation
+/// time). The classification preserves the distinction between a present ABI
+/// (`Supported`), an absent ABI (`Unsupported`), a transient read failure
+/// (`TemporarilyUnavailable`) and a permission failure (`PermissionDenied`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PerformanceMutationStatus {
+    /// The kernel `platform_profile` ABI is present and readable, so the
+    /// mutation path exists. Operational write failures are not predicted.
+    Supported,
+    /// The `platform_profile` ABI is structurally absent on this device.
+    Unsupported,
+    /// A known/expected ABI is temporarily unreadable.
+    TemporarilyUnavailable,
+    /// The ABI exists but current read authorization denies access.
+    PermissionDenied,
+    /// No provable evidence about mutation availability.
+    Unknown,
+}
+
+/// Stable wire values for `Hardware1.PerformanceMutationStatus`.
+///
+/// The numeric values intentionally match the Battery mutation status wire
+/// contract (identical semantic classes); each backend module still keeps its
+/// own named constants so the D-Bus contract stays self-contained.
+pub mod performance_mutation_wire {
+    use super::PerformanceMutationStatus;
+
+    /// Proven mutation backend / ABI present.
+    pub const SUPPORTED: u8 = 0;
+    /// Mutation capability structurally absent.
+    pub const UNSUPPORTED: u8 = 1;
+    /// Known backend temporarily unavailable.
+    pub const TEMPORARILY_UNAVAILABLE: u8 = 2;
+    /// Mutation denied by authorization evidence.
+    pub const PERMISSION_DENIED: u8 = 3;
+    /// No evidence.
+    pub const UNKNOWN: u8 = 4;
+
+    /// Encode typed status into the D-Bus wire value.
+    pub fn to_wire(status: PerformanceMutationStatus) -> u8 {
+        match status {
+            PerformanceMutationStatus::Supported => SUPPORTED,
+            PerformanceMutationStatus::Unsupported => UNSUPPORTED,
+            PerformanceMutationStatus::TemporarilyUnavailable => TEMPORARILY_UNAVAILABLE,
+            PerformanceMutationStatus::PermissionDenied => PERMISSION_DENIED,
+            PerformanceMutationStatus::Unknown => UNKNOWN,
+        }
+    }
+
+    /// Decode a wire value; unknown values produce `None` so callers classify
+    /// them as `Unknown` instead of inventing a known state.
+    pub fn from_wire(raw: u8) -> Option<PerformanceMutationStatus> {
+        match raw {
+            SUPPORTED => Some(PerformanceMutationStatus::Supported),
+            UNSUPPORTED => Some(PerformanceMutationStatus::Unsupported),
+            TEMPORARILY_UNAVAILABLE => Some(PerformanceMutationStatus::TemporarilyUnavailable),
+            PERMISSION_DENIED => Some(PerformanceMutationStatus::PermissionDenied),
+            UNKNOWN => Some(PerformanceMutationStatus::Unknown),
+            _ => None,
+        }
     }
 }
 
@@ -708,6 +801,16 @@ impl HardwareService {
         handle_set_performance_profile(self.authorizer.as_ref(), &self.writer, raw, &sender).await
     }
 
+    /// Read-only typed evidence about Performance mutation backend availability.
+    ///
+    /// This is capability metadata, not a mutation: no authorization is
+    /// required and no hardware write occurs. The returned wire value is one
+    /// of `performance_mutation_wire::*`.
+    fn performance_mutation_status(&self) -> u8 {
+        use performance_mutation_wire;
+        performance_mutation_wire::to_wire(self.writer.mutation_status())
+    }
+
     /// Установить Battery configured threshold; возвращает подтверждённый
     /// configured percent, effective value остаётся отдельным read-model field.
     async fn set_charge_limit(
@@ -804,6 +907,9 @@ pub trait Hardware1 {
     /// Установить Performance profile; возвращает подтверждённый wire profile.
     fn set_performance_profile(&self, profile: u8) -> zbus::Result<u8>;
 
+    /// Read-only typed Performance mutation backend availability (wire enum).
+    fn performance_mutation_status(&self) -> zbus::Result<u8>;
+
     /// Установить Battery configured threshold; возвращает подтверждённый
     /// configured percent, effective value остаётся отдельным read-model field.
     fn set_charge_limit(&self, percent: u8) -> zbus::Result<u8>;
@@ -833,6 +939,7 @@ mod tests {
         reads: AtomicUsize,
         writes: AtomicUsize,
         write_error: Mutex<Option<std::io::Error>>,
+        read_error: Mutex<Option<std::io::Error>>,
         override_read_back: Mutex<Option<String>>,
     }
 
@@ -844,6 +951,7 @@ mod tests {
                 reads: AtomicUsize::new(0),
                 writes: AtomicUsize::new(0),
                 write_error: Mutex::new(None),
+                read_error: Mutex::new(None),
                 override_read_back: Mutex::new(None),
             }
         }
@@ -864,6 +972,10 @@ mod tests {
             *self.write_error.lock().unwrap() = Some(err);
         }
 
+        fn set_read_error(&self, err: std::io::Error) {
+            *self.read_error.lock().unwrap() = Some(err);
+        }
+
         fn set_override_read_back(&self, value: &str) {
             *self.override_read_back.lock().unwrap() = Some(value.to_string());
         }
@@ -880,6 +992,14 @@ mod tests {
     impl ProfileIo for ScriptedIo {
         fn read_to_string(&self, path: &Path) -> Result<String, ProviderError> {
             self.reads.fetch_add(1, Ordering::SeqCst);
+            if let Some(err) = self.read_error.lock().unwrap().as_ref() {
+                // Клонировать io::Error нельзя; воспроизводим с тем же kind.
+                let kind = err.kind();
+                return Err(ProviderError::Io(std::io::Error::new(
+                    kind,
+                    err.to_string(),
+                )));
+            }
             let name = path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -919,6 +1039,61 @@ mod tests {
             PLATFORM_PROFILE_CHOICES_PATH,
             "/sys/firmware/acpi/platform_profile_choices"
         );
+    }
+
+    #[test]
+    fn performance_mutation_status_classifies_read_evidence() {
+        // Present, non-empty ABI → Supported.
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        let w = writer(io);
+        assert_eq!(w.mutation_status(), PerformanceMutationStatus::Supported);
+
+        // Empty choices file is malformed → Unknown, never guessed Supported.
+        let io = ScriptedIo::new("", "balanced");
+        let w = writer(io);
+        assert_eq!(w.mutation_status(), PerformanceMutationStatus::Unknown);
+
+        // Structurally absent ABI → Unsupported.
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        io.set_read_error(std::io::Error::new(std::io::ErrorKind::NotFound, "missing"));
+        let w = writer(io);
+        assert_eq!(w.mutation_status(), PerformanceMutationStatus::Unsupported);
+
+        // Permission denied on the ABI read → PermissionDenied.
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        io.set_read_error(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "denied",
+        ));
+        let w = writer(io);
+        assert_eq!(
+            w.mutation_status(),
+            PerformanceMutationStatus::PermissionDenied
+        );
+
+        // Transient read failure → TemporarilyUnavailable.
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        io.set_read_error(std::io::Error::other("temporary"));
+        let w = writer(io);
+        assert_eq!(
+            w.mutation_status(),
+            PerformanceMutationStatus::TemporarilyUnavailable
+        );
+    }
+
+    #[test]
+    fn performance_mutation_wire_roundtrip_is_total() {
+        for status in [
+            PerformanceMutationStatus::Supported,
+            PerformanceMutationStatus::Unsupported,
+            PerformanceMutationStatus::TemporarilyUnavailable,
+            PerformanceMutationStatus::PermissionDenied,
+            PerformanceMutationStatus::Unknown,
+        ] {
+            let wire = performance_mutation_wire::to_wire(status);
+            assert_eq!(performance_mutation_wire::from_wire(wire), Some(status));
+        }
+        assert_eq!(performance_mutation_wire::from_wire(99), None);
     }
 
     #[test]
