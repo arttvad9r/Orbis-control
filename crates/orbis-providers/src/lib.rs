@@ -21,6 +21,7 @@ pub mod probes;
 pub mod supergfxd;
 pub mod sysfs_telemetry;
 pub mod traits;
+pub mod wayland_output;
 
 #[cfg(feature = "mock")]
 pub mod mock;
@@ -30,11 +31,13 @@ pub use error::{OperationId, ProviderError, ValidationResult};
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 pub use native_asus_eco::*;
 pub use probes::{
-    probe_charge_limit, probe_fan_curve, probe_gpu_access, probe_gpu_mux, probe_gpu_power,
-    probe_mini_led_mode, probe_panel_overdrive, probe_performance, probe_screen_auto_brightness,
+    probe_charge_limit, probe_display_output, probe_fan_curve, probe_gpu_access, probe_gpu_mux,
+    probe_gpu_power, probe_mini_led_mode, probe_panel_overdrive, probe_performance,
+    probe_screen_auto_brightness,
 };
 pub use sysfs_telemetry::SysfsTelemetryProvider;
 pub use traits::*;
+pub use wayland_output::*;
 
 #[cfg(feature = "mock")]
 pub use mock::{MockErrorMode, MockProvider, MockState, MockStateError};

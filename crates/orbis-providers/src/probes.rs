@@ -20,8 +20,9 @@ use orbis_core::capability::{
 
 use crate::error::ProviderError;
 use crate::traits::{
-    BatteryProvider, FanProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
-    MiniLedModeProvider, PanelOverdriveProvider, PerformanceProvider, ScreenAutoBrightnessProvider,
+    BatteryProvider, DisplayOutputProvider, FanProvider, GpuAccessProvider, GpuMuxProvider,
+    GpuPowerProvider, MiniLedModeProvider, PanelOverdriveProvider, PerformanceProvider,
+    ScreenAutoBrightnessProvider,
 };
 
 fn operation_from_error(
@@ -414,6 +415,39 @@ where
     P: ScreenAutoBrightnessProvider + ?Sized,
 {
     match provider.screen_auto_brightness_state().await {
+        Ok(_) => Ok(capability_from_operations(
+            CapabilityOperations {
+                read: ProbeOperationResult::classified(ProbeClassification::Supported)
+                    .into_operation(),
+                write: read_only_write(),
+            },
+            CapabilityConstraints::Unknown,
+        )),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            let write = write_from_read_failure(&read);
+            Ok(capability_from_read(
+                read,
+                write,
+                CapabilityConstraints::Unknown,
+            ))
+        }
+    }
+}
+
+/// Probe Display Output read capability from an authoritative read.
+///
+/// The observed state is read only to confirm the read contract; the
+/// `DisplayOutputSnapshot` value never enters the capability metadata.
+///
+/// Write capability is fixed at `ReadOnly`: this slice has no production
+/// Display Output mutation backend, so write must never be presented
+/// as Supported.
+pub async fn probe_display_output<P>(provider: &P) -> Result<Capability, ProbeError>
+where
+    P: DisplayOutputProvider + ?Sized,
+{
+    match provider.display_output_snapshot().await {
         Ok(_) => Ok(capability_from_operations(
             CapabilityOperations {
                 read: ProbeOperationResult::classified(ProbeClassification::Supported)

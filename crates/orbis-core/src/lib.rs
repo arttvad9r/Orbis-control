@@ -21,6 +21,7 @@ pub mod battery;
 pub mod capability;
 pub mod diagnostics;
 pub mod display;
+pub mod display_output;
 pub mod error;
 pub mod fan;
 pub mod gpu;
@@ -44,6 +45,10 @@ pub use diagnostics::{DiagnosticEntry, DiagnosticReport};
 pub use display::{
     DisplayMode, HdrState, MiniLedModeKind, MiniLedModeState, MiniLedModeValue,
     PanelOverdriveState, RefreshMode, ScreenAutoBrightnessState, interpret_mini_led_mode,
+};
+pub use display_output::{
+    CurrentDisplayMode, DisplayMode as OutputDisplayMode, DisplayOutputId, DisplayOutputSnapshot,
+    DisplayOutputState,
 };
 pub use error::CoreError;
 pub use fan::{FanCurve, FanCurvePoint, FanId};

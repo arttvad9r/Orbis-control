@@ -70,6 +70,8 @@ pub enum FeatureId {
     Slash,
     /// Смена частоты дисплея.
     DisplayRefresh,
+    /// Текущее состояние outputs (Wayland/compositor read-only).
+    DisplayOutput,
     /// Яркость дисплея.
     DisplayBacklight,
     /// Глобальные горячие клавиши.
@@ -110,6 +112,7 @@ impl FeatureId {
         FeatureId::Anime,
         FeatureId::Slash,
         FeatureId::DisplayRefresh,
+        FeatureId::DisplayOutput,
         FeatureId::DisplayBacklight,
         FeatureId::Hotkeys,
         FeatureId::Automation,
@@ -146,6 +149,7 @@ impl FeatureId {
             FeatureId::Anime => "anime",
             FeatureId::Slash => "slash",
             FeatureId::DisplayRefresh => "display_refresh",
+            FeatureId::DisplayOutput => "display_output",
             FeatureId::DisplayBacklight => "display_backlight",
             FeatureId::Hotkeys => "hotkeys",
             FeatureId::Automation => "automation",
@@ -461,6 +465,11 @@ mod tests {
             FeatureId::ScreenAutoBrightness.as_str(),
             "screen_auto_brightness"
         );
+        assert_eq!(
+            serde_json::to_string(&FeatureId::DisplayOutput).unwrap(),
+            "\"display_output\""
+        );
+        assert_eq!(FeatureId::DisplayOutput.as_str(), "display_output");
     }
 
     #[test]

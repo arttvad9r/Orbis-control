@@ -12,6 +12,7 @@ use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::display::{
     DisplayMode, MiniLedModeState, PanelOverdriveState, ScreenAutoBrightnessState,
 };
+use orbis_core::display_output::DisplayOutputSnapshot;
 use orbis_core::fan::FanCurve;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
@@ -288,6 +289,18 @@ pub trait ScreenAutoBrightnessProvider: Provider {
     async fn screen_auto_brightness_state(
         &self,
     ) -> Result<ScreenAutoBrightnessState, ProviderError>;
+}
+
+/// Read-only display output state capability (Wayland/compositor session
+/// concern).
+///
+/// Отдельный concept-specific trait (ADR 0005): провайдер, реализующий только
+/// текущее состояние outputs, не обязан предоставлять полную модель дисплея.
+/// Mutation в этом slice отсутствует (никакого modeset/configuration API).
+#[async_trait]
+pub trait DisplayOutputProvider: Provider {
+    /// Текущий snapshot outputs compositor-а (fresh authoritative read).
+    async fn display_output_snapshot(&self) -> Result<DisplayOutputSnapshot, ProviderError>;
 }
 
 /// Дисплей.
