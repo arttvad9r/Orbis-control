@@ -182,6 +182,65 @@ mod tests {
         assert_eq!(back, s);
     }
 
+    #[test]
+    fn snapshot_roundtrip_preserves_partial_telemetry() {
+        let mut t = Telemetry::empty();
+        t.cpu_temp = Some(TemperatureC::new(46).unwrap());
+        // GPU temp unavailable, fans empty, battery partial.
+        t.battery = Some(BatteryTelemetry {
+            percent: Percent::new(80).unwrap(),
+            capacity: None,
+            energy_now: None,
+            energy_full: None,
+            charge_cycles: None,
+            state: "Discharging".into(),
+        });
+        t.ac_online = Some(false);
+
+        let s = HardwareSnapshot {
+            profile: PerformanceProfile::Balanced,
+            gpu: GpuStatus {
+                requested_mode: GpuMode::Standard,
+                mux: GpuMuxState::Unknown,
+                access_policy: GpuAccessPolicy::Unknown,
+            },
+            charge_limit: ChargeLimit::new(
+                false,
+                Some(Percent::new(80).unwrap()),
+                Some(Percent::new(80).unwrap()),
+                Some(
+                    ChargeLimitBounds::new(
+                        Percent::new(40).unwrap(),
+                        Percent::new(100).unwrap(),
+                        1,
+                    )
+                    .unwrap(),
+                ),
+            )
+            .unwrap(),
+            display: DisplayMode::default(),
+            telemetry: t,
+            warnings: Vec::new(),
+        };
+
+        let json = serde_json::to_string(&s).unwrap();
+        let back: HardwareSnapshot = serde_json::from_str(&json).unwrap();
+
+        // Partial telemetry preserved.
+        assert_eq!(
+            back.telemetry.cpu_temp,
+            Some(TemperatureC::new(46).unwrap())
+        );
+        assert_eq!(back.telemetry.gpu_temp, None);
+        assert!(back.telemetry.fans.is_empty());
+        assert_eq!(back.telemetry.ac_online, Some(false));
+        let b = back.telemetry.battery.unwrap();
+        assert_eq!(b.percent.get(), 80);
+        assert_eq!(b.capacity, None);
+        assert_eq!(b.charge_cycles, None);
+        assert_eq!(b.state, "Discharging");
+    }
+
     // -----------------------------------------------------------------------
     // Telemetry roundtrip tests
     // -----------------------------------------------------------------------

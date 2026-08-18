@@ -785,4 +785,97 @@ mod tests {
             Err(zbus::fdo::Error::NotSupported(_))
         ));
     }
+
+    // -----------------------------------------------------------------------
+    // Read-only path invariant tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn mutation_methods_return_unsupported() {
+        // All mutation methods on the read-only providers must return
+        // Unsupported without performing any I/O or side effects.
+        let (_svc, provider) =
+            service(vec![ScriptedRead::Limit(limit(true, Some(80), 40, 100, 5))]);
+
+        // set_charge_limit must not be callable and must return Unsupported.
+        let err = provider
+            .set_charge_limit(90)
+            .await
+            .expect_err("set unsupported");
+        assert!(matches!(err, ProviderError::Unsupported(_)));
+
+        // one_shot_full_charge must not be callable.
+        let err = provider
+            .one_shot_full_charge()
+            .await
+            .expect_err("oneshot unsupported");
+        assert!(matches!(err, ProviderError::Unsupported(_)));
+
+        // validate_charge_limit must return invalid.
+        assert!(matches!(
+            provider.validate_charge_limit(80),
+            ValidationResult::Invalid(_)
+        ));
+
+        // Verify no reads were consumed by mutation attempts.
+        assert_eq!(provider.reads(), 0);
+    }
+
+    #[tokio::test]
+    async fn read_only_service_produces_consistent_charge_limit() {
+        // Multiple reads from the same service should be consistent and
+        // independent — no caching, no mutation side effects.
+        let (svc, provider) = service(vec![
+            ScriptedRead::Limit(limit(true, Some(80), 40, 100, 5)),
+            ScriptedRead::Limit(limit(true, Some(60), 40, 100, 5)),
+            ScriptedRead::Limit(limit(false, None, 40, 100, 5)),
+        ]);
+
+        let first = svc.read_charge_limit().await.expect("read1");
+        assert_eq!(first.configured_percent, 80);
+        assert!(first.configured_percent_present);
+
+        let second = svc.read_charge_limit().await.expect("read2");
+        assert_eq!(second.configured_percent, 60);
+        assert!(second.configured_percent_present);
+
+        let third = svc.read_charge_limit().await.expect("read3");
+        assert!(!third.enabled);
+        assert!(!third.configured_percent_present);
+
+        assert_eq!(provider.reads(), 3);
+    }
+
+    #[tokio::test]
+    async fn gpu_unsupported_when_provider_absent() {
+        // GPU capabilities are optional; when absent, properties return
+        // NotSupported — not an error or crash.
+        let (svc, _) = service(vec![ScriptedRead::Limit(limit(true, Some(80), 40, 100, 5))]);
+        // No GPU providers configured.
+        assert!(matches!(
+            svc.read_gpu_power().await,
+            Err(ProviderError::Unsupported(_))
+        ));
+        assert!(matches!(
+            svc.read_gpu_mux().await,
+            Err(ProviderError::Unsupported(_))
+        ));
+        assert!(matches!(
+            svc.read_gpu_access().await,
+            Err(ProviderError::Unsupported(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn performance_unsupported_when_provider_absent() {
+        // Performance capability is optional; when absent, returns Unsupported.
+        let (svc, _) = service(vec![ScriptedRead::Limit(limit(true, Some(80), 40, 100, 5))]);
+        let err = svc.read_performance().await.expect_err("no provider");
+        assert!(matches!(err, ProviderError::Unsupported(_)));
+        // Also verify the D-Bus property returns NotSupported.
+        assert!(matches!(
+            svc.performance().await,
+            Err(zbus::fdo::Error::NotSupported(_))
+        ));
+    }
 }
