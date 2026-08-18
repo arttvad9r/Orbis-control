@@ -16,8 +16,8 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use orbis_hardwared::{
-    Authorizer, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION,
-    GPU_POLKIT_ACTION, HardwareService, PolkitAuthorizer,
+    BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION, GPU_POLKIT_ACTION,
+    HardwareService, PolkitAuthorizer,
     battery::{
         AsusdBatteryMutationBackend, BatteryMutationBackend, BatteryMutationReadback,
         ZbusAsusdBatteryClient, discover_effective_reader,
