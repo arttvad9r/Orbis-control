@@ -21,6 +21,7 @@ pub mod hardware_identity;
 pub mod keyboard_backlight;
 pub mod native_asus_eco;
 pub mod probes;
+pub mod service_presence;
 pub mod supergfxd;
 pub mod sysfs_telemetry;
 pub mod system_metadata;
@@ -42,6 +43,7 @@ pub use probes::{
     probe_gpu_power, probe_mini_led_mode, probe_panel_overdrive, probe_performance,
     probe_screen_auto_brightness,
 };
+pub use service_presence::*;
 pub use sysfs_telemetry::SysfsTelemetryProvider;
 pub use system_metadata::SystemMetadataProvider;
 pub use traits::*;
