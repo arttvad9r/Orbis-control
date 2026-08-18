@@ -1433,6 +1433,45 @@ mod tests {
     }
 
     #[test]
+    fn performance_write_temporarily_unavailable_does_not_enable_mutation() {
+        // Read is fine, but the Performance mutation backend is temporarily
+        // unavailable: the UI must NOT enable the write control. The
+        // distinction is preserved, not collapsed to a bool.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::Performance,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.perf_capability, CapabilityAvailability::Supported);
+        assert!(!s.perf_writable);
+        // write_allows_mutation rejects TemporarilyUnavailable directly.
+        assert!(!write_allows_mutation(
+            CapabilityStatus::TemporarilyUnavailable
+        ));
+    }
+
+    #[test]
+    fn performance_write_permission_denied_does_not_enable_mutation() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::Performance,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::PermissionDenied,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.perf_writable);
+        assert!(!write_allows_mutation(CapabilityStatus::PermissionDenied));
+    }
+
+    #[test]
     fn one_unavailable_domain_does_not_affect_others() {
         let mut s = UiState::from_mock_profile("zephyrus-full");
         let snapshot = registry_with(vec![

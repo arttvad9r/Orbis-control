@@ -18,7 +18,7 @@ use orbis_core::capability::{
     Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, OperationCapability,
 };
 
-use crate::error::{ProviderError, ValidationResult};
+use crate::error::ProviderError;
 use crate::traits::{
     BatteryProvider, FanProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
     PerformanceProvider,
@@ -39,20 +39,6 @@ fn unsupported_write() -> OperationCapability {
         "read-only capability probe does not establish mutation support",
     )
     .into_operation()
-}
-
-/// Derive write capability from the provider's declarative validation result.
-///
-/// `Valid` proves the production mutation path exists and is available.
-/// `Invalid` (e.g. the read-only session contract) reports `Unsupported`; we
-/// never invent `PermissionDenied` without real authorization evidence.
-fn write_from_validation(validation: ValidationResult) -> OperationCapability {
-    match validation {
-        ValidationResult::Valid => {
-            ProbeOperationResult::classified(ProbeClassification::Supported).into_operation()
-        }
-        ValidationResult::Invalid(_) => unsupported_write(),
-    }
 }
 
 /// Conservative write operation for a failed read probe.
@@ -96,9 +82,16 @@ fn capability_from_read(
 /// Probe Performance support from current and available profile reads.
 ///
 /// The current profile is read only to establish that the read contract is
-/// usable; it is not stored in the returned capability metadata. Write support
-/// is derived from `validate_set_profile` with the first available profile.
-pub async fn probe_performance<P>(provider: &P) -> Result<Capability, ProbeError>
+/// usable; it is not stored in the returned capability metadata.
+///
+/// Write capability comes from typed runtime evidence about the mutation
+/// backend (`mutation_status`), NOT from `validate_set_profile`: validation
+/// only answers whether a profile is a valid input if mutation were
+/// available; it never proves the mutation path exists or is operational.
+pub async fn probe_performance<P>(
+    provider: &P,
+    mutation_status: CapabilityStatus,
+) -> Result<Capability, ProbeError>
 where
     P: PerformanceProvider + ?Sized,
 {
@@ -140,7 +133,7 @@ where
     }
 
     let read = ProbeOperationResult::classified(ProbeClassification::Supported).into_operation();
-    let write = write_from_validation(provider.validate_set_profile(profiles[0]));
+    let write = write_from_mutation_status(mutation_status);
     Ok(capability_from_read(
         read,
         write,
@@ -559,7 +552,10 @@ mod tests {
             PerformanceProfile::Balanced,
             PerformanceProfile::Turbo,
         ]));
-        let capability = probe_performance(&provider).await.unwrap();
+        // Mutation evidence = Unsupported (no proven backend).
+        let capability = probe_performance(&provider, CapabilityStatus::Unsupported)
+            .await
+            .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::Supported
@@ -588,10 +584,14 @@ mod tests {
             ),
             (ScriptedError::Unsupported, CapabilityStatus::Unsupported),
         ] {
-            let capability =
-                probe_performance(&ScriptedProvider::performance(Scripted::Error(error)))
-                    .await
-                    .unwrap();
+            let capability = probe_performance(
+                &ScriptedProvider::performance(Scripted::Error(error)),
+                // Even positive mutation evidence must not override a read
+                // failure: write mirrors the read classification.
+                CapabilityStatus::Supported,
+            )
+            .await
+            .unwrap();
             assert_eq!(capability.operations.read.status, expected);
         }
     }
@@ -649,13 +649,16 @@ mod tests {
 
     #[tokio::test]
     async fn performance_probe_reports_write_supported_when_mutation_path_proven() {
-        let mut provider = ScriptedProvider::performance(Scripted::Value(vec![
+        let provider = ScriptedProvider::performance(Scripted::Value(vec![
             PerformanceProfile::Silent,
             PerformanceProfile::Balanced,
             PerformanceProfile::Turbo,
         ]));
-        provider.write_supported = true;
-        let capability = probe_performance(&provider).await.unwrap();
+        // Mutation backend evidence = Supported (Hardware1 reports a proven
+        // performance mutation backend).
+        let capability = probe_performance(&provider, CapabilityStatus::Supported)
+            .await
+            .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::Supported
@@ -665,6 +668,74 @@ mod tests {
             CapabilityStatus::Supported
         );
         assert_eq!(capability.status, CapabilityStatus::Supported);
+    }
+
+    #[tokio::test]
+    async fn performance_probe_write_status_matches_runtime_evidence() {
+        // Read is Supported and profiles are known in all cases; only the
+        // mutation evidence varies. Each evidence class must be preserved
+        // exactly — never collapsed to a bool or a generic error.
+        for (evidence, expected_write) in [
+            (CapabilityStatus::Supported, CapabilityStatus::Supported),
+            (CapabilityStatus::Unsupported, CapabilityStatus::Unsupported),
+            (
+                CapabilityStatus::TemporarilyUnavailable,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+            (
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::PermissionDenied,
+            ),
+            (CapabilityStatus::Unknown, CapabilityStatus::Unknown),
+        ] {
+            let provider = ScriptedProvider::performance(Scripted::Value(vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+            ]));
+            let capability = probe_performance(&provider, evidence).await.unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported,
+                "read must stay Supported for evidence {evidence:?}"
+            );
+            assert_eq!(
+                capability.operations.write.status, expected_write,
+                "write must mirror evidence {evidence:?}"
+            );
+            // Constraints (known profiles) are data, not write proof.
+            assert!(matches!(
+                capability.constraints,
+                CapabilityConstraints::PerformanceProfiles(_)
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn performance_probe_validation_alone_does_not_make_write_supported() {
+        // validate_set_profile accepts the profile (write_supported=true),
+        // but the runtime mutation evidence says Unsupported. Validation alone
+        // must never make write Supported.
+        let mut provider = ScriptedProvider::performance(Scripted::Value(vec![
+            PerformanceProfile::Silent,
+            PerformanceProfile::Balanced,
+        ]));
+        provider.write_supported = true;
+        let capability = probe_performance(&provider, CapabilityStatus::Unsupported)
+            .await
+            .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported,
+            "validate_set_profile must not prove mutation availability"
+        );
     }
 
     #[tokio::test]
@@ -693,9 +764,12 @@ mod tests {
     async fn write_operation_mirrors_backend_missing_when_read_fails() {
         // Structural read failure: write must be reported as BackendMissing,
         // not Unsupported-as-if-proven or invented PermissionDenied.
-        let performance = probe_performance(&ScriptedProvider::performance(Scripted::Error(
-            ScriptedError::BackendMissing,
-        )))
+        let performance = probe_performance(
+            &ScriptedProvider::performance(Scripted::Error(ScriptedError::BackendMissing)),
+            // Even positive mutation evidence must not override a structural
+            // read failure: write mirrors the read classification.
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -729,9 +803,12 @@ mod tests {
     async fn write_operation_does_not_invent_permission_denied() {
         // Read PermissionDenied is evidence about reads only. Write must stay
         // Unsupported instead of claiming a denied write without evidence.
-        let performance = probe_performance(&ScriptedProvider::performance(Scripted::Error(
-            ScriptedError::PermissionDenied,
-        )))
+        let performance = probe_performance(
+            &ScriptedProvider::performance(Scripted::Error(ScriptedError::PermissionDenied)),
+            // Read PermissionDenied is evidence about reads only. Even positive
+            // mutation evidence must not invent a denied write.
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -765,10 +842,13 @@ mod tests {
     async fn probes_never_call_mutation_methods() {
         // ScriptedProvider::set_profile / set_charge_limit return a distinct
         // error; the probes must not reach them even when write_supported.
-        let mut provider =
+        let provider =
             ScriptedProvider::performance(Scripted::Value(vec![PerformanceProfile::Silent]));
-        provider.write_supported = true;
-        let performance = probe_performance(&provider).await.unwrap();
+        // Mutation evidence = Supported; the probe must derive write from the
+        // evidence without ever calling set_profile.
+        let performance = probe_performance(&provider, CapabilityStatus::Supported)
+            .await
+            .unwrap();
         assert_eq!(
             performance.operations.write.status,
             CapabilityStatus::Supported
@@ -785,10 +865,13 @@ mod tests {
 
     #[tokio::test]
     async fn probes_assemble_through_registry_builder() {
-        let performance = probe_performance(&ScriptedProvider::performance(Scripted::Value(vec![
-            PerformanceProfile::Silent,
-            PerformanceProfile::Balanced,
-        ])))
+        let performance = probe_performance(
+            &ScriptedProvider::performance(Scripted::Value(vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+            ])),
+            CapabilityStatus::Unsupported,
+        )
         .await
         .unwrap();
         let battery = probe_charge_limit(
@@ -1206,11 +1289,14 @@ mod tests {
             1,
             std::time::SystemTime::UNIX_EPOCH,
         );
-        let performance = probe_performance(&ScriptedProvider::performance(Scripted::Value(vec![
-            PerformanceProfile::Silent,
-            PerformanceProfile::Balanced,
-            PerformanceProfile::Turbo,
-        ])))
+        let performance = probe_performance(
+            &ScriptedProvider::performance(Scripted::Value(vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ])),
+            CapabilityStatus::Unsupported,
+        )
         .await
         .unwrap();
         builder

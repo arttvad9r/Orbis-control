@@ -456,6 +456,7 @@ where
         runtime.fan.provider_fan(),
         runtime.fan_write_available(),
         runtime.battery_mutation_status(),
+        runtime.performance_mutation_status(),
         next_generation,
         std::time::SystemTime::now(),
     )
@@ -568,6 +569,7 @@ mod tests {
                 snapshot,
                 false,
                 CapabilityStatus::Unsupported,
+                CapabilityStatus::Unsupported,
             ),
             receiver,
             emit,
@@ -669,6 +671,7 @@ mod tests {
             telemetry,
             snapshot,
             false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         )
     }
@@ -2912,6 +2915,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("initial snapshot must succeed");
@@ -2943,6 +2947,7 @@ mod tests {
                     telemetry_service,
                     initial_snapshot,
                     false,
+                    CapabilityStatus::Unsupported,
                     CapabilityStatus::Unsupported,
                 ),
                 rx,
@@ -3009,6 +3014,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("initial snapshot must succeed");
@@ -3037,6 +3043,7 @@ mod tests {
                     telemetry_service,
                     initial_snapshot,
                     false,
+                    CapabilityStatus::Unsupported,
                     CapabilityStatus::Unsupported,
                 ),
                 rx,

@@ -327,9 +327,16 @@ pub trait PerformanceServiceRuntime: Send {
 
     /// Probe Performance capability support metadata.
     ///
+    /// `mutation_status` is the typed runtime evidence about the Hardware1
+    /// Performance mutation backend; it is passed through to the probe instead
+    /// of deriving write support from `validate_set_profile`.
+    ///
     /// This is used by the lifecycle refresh path to build a new
     /// capability registry snapshot.
-    async fn probe_performance(&self) -> Result<orbis_core::capability::Capability, ProbeError>;
+    async fn probe_performance(
+        &self,
+        mutation_status: orbis_core::capability::CapabilityStatus,
+    ) -> Result<orbis_core::capability::Capability, ProbeError>;
 
     /// Borrow the inner performance provider for capability probing.
     fn provider_performance(&self)
@@ -352,8 +359,11 @@ where
         AppService::set_performance(self, profile).await
     }
 
-    async fn probe_performance(&self) -> Result<orbis_core::capability::Capability, ProbeError> {
-        orbis_providers::probe_performance(self.provider()).await
+    async fn probe_performance(
+        &self,
+        mutation_status: orbis_core::capability::CapabilityStatus,
+    ) -> Result<orbis_core::capability::Capability, ProbeError> {
+        orbis_providers::probe_performance(self.provider(), mutation_status).await
     }
 
     fn provider_performance(
@@ -501,6 +511,11 @@ pub struct ApplicationRuntime<G, B, R> {
     /// Supported / Unsupported / TemporarilyUnavailable / PermissionDenied /
     /// Unknown so the UI can distinguish them honestly.
     battery_mutation_status: orbis_core::capability::CapabilityStatus,
+    /// Typed Hardware1 Performance mutation backend evidence (startup-time).
+    ///
+    /// Controls Performance write capability with the same honest status
+    /// distinctions as the Battery mutation evidence.
+    performance_mutation_status: orbis_core::capability::CapabilityStatus,
 }
 
 impl<G, B, R> ApplicationRuntime<G, B, R> {
@@ -519,6 +534,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
         snapshot: CapabilityRegistrySnapshot,
         fan_write_available: bool,
         battery_mutation_status: orbis_core::capability::CapabilityStatus,
+        performance_mutation_status: orbis_core::capability::CapabilityStatus,
     ) -> Self
     where
         T: TelemetryServiceRuntime + 'static,
@@ -533,6 +549,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             capabilities: Arc::new(snapshot),
             fan_write_available,
             battery_mutation_status,
+            performance_mutation_status,
         }
     }
 
@@ -572,6 +589,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
         fan: F,
         telemetry: T,
         battery_mutation_status: orbis_core::capability::CapabilityStatus,
+        performance_mutation_status: orbis_core::capability::CapabilityStatus,
     ) -> Self
     where
         T: TelemetryServiceRuntime + 'static,
@@ -590,6 +608,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             capabilities: Arc::new(snapshot),
             fan_write_available: false,
             battery_mutation_status,
+            performance_mutation_status,
         }
     }
 
@@ -601,6 +620,11 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
     /// Typed Hardware1 Battery mutation backend evidence (startup-time).
     pub fn battery_mutation_status(&self) -> orbis_core::capability::CapabilityStatus {
         self.battery_mutation_status
+    }
+
+    /// Typed Hardware1 Performance mutation backend evidence (startup-time).
+    pub fn performance_mutation_status(&self) -> orbis_core::capability::CapabilityStatus {
+        self.performance_mutation_status
     }
 }
 
@@ -673,6 +697,7 @@ pub async fn probe_capability_registry<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     fan_provider: &Fp,
     fan_write_available: bool,
     battery_mutation_status: orbis_core::capability::CapabilityStatus,
+    performance_mutation_status: orbis_core::capability::CapabilityStatus,
     generation: u64,
     checked_at: SystemTime,
 ) -> Result<CapabilityRegistrySnapshot, ProbeError>
@@ -686,7 +711,9 @@ where
 {
     let mut builder = CapabilityRegistryBuilder::new(generation, checked_at);
 
-    let performance = orbis_providers::probe_performance(performance_provider).await?;
+    let performance =
+        orbis_providers::probe_performance(performance_provider, performance_mutation_status)
+            .await?;
     builder
         .add(orbis_core::FeatureId::Performance, performance)
         .map_err(|err| match err {
@@ -800,6 +827,7 @@ pub async fn build_initial_registry_snapshot<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     fan_provider: &Fp,
     fan_write_available: bool,
     battery_mutation_status: orbis_core::capability::CapabilityStatus,
+    performance_mutation_status: orbis_core::capability::CapabilityStatus,
 ) -> Result<CapabilityRegistrySnapshot, RegistryAssemblyError>
 where
     Bp: orbis_providers::traits::BatteryProvider + ?Sized,
@@ -819,6 +847,7 @@ where
         fan_provider,
         fan_write_available,
         battery_mutation_status,
+        performance_mutation_status,
         1,
         checked_at,
     )
@@ -841,6 +870,7 @@ pub async fn refresh_capability_registry<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     fan_provider: &Fp,
     fan_write_available: bool,
     battery_mutation_status: orbis_core::capability::CapabilityStatus,
+    performance_mutation_status: orbis_core::capability::CapabilityStatus,
     next_generation: u64,
 ) -> Result<CapabilityRegistrySnapshot, RefreshError>
 where
@@ -861,6 +891,7 @@ where
         fan_provider,
         fan_write_available,
         battery_mutation_status,
+        performance_mutation_status,
         next_generation,
         checked_at,
     )
@@ -900,6 +931,8 @@ pub async fn build_production_runtime(
     let hardware_owner = hardware1_write_available(&system_connection).await;
     let battery_mutation_status =
         orbis_session_client::hardware1_battery_mutation_status(&system_connection).await;
+    let performance_mutation_status =
+        orbis_session_client::hardware1_performance_mutation_status(&system_connection).await;
 
     let battery_read_provider = SessionChargeLimitProvider::new(ZbusSessionChargeLimitSource::new(
         session_connection.clone(),
@@ -954,6 +987,7 @@ pub async fn build_production_runtime(
         fan_service.provider(),
         hardware_owner,
         battery_mutation_status,
+        performance_mutation_status,
     )
     .await?;
 
@@ -967,6 +1001,7 @@ pub async fn build_production_runtime(
             snapshot,
             hardware_owner,
             battery_mutation_status,
+            performance_mutation_status,
         ),
         hardware_owner,
     ))
@@ -1018,6 +1053,7 @@ pub fn mock_runtime() -> MockRuntime {
         AppService::new(provider),
         empty,
         false,
+        CapabilityStatus::Unsupported,
         CapabilityStatus::Unsupported,
     )
 }
@@ -1073,6 +1109,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("scripted provider must produce a coherent snapshot");
@@ -1087,6 +1124,7 @@ mod tests {
             AppService::new(provider.clone()),
             AppService::new(provider.clone()),
             AppService::new(provider),
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         );
         runtime.replace_capabilities(snapshot);
@@ -1122,6 +1160,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("scripted provider must produce a coherent snapshot");
@@ -1148,6 +1187,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("scripted provider must produce a coherent snapshot");
@@ -1173,6 +1213,7 @@ mod tests {
             &*provider,
             true,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("scripted provider must produce a coherent snapshot");
@@ -1197,6 +1238,7 @@ mod tests {
             provider,
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("scripted provider must produce a coherent snapshot")
@@ -1214,6 +1256,7 @@ mod tests {
             AppService::new(provider.clone()),
             AppService::new(provider.clone()),
             AppService::new(provider),
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         )
     }
@@ -1236,6 +1279,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
         )
         .await
@@ -1253,6 +1297,7 @@ mod tests {
             &*provider,
             &*provider,
             false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
         )
@@ -1291,6 +1336,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
             pre_generation + 1,
         )
         .await
@@ -1320,6 +1366,7 @@ mod tests {
             &*provider,
             &*provider,
             false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
         )
@@ -1355,6 +1402,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
         )
         .await
@@ -1385,6 +1433,7 @@ mod tests {
             &*provider,
             true,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
         )
         .await
@@ -1406,6 +1455,7 @@ mod tests {
             &*provider,
             &*provider,
             false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
         )
@@ -1437,6 +1487,7 @@ mod tests {
             &*provider,
             &*provider,
             true,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
         )
@@ -1539,6 +1590,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("initial snapshot must succeed");
@@ -1551,6 +1603,7 @@ mod tests {
             &*provider,
             &*provider,
             false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             2,
         )
@@ -1593,6 +1646,7 @@ mod tests {
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
             1,
             std::time::SystemTime::now(),
         )
@@ -1617,6 +1671,7 @@ mod tests {
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
             false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             1,
             std::time::SystemTime::now(),
@@ -1674,6 +1729,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
             pre_generation + 1,
             std::time::SystemTime::now(),
         )
@@ -1710,6 +1766,7 @@ mod tests {
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
             false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             1,
             std::time::SystemTime::now(),
@@ -1798,6 +1855,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::TemporarilyUnavailable,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("snapshot must assemble");
@@ -1848,6 +1906,7 @@ mod tests {
             &*provider,
             false,
             CapabilityStatus::PermissionDenied,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("snapshot must assemble");
@@ -1859,5 +1918,55 @@ mod tests {
             CapabilityStatus::PermissionDenied,
             "PermissionDenied evidence must be preserved, not collapsed"
         );
+    }
+
+    #[tokio::test]
+    async fn performance_write_evidence_flows_through_registry_assembly() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        // Runtime evidence says the Performance mutation backend is
+        // temporarily unavailable. Read stays Supported and profiles remain
+        // known; write must NOT become Supported.
+        let snapshot = build_initial_registry_snapshot(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            false,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::TemporarilyUnavailable,
+        )
+        .await
+        .expect("snapshot must assemble");
+        let performance = snapshot
+            .capability(FeatureId::Performance)
+            .expect("Performance present");
+        assert_eq!(
+            performance.operations.read.status,
+            CapabilityStatus::Supported,
+            "read must stay Supported"
+        );
+        assert_eq!(
+            performance.operations.write.status,
+            CapabilityStatus::TemporarilyUnavailable,
+            "write must mirror runtime mutation evidence"
+        );
+
+        // Independent domains remain unaffected.
+        let battery = snapshot
+            .capability(FeatureId::ChargeLimit)
+            .expect("ChargeLimit present");
+        assert_eq!(battery.operations.read.status, CapabilityStatus::Supported);
+        let gpu_power = snapshot
+            .capability(FeatureId::GpuPower)
+            .expect("GpuPower present");
+        assert_eq!(
+            gpu_power.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert!(snapshot.contains(FeatureId::FanCurves));
     }
 }
