@@ -892,6 +892,21 @@ impl HardwareService {
         )
         .await
     }
+
+    /// Read-only typed evidence about fan curve mutation backend availability.
+    ///
+    /// This is capability metadata, not a mutation: no authorization is
+    /// required and no fan write occurs. The probe uses the read-only
+    /// `FanCurveData` path; when no fan backend is configured it reports
+    /// `BackendMissing` (not configured ≠ proven Unsupported).
+    async fn fan_mutation_status(&self) -> u8 {
+        use fans::fan_mutation_wire;
+        let status = match self.fan_backend.as_deref() {
+            Some(backend) => backend.mutation_status().await,
+            None => fans::FanMutationStatus::BackendMissing,
+        };
+        fan_mutation_wire::to_wire(status)
+    }
 }
 
 /// Client proxy контракта `io.github.orbiscontrol.Hardware1` (для sessiond).
@@ -922,6 +937,9 @@ pub trait Hardware1 {
 
     /// Установить одну fan curve; возвращает подтверждённый profile wire.
     fn set_fan_curve(&self, profile: u32, fan: u8, curve: fans::FanCurveWire) -> zbus::Result<u32>;
+
+    /// Read-only typed fan curve mutation backend availability (wire enum).
+    fn fan_mutation_status(&self) -> zbus::Result<u8>;
 }
 
 #[cfg(test)]
@@ -1500,6 +1518,7 @@ mod tests {
     struct FakeFanBackend {
         calls: AtomicUsize,
         fail: std::sync::atomic::AtomicBool,
+        status: fans::FanMutationStatus,
     }
 
     impl FakeFanBackend {
@@ -1507,6 +1526,15 @@ mod tests {
             Self {
                 calls: AtomicUsize::new(0),
                 fail: std::sync::atomic::AtomicBool::new(false),
+                status: fans::FanMutationStatus::Supported,
+            }
+        }
+
+        fn with_status(status: fans::FanMutationStatus) -> Self {
+            Self {
+                calls: AtomicUsize::new(0),
+                fail: std::sync::atomic::AtomicBool::new(false),
+                status,
             }
         }
     }
@@ -1528,6 +1556,10 @@ mod tests {
                 requested_fan: fan.clone(),
                 result: ApplyResult::Applied,
             })
+        }
+
+        async fn mutation_status(&self) -> fans::FanMutationStatus {
+            self.status
         }
     }
 
@@ -1614,6 +1646,44 @@ mod tests {
             .expect_err("backend error");
         assert!(matches!(err, zbus::fdo::Error::Failed(_)));
         assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn fan_mutation_status_reflects_backend_evidence() {
+        use fans::fan_mutation_wire;
+        // No fan backend configured → BackendMissing wire (not configured ≠
+        // proven Unsupported).
+        let service = HardwareService::new(Box::new(FakeAuthorizer::new(AuthOutcome::Ok)));
+        assert_eq!(
+            service.fan_mutation_status().await,
+            fan_mutation_wire::BACKEND_MISSING
+        );
+
+        // Configured backend reporting Supported → SUPPORTED wire.
+        let service = HardwareService::with_fan_backend(
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+            Box::new(FakeFanBackend::with_status(
+                fans::FanMutationStatus::Supported,
+            )),
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+        );
+        assert_eq!(
+            service.fan_mutation_status().await,
+            fan_mutation_wire::SUPPORTED
+        );
+
+        // Configured backend reporting PermissionDenied → PERMISSION_DENIED wire.
+        let service = HardwareService::with_fan_backend(
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+            Box::new(FakeFanBackend::with_status(
+                fans::FanMutationStatus::PermissionDenied,
+            )),
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+        );
+        assert_eq!(
+            service.fan_mutation_status().await,
+            fan_mutation_wire::PERMISSION_DENIED
+        );
     }
 
     // -----------------------------------------------------------------------

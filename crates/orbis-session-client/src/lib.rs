@@ -778,6 +778,50 @@ pub async fn hardware1_performance_mutation_status(
     }
 }
 
+/// Decode the Hardware1 `FanMutationStatus` wire value into the canonical
+/// domain capability status.
+///
+/// Unknown wire values and the explicit `Unknown` evidence both map to
+/// `CapabilityStatus::Unknown` — never to a guessed known state.
+pub fn fan_mutation_status_from_wire(raw: u8) -> orbis_core::capability::CapabilityStatus {
+    use orbis_core::capability::CapabilityStatus;
+    use orbis_hardwared::fans::{FanMutationStatus, fan_mutation_wire};
+    match fan_mutation_wire::from_wire(raw) {
+        Some(FanMutationStatus::Supported) => CapabilityStatus::Supported,
+        Some(FanMutationStatus::Unsupported) => CapabilityStatus::Unsupported,
+        Some(FanMutationStatus::TemporarilyUnavailable) => CapabilityStatus::TemporarilyUnavailable,
+        Some(FanMutationStatus::PermissionDenied) => CapabilityStatus::PermissionDenied,
+        Some(FanMutationStatus::BackendMissing) => CapabilityStatus::BackendMissing,
+        Some(FanMutationStatus::Unknown) | None => CapabilityStatus::Unknown,
+    }
+}
+
+/// Read-only typed fan curve mutation backend status from the production
+/// Hardware1 daemon.
+///
+/// This performs no mutation and requires no authorization. When the daemon is
+/// absent, the method is not exposed, or the reply is malformed, the result is
+/// `CapabilityStatus::Unknown` — the honest no-evidence state, never a guessed
+/// `Supported`.
+pub async fn hardware1_fan_mutation_status(
+    connection: &zbus::Connection,
+) -> orbis_core::capability::CapabilityStatus {
+    let proxy = match Hardware1Proxy::builder(connection)
+        .path(DBUS_OBJECT_PATH)
+        .expect("valid hardware object path")
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+    {
+        Ok(proxy) => proxy,
+        Err(_) => return orbis_core::capability::CapabilityStatus::Unknown,
+    };
+    match proxy.fan_mutation_status().await {
+        Ok(raw) => fan_mutation_status_from_wire(raw),
+        Err(_) => orbis_core::capability::CapabilityStatus::Unknown,
+    }
+}
+
 /// Реальный zbus источник Performance через generated `Session1Proxy`.
 ///
 /// Хранит переданную извне готовую `Connection`; I/O начинается только в
@@ -1626,6 +1670,40 @@ mod tests {
             performance_mutation_status_from_wire(99),
             CapabilityStatus::Unknown
         );
+    }
+
+    #[test]
+    fn fan_mutation_status_wire_maps_to_capability_status() {
+        use orbis_core::capability::CapabilityStatus;
+        use orbis_hardwared::fans::fan_mutation_wire;
+
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::SUPPORTED),
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::UNSUPPORTED),
+            CapabilityStatus::Unsupported
+        );
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::TEMPORARILY_UNAVAILABLE),
+            CapabilityStatus::TemporarilyUnavailable
+        );
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::PERMISSION_DENIED),
+            CapabilityStatus::PermissionDenied
+        );
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::BACKEND_MISSING),
+            CapabilityStatus::BackendMissing
+        );
+        // Explicit unknown evidence and malformed wire both map to Unknown —
+        // never to a guessed known state.
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::UNKNOWN),
+            CapabilityStatus::Unknown
+        );
+        assert_eq!(fan_mutation_status_from_wire(99), CapabilityStatus::Unknown);
     }
 
     #[test]

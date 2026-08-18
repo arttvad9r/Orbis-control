@@ -158,6 +158,113 @@ pub trait FanCurveMutationOperation: Send + Sync {
         fan: &FanId,
         curve: &FanCurvePoints,
     ) -> Result<FanCurveMutationReadback, ProviderError>;
+
+    /// Read-only typed runtime evidence about fan curve mutation availability.
+    ///
+    /// Must never call `set_fan_curve` or mutate anything. Uses the existing
+    /// read-only `FanCurveData` path on the same `xyz.ljones.FanCurves`
+    /// interface the setter targets, so a successful read proves the mutation
+    /// interface is present and responsive.
+    async fn mutation_status(&self) -> FanMutationStatus;
+}
+
+/// Typed runtime evidence for fan curve mutation backend availability.
+///
+/// The distinction matters: a configured backend object (`Some`) does not
+/// prove the asusd service or the `xyz.ljones.FanCurves` interface is
+/// reachable, and `None` only means "not configured" — never a proven
+/// hardware `Unsupported`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FanMutationStatus {
+    /// The fan curve mutation backend is configured and the read-only
+    /// `FanCurves` interface probe succeeded.
+    Supported,
+    /// The interface/feature is proven unsupported by the backend contract.
+    Unsupported,
+    /// A known/expected backend or service is temporarily unavailable.
+    TemporarilyUnavailable,
+    /// The operation exists but current authorization evidence denies it.
+    PermissionDenied,
+    /// The required backend/service is structurally absent (e.g. no fan
+    /// mutation backend configured, or asusd service not present).
+    BackendMissing,
+    /// No provable evidence about mutation availability.
+    Unknown,
+}
+
+/// Stable wire values for `Hardware1.FanMutationStatus`.
+pub mod fan_mutation_wire {
+    use super::FanMutationStatus;
+
+    /// Proven mutation backend / interface present.
+    pub const SUPPORTED: u8 = 0;
+    /// Mutation capability structurally unsupported.
+    pub const UNSUPPORTED: u8 = 1;
+    /// Known backend temporarily unavailable.
+    pub const TEMPORARILY_UNAVAILABLE: u8 = 2;
+    /// Mutation denied by authorization evidence.
+    pub const PERMISSION_DENIED: u8 = 3;
+    /// Required backend/service absent.
+    pub const BACKEND_MISSING: u8 = 4;
+    /// No evidence.
+    pub const UNKNOWN: u8 = 5;
+
+    /// Encode typed status into the D-Bus wire value.
+    pub fn to_wire(status: FanMutationStatus) -> u8 {
+        match status {
+            FanMutationStatus::Supported => SUPPORTED,
+            FanMutationStatus::Unsupported => UNSUPPORTED,
+            FanMutationStatus::TemporarilyUnavailable => TEMPORARILY_UNAVAILABLE,
+            FanMutationStatus::PermissionDenied => PERMISSION_DENIED,
+            FanMutationStatus::BackendMissing => BACKEND_MISSING,
+            FanMutationStatus::Unknown => UNKNOWN,
+        }
+    }
+
+    /// Decode a wire value; unknown values produce `None` so callers classify
+    /// them as `Unknown` instead of inventing a known state.
+    pub fn from_wire(raw: u8) -> Option<FanMutationStatus> {
+        match raw {
+            SUPPORTED => Some(FanMutationStatus::Supported),
+            UNSUPPORTED => Some(FanMutationStatus::Unsupported),
+            TEMPORARILY_UNAVAILABLE => Some(FanMutationStatus::TemporarilyUnavailable),
+            PERMISSION_DENIED => Some(FanMutationStatus::PermissionDenied),
+            BACKEND_MISSING => Some(FanMutationStatus::BackendMissing),
+            UNKNOWN => Some(FanMutationStatus::Unknown),
+            _ => None,
+        }
+    }
+}
+
+/// Classify a D-Bus error detail string into a fan mutation status.
+///
+/// Mirrors the stable error-name semantics used by the capability probe layer
+/// (`ServiceUnknown`/`NameHasNoOwner` → backend absent, `UnknownMethod`/
+/// `NotSupported` → unsupported, `AccessDenied` → denied, timeouts → transient).
+fn classify_fan_mutation_dbus(detail: &str) -> FanMutationStatus {
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("serviceunknown")
+        || lower.contains("namehasnoowner")
+        || lower.contains("service not found")
+    {
+        FanMutationStatus::BackendMissing
+    } else if lower.contains("accessdenied") || lower.contains("permission denied") {
+        FanMutationStatus::PermissionDenied
+    } else if lower.contains("unknownmethod")
+        || lower.contains("unknowninterface")
+        || lower.contains("not supported")
+        || lower.contains("notsupported")
+    {
+        FanMutationStatus::Unsupported
+    } else if lower.contains("timeout")
+        || lower.contains("timed out")
+        || lower.contains("noreply")
+        || lower.contains("disconnected")
+    {
+        FanMutationStatus::TemporarilyUnavailable
+    } else {
+        FanMutationStatus::Unknown
+    }
 }
 
 /// Validate the public fan curve input without contacting any backend.
@@ -274,6 +381,18 @@ where
         curve: &FanCurvePoints,
     ) -> Result<FanCurveMutationReadback, ProviderError> {
         self.set_fan_curve(profile, fan, curve).await
+    }
+
+    async fn mutation_status(&self) -> FanMutationStatus {
+        // Read-only evidence: the same `FanCurveData` read path the mutation
+        // backend uses for authoritative read-back, on the same
+        // `xyz.ljones.FanCurves` interface the setter targets. A successful
+        // read proves the mutation interface is present and responsive.
+        match self.asusd.read_curves(AsusdFanProfile::Balanced).await {
+            Ok(_) => FanMutationStatus::Supported,
+            Err(ProviderError::Dbus(detail)) => classify_fan_mutation_dbus(&detail),
+            Err(_) => FanMutationStatus::Unknown,
+        }
     }
 }
 
@@ -480,6 +599,7 @@ mod tests {
         stored: std::sync::Mutex<StoredCurves>,
         fail_setter: std::sync::atomic::AtomicBool,
         fail_readback: std::sync::atomic::AtomicBool,
+        readback_dbus_error: std::sync::Mutex<Option<String>>,
         mismatch_readback: std::sync::atomic::AtomicBool,
         setter_calls: std::sync::atomic::AtomicUsize,
     }
@@ -490,6 +610,7 @@ mod tests {
                 stored: std::sync::Mutex::new(StoredCurves::new()),
                 fail_setter: std::sync::atomic::AtomicBool::new(false),
                 fail_readback: std::sync::atomic::AtomicBool::new(false),
+                readback_dbus_error: std::sync::Mutex::new(None),
                 mismatch_readback: std::sync::atomic::AtomicBool::new(false),
                 setter_calls: std::sync::atomic::AtomicUsize::new(0),
             }
@@ -523,6 +644,9 @@ mod tests {
             &self,
             profile: AsusdFanProfile,
         ) -> Result<Vec<(String, [u8; 8], [u8; 8], bool)>, ProviderError> {
+            if let Some(detail) = self.readback_dbus_error.lock().unwrap().as_ref() {
+                return Err(ProviderError::Dbus(detail.clone()));
+            }
             if self.fail_readback.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err(ProviderError::Dbus("readback failed".into()));
             }
@@ -803,5 +927,87 @@ mod tests {
             pwms: decoded.pwms.iter().map(|p| p.get()).collect(),
         };
         assert_eq!(encoded, input, "roundtrip must be lossless");
+    }
+
+    #[tokio::test]
+    async fn mutation_status_supported_without_setter_calls() {
+        // The status probe uses the read-only FanCurveData path. It must prove
+        // Supported without ever calling the setter.
+        let asusd = FakeAsusd::new();
+        let backend = AsusdFanCurveMutationBackend::new(&asusd);
+        assert_eq!(
+            backend.mutation_status().await,
+            FanMutationStatus::Supported
+        );
+        assert_eq!(
+            asusd.setter_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "status query must not call the setter"
+        );
+    }
+
+    #[tokio::test]
+    async fn mutation_status_classifies_dbus_evidence() {
+        for (detail, expected) in [
+            (
+                "org.freedesktop.DBus.Error.ServiceUnknown: name not found",
+                FanMutationStatus::BackendMissing,
+            ),
+            (
+                "org.freedesktop.DBus.Error.NameHasNoOwner",
+                FanMutationStatus::BackendMissing,
+            ),
+            (
+                "org.freedesktop.DBus.Error.UnknownMethod",
+                FanMutationStatus::Unsupported,
+            ),
+            (
+                "org.freedesktop.DBus.Error.UnknownInterface",
+                FanMutationStatus::Unsupported,
+            ),
+            (
+                "org.freedesktop.DBus.Error.NotSupported",
+                FanMutationStatus::Unsupported,
+            ),
+            (
+                "org.freedesktop.DBus.Error.AccessDenied",
+                FanMutationStatus::PermissionDenied,
+            ),
+            (
+                "org.freedesktop.DBus.Error.NoReply: timed out",
+                FanMutationStatus::TemporarilyUnavailable,
+            ),
+            ("unexpected protocol failure", FanMutationStatus::Unknown),
+        ] {
+            let asusd = FakeAsusd::new();
+            *asusd.readback_dbus_error.lock().unwrap() = Some(detail.to_string());
+            let backend = AsusdFanCurveMutationBackend::new(&asusd);
+            assert_eq!(
+                backend.mutation_status().await,
+                expected,
+                "detail: {detail}"
+            );
+            assert_eq!(
+                asusd.setter_calls.load(std::sync::atomic::Ordering::SeqCst),
+                0,
+                "status query must not call the setter"
+            );
+        }
+    }
+
+    #[test]
+    fn fan_mutation_wire_roundtrip_is_total() {
+        for status in [
+            FanMutationStatus::Supported,
+            FanMutationStatus::Unsupported,
+            FanMutationStatus::TemporarilyUnavailable,
+            FanMutationStatus::PermissionDenied,
+            FanMutationStatus::BackendMissing,
+            FanMutationStatus::Unknown,
+        ] {
+            let wire = fan_mutation_wire::to_wire(status);
+            assert_eq!(fan_mutation_wire::from_wire(wire), Some(status));
+        }
+        assert_eq!(fan_mutation_wire::from_wire(99), None);
     }
 }
