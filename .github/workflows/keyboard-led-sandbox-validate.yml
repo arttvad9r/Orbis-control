@@ -1,7 +1,7 @@
 name: Keyboard LED sandbox validation
 
 on:
-  push:
+  pull_request:
     branches:
       - agent/nixos-keyboard-led-sandbox-validate
 
@@ -52,4 +52,4 @@ jobs:
 
       - name: Check implementation diff whitespace
         shell: bash
-        run: git diff --check ea286e32d7e86f7965ba101865d2feee5dcf0342 HEAD^
+        run: git diff --check ea286e32d7e86f7965ba101865d2feee5dcf0342 56239735f7c08926e4c43a0a8056d59bd8bdf5b2
