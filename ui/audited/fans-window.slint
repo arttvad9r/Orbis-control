@@ -1,5 +1,5 @@
 import { UiState } from "model.slint";
-import { FanCurveEditor } from "fan-curve-editor-v2.slint";
+import { FanCurveEditor } from "fan-curve-editor-v3.slint";
 import { ToggleRow, PreviewSliderRow } from "../components/visual-controls.slint";
 import { SectionCard, ActionButton } from "common.slint";
 import { Palette } from "../themes/dark.slint";
@@ -29,7 +29,7 @@ export component FansWindow inherits Window {
         padding: 10px;
         spacing: 7px;
         FanCurveEditor {
-            height: 382px;
+            height: 460px;
             state: root.ui-state.fan-curve-state;
             writable: root.ui-state.fan-curve-writable;
             error-state: root.ui-state.fan-curve-error;
