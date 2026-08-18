@@ -717,22 +717,14 @@ mod tests {
         full_fixture(&root);
         let source = SysfsFanCurveSource::new(root.clone());
 
-        write_fixture(
-            &root,
-            "class/hwmon/hwmon5/pwm1_auto_point1_temp",
-            "65536\n",
-        );
+        write_fixture(&root, "class/hwmon/hwmon5/pwm1_auto_point1_temp", "65536\n");
         let err = source
             .read_active_curve(&FanId::Cpu)
             .await
             .expect_err("temperature narrowing must fail");
         assert!(matches!(err, ProviderError::Internal(_)));
 
-        write_fixture(
-            &root,
-            "class/hwmon/hwmon5/pwm1_auto_point1_temp",
-            "45\n",
-        );
+        write_fixture(&root, "class/hwmon/hwmon5/pwm1_auto_point1_temp", "45\n");
         write_fixture(&root, "class/hwmon/hwmon5/pwm1_auto_point1_pwm", "256\n");
         let err = source
             .read_active_curve(&FanId::Cpu)

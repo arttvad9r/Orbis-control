@@ -216,7 +216,8 @@ fn read_temp_c(path: &Path) -> Result<Option<TemperatureC>, ProviderError> {
     let Some(raw) = read_u64(path)? else {
         return Ok(None);
     };
-    let celsius = i16::try_from(raw / 1000).map_err(|_| narrowing_error("температура", raw, path))?;
+    let celsius =
+        i16::try_from(raw / 1000).map_err(|_| narrowing_error("температура", raw, path))?;
     TemperatureC::new(celsius).map(Some).map_err(|_| {
         ProviderError::Internal(format!(
             "sysfs telemetry: температура вне domain диапазона '{raw}' в '{}'",
@@ -244,7 +245,8 @@ fn read_milli_watt(path: &Path) -> Result<Option<MilliWatt>, ProviderError> {
     let Some(raw) = read_u64(path)? else {
         return Ok(None);
     };
-    let milliwatt = u32::try_from(raw / 1000).map_err(|_| narrowing_error("мощность", raw, path))?;
+    let milliwatt =
+        u32::try_from(raw / 1000).map_err(|_| narrowing_error("мощность", raw, path))?;
     MilliWatt::new(milliwatt).map(Some).map_err(|_| {
         ProviderError::Internal(format!(
             "sysfs telemetry: мощность вне domain диапазона '{raw}' в '{}'",
@@ -336,9 +338,8 @@ fn read_battery(dir: &Path) -> Result<Option<BatteryTelemetry>, ProviderError> {
                 ))
             })?;
             let pct = scaled / design;
-            let clamped = u8::try_from(pct.min(100)).map_err(|_| {
-                narrowing_error("battery health", pct, &dir.join("charge_full"))
-            })?;
+            let clamped = u8::try_from(pct.min(100))
+                .map_err(|_| narrowing_error("battery health", pct, &dir.join("charge_full")))?;
             Some(Percent::new(clamped).map_err(|_| {
                 ProviderError::Internal(format!(
                     "sysfs telemetry: battery health вне domain диапазона '{pct}'"
@@ -401,7 +402,11 @@ mod tests {
     }
 
     fn battery_type(root: &Path, name: &str) {
-        write_fixture(root, &format!("class/power_supply/{name}/type"), "Battery\n");
+        write_fixture(
+            root,
+            &format!("class/power_supply/{name}/type"),
+            "Battery\n",
+        );
     }
 
     fn external_type(root: &Path, name: &str) {
@@ -607,7 +612,10 @@ mod tests {
         write_fixture(&root, "class/hwmon/hwmon2/fan1_input", "65536\n");
 
         let provider = SysfsTelemetryProvider::new(root.clone());
-        let err = provider.snapshot().await.expect_err("RPM narrowing must fail");
+        let err = provider
+            .snapshot()
+            .await
+            .expect_err("RPM narrowing must fail");
         assert!(matches!(err, ProviderError::Internal(_)));
 
         let _ = std::fs::remove_dir_all(root);
@@ -618,11 +626,7 @@ mod tests {
         let root = fixture_root();
         // Decoys deliberately expose familiar attributes under the wrong type.
         external_type(&root, "NOT_A_BATTERY");
-        write_fixture(
-            &root,
-            "class/power_supply/NOT_A_BATTERY/capacity",
-            "1\n",
-        );
+        write_fixture(&root, "class/power_supply/NOT_A_BATTERY/capacity", "1\n");
         battery_type(&root, "BAT_WITH_ONLINE");
         write_fixture(&root, "class/power_supply/BAT_WITH_ONLINE/online", "0\n");
 
@@ -633,7 +637,10 @@ mod tests {
 
         let provider = SysfsTelemetryProvider::new(root.clone());
         let t = provider.snapshot().await.expect("snapshot");
-        assert_eq!(t.battery.expect("battery").percent, Percent::new(77).unwrap());
+        assert_eq!(
+            t.battery.expect("battery").percent,
+            Percent::new(77).unwrap()
+        );
         assert_eq!(t.ac_online, Some(true));
 
         let _ = std::fs::remove_dir_all(root);

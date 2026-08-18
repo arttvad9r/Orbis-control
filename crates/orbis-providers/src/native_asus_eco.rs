@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState};
 
 use crate::ProviderError;
-use crate::supergfxd::{power_from_wire, SupergfxdMode, SupergfxdSnapshot, SupergfxdUserAction};
+use crate::supergfxd::{SupergfxdMode, SupergfxdSnapshot, SupergfxdUserAction, power_from_wire};
 
 #[zbus::proxy(
     interface = "org.supergfxctl.Daemon",
