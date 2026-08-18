@@ -9,8 +9,16 @@
 #![warn(missing_docs)]
 
 pub mod paths;
+pub mod preferences;
 pub mod store;
 
+pub use preferences::{
+    AppearancePreferences, CloseAction, PREFERENCES_FILE, PREFERENCES_SCHEMA_VERSION,
+    PreferencesConfig, PreferencesError, PreferencesLoad, PreferencesLoadSource,
+    PreferencesPathError, PreferencesWarning, PreferencesWarningKind, ThemePreference,
+    WindowPreferences, load_preferences, load_preferences_from_dir, preferences_dir,
+    preferences_dir_with, preferences_file, save_preferences, save_preferences_to_dir,
+};
 pub use store::{
     AppConfig, AutomationConfig, BatteryConfig, ExperimentalConfig, UiConfig, load_or_default,
 };
