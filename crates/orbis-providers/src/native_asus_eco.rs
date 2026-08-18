@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState};
 
 use crate::ProviderError;
-use crate::supergfxd::{SupergfxdMode, SupergfxdSnapshot, SupergfxdUserAction};
+use crate::supergfxd::{power_from_wire, SupergfxdMode, SupergfxdSnapshot, SupergfxdUserAction};
 
 #[zbus::proxy(
     interface = "org.supergfxctl.Daemon",
@@ -24,15 +24,6 @@ trait SupergfxdReadOnly {
 
 fn supergfxd_error(error: zbus::Error) -> ProviderError {
     ProviderError::Dbus(error.to_string())
-}
-
-fn power_from_wire(raw: u32) -> orbis_core::gpu::GpuPowerState {
-    match raw {
-        0 => orbis_core::gpu::GpuPowerState::Active,
-        1 => orbis_core::gpu::GpuPowerState::Suspended,
-        2..=4 => orbis_core::gpu::GpuPowerState::Off,
-        _ => orbis_core::gpu::GpuPowerState::Unknown,
-    }
 }
 
 /// Severity of read-only evidence for a native live Eco transition.
