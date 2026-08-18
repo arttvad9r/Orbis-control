@@ -27,13 +27,13 @@ export component DiagnosticsWindow inherits Window {
                 horizontal-stretch: 1; height: 260px;
                 VerticalLayout { padding: 10px; spacing: 9px;
                     SectionTitle { title: root.show-logs ? "Log Preview" : "Capability Registry"; }
-                    if (!root.show-logs) : HorizontalLayout { Text { text: "Performance"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Supported"; accent: Palette.success; } }
-                    if (!root.show-logs) : HorizontalLayout { Text { text: "Battery threshold"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Supported"; accent: Palette.success; } }
-                    if (!root.show-logs) : HorizontalLayout { Text { text: "GPU primitives"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Mixed"; accent: Palette.warning; } }
-                    if (!root.show-logs) : HorizontalLayout { Text { text: "Fan curves"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Runtime"; accent: Palette.accent-default; } }
+                    if (!root.show-logs) : HorizontalLayout { Text { text: "Performance"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    if (!root.show-logs) : HorizontalLayout { Text { text: "Battery threshold"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    if (!root.show-logs) : HorizontalLayout { Text { text: "GPU primitives"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
+                    if (!root.show-logs) : HorizontalLayout { Text { text: "Fan curves"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
                     if (!root.show-logs) : HorizontalLayout { Text { text: "Power limits"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
                     if (!root.show-logs) : HorizontalLayout { Text { text: "Display / Lighting"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
-                    if (root.show-logs) : Text { text: "[preview] Session1 connected\n[preview] Hardware1 on-demand\n[preview] No diagnostics log transport is wired yet."; font-size: 9px; color: Palette.text-secondary; wrap: word-wrap; }
+                    if (root.show-logs) : Text { text: "[preview] Session1 status not queried\n[preview] Hardware1 status not queried\n[preview] No diagnostics log transport is wired yet."; font-size: 9px; color: Palette.text-secondary; wrap: word-wrap; }
                 }
             }
             SectionCard {
@@ -42,7 +42,7 @@ export component DiagnosticsWindow inherits Window {
                     SectionTitle { title: "Providers"; }
                     HorizontalLayout { Text { text: "asusd"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
                     HorizontalLayout { Text { text: "supergfxd"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
-                    HorizontalLayout { Text { text: "Hardware1"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "On demand"; accent: Palette.accent-default; } }
+                    HorizontalLayout { Text { text: "Hardware1"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: "Preview"; accent: Palette.warning; } }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                 }
             }
