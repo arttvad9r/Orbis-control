@@ -102,3 +102,20 @@ jobs:
         run: cargo check -p orbis-ui --all-targets
       - name: Test UI crate
         run: cargo test -p orbis-ui
+      - name: Render audited windows
+        run: |
+          mkdir -p snapshots
+          cargo run -p orbis-ui -- --ui-state default --screenshot snapshots/main-default.png
+          cargo run -p orbis-ui -- --ui-state pending --screenshot snapshots/main-pending.png
+          cargo run -p orbis-ui --example ui_snapshot -- fans snapshots/fans.png
+          cargo run -p orbis-ui --example ui_snapshot -- extra snapshots/extra.png
+          cargo run -p orbis-ui --example ui_snapshot -- automation snapshots/automation.png
+          cargo run -p orbis-ui --example ui_snapshot -- preferences snapshots/preferences.png
+          cargo run -p orbis-ui --example ui_snapshot -- diagnostics snapshots/diagnostics.png
+          cargo run -p orbis-ui --example ui_snapshot -- updates snapshots/updates.png
+          cargo run -p orbis-ui --example ui_snapshot -- dialog snapshots/dialog.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-audit-snapshots
+          path: snapshots/*.png
+          if-no-files-found: error
