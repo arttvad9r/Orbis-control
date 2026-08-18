@@ -30,6 +30,7 @@ export component SectionTitle inherits Rectangle {
     background: transparent;
     HorizontalLayout {
         alignment: center;
+        spacing: 8px;
         Text { text: root.title; font-size: 10px; font-weight: 700; color: Palette.text-primary; vertical-alignment: center; overflow: elide; }
         Rectangle { horizontal-stretch: 1; background: transparent; }
         if (root.detail != "") : Text { text: root.detail; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; overflow: elide; }

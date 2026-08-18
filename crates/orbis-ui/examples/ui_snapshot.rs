@@ -102,7 +102,7 @@ fn main() -> anyhow::Result<()> {
         "preferences" => (580, 550),
         "diagnostics" => (640, 540),
         "updates" => (470, 350),
-        "dialog" => (430, 230),
+        "dialog" => (430, 220),
         other => anyhow::bail!("unknown window: {other}"),
     };
 

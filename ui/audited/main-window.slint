@@ -1,10 +1,32 @@
-import { ComboBox, Slider, CheckBox } from "std-widgets.slint";
+import { ComboBox, Slider } from "std-widgets.slint";
 import { UiState, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState } from "model.slint";
 import { ModeCard } from "../components/mode-card.slint";
 import { ValueSlider } from "../components/value-slider.slint";
 import { PreviewButton, ChoiceChip } from "../components/visual-controls.slint";
 import { SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
 import { Palette } from "../themes/dark.slint";
+
+component DarkCheckBox inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked: false;
+    in property <bool> disabled: false;
+    height: 20px;
+    min-width: 112px;
+    background: transparent;
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: center;
+        Rectangle {
+            width: 14px; height: 14px; border-radius: 2px; border-width: 1px;
+            border-color: root.checked && !root.disabled ? Palette.accent-default : Palette.border-default;
+            background: root.checked && !root.disabled ? Palette.accent-default : Palette.surface-default;
+            if (root.checked) : Text { text: "✓"; font-size: 10px; font-weight: 700; color: Palette.text-primary; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        Text { text: root.text; font-size: 9px; color: root.disabled ? Palette.text-disabled : Palette.text-secondary; vertical-alignment: center; overflow: elide; }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+    }
+    TouchArea { enabled: !root.disabled; clicked => { root.checked = !root.checked; } }
+}
 
 export component AppWindow inherits Window {
     width: 500px;
@@ -155,8 +177,8 @@ export component AppWindow inherits Window {
                         ComboBox { horizontal-stretch: 1; model: ["Interval Off", "Slow", "Medium", "Fast"]; current-index <=> root.slash-interval-preview; }
                     }
                     HorizontalLayout { height: 20px; spacing: 10px;
-                        CheckBox { text: "Disable on battery"; checked <=> root.slash-battery-preview; }
-                        CheckBox { text: "Disable on lid close"; checked <=> root.slash-lid-preview; }
+                        DarkCheckBox { text: "Disable on battery"; checked <=> root.slash-battery-preview; }
+                        DarkCheckBox { text: "Disable on lid close"; checked <=> root.slash-lid-preview; }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
                 }
@@ -195,7 +217,7 @@ export component AppWindow inherits Window {
                         ActionButton { width: 62px; label: "100%"; disabled: root.ui-state.charge-limit-state != ChargeLimitState.Ready || !root.ui-state.charge-limit-writable; clicked => { root.charge-changed(100); } }
                     }
                     HorizontalLayout { height: 20px;
-                        CheckBox { text: "Run on Startup"; checked <=> root.startup-preview; }
+                        DarkCheckBox { text: "Run on Startup"; checked <=> root.startup-preview; }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                         Text { text: root.ui-state.battery_percent + " · " + root.ui-state.battery_health; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; }
                     }
