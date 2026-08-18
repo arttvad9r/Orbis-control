@@ -1,0 +1,74 @@
+import { Palette } from "../themes/dark.slint";
+
+export component WindowHeader inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle: "";
+    height: 34px;
+    background: transparent;
+    HorizontalLayout {
+        alignment: center;
+        VerticalLayout {
+            alignment: center;
+            Text { text: root.title; font-size: 13px; font-weight: 700; color: Palette.text-primary; }
+            if (root.subtitle != "") : Text { text: root.subtitle; font-size: 8px; color: Palette.text-secondary; overflow: elide; }
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+    }
+}
+
+export component SectionCard inherits Rectangle {
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Palette.border-default;
+    background: Palette.surface-default;
+}
+
+export component SectionTitle inherits Rectangle {
+    in property <string> title;
+    in property <string> detail: "";
+    height: 18px;
+    background: transparent;
+    HorizontalLayout {
+        alignment: center;
+        Text { text: root.title; font-size: 10px; font-weight: 700; color: Palette.text-primary; vertical-alignment: center; overflow: elide; }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+        if (root.detail != "") : Text { text: root.detail; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; overflow: elide; }
+    }
+}
+
+export component ActionButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> disabled: false;
+    in property <bool> accent: false;
+    callback clicked;
+    height: 28px;
+    min-width: 70px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: root.accent && !root.disabled ? Palette.accent-default : Palette.border-default;
+    background: root.disabled ? Palette.surface-disabled
+        : touch.pressed ? Palette.surface-pressed
+        : touch.has-hover ? Palette.surface-hover
+        : root.accent ? Palette.accent-default : Palette.surface-default;
+    Text {
+        text: root.label;
+        font-size: 9px;
+        font-weight: 600;
+        color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    touch := TouchArea { enabled: !root.disabled; clicked => { root.clicked(); } }
+}
+
+export component LocalStatus inherits Rectangle {
+    in property <string> text;
+    in property <color> accent: Palette.text-secondary;
+    height: 24px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: root.accent;
+    background: Palette.surface-pressed;
+    Text { x: 7px; width: parent.width - 14px; text: root.text; font-size: 8px; color: root.accent; vertical-alignment: center; overflow: elide; }
+}
