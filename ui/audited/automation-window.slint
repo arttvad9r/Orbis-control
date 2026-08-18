@@ -1,0 +1,74 @@
+import { SelectRow, ToggleRow } from "../components/visual-controls.slint";
+import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
+import { Palette } from "../themes/dark.slint";
+
+export component AutomationWindow inherits Window {
+    width: 700px;
+    height: 540px;
+    min-width: 660px;
+    min-height: 520px;
+    title: "Orbis Control — Automation";
+    background: Palette.window-background;
+
+    property <bool> enabled: true;
+    property <int> ac-profile: 2; property <int> battery-profile: 0;
+    property <int> ac-gpu: 1; property <int> battery-gpu: 0;
+    property <int> ac-display: 2; property <int> battery-display: 0;
+    property <int> ac-lighting: 2; property <int> battery-lighting: 1;
+    property <bool> on-resume: true; property <bool> on-ac-change: true; property <bool> reconcile-only: true; property <bool> notify-transitions: true;
+    property <string> local-status: "Visual-only desired-state rules";
+
+    function reset-values() {
+        root.enabled = true;
+        root.ac-profile = 2; root.battery-profile = 0;
+        root.ac-gpu = 1; root.battery-gpu = 0;
+        root.ac-display = 2; root.battery-display = 0;
+        root.ac-lighting = 2; root.battery-lighting = 1;
+        root.on-resume = true; root.on-ac-change = true; root.reconcile-only = true; root.notify-transitions = true;
+        root.local-status = "Preview rules reset";
+    }
+
+    VerticalLayout {
+        padding: 10px; spacing: 7px;
+        WindowHeader { title: "Automation"; subtitle: "Desired-state rules"; }
+        LocalStatus { text: root.local-status; accent: Palette.warning; }
+        ToggleRow { label: "Enable automation policies"; description: "Local preview only"; checked <=> root.enabled; }
+        HorizontalLayout { spacing: 10px;
+            SectionCard {
+                horizontal-stretch: 1; height: 205px;
+                VerticalLayout { padding: 9px; spacing: 2px;
+                    SectionTitle { title: "AC Power"; }
+                    SelectRow { label: "Performance"; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index <=> root.ac-profile; disabled: !root.enabled; }
+                    SelectRow { label: "GPU policy"; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index <=> root.ac-gpu; disabled: !root.enabled; }
+                    SelectRow { label: "Display"; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index <=> root.ac-display; disabled: !root.enabled; }
+                    SelectRow { label: "Lighting"; model: ["Off", "Dim", "Normal", "Keep current"]; current-index <=> root.ac-lighting; disabled: !root.enabled; }
+                }
+            }
+            SectionCard {
+                horizontal-stretch: 1; height: 205px;
+                VerticalLayout { padding: 9px; spacing: 2px;
+                    SectionTitle { title: "Battery"; }
+                    SelectRow { label: "Performance"; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index <=> root.battery-profile; disabled: !root.enabled; }
+                    SelectRow { label: "GPU policy"; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index <=> root.battery-gpu; disabled: !root.enabled; }
+                    SelectRow { label: "Display"; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index <=> root.battery-display; disabled: !root.enabled; }
+                    SelectRow { label: "Lighting"; model: ["Off", "Dim", "Normal", "Keep current"]; current-index <=> root.battery-lighting; disabled: !root.enabled; }
+                }
+            }
+        }
+        SectionCard {
+            height: 145px;
+            VerticalLayout { padding: 8px; spacing: 1px;
+                SectionTitle { title: "Triggers / Reconciliation"; }
+                ToggleRow { label: "Apply on AC / battery change"; checked <=> root.on-ac-change; disabled: !root.enabled; }
+                ToggleRow { label: "Reconcile after resume"; checked <=> root.on-resume; disabled: !root.enabled; }
+                ToggleRow { label: "Write only when observed state differs"; checked <=> root.reconcile-only; disabled: !root.enabled; }
+                ToggleRow { label: "Notify about staged transitions"; checked <=> root.notify-transitions; disabled: !root.enabled; }
+            }
+        }
+        HorizontalLayout { height: 28px; spacing: 6px;
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            ActionButton { width: 92px; label: "Reset"; clicked => { root.reset-values(); } }
+            ActionButton { width: 112px; label: "Save Rules"; accent: true; clicked => { root.local-status = "Rules saved locally · no persistence/backend write"; } }
+        }
+    }
+}
