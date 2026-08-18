@@ -420,7 +420,14 @@ fn show_preview_dialog(kind: i32) -> Result<(), slint::PlatformError> {
     PREVIEW_DIALOG_WINDOW.with(|slot| {
         let mut slot = slot.borrow_mut();
         if slot.is_none() {
-            *slot = Some(PreviewDialogWindow::new()?);
+            let window = PreviewDialogWindow::new()?;
+            let weak = window.as_weak();
+            window.on_dismiss_clicked(move || {
+                if let Some(window) = weak.upgrade() {
+                    let _ = window.hide();
+                }
+            });
+            *slot = Some(window);
         }
         let window = slot.as_ref().expect("PreviewDialogWindow initialized");
         window.set_kind(kind.clamp(0, 3));
