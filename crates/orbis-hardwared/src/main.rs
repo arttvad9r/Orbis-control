@@ -18,7 +18,10 @@ use async_trait::async_trait;
 use orbis_hardwared::{
     Authorizer, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION,
     GPU_POLKIT_ACTION, HardwareService, PolkitAuthorizer,
-    battery::{AsusdBatteryMutationBackend, ZbusAsusdBatteryClient, discover_effective_reader},
+    battery::{
+        AsusdBatteryMutationBackend, BatteryMutationBackend, BatteryMutationReadback,
+        ZbusAsusdBatteryClient, discover_effective_reader,
+    },
     fans::{AsusdFanCurveMutationBackend, ZbusAsusdFanCurveClient},
     supergfxd::{MutationObservation, SupergfxdMutationOperation},
 };
@@ -41,6 +44,23 @@ impl SupergfxdMutationOperation for DisabledGpuMutationBackend {
     }
 }
 
+/// Capability-local fallback used when no effective battery threshold source
+/// exists. Keeping a typed disabled backend makes `SetChargeLimit` fail as
+/// NotSupported without making the entire Hardware1 service unavailable.
+struct DisabledBatteryMutationBackend;
+
+#[async_trait]
+impl BatteryMutationBackend for DisabledBatteryMutationBackend {
+    async fn set_charge_limit(
+        &self,
+        _percent: u8,
+    ) -> Result<BatteryMutationReadback, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "battery charge-limit mutation unavailable: no effective threshold source".into(),
+        ))
+    }
+}
+
 fn init_tracing() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,orbis_hardwared=info"));
@@ -52,53 +72,43 @@ async fn main() -> Result<(), Box<dyn Error>> {
     init_tracing();
     let connection = zbus::connection::Builder::system()?.build().await?;
 
-    let fan_backend =
-        AsusdFanCurveMutationBackend::new(ZbusAsusdFanCurveClient::new(connection.clone()));
-
     // Battery support is capability-local. Failure to discover its effective
     // kernel read-back must not prevent Performance/Fan Hardware1 startup.
-    let service = match discover_effective_reader() {
-        Ok(effective_reader) => {
-            let battery_backend = AsusdBatteryMutationBackend::new(
-                ZbusAsusdBatteryClient::new(connection.clone()),
-                effective_reader,
-            );
-
-            HardwareService::with_battery_gpu_and_fan_backends(
-                Box::new(PolkitAuthorizer::new(connection.clone())),
-                Box::new(battery_backend),
-                Box::new(PolkitAuthorizer::with_action(
-                    connection.clone(),
-                    BATTERY_POLKIT_ACTION,
-                )),
-                Box::new(DisabledGpuMutationBackend),
-                Box::new(PolkitAuthorizer::with_action(
-                    connection.clone(),
-                    GPU_POLKIT_ACTION,
-                )),
-                Box::new(fan_backend),
-                Box::new(PolkitAuthorizer::with_action(
-                    connection.clone(),
-                    FAN_POLKIT_ACTION,
-                )),
-            )
-        }
+    let battery_backend: Box<dyn BatteryMutationBackend> = match discover_effective_reader() {
+        Ok(effective_reader) => Box::new(AsusdBatteryMutationBackend::new(
+            ZbusAsusdBatteryClient::new(connection.clone()),
+            effective_reader,
+        )),
         Err(error) => {
             tracing::warn!(
                 ?error,
-                "battery effective threshold unavailable; starting Hardware1 without Battery mutation"
+                "battery effective threshold unavailable; Battery mutation will report NotSupported"
             );
-
-            HardwareService::with_fan_backend(
-                Box::new(PolkitAuthorizer::new(connection.clone())),
-                Box::new(fan_backend),
-                Box::new(PolkitAuthorizer::with_action(
-                    connection.clone(),
-                    FAN_POLKIT_ACTION,
-                )),
-            )
+            Box::new(DisabledBatteryMutationBackend)
         }
     };
+
+    let fan_backend =
+        AsusdFanCurveMutationBackend::new(ZbusAsusdFanCurveClient::new(connection.clone()));
+
+    let service = HardwareService::with_battery_gpu_and_fan_backends(
+        Box::new(PolkitAuthorizer::new(connection.clone())),
+        battery_backend,
+        Box::new(PolkitAuthorizer::with_action(
+            connection.clone(),
+            BATTERY_POLKIT_ACTION,
+        )),
+        Box::new(DisabledGpuMutationBackend),
+        Box::new(PolkitAuthorizer::with_action(
+            connection.clone(),
+            GPU_POLKIT_ACTION,
+        )),
+        Box::new(fan_backend),
+        Box::new(PolkitAuthorizer::with_action(
+            connection.clone(),
+            FAN_POLKIT_ACTION,
+        )),
+    );
 
     connection
         .object_server()
