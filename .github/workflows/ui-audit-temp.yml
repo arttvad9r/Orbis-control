@@ -17,6 +17,12 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Use current stable Rust for UI audit
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup override set stable
+          rustc --version
+          cargo --version
       - name: Work around inherited manifest syntax
         shell: python
         run: |
@@ -28,8 +34,6 @@ jobs:
           if old not in text:
               raise SystemExit("expected inherited manifest block not found")
           path.write_text(text.replace(old, new))
-      - name: Rust versions
-        run: rustc --version && cargo --version
       - name: Formatting
         continue-on-error: true
         run: cargo fmt --all -- --check
