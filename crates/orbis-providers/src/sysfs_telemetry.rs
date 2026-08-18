@@ -116,8 +116,10 @@ impl TelemetryProvider for SysfsTelemetryProvider {
         for dir in read_dir_optional(&power_dir)? {
             let supply_type = read_string(&dir.join("type"))?;
             match supply_type.as_deref() {
-                Some("Battery") if battery.is_none() => {
-                    battery = read_battery(&dir)?;
+                Some("Battery") => {
+                    if battery.is_none() {
+                        battery = read_battery(&dir)?;
+                    }
                 }
                 // External supplies use several kernel type names (Mains,
                 // USB*, Wireless, ...). Require an explicit non-Battery type
