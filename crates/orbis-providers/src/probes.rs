@@ -21,7 +21,7 @@ use orbis_core::capability::{
 use crate::error::ProviderError;
 use crate::traits::{
     BatteryProvider, FanProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
-    PanelOverdriveProvider, PerformanceProvider,
+    MiniLedModeProvider, PanelOverdriveProvider, PerformanceProvider,
 };
 
 fn operation_from_error(
@@ -330,6 +330,62 @@ where
                 read: ProbeOperationResult::classified(ProbeClassification::Supported)
                     .into_operation(),
                 write: write_from_mutation_status(mutation_status),
+            },
+            CapabilityConstraints::Unknown,
+        )),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            let write = write_from_read_failure(&read);
+            Ok(capability_from_read(
+                read,
+                write,
+                CapabilityConstraints::Unknown,
+            ))
+        }
+    }
+}
+
+/// Fixed `ReadOnly` write operation for capabilities whose mutation backend is
+/// intentionally absent in this slice.
+///
+/// `CapabilityStatus::ReadOnly` — read exists, write absent; this is honest
+/// even though the sysfs attribute is root-writable: Orbis has no production
+/// MiniLED mutation backend yet.
+fn read_only_write() -> OperationCapability {
+    OperationCapability {
+        status: CapabilityStatus::ReadOnly,
+        reason: Some(orbis_core::capability::CapabilityReason {
+            reason:
+                "MiniLED mutation intentionally not implemented; no production mutation backend"
+                    .into(),
+            suggestion: String::new(),
+            backend: None,
+            endpoint: None,
+            requirement: None,
+            risk: orbis_core::capability::RiskLevel::Safe,
+            checked_at: None,
+        }),
+    }
+}
+
+/// Probe MiniLED mode read capability from an authoritative snapshot.
+///
+/// The observed state is read only to confirm the read contract; the raw
+/// current/allowed values never enter the capability metadata.
+///
+/// Write capability is fixed at `ReadOnly`: this slice has no production
+/// MiniLED mutation backend, so write must never be presented as Supported
+/// just because the sysfs attribute is root-writable.
+pub async fn probe_mini_led_mode<P>(provider: &P) -> Result<Capability, ProbeError>
+where
+    P: MiniLedModeProvider + ?Sized,
+{
+    match provider.mini_led_mode_state().await {
+        Ok(_) => Ok(capability_from_operations(
+            CapabilityOperations {
+                read: ProbeOperationResult::classified(ProbeClassification::Supported)
+                    .into_operation(),
+                write: read_only_write(),
             },
             CapabilityConstraints::Unknown,
         )),
@@ -1743,6 +1799,169 @@ mod tests {
             .unwrap();
         assert_eq!(
             panel.operations.read.status,
+            CapabilityStatus::BackendMissing
+        );
+    }
+
+    /// Scripted MiniLED mode provider.
+    struct ScriptedMiniLedProvider {
+        state: Scripted<orbis_core::display::MiniLedModeState>,
+    }
+
+    impl ScriptedMiniLedProvider {
+        fn new(state: Scripted<orbis_core::display::MiniLedModeState>) -> Self {
+            Self { state }
+        }
+    }
+
+    impl Provider for ScriptedMiniLedProvider {
+        fn id(&self) -> &'static str {
+            "scripted-mini-led"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-mini-led")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted mini-led: функция '{feature}' недоступна")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl MiniLedModeProvider for ScriptedMiniLedProvider {
+        async fn mini_led_mode_state(
+            &self,
+        ) -> Result<orbis_core::display::MiniLedModeState, ProviderError> {
+            self.state.result()
+        }
+    }
+
+    fn mini_led_state(current: u32) -> orbis_core::display::MiniLedModeState {
+        use orbis_core::display::MiniLedModeValue;
+        orbis_core::display::MiniLedModeState {
+            allowed: vec![MiniLedModeValue::new(0), MiniLedModeValue::new(1)],
+            current: MiniLedModeValue::new(current),
+            semantics: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn mini_led_probe_reports_supported_with_readonly_write() {
+        for current in [0u32, 1] {
+            let capability = probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Value(
+                mini_led_state(current),
+            )))
+            .await
+            .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported
+            );
+            // Write никогда не Supported: mutation backend отсутствует.
+            assert_eq!(
+                capability.operations.write.status,
+                CapabilityStatus::ReadOnly
+            );
+            assert_eq!(capability.status, CapabilityStatus::Supported);
+            assert_eq!(capability.constraints, CapabilityConstraints::Unknown);
+        }
+    }
+
+    #[tokio::test]
+    async fn mini_led_probe_preserves_backend_missing_and_unsupported() {
+        for (error, expected) in [
+            (
+                ScriptedError::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (ScriptedError::Unsupported, CapabilityStatus::Unsupported),
+        ] {
+            let capability =
+                probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Error(error)))
+                    .await
+                    .unwrap();
+            assert_eq!(capability.operations.read.status, expected);
+            // Write зеркалит read при структурном отказе (не фальсифицируется).
+            assert_eq!(capability.operations.write.status, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn mini_led_probe_read_permission_denied_does_not_invent_denied_write() {
+        let capability = probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Error(
+            ScriptedError::PermissionDenied,
+        )))
+        .await
+        .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::PermissionDenied
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
+
+    #[tokio::test]
+    async fn mini_led_probe_malformed_backend_error_is_not_unsupported() {
+        let capability = probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Error(
+            ScriptedError::Internal,
+        )))
+        .await;
+        assert!(matches!(capability, Err(ProbeError::Internal(_))));
+    }
+
+    #[tokio::test]
+    async fn mini_led_failure_does_not_corrupt_panel_overdrive_in_registry() {
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let panel = probe_panel_overdrive(
+            &ScriptedPanelProvider::new(Scripted::Value(
+                orbis_core::display::PanelOverdriveState::Enabled,
+            )),
+            CapabilityStatus::Supported,
+        )
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::PanelOverdrive, panel)
+            .unwrap();
+
+        let mini_led = probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Error(
+            ScriptedError::BackendMissing,
+        )))
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::MiniLed, mini_led)
+            .unwrap();
+
+        let snapshot = builder.build().unwrap();
+        let panel = snapshot
+            .capability(orbis_core::FeatureId::PanelOverdrive)
+            .unwrap();
+        assert_eq!(panel.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(panel.status, CapabilityStatus::Supported);
+
+        let mini_led = snapshot.capability(orbis_core::FeatureId::MiniLed).unwrap();
+        assert_eq!(
+            mini_led.operations.read.status,
             CapabilityStatus::BackendMissing
         );
     }

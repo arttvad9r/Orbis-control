@@ -9,7 +9,7 @@ use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::automation::AutomationRule;
 use orbis_core::battery::ChargeLimit;
 use orbis_core::diagnostics::DiagnosticEntry;
-use orbis_core::display::{DisplayMode, PanelOverdriveState};
+use orbis_core::display::{DisplayMode, MiniLedModeState, PanelOverdriveState};
 use orbis_core::fan::FanCurve;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
@@ -259,6 +259,18 @@ pub trait GpuAccessProvider: Provider {
 pub trait PanelOverdriveProvider: Provider {
     /// Текущее состояние Panel Overdrive (fresh authoritative read).
     async fn panel_overdrive_state(&self) -> Result<PanelOverdriveState, ProviderError>;
+}
+
+/// Read-only MiniLED mode capability (ASUS firmware `mini_led_mode`).
+///
+/// Отдельный concept-specific trait (ADR 0005): провайдер, реализующий только
+/// MiniLED, не обязан предоставлять полную модель дисплея. Состояние — честная
+/// device-specific firmware enumeration: raw current + authoritative allowed
+/// set + optional доказанная семантика. Mutation в этом slice отсутствует.
+#[async_trait]
+pub trait MiniLedModeProvider: Provider {
+    /// Текущее состояние MiniLED mode (fresh authoritative snapshot).
+    async fn mini_led_mode_state(&self) -> Result<MiniLedModeState, ProviderError>;
 }
 
 /// Дисплей.

@@ -41,7 +41,10 @@ pub use capability::{
     Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId,
 };
 pub use diagnostics::{DiagnosticEntry, DiagnosticReport};
-pub use display::{DisplayMode, HdrState, PanelOverdriveState, RefreshMode};
+pub use display::{
+    DisplayMode, HdrState, MiniLedModeKind, MiniLedModeState, MiniLedModeValue,
+    PanelOverdriveState, RefreshMode, interpret_mini_led_mode,
+};
 pub use error::CoreError;
 pub use fan::{FanCurve, FanCurvePoint, FanId};
 pub use gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};

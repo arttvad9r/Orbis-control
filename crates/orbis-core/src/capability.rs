@@ -38,6 +38,8 @@ pub enum FeatureId {
     DgpuDisable,
     /// Panel Overdrive.
     PanelOverdrive,
+    /// MiniLED backlight mode (device-specific firmware enumeration).
+    MiniLed,
     /// PPT PL1 (SPL).
     PptPl1Spl,
     /// PPT PL2 (SPPT).
@@ -90,6 +92,7 @@ impl FeatureId {
         FeatureId::GpuProductPolicy,
         FeatureId::DgpuDisable,
         FeatureId::PanelOverdrive,
+        FeatureId::MiniLed,
         FeatureId::PptPl1Spl,
         FeatureId::PptPl2Sppt,
         FeatureId::PptFppt,
@@ -124,6 +127,7 @@ impl FeatureId {
             FeatureId::GpuProductPolicy => "gpu_product_policy",
             FeatureId::DgpuDisable => "dgpu_disable",
             FeatureId::PanelOverdrive => "panel_overdrive",
+            FeatureId::MiniLed => "mini_led",
             FeatureId::PptPl1Spl => "ppt_pl1_spl",
             FeatureId::PptPl2Sppt => "ppt_pl2_sppt",
             FeatureId::PptFppt => "ppt_fppt",
@@ -440,6 +444,11 @@ mod tests {
             serde_json::to_string(&FeatureId::GpuProductPolicy).unwrap(),
             "\"gpu_product_policy\""
         );
+        assert_eq!(
+            serde_json::to_string(&FeatureId::MiniLed).unwrap(),
+            "\"mini_led\""
+        );
+        assert_eq!(FeatureId::MiniLed.as_str(), "mini_led");
     }
 
     #[test]
