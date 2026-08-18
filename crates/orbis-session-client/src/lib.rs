@@ -1205,7 +1205,12 @@ where
                 return Err(error);
             }
         };
-        let confirmed_profile = fan_profile_from_wire(confirmed)?;
+        let confirmed_profile = fan_profile_from_wire(confirmed).map_err(|err| match err {
+            ProviderError::InvalidRequest(msg) => ProviderError::Internal(format!(
+                "hardware protocol: malformed fan profile confirmation: {msg}"
+            )),
+            other => other,
+        })?;
         if confirmed_profile != profile {
             return Err(ProviderError::Internal(format!(
                 "hardware protocol: подтверждён другой fan profile: requested={profile:?}, confirmed={confirmed_profile:?}"
@@ -2051,6 +2056,8 @@ mod tests {
         let provider = SessionHardwareFanCurveProvider::new(session, hardware);
         let points = fan_curve_points();
 
+        // Unknown confirmation from backend is a protocol violation → Internal,
+        // not InvalidRequest (which is reserved for user input errors).
         assert!(matches!(
             orbis_providers::traits::FanCurveMutationProvider::set_fan_curve(
                 &provider,
@@ -2059,7 +2066,7 @@ mod tests {
                 &points
             )
             .await,
-            Err(ProviderError::InvalidRequest(_))
+            Err(ProviderError::Internal(_))
         ));
     }
 
