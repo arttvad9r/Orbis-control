@@ -244,9 +244,16 @@ fn probe_mutation_status(io: &dyn KeyboardBacklightProbeIo) -> KeyboardBacklight
 }
 
 /// Sysfs-based keyboard backlight mutation backend.
-#[derive(Default)]
 pub struct SysfsKeyboardBacklightMutationBackend<I = SysfsKeyboardBacklightIo> {
     io: I,
+}
+
+impl Default for SysfsKeyboardBacklightMutationBackend<SysfsKeyboardBacklightIo> {
+    fn default() -> Self {
+        Self {
+            io: SysfsKeyboardBacklightIo::default(),
+        }
+    }
 }
 
 impl<I> SysfsKeyboardBacklightMutationBackend<I> {
@@ -365,7 +372,6 @@ mod tests {
             &self,
             level: u8,
         ) -> Result<KeyboardBacklightMutationReadback, ProviderError> {
-            // Validation: level <= max
             if level as u32 > self.max {
                 return Err(ProviderError::InvalidRequest(format!(
                     "level ({level}) > max ({})",
@@ -373,14 +379,12 @@ mod tests {
                 )));
             }
 
-            // Write
             self.writes.fetch_add(1, Ordering::SeqCst);
             if let Some(e) = self.write_errors.lock().unwrap().clone() {
                 return Err(ProviderError::Dbus(e));
             }
             *self.brightness.lock().unwrap() = level as u32;
 
-            // Read-back
             if let Some(e) = self.read_errors.lock().unwrap().clone() {
                 return Err(ProviderError::Dbus(e));
             }
@@ -606,13 +610,11 @@ mod tests {
     #[test]
     fn probe_never_calls_write() {
         let io = ProbeIo::new(ProbeRead::Value(1), ProbeRead::Value(3));
-        let writes = io.writes.clone();
-        let backend = SysfsKeyboardBacklightMutationBackend::new(io);
         assert_eq!(
-            backend.mutation_status(),
+            probe_mutation_status(&io),
             KeyboardBacklightMutationStatus::Supported
         );
-        assert_eq!(writes.load(Ordering::SeqCst), 0);
+        assert_eq!(io.writes(), 0);
     }
 
     #[tokio::test]
@@ -662,7 +664,6 @@ mod tests {
     #[tokio::test]
     async fn readback_mismatch_is_not_applied() {
         let tb = TestBackend::new(0, 3);
-        // Simulate readback returning different value by using read_error
         tb.set_read_error("mismatch");
         let result = tb.set_brightness(2).await;
         assert!(matches!(result, Err(ProviderError::Dbus(_))));
