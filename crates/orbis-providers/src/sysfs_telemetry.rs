@@ -114,11 +114,19 @@ impl TelemetryProvider for SysfsTelemetryProvider {
         let mut battery = None;
         let mut ac_online = None;
         for dir in read_dir_optional(&power_dir)? {
-            if battery.is_none() && dir.join("capacity").exists() {
-                battery = read_battery(&dir)?;
-            }
-            if ac_online.is_none() && dir.join("online").exists() {
-                ac_online = read_online(&dir)?;
+            let supply_type = read_string(&dir.join("type"))?;
+            match supply_type.as_deref() {
+                Some("Battery") if battery.is_none() => {
+                    battery = read_battery(&dir)?;
+                }
+                // External supplies use several kernel type names (Mains,
+                // USB*, Wireless, ...). Require an explicit non-Battery type
+                // plus the standard `online` attribute instead of selecting
+                // the first arbitrary power_supply that happens to have it.
+                Some(_) if ac_online.is_none() && dir.join("online").exists() => {
+                    ac_online = read_online(&dir)?;
+                }
+                _ => {}
             }
         }
 
@@ -194,15 +202,22 @@ fn read_u64(path: &Path) -> Result<Option<u64>, ProviderError> {
     })
 }
 
+fn narrowing_error(kind: &str, raw: u64, path: &Path) -> ProviderError {
+    ProviderError::Internal(format!(
+        "sysfs telemetry: {kind} вне представимого диапазона '{raw}' в '{}'",
+        path.display()
+    ))
+}
+
 /// Прочитать температуру: sysfs м°C → domain °C.
 fn read_temp_c(path: &Path) -> Result<Option<TemperatureC>, ProviderError> {
     let Some(raw) = read_u64(path)? else {
         return Ok(None);
     };
-    let celsius = (raw / 1000) as i16;
+    let celsius = i16::try_from(raw / 1000).map_err(|_| narrowing_error("температура", raw, path))?;
     TemperatureC::new(celsius).map(Some).map_err(|_| {
         ProviderError::Internal(format!(
-            "sysfs telemetry: температура вне диапазона '{raw}' в '{}'",
+            "sysfs telemetry: температура вне domain диапазона '{raw}' в '{}'",
             path.display()
         ))
     })
@@ -213,9 +228,10 @@ fn read_rpm(path: &Path) -> Result<Option<Rpm>, ProviderError> {
     let Some(raw) = read_u64(path)? else {
         return Ok(None);
     };
-    Rpm::new(raw as u16).map(Some).map_err(|_| {
+    let rpm = u16::try_from(raw).map_err(|_| narrowing_error("RPM", raw, path))?;
+    Rpm::new(rpm).map(Some).map_err(|_| {
         ProviderError::Internal(format!(
-            "sysfs telemetry: RPM вне диапазона '{raw}' в '{}'",
+            "sysfs telemetry: RPM вне domain диапазона '{raw}' в '{}'",
             path.display()
         ))
     })
@@ -226,10 +242,10 @@ fn read_milli_watt(path: &Path) -> Result<Option<MilliWatt>, ProviderError> {
     let Some(raw) = read_u64(path)? else {
         return Ok(None);
     };
-    let milliwatt = (raw / 1000) as u32;
+    let milliwatt = u32::try_from(raw / 1000).map_err(|_| narrowing_error("мощность", raw, path))?;
     MilliWatt::new(milliwatt).map(Some).map_err(|_| {
         ProviderError::Internal(format!(
-            "sysfs telemetry: мощность вне диапазона '{raw}' в '{}'",
+            "sysfs telemetry: мощность вне domain диапазона '{raw}' в '{}'",
             path.display()
         ))
     })
@@ -240,9 +256,10 @@ fn read_percent(path: &Path) -> Result<Option<Percent>, ProviderError> {
     let Some(raw) = read_u64(path)? else {
         return Ok(None);
     };
-    Percent::new(raw as u8).map(Some).map_err(|_| {
+    let percent = u8::try_from(raw).map_err(|_| narrowing_error("процент", raw, path))?;
+    Percent::new(percent).map(Some).map_err(|_| {
         ProviderError::Internal(format!(
-            "sysfs telemetry: процент вне диапазона '{raw}' в '{}'",
+            "sysfs telemetry: процент вне domain диапазона '{raw}' в '{}'",
             path.display()
         ))
     })
@@ -299,13 +316,32 @@ fn read_battery(dir: &Path) -> Result<Option<BatteryTelemetry>, ProviderError> {
         return Ok(None);
     };
     let status = read_string(&dir.join("status"))?.unwrap_or_default();
-    let charge_cycles = read_u64(&dir.join("cycle_count"))?.map(|v| v as u32);
+    let charge_cycles = match read_u64(&dir.join("cycle_count"))? {
+        Some(raw) => Some(
+            u32::try_from(raw)
+                .map_err(|_| narrowing_error("cycle_count", raw, &dir.join("cycle_count")))?,
+        ),
+        None => None,
+    };
     let charge_full = read_u64(&dir.join("charge_full"))?;
     let charge_full_design = read_u64(&dir.join("charge_full_design"))?;
     let capacity = match (charge_full, charge_full_design) {
         (Some(full), Some(design)) if design > 0 => {
-            let pct = (full * 100) / design;
-            Percent::new(pct.min(100) as u8).ok()
+            let scaled = full.checked_mul(100).ok_or_else(|| {
+                ProviderError::Internal(format!(
+                    "sysfs telemetry: battery health overflow для '{}'",
+                    dir.join("charge_full").display()
+                ))
+            })?;
+            let pct = scaled / design;
+            let clamped = u8::try_from(pct.min(100)).map_err(|_| {
+                narrowing_error("battery health", pct, &dir.join("charge_full"))
+            })?;
+            Some(Percent::new(clamped).map_err(|_| {
+                ProviderError::Internal(format!(
+                    "sysfs telemetry: battery health вне domain диапазона '{pct}'"
+                ))
+            })?)
         }
         _ => None,
     };
@@ -362,6 +398,14 @@ mod tests {
         std::fs::write(path, content).expect("write fixture");
     }
 
+    fn battery_type(root: &Path, name: &str) {
+        write_fixture(root, &format!("class/power_supply/{name}/type"), "Battery\n");
+    }
+
+    fn external_type(root: &Path, name: &str) {
+        write_fixture(root, &format!("class/power_supply/{name}/type"), "Mains\n");
+    }
+
     /// Полное fixture-дерево: k10temp, amdgpu, asus, BAT1, ACAD.
     fn full_fixture(root: &Path) {
         write_fixture(root, "class/hwmon/hwmon0/name", "k10temp\n");
@@ -379,6 +423,7 @@ mod tests {
         write_fixture(root, "class/hwmon/hwmon2/fan2_input", "2100\n");
         write_fixture(root, "class/hwmon/hwmon2/fan2_label", "gpu_fan\n");
 
+        battery_type(root, "BAT1");
         write_fixture(root, "class/power_supply/BAT1/capacity", "100\n");
         write_fixture(root, "class/power_supply/BAT1/status", "Full\n");
         write_fixture(root, "class/power_supply/BAT1/cycle_count", "0\n");
@@ -389,6 +434,7 @@ mod tests {
             "5675000\n",
         );
 
+        external_type(root, "ACAD");
         write_fixture(root, "class/power_supply/ACAD/online", "1\n");
     }
 
@@ -470,6 +516,7 @@ mod tests {
         // Только k10temp + BAT1 без необязательных файлов.
         write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
         write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "46375\n");
+        battery_type(&root, "BAT1");
         write_fixture(&root, "class/power_supply/BAT1/capacity", "80\n");
         // status/cycle_count/charge_full/charge_full_design отсутствуют.
         // amdgpu/asus/ACAD отсутствуют.
@@ -551,6 +598,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn narrowing_never_wraps_large_sysfs_values() {
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon2/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon2/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon2/fan1_input", "65536\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let err = provider.snapshot().await.expect_err("RPM narrowing must fail");
+        assert!(matches!(err, ProviderError::Internal(_)));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn power_supply_discovery_requires_explicit_type() {
+        let root = fixture_root();
+        // Decoys deliberately expose familiar attributes under the wrong type.
+        external_type(&root, "NOT_A_BATTERY");
+        write_fixture(
+            &root,
+            "class/power_supply/NOT_A_BATTERY/capacity",
+            "1\n",
+        );
+        battery_type(&root, "BAT_WITH_ONLINE");
+        write_fixture(&root, "class/power_supply/BAT_WITH_ONLINE/online", "0\n");
+
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "77\n");
+        external_type(&root, "ACAD");
+        write_fixture(&root, "class/power_supply/ACAD/online", "1\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot");
+        assert_eq!(t.battery.expect("battery").percent, Percent::new(77).unwrap());
+        assert_eq!(t.ac_online, Some(true));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn units_are_converted_correctly() {
         let root = fixture_root();
         write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
@@ -577,6 +664,7 @@ mod tests {
     #[tokio::test]
     async fn ac_online_parses_zero_and_one() {
         let root = fixture_root();
+        external_type(&root, "ACAD");
         write_fixture(&root, "class/power_supply/ACAD/online", "0\n");
         let provider = SysfsTelemetryProvider::new(root.clone());
         let t = provider.snapshot().await.expect("snapshot");
@@ -592,6 +680,7 @@ mod tests {
     #[tokio::test]
     async fn battery_health_clamps_to_100() {
         let root = fixture_root();
+        battery_type(&root, "BAT1");
         write_fixture(&root, "class/power_supply/BAT1/capacity", "50\n");
         write_fixture(&root, "class/power_supply/BAT1/charge_full", "6000000\n");
         write_fixture(
@@ -611,6 +700,7 @@ mod tests {
     #[tokio::test]
     async fn battery_health_zero_design_is_none() {
         let root = fixture_root();
+        battery_type(&root, "BAT1");
         write_fixture(&root, "class/power_supply/BAT1/capacity", "50\n");
         write_fixture(&root, "class/power_supply/BAT1/charge_full", "6000000\n");
         write_fixture(&root, "class/power_supply/BAT1/charge_full_design", "0\n");
