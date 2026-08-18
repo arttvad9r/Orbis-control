@@ -126,8 +126,8 @@ component MiniCurveChart inherits Rectangle {
         Rectangle { x: 50%; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
         Rectangle { x: 75%; y: 0px; width: 1px; height: parent.height; background: Palette.border-default; }
         if (root.has-curve) : Path {
-            width: parent.width; height: parent.height; viewbox-x: 0; viewbox-y: 0; viewbox-width: 100; viewbox-height: 100; fit: fill;
-            stroke: root.curve-color; stroke-width: 2px; stroke-line-cap: round; stroke-line-join: round;
+            width: parent.width; height: parent.height; viewbox-x: 0; viewbox-y: 0; viewbox-width: 100; viewbox-height: 100;
+            stroke: root.curve-color; stroke-width: 2px; stroke-line-cap: round;
             MoveTo { x: root.x-pos(root.temp-0); y: root.y-pos(root.pwm-0); }
             LineTo { x: root.x-pos(root.temp-1); y: root.y-pos(root.pwm-1); }
             LineTo { x: root.x-pos(root.temp-2); y: root.y-pos(root.pwm-2); }
