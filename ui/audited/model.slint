@@ -1,4 +1,5 @@
 // Stable Slint ABI shared by the audited windows and Rust glue.
+// Keep this model backend-agnostic; runtime truth still comes from controller state.
 export enum ChargeLimitState { Loading, Ready, Unavailable }
 export enum GpuHwState { Loading, Ready, Unavailable }
 export enum PerformanceHwState { Loading, Ready, Unavailable }
