@@ -11,6 +11,7 @@
 //!   (кэш отсутствует).
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -449,8 +450,181 @@ where
     }
 }
 
+// ---------------------------------------------------------------------------
+// Lazy discovery Battery provider (UPower resilience)
+// ---------------------------------------------------------------------------
+
+/// Testable источник discovery системной батареи.
+///
+/// Отдельный trait от `crate::discovery::discover_battery` позволяет
+/// инжектировать scripted discovery в unit/P2P тестах без реального UPower.
+#[async_trait]
+pub trait BatteryDiscoverySource: Send + Sync {
+    /// Обнаружить системную батарею (authoritative, без кэша).
+    async fn discover(&self) -> Result<crate::discovery::DiscoveredBattery, ProviderError>;
+}
+
+/// Реальный zbus discovery через UPower (`org.freedesktop.UPower`).
+///
+/// Хранит готовую `Connection`; I/O начинается только в `discover().await`.
+pub struct ZbusBatteryDiscoverySource {
+    connection: zbus::Connection,
+}
+
+impl ZbusBatteryDiscoverySource {
+    /// Создать источник с готовой C-connection.
+    ///
+    /// Конструктор не выполняет I/O, не открывает bus, не проверяет service.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl BatteryDiscoverySource for ZbusBatteryDiscoverySource {
+    async fn discover(&self) -> Result<crate::discovery::DiscoveredBattery, ProviderError> {
+        crate::discovery::discover_battery(&self.connection).await
+    }
+}
+
+/// Testable фабрика read-chain по обнаруженной батарее.
+///
+/// Отдельный trait позволяет инжектировать scripted read в unit/P2P-тестах
+/// без реального UPower/asusd/sysfs.
+#[async_trait]
+pub trait BatteryReadFactory: Send + Sync {
+    /// Построить read-only `BatteryProvider` по результату discovery.
+    async fn build(
+        &self,
+        battery: &crate::discovery::DiscoveredBattery,
+    ) -> Result<Arc<dyn BatteryProvider>, ProviderError>;
+}
+
+/// Production фабрика: UPower device + asusd configured + kernel effective
+/// (тот же состав, что `build_upower_session_server_with_effective_source`).
+pub struct AsusdBatteryReadFactory {
+    connection: zbus::Connection,
+}
+
+impl AsusdBatteryReadFactory {
+    /// Создать фабрику без I/O.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl BatteryReadFactory for AsusdBatteryReadFactory {
+    async fn build(
+        &self,
+        battery: &crate::discovery::DiscoveredBattery,
+    ) -> Result<Arc<dyn BatteryProvider>, ProviderError> {
+        let effective = SysfsBatteryEndThresholdSource::from_native_path(&battery.native_path)?;
+        let upower_source =
+            ZbusUPowerChargeLimitSource::new(self.connection.clone(), battery.object_path.clone());
+        let asusd_source = ZbusAsusdConfiguredSource::new(self.connection.clone());
+        Ok(Arc::new(AsusdBatteryChargeLimitProvider::new(
+            upower_source,
+            asusd_source,
+            effective,
+        )))
+    }
+}
+
+/// Lazy Battery Charge Limit provider: discovery выполняется при каждом read.
+///
+/// Создан для UPower resilience:
+/// - Session1 стартует даже если UPower service / battery object недоступны
+///   при startup (startup discovery отсутствует);
+/// - каждый `charge_limit()` выполняет новый discovery + read; transient
+///   failure возвращается честно и **не кэшируется** (следующий read повторяет
+///   discovery без restart sessiond);
+/// - если UPower/battery появляется позже или UPower перезапускается —
+///   следующий read снова обнаружит батарею;
+/// - реально неподдерживаемая battery capability → `Unsupported`
+///   (непревращаемое в transient), permission → `PermissionDenied`,
+///   transient/unavailable → `Dbus`/`BackendUnavailable`, malformed → closed;
+/// - никаких synthetic/default charge limits.
+pub struct LazyBatteryChargeLimitProvider<D, F> {
+    discovery: D,
+    read_factory: F,
+}
+
+impl<D, F> LazyBatteryChargeLimitProvider<D, F> {
+    /// Создать provider без I/O.
+    pub fn new(discovery: D, read_factory: F) -> Self {
+        Self {
+            discovery,
+            read_factory,
+        }
+    }
+}
+
+impl<D, F> Provider for LazyBatteryChargeLimitProvider<D, F>
+where
+    D: BatteryDiscoverySource,
+    F: BatteryReadFactory,
+{
+    fn id(&self) -> &'static str {
+        "lazy-upower-charge-limit"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("lazy-upower-charge-limit")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("lazy UPower charge limit backend: функция '{feature}' недоступна")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.lazy-upower-charge-limit",
+            "lazy read-only UPower charge limit backend (retry discovery per read)",
+        )]
+    }
+}
+
+#[async_trait]
+impl<D, F> BatteryProvider for LazyBatteryChargeLimitProvider<D, F>
+where
+    D: BatteryDiscoverySource,
+    F: BatteryReadFactory,
+{
+    async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
+        let battery = self.discovery.discover().await?;
+        let provider = self.read_factory.build(&battery).await?;
+        provider.charge_limit().await
+    }
+
+    async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "lazy-upower: set_charge_limit недоступна (read-only)".into(),
+        ))
+    }
+
+    async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "lazy-upower: one_shot_full_charge недоступна (read-only)".into(),
+        ))
+    }
+
+    fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
+        ValidationResult::invalid("read-only backend: запись charge limit не поддерживается")
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -729,5 +903,246 @@ mod tests {
             ValidationResult::Valid
         ));
         assert_eq!(p.source.reads(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Lazy discovery Battery provider (UPower resilience)
+    // -----------------------------------------------------------------------
+
+    /// Тестовый discovery source: очередь заранее заданных результатов.
+    struct ScriptedDiscovery {
+        outcomes: std::sync::Mutex<
+            std::collections::VecDeque<Result<crate::discovery::DiscoveredBattery, ProviderError>>,
+        >,
+        calls: AtomicUsize,
+    }
+
+    impl ScriptedDiscovery {
+        fn new(outcomes: Vec<Result<crate::discovery::DiscoveredBattery, ProviderError>>) -> Self {
+            Self {
+                outcomes: std::sync::Mutex::new(outcomes.into()),
+                calls: AtomicUsize::new(0),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl BatteryDiscoverySource for ScriptedDiscovery {
+        async fn discover(&self) -> Result<crate::discovery::DiscoveredBattery, ProviderError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.outcomes
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("scripted discovery: очередь результатов исчерпана")
+        }
+    }
+
+    #[async_trait]
+    impl BatteryDiscoverySource for Arc<ScriptedDiscovery> {
+        async fn discover(&self) -> Result<crate::discovery::DiscoveredBattery, ProviderError> {
+            (**self).discover().await
+        }
+    }
+
+    fn discovered_battery() -> crate::discovery::DiscoveredBattery {
+        crate::discovery::DiscoveredBattery {
+            object_path: "/org/freedesktop/UPower/devices/battery_BAT1"
+                .try_into()
+                .expect("valid path"),
+            native_path: "BAT1".into(),
+        }
+    }
+
+    /// Тестовая read-фабрика: возвращает scripted provider либо ошибку.
+    struct ScriptedReadFactory {
+        outcomes: std::sync::Mutex<std::collections::VecDeque<Result<ChargeLimit, ProviderError>>>,
+    }
+
+    impl ScriptedReadFactory {
+        fn new(outcomes: Vec<Result<ChargeLimit, ProviderError>>) -> Self {
+            Self {
+                outcomes: std::sync::Mutex::new(outcomes.into()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl BatteryReadFactory for ScriptedReadFactory {
+        async fn build(
+            &self,
+            _battery: &crate::discovery::DiscoveredBattery,
+        ) -> Result<Arc<dyn BatteryProvider>, ProviderError> {
+            let outcome = self
+                .outcomes
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("scripted read factory: очередь результатов исчерпана");
+            Ok(Arc::new(ScriptedReadProvider { outcome }))
+        }
+    }
+
+    /// Тестовый read-only BatteryProvider поверх готового результата.
+    struct ScriptedReadProvider {
+        outcome: Result<ChargeLimit, ProviderError>,
+    }
+
+    impl Provider for ScriptedReadProvider {
+        fn id(&self) -> &'static str {
+            "scripted-read"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-read")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted-read: {feature} недоступен")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl BatteryProvider for ScriptedReadProvider {
+        async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
+            match &self.outcome {
+                Ok(limit) => Ok(*limit),
+                Err(e) => Err(match e {
+                    ProviderError::Unsupported(m) => ProviderError::Unsupported(m.clone()),
+                    ProviderError::PermissionDenied(m) => {
+                        ProviderError::PermissionDenied(m.clone())
+                    }
+                    ProviderError::InvalidRequest(m) => ProviderError::InvalidRequest(m.clone()),
+                    ProviderError::BackendUnavailable(m) => {
+                        ProviderError::BackendUnavailable(m.clone())
+                    }
+                    ProviderError::Timeout(m) => ProviderError::Timeout(m.clone()),
+                    ProviderError::Dbus(m) => ProviderError::Dbus(m.clone()),
+                    ProviderError::Internal(m) => ProviderError::Internal(m.clone()),
+                    ProviderError::Io(e) => ProviderError::Io(std::io::Error::other(e.to_string())),
+                }),
+            }
+        }
+        async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("scripted: read-only".into()))
+        }
+        async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("scripted: read-only".into()))
+        }
+        fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
+            ValidationResult::invalid("scripted: read-only")
+        }
+    }
+
+    fn scripted_limit(percent: u8) -> ChargeLimit {
+        ChargeLimit::new(
+            true,
+            Some(Percent::new(percent).expect("percent")),
+            Some(Percent::new(percent).expect("percent")),
+            None,
+        )
+        .expect("valid")
+    }
+
+    fn lazy_provider(
+        discovery: ScriptedDiscovery,
+        read_factory: ScriptedReadFactory,
+    ) -> LazyBatteryChargeLimitProvider<Arc<ScriptedDiscovery>, ScriptedReadFactory> {
+        LazyBatteryChargeLimitProvider::new(Arc::new(discovery), read_factory)
+    }
+
+    #[tokio::test]
+    async fn lazy_discovery_transient_error_is_preserved() {
+        // При недоступности UPower первый read возвращает честную
+        // ошибку (не кэшируется, не подставляется synthetic).
+        let discovery = ScriptedDiscovery::new(vec![Err(ProviderError::Dbus(
+            "UPower service unavailable".into(),
+        ))]);
+        let provider = lazy_provider(discovery, ScriptedReadFactory::new(vec![]));
+        let err = provider.charge_limit().await.expect_err("transient");
+        assert!(matches!(err, ProviderError::Dbus(_)));
+    }
+
+    #[tokio::test]
+    async fn lazy_discovery_unsupported_stays_unsupported_not_transient() {
+        // Реально неподдерживаемая battery capability → Unsupported,
+        // НЕ преобразуется в transient unavailable.
+        let discovery =
+            ScriptedDiscovery::new(vec![Err(ProviderError::Unsupported("no battery".into()))]);
+        let provider = lazy_provider(discovery, ScriptedReadFactory::new(vec![]));
+        let err = provider.charge_limit().await.expect_err("unsupported");
+        assert!(matches!(err, ProviderError::Unsupported(_)));
+    }
+
+    #[tokio::test]
+    async fn lazy_discovery_permission_denied_is_preserved() {
+        let discovery =
+            ScriptedDiscovery::new(vec![Err(ProviderError::PermissionDenied("denied".into()))]);
+        let provider = lazy_provider(discovery, ScriptedReadFactory::new(vec![]));
+        let err = provider
+            .charge_limit()
+            .await
+            .expect_err("permission denied");
+        assert!(matches!(err, ProviderError::PermissionDenied(_)));
+    }
+
+    #[tokio::test]
+    async fn lazy_rediscovers_after_later_availability() {
+        // Первый read → transient (не кэшируется), второй read снова
+        // выполняет discovery и при появившейся батарее читает успешно.
+        let discovery = ScriptedDiscovery::new(vec![
+            Err(ProviderError::Dbus("not ready".into())),
+            Ok(discovered_battery()),
+        ]);
+        let provider = lazy_provider(
+            discovery,
+            ScriptedReadFactory::new(vec![Ok(scripted_limit(60))]),
+        );
+
+        let err = provider.charge_limit().await.expect_err("transient");
+        assert!(matches!(err, ProviderError::Dbus(_)));
+
+        let limit = provider.charge_limit().await.expect("later availability");
+        assert_eq!(limit.configured_percent.map(|p| p.get()), Some(60));
+    }
+
+    #[tokio::test]
+    async fn lazy_mutations_unsupported_no_io() {
+        let discovery = Arc::new(ScriptedDiscovery::new(vec![Err(
+            ProviderError::Unsupported("no battery".into()),
+        )]));
+        let provider: LazyBatteryChargeLimitProvider<Arc<ScriptedDiscovery>, ScriptedReadFactory> =
+            LazyBatteryChargeLimitProvider::new(discovery.clone(), ScriptedReadFactory::new(vec![]));
+        assert!(matches!(
+            provider
+                .set_charge_limit(40)
+                .await
+                .expect_err("set unsupported"),
+            ProviderError::Unsupported(_)
+        ));
+        assert!(matches!(
+            provider
+                .one_shot_full_charge()
+                .await
+                .expect_err("oneshot unsupported"),
+            ProviderError::Unsupported(_)
+        ));
+        assert_eq!(discovery.calls(), 0);
     }
 }

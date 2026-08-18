@@ -8,7 +8,8 @@ use orbis_providers::traits::{BatteryProvider, PerformanceProvider};
 use crate::fans::AsusdFanCurveSource;
 use crate::server::{GpuCapabilities, build_session_server};
 use crate::upower::{
-    AsusdBatteryChargeLimitProvider, SysfsBatteryEndThresholdSource, ZbusAsusdConfiguredSource,
+    AsusdBatteryChargeLimitProvider, AsusdBatteryReadFactory, LazyBatteryChargeLimitProvider,
+    SysfsBatteryEndThresholdSource, ZbusAsusdConfiguredSource, ZbusBatteryDiscoverySource,
     ZbusUPowerChargeLimitSource,
 };
 
@@ -77,5 +78,26 @@ where
     let provider =
         AsusdBatteryChargeLimitProvider::new(upower_source, asusd_source, effective_source);
     let battery: Arc<dyn BatteryProvider> = Arc::new(provider);
+    build_session_server(session_builder, battery, gpu, performance, fan_curves).await
+}
+
+/// Построить session server с **lazy** battery discovery.
+///
+/// UPower resilience: Session1 стартует даже если UPower service или battery
+/// object недоступны при startup. Discovery выполняется при каждом battery
+/// read (через `ZbusBatteryDiscoverySource`), transient failure не кэшируется
+/// и повторяется на следующем read — без restart sessiond. Ошибки Battery
+/// capability-local: Performance/GPU/Fan read continue работать.
+pub async fn build_lazy_upower_session_server(
+    session_builder: zbus::connection::Builder<'_>,
+    upower_connection: zbus::Connection,
+    gpu: GpuCapabilities,
+    performance: Option<Arc<dyn PerformanceProvider>>,
+    fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
+) -> zbus::Result<zbus::Connection> {
+    let battery: Arc<dyn BatteryProvider> = Arc::new(LazyBatteryChargeLimitProvider::new(
+        ZbusBatteryDiscoverySource::new(upower_connection.clone()),
+        AsusdBatteryReadFactory::new(upower_connection),
+    ));
     build_session_server(session_builder, battery, gpu, performance, fan_curves).await
 }
