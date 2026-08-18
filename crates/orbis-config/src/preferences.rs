@@ -23,55 +23,38 @@ pub const PREFERENCES_SCHEMA_VERSION: u32 = 1;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Persisted application theme preference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ThemePreference {
     /// Dark application theme.
+    #[default]
     Dark,
     /// Light application theme.
     Light,
 }
 
-impl Default for ThemePreference {
-    fn default() -> Self {
-        Self::Dark
-    }
-}
-
 /// Persisted behavior for the main-window close action.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CloseAction {
     /// Hide the application to its tray integration.
     HideToTray,
     /// Quit the application.
+    ///
+    /// Until tray behavior is production-wired, Quit is the conservative
+    /// standalone default. Legacy close_to_tray=true is imported explicitly.
+    #[default]
     Quit,
     /// Ask the user each time.
     Ask,
 }
 
-impl Default for CloseAction {
-    fn default() -> Self {
-        // Until tray behavior is production-wired, Quit is the conservative
-        // standalone default. Legacy close_to_tray=true is imported explicitly.
-        Self::Quit
-    }
-}
-
 /// Safe appearance preferences.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct AppearancePreferences {
     /// Selected Dark or Light theme.
     pub theme: ThemePreference,
-}
-
-impl Default for AppearancePreferences {
-    fn default() -> Self {
-        Self {
-            theme: ThemePreference::default(),
-        }
-    }
 }
 
 /// Safe window-behavior preferences.
