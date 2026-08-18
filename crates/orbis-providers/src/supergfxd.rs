@@ -39,6 +39,21 @@ impl SupergfxdMode {
     }
 }
 
+/// Decode the supergfxd `Power()` wire value without collapsing unknown backend
+/// states into a known physical power state.
+///
+/// Live/read-path evidence establishes only 0=Active, 1=Suspended and 2=Off.
+/// Backend-specific/future values (including AsusDisabled/Unknown variants)
+/// remain `GpuPowerState::Unknown` until independently proven.
+pub fn power_from_wire(raw: u32) -> GpuPowerState {
+    match raw {
+        0 => GpuPowerState::Active,
+        1 => GpuPowerState::Suspended,
+        2 => GpuPowerState::Off,
+        _ => GpuPowerState::Unknown,
+    }
+}
+
 /// Exact supergfxd user action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupergfxdUserAction {
@@ -188,6 +203,16 @@ mod tests {
             SupergfxdUserAction::from_wire(99),
             SupergfxdUserAction::Unknown(99)
         );
+    }
+
+    #[test]
+    fn power_wire_mapping_preserves_unknown_states() {
+        assert_eq!(power_from_wire(0), GpuPowerState::Active);
+        assert_eq!(power_from_wire(1), GpuPowerState::Suspended);
+        assert_eq!(power_from_wire(2), GpuPowerState::Off);
+        for raw in [3, 4, 99] {
+            assert_eq!(power_from_wire(raw), GpuPowerState::Unknown);
+        }
     }
 
     #[test]
