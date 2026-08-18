@@ -301,11 +301,7 @@ pub fn load_preferences_from_dir(dir: &Path) -> Result<PreferencesLoad, Preferen
         Ok(text) => return decode_preferences(&preferences_path, &text),
         Err(source) if source.kind() == io::ErrorKind::NotFound => {}
         Err(source) => {
-            return Err(io_failure(
-                "read preferences",
-                preferences_path,
-                source,
-            ));
+            return Err(io_failure("read preferences", preferences_path, source));
         }
     }
 
@@ -354,17 +350,29 @@ pub fn save_preferences_to_dir(
     if let Err(source) = temp.write_all(text.as_bytes()) {
         drop(temp);
         let _ = fs::remove_file(&temp_path);
-        return Err(io_failure("write preferences temporary file", temp_path, source));
+        return Err(io_failure(
+            "write preferences temporary file",
+            temp_path,
+            source,
+        ));
     }
     if let Err(source) = temp.flush() {
         drop(temp);
         let _ = fs::remove_file(&temp_path);
-        return Err(io_failure("flush preferences temporary file", temp_path, source));
+        return Err(io_failure(
+            "flush preferences temporary file",
+            temp_path,
+            source,
+        ));
     }
     if let Err(source) = temp.sync_all() {
         drop(temp);
         let _ = fs::remove_file(&temp_path);
-        return Err(io_failure("sync preferences temporary file", temp_path, source));
+        return Err(io_failure(
+            "sync preferences temporary file",
+            temp_path,
+            source,
+        ));
     }
     drop(temp);
 
@@ -695,7 +703,10 @@ mod tests {
         let leftovers: Vec<_> = fs::read_dir(&dir)
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
-            .filter(|name| name.to_string_lossy().starts_with(".preferences.toml.tmp."))
+            .filter(|name| {
+                name.to_string_lossy()
+                    .starts_with(".preferences.toml.tmp.")
+            })
             .collect();
         assert!(leftovers.is_empty());
     }
@@ -769,7 +780,10 @@ raw_wmi = true
             "raw_wmi",
             "do-not-import",
         ] {
-            assert!(!persisted.contains(forbidden), "unexpected legacy field: {forbidden}");
+            assert!(
+                !persisted.contains(forbidden),
+                "unexpected legacy field: {forbidden}"
+            );
         }
     }
 
