@@ -1,30 +1,40 @@
-// Orbis Control — тёмная тема (дизайн-токены).
-// Базовые значения из docs/ui-reference.md; уточняются после визуальной сверки.
+// Orbis Control — runtime theme tokens.
+// The historical filename is kept so existing imports stay stable.
+
+import { LightPalette } from "light.slint";
+
+export enum ThemeMode { Dark, Light }
+
+// Slint globals are per top-level component/window. Rust synchronizes this
+// property between native windows when the user changes appearance.
+export global ThemeState {
+    in-out property <ThemeMode> mode: ThemeMode.Dark;
+}
 
 export global Palette {
     // surfaces
-    in property <color> window-background: #1F1F1F;
-    in property <color> titlebar-background: #242529;
-    in property <color> surface-default: #303030;
-    in property <color> surface-hover: #383838;
-    in property <color> surface-pressed: #292929;
-    in property <color> surface-disabled: #292929;
-    in property <color> border-default: #444444;
+    in property <color> window-background: ThemeState.mode == ThemeMode.Light ? LightPalette.window-background : #1F1F1F;
+    in property <color> titlebar-background: ThemeState.mode == ThemeMode.Light ? LightPalette.titlebar-background : #242529;
+    in property <color> surface-default: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-default : #303030;
+    in property <color> surface-hover: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-hover : #383838;
+    in property <color> surface-pressed: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-pressed : #292929;
+    in property <color> surface-disabled: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-disabled : #292929;
+    in property <color> border-default: ThemeState.mode == ThemeMode.Light ? LightPalette.border-default : #444444;
     // text
-    in property <color> text-primary: #F2F2F2;
-    in property <color> text-secondary: #B7B7B7;
-    in property <color> text-disabled: #777777;
+    in property <color> text-primary: ThemeState.mode == ThemeMode.Light ? LightPalette.text-primary : #F2F2F2;
+    in property <color> text-secondary: ThemeState.mode == ThemeMode.Light ? LightPalette.text-secondary : #B7B7B7;
+    in property <color> text-disabled: ThemeState.mode == ThemeMode.Light ? LightPalette.text-disabled : #777777;
     // accents
-    in property <color> accent-default: #2DA8F2;
-    in property <color> warning: #E5A94F;
-    in property <color> error: #E35D6A;
-    in property <color> success: #4BC39A;
+    in property <color> accent-default: ThemeState.mode == ThemeMode.Light ? LightPalette.accent-default : #2DA8F2;
+    in property <color> warning: ThemeState.mode == ThemeMode.Light ? LightPalette.warning : #E5A94F;
+    in property <color> error: ThemeState.mode == ThemeMode.Light ? LightPalette.error : #E35D6A;
+    in property <color> success: ThemeState.mode == ThemeMode.Light ? LightPalette.success : #4BC39A;
     // mode accents
-    in property <color> silent: #49C6A5;
-    in property <color> balanced: #2DA8F2;
-    in property <color> turbo: #EF6376;
-    in property <color> eco: #67C66A;
-    in property <color> standard: #2DA8F2;
-    in property <color> ultimate: #E6A04B;
-    in property <color> optimized: #2DA8F2;
+    in property <color> silent: ThemeState.mode == ThemeMode.Light ? LightPalette.silent : #49C6A5;
+    in property <color> balanced: ThemeState.mode == ThemeMode.Light ? LightPalette.balanced : #2DA8F2;
+    in property <color> turbo: ThemeState.mode == ThemeMode.Light ? LightPalette.turbo : #EF6376;
+    in property <color> eco: ThemeState.mode == ThemeMode.Light ? LightPalette.eco : #67C66A;
+    in property <color> standard: ThemeState.mode == ThemeMode.Light ? LightPalette.standard : #2DA8F2;
+    in property <color> ultimate: ThemeState.mode == ThemeMode.Light ? LightPalette.ultimate : #E6A04B;
+    in property <color> optimized: ThemeState.mode == ThemeMode.Light ? LightPalette.optimized : #2DA8F2;
 }

@@ -94,8 +94,11 @@ fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
     let kind = args.next().unwrap_or_else(|| "extra".to_string());
     let path = args.next().unwrap_or_else(|| format!("{kind}.png"));
+    let theme = args.next().unwrap_or_else(|| "dark".to_string());
+    let light = match theme.as_str() { "dark" => false, "light" => true, other => anyhow::bail!("unknown theme: {other}") };
 
     let (width, height) = match kind.as_str() {
+        "main" => (500, 680),
         "fans" => (760, 590),
         "extra" => (560, 760),
         "automation" => (700, 600),
@@ -109,8 +112,16 @@ fn main() -> anyhow::Result<()> {
     let renderer = setup(width, height);
 
     match kind.as_str() {
+        "main" => {
+            let component = AppWindow::new()?;
+            component.global::<ThemeState>().set_mode(if light { ThemeMode::Light } else { ThemeMode::Dark });
+            component.window().set_size(LogicalSize::new(width as f32, height as f32));
+            component.show()?;
+            save(&renderer, component.window(), &path)?;
+        }
         "fans" => {
             let component = FansWindow::new()?;
+            component.global::<ThemeState>().set_mode(if light { ThemeMode::Light } else { ThemeMode::Dark });
             let mut state = component.get_ui_state();
             state.fan_curve_state = FanCurveHwState::Ready;
             state.fan_curve_writable = true;
@@ -128,24 +139,28 @@ fn main() -> anyhow::Result<()> {
         }
         "extra" => {
             let component = ExtraWindow::new()?;
+            component.global::<ThemeState>().set_mode(if light { ThemeMode::Light } else { ThemeMode::Dark });
             component.window().set_size(LogicalSize::new(width as f32, height as f32));
             component.show()?;
             save(&renderer, component.window(), &path)?;
         }
         "automation" => {
             let component = AutomationWindow::new()?;
+            component.global::<ThemeState>().set_mode(if light { ThemeMode::Light } else { ThemeMode::Dark });
             component.window().set_size(LogicalSize::new(width as f32, height as f32));
             component.show()?;
             save(&renderer, component.window(), &path)?;
         }
         "preferences" => {
             let component = PreferencesWindow::new()?;
+            component.global::<ThemeState>().set_mode(if light { ThemeMode::Light } else { ThemeMode::Dark });
             component.window().set_size(LogicalSize::new(width as f32, height as f32));
             component.show()?;
             save(&renderer, component.window(), &path)?;
         }
         "diagnostics" => {
             let component = DiagnosticsWindow::new()?;
+            component.global::<ThemeState>().set_mode(if light { ThemeMode::Light } else { ThemeMode::Dark });
             component.set_version("0.1.0-audit".into());
             component.window().set_size(LogicalSize::new(width as f32, height as f32));
             component.show()?;
@@ -153,6 +168,7 @@ fn main() -> anyhow::Result<()> {
         }
         "updates" => {
             let component = UpdatesWindow::new()?;
+            component.global::<ThemeState>().set_mode(if light { ThemeMode::Light } else { ThemeMode::Dark });
             component.set_version("0.1.0-audit".into());
             component.window().set_size(LogicalSize::new(width as f32, height as f32));
             component.show()?;
@@ -160,6 +176,7 @@ fn main() -> anyhow::Result<()> {
         }
         "dialog" => {
             let component = PreviewDialogWindow::new()?;
+            component.global::<ThemeState>().set_mode(if light { ThemeMode::Light } else { ThemeMode::Dark });
             component.set_kind(3);
             component.window().set_size(LogicalSize::new(width as f32, height as f32));
             component.show()?;

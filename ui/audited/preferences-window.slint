@@ -1,6 +1,6 @@
-import { SelectRow, ToggleRow, PreviewSliderRow } from "../components/visual-controls.slint";
+import { SelectRow, ToggleRow, PreviewSliderRow, ChoiceChip } from "../components/visual-controls.slint";
 import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
-import { Palette } from "../themes/dark.slint";
+import { Palette, ThemeState, ThemeMode } from "../themes/dark.slint";
 
 export component PreferencesWindow inherits Window {
     width: 580px;
@@ -8,16 +8,25 @@ export component PreferencesWindow inherits Window {
     title: "Orbis Control — Preferences";
     background: Palette.window-background;
 
-    property <int> language: 0; property <int> appearance: 0; property <int> update-channel: 0; property <int> close-action: 0;
+    callback theme-changed(bool);
+
+    property <int> language: 0; property <int> update-channel: 0; property <int> close-action: 0;
     property <bool> startup: true; property <bool> notifications: true; property <bool> update-check: true; property <bool> tray: true; property <bool> restore-window: true;
     property <float> telemetry-rate: 1; property <float> ui-scale: 100;
-    property <string> local-status: "Visual preference model · persistence not connected";
+    property <string> local-status: "Theme changes apply immediately · persistence not connected";
+
+    function set-theme(light: bool) {
+        ThemeState.mode = light ? ThemeMode.Light : ThemeMode.Dark;
+        root.local-status = light ? "Light theme active · session only" : "Dark theme active · session only";
+        root.theme-changed(light);
+    }
 
     function reset-values() {
-        root.language = 0; root.appearance = 0; root.update-channel = 0; root.close-action = 0;
+        root.language = 0; root.update-channel = 0; root.close-action = 0;
         root.startup = true; root.notifications = true; root.update-check = true; root.tray = true; root.restore-window = true;
         root.telemetry-rate = 1; root.ui-scale = 100;
-        root.local-status = "Preferences reset locally";
+        root.set-theme(false);
+        root.local-status = "Preferences reset locally · dark theme restored";
     }
 
     VerticalLayout {
@@ -30,7 +39,14 @@ export component PreferencesWindow inherits Window {
                 VerticalLayout { padding: 9px; spacing: 2px;
                     SectionTitle { title: "General"; }
                     SelectRow { label: "Language"; model: ["System", "English", "Русский", "Deutsch", "Français"]; current-index <=> root.language; }
-                    SelectRow { label: "Appearance"; model: ["Dark", "System", "Light"]; current-index <=> root.appearance; }
+                    Rectangle {
+                        height: 36px; background: transparent;
+                        HorizontalLayout { spacing: 8px; alignment: center;
+                            Text { width: 138px; text: "Appearance"; font-size: 10px; font-weight: 500; color: Palette.text-primary; vertical-alignment: center; }
+                            ChoiceChip { horizontal-stretch: 1; label: "Dark"; selected: ThemeState.mode == ThemeMode.Dark; clicked => { root.set-theme(false); } }
+                            ChoiceChip { horizontal-stretch: 1; label: "Light"; selected: ThemeState.mode == ThemeMode.Light; clicked => { root.set-theme(true); } }
+                        }
+                    }
                     SelectRow { label: "Close button"; model: ["Hide to tray", "Quit", "Ask every time"]; current-index <=> root.close-action; }
                     ToggleRow { label: "Restore window position"; checked <=> root.restore-window; }
                 }
@@ -59,7 +75,7 @@ export component PreferencesWindow inherits Window {
         HorizontalLayout { height: 28px; spacing: 6px;
             Rectangle { horizontal-stretch: 1; background: transparent; }
             ActionButton { width: 92px; label: "Reset"; clicked => { root.reset-values(); } }
-            ActionButton { width: 92px; label: "Save"; accent: true; clicked => { root.local-status = "Preferences saved locally · persistence not connected"; } }
+            ActionButton { width: 92px; label: "Save"; accent: true; clicked => { root.local-status = "Preferences saved locally · theme persistence not connected"; } }
         }
     }
 }

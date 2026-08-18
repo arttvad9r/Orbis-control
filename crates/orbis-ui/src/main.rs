@@ -24,7 +24,7 @@ use orbis_providers::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProv
 use orbis_ui::composition::build_production_runtime;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker_with_polling};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
-use slint::{LogicalSize, PhysicalSize, Rgb8Pixel, WindowSize};
+use slint::{ComponentHandle, LogicalSize, PhysicalSize, Rgb8Pixel, WindowSize};
 use tokio::sync::mpsc::UnboundedSender;
 
 slint::include_modules!();
@@ -37,6 +37,7 @@ thread_local! {
     static DIAGNOSTICS_WINDOW: RefCell<Option<DiagnosticsWindow>> = const { RefCell::new(None) };
     static UPDATES_WINDOW: RefCell<Option<UpdatesWindow>> = const { RefCell::new(None) };
     static PREVIEW_DIALOG_WINDOW: RefCell<Option<PreviewDialogWindow>> = const { RefCell::new(None) };
+    static THEME_LIGHT: Cell<bool> = const { Cell::new(false) };
 }
 
 #[derive(Clone)]
@@ -285,9 +286,30 @@ fn build_app(
     fan_defaults: Option<FanDefaultsContext>,
 ) -> Result<AppWindow, slint::PlatformError> {
     let app = AppWindow::new()?;
+    app.global::<ThemeState>().set_mode(theme_mode(current_theme_light()));
     app.set_ui_state(to_slint(state));
     wire_callbacks(&app, worker_tx, fan_defaults);
     Ok(app)
+}
+
+fn theme_mode(light: bool) -> ThemeMode {
+    if light { ThemeMode::Light } else { ThemeMode::Dark }
+}
+
+fn current_theme_light() -> bool {
+    THEME_LIGHT.with(Cell::get)
+}
+
+fn apply_theme_to_all(app: &AppWindow, light: bool) {
+    THEME_LIGHT.with(|state| state.set(light));
+    app.global::<ThemeState>().set_mode(theme_mode(light));
+    FANS_WINDOW.with(|slot| { if let Some(window) = slot.borrow().as_ref() { window.global::<ThemeState>().set_mode(theme_mode(light)); } });
+    EXTRA_WINDOW.with(|slot| { if let Some(window) = slot.borrow().as_ref() { window.global::<ThemeState>().set_mode(theme_mode(light)); } });
+    AUTOMATION_WINDOW.with(|slot| { if let Some(window) = slot.borrow().as_ref() { window.global::<ThemeState>().set_mode(theme_mode(light)); } });
+    PREFERENCES_WINDOW.with(|slot| { if let Some(window) = slot.borrow().as_ref() { window.global::<ThemeState>().set_mode(theme_mode(light)); } });
+    DIAGNOSTICS_WINDOW.with(|slot| { if let Some(window) = slot.borrow().as_ref() { window.global::<ThemeState>().set_mode(theme_mode(light)); } });
+    UPDATES_WINDOW.with(|slot| { if let Some(window) = slot.borrow().as_ref() { window.global::<ThemeState>().set_mode(theme_mode(light)); } });
+    PREVIEW_DIALOG_WINDOW.with(|slot| { if let Some(window) = slot.borrow().as_ref() { window.global::<ThemeState>().set_mode(theme_mode(light)); } });
 }
 
 fn sync_fans_window(app: &AppWindow) {
@@ -358,6 +380,7 @@ fn show_fans_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
         }
         let window = slot.as_ref().expect("FansWindow initialized");
         window.set_ui_state(to_slint(&from_slint(&app.get_ui_state())));
+        window.global::<ThemeState>().set_mode(theme_mode(current_theme_light()));
         window.show()
     })
 }
@@ -368,7 +391,9 @@ fn show_extra_window() -> Result<(), slint::PlatformError> {
         if slot.is_none() {
             *slot = Some(ExtraWindow::new()?);
         }
-        slot.as_ref().expect("ExtraWindow initialized").show()
+        let window = slot.as_ref().expect("ExtraWindow initialized");
+        window.global::<ThemeState>().set_mode(theme_mode(current_theme_light()));
+        window.show()
     })
 }
 
@@ -378,17 +403,29 @@ fn show_automation_window() -> Result<(), slint::PlatformError> {
         if slot.is_none() {
             *slot = Some(AutomationWindow::new()?);
         }
-        slot.as_ref().expect("AutomationWindow initialized").show()
+        let window = slot.as_ref().expect("AutomationWindow initialized");
+        window.global::<ThemeState>().set_mode(theme_mode(current_theme_light()));
+        window.show()
     })
 }
 
-fn show_preferences_window() -> Result<(), slint::PlatformError> {
+fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
     PREFERENCES_WINDOW.with(|slot| {
         let mut slot = slot.borrow_mut();
         if slot.is_none() {
-            *slot = Some(PreferencesWindow::new()?);
+            let window = PreferencesWindow::new()?;
+            window.global::<ThemeState>().set_mode(theme_mode(current_theme_light()));
+            let app_weak = app.as_weak();
+            window.on_theme_changed(move |light| {
+                if let Some(app) = app_weak.upgrade() {
+                    apply_theme_to_all(&app, light);
+                }
+            });
+            *slot = Some(window);
         }
-        slot.as_ref().expect("PreferencesWindow initialized").show()
+        let window = slot.as_ref().expect("PreferencesWindow initialized");
+        window.global::<ThemeState>().set_mode(theme_mode(current_theme_light()));
+        window.show()
     })
 }
 
@@ -400,6 +437,7 @@ fn show_diagnostics_window(app: &AppWindow) -> Result<(), slint::PlatformError> 
         }
         let window = slot.as_ref().expect("DiagnosticsWindow initialized");
         window.set_version(app.get_ui_state().version.clone());
+        window.global::<ThemeState>().set_mode(theme_mode(current_theme_light()));
         window.show()
     })
 }
@@ -412,6 +450,7 @@ fn show_updates_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
         }
         let window = slot.as_ref().expect("UpdatesWindow initialized");
         window.set_version(app.get_ui_state().version.clone());
+        window.global::<ThemeState>().set_mode(theme_mode(current_theme_light()));
         window.show()
     })
 }
@@ -431,6 +470,7 @@ fn show_preview_dialog(kind: i32) -> Result<(), slint::PlatformError> {
         }
         let window = slot.as_ref().expect("PreviewDialogWindow initialized");
         window.set_kind(kind.clamp(0, 3));
+        window.global::<ThemeState>().set_mode(theme_mode(current_theme_light()));
         window.show()
     })
 }
@@ -905,11 +945,15 @@ fn wire_callbacks(
             tracing::warn!("не удалось открыть AutomationWindow: {e:?}");
         }
     });
-    app.on_preferences_clicked(move || {
-        if let Err(e) = show_preferences_window() {
-            tracing::warn!("не удалось открыть PreferencesWindow: {e:?}");
-        }
-    });
+    {
+        let app_weak = app.as_weak();
+        app.on_preferences_clicked(move || {
+            let Some(app) = app_weak.upgrade() else { return; };
+            if let Err(e) = show_preferences_window(&app) {
+                tracing::warn!("не удалось открыть PreferencesWindow: {e:?}");
+            }
+        });
+    }
     {
         let app_weak = app.as_weak();
         app.on_diagnostics_clicked(move || {

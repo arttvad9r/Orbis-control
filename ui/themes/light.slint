@@ -1,0 +1,31 @@
+// Orbis Control — light-theme design tokens.
+// Kept separate from the runtime theme switch so every visual surface can
+// consume the same semantic token names through Palette.
+
+export global LightPalette {
+    // surfaces
+    in property <color> window-background: #F4F6F8;
+    in property <color> titlebar-background: #ECEFF3;
+    in property <color> surface-default: #FFFFFF;
+    in property <color> surface-hover: #F3F5F7;
+    in property <color> surface-pressed: #E8ECF0;
+    in property <color> surface-disabled: #EEF1F4;
+    in property <color> border-default: #CDD3DA;
+    // text
+    in property <color> text-primary: #1C222A;
+    in property <color> text-secondary: #5E6875;
+    in property <color> text-disabled: #98A1AC;
+    // accents tuned for contrast on light surfaces
+    in property <color> accent-default: #1688C9;
+    in property <color> warning: #AA6D0D;
+    in property <color> error: #C54250;
+    in property <color> success: #167D60;
+    // mode accents
+    in property <color> silent: #258C70;
+    in property <color> balanced: #1688C9;
+    in property <color> turbo: #D64C60;
+    in property <color> eco: #348F43;
+    in property <color> standard: #1688C9;
+    in property <color> ultimate: #B97412;
+    in property <color> optimized: #1688C9;
+}
