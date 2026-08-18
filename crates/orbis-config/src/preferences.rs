@@ -703,10 +703,7 @@ mod tests {
         let leftovers: Vec<_> = fs::read_dir(&dir)
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
-            .filter(|name| {
-                name.to_string_lossy()
-                    .starts_with(".preferences.toml.tmp.")
-            })
+            .filter(|name| name.to_string_lossy().starts_with(".preferences.toml.tmp."))
             .collect();
         assert!(leftovers.is_empty());
     }
