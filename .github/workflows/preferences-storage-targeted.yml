@@ -1,0 +1,35 @@
+name: Preferences storage targeted validation
+
+on:
+  pull_request:
+    branches:
+      - agent/preferences-storage-foundation-validate
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Targeted orbis-config checks
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all -- --check
+            cargo check -p orbis-config --all-targets
+            cargo test -p orbis-config
+            cargo clippy -p orbis-config --all-targets -- -D warnings
+          '
+      - name: Check implementation diff whitespace
+        run: git diff --check ea286e32d7e86f7965ba101865d2feee5dcf0342 db9837009ce3f760dc5835f7a8c0a20fc1cdd259
