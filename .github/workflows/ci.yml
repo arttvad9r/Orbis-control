@@ -29,3 +29,78 @@ jobs:
 
       - name: Check flake
         run: nix flake check --print-build-logs
+
+  theme-persistence-targeted:
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/theme-persistence-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout implementation base
+        uses: actions/checkout@v5
+        with:
+          ref: agent/theme-persistence
+          fetch-depth: 0
+
+      - name: Fetch validation patch generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show origin/agent/theme-persistence-validate:.github/theme_persistence_patch.py > /tmp/theme_persistence_patch.py
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply theme persistence patch
+        run: python3 /tmp/theme_persistence_patch.py
+
+      - name: Targeted formatting and checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all
+            cargo fmt --all -- --check
+            cargo check -p orbis-config --all-targets
+            cargo check -p orbis-ui --all-targets
+            cargo test -p orbis-config
+            cargo test -p orbis-ui
+            cargo clippy -p orbis-config --all-targets -- -D warnings
+            cargo clippy -p orbis-ui --all-targets -- -D warnings
+            git diff --check
+          '
+
+      - name: Assert narrow scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only | sort > /tmp/changed.txt
+          cat >/tmp/allowed.txt <<'EOF'
+          Cargo.lock
+          crates/orbis-ui/Cargo.toml
+          crates/orbis-ui/src/main.rs
+          crates/orbis-ui/src/main_tests.rs
+          ui/audited/preferences-window.slint
+          EOF
+          sort -o /tmp/allowed.txt /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
+
+      - name: Stage patched source artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/theme-persistence-artifact/crates/orbis-ui/src /tmp/theme-persistence-artifact/ui/audited
+          cp Cargo.lock /tmp/theme-persistence-artifact/Cargo.lock
+          cp crates/orbis-ui/Cargo.toml /tmp/theme-persistence-artifact/crates/orbis-ui/Cargo.toml
+          cp crates/orbis-ui/src/main.rs /tmp/theme-persistence-artifact/crates/orbis-ui/src/main.rs
+          cp crates/orbis-ui/src/main_tests.rs /tmp/theme-persistence-artifact/crates/orbis-ui/src/main_tests.rs
+          cp ui/audited/preferences-window.slint /tmp/theme-persistence-artifact/ui/audited/preferences-window.slint
+
+      - name: Upload patched source
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-persistence-patched-source
+          path: /tmp/theme-persistence-artifact
+          if-no-files-found: error
