@@ -1,0 +1,46 @@
+name: Diagnostics application metadata validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/diagnostics-application-metadata-source
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Targeted orbis-ui checks
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all -- --check
+            cargo check -p orbis-ui --all-targets
+            cargo test -p orbis-ui --lib diagnostics_metadata
+            cargo clippy -p orbis-ui --all-targets -- -D warnings
+          '
+
+      - name: Check narrow diff
+        run: |
+          set -euo pipefail
+          git diff --check 52dd1a073143b369425447e8d92425601c7b477c..HEAD
+          git diff --name-only 52dd1a073143b369425447e8d92425601c7b477c..HEAD | sort > /tmp/changed.txt
+          cat >/tmp/allowed.txt <<'EOF'
+          crates/orbis-ui/src/diagnostics_metadata.rs
+          crates/orbis-ui/src/lib.rs
+          EOF
+          sort -o /tmp/allowed.txt /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
