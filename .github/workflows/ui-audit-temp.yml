@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - agent/full-visual-ui
-  pull_request:
-    branches:
-      - agent/fan-curve-editor-ui
 
 concurrency:
   group: ui-audit-${{ github.ref }}
@@ -21,8 +18,6 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'push' && github.ref_name || github.sha }}
       - name: Use current stable Rust for UI audit
         run: |
           rustup toolchain install stable --profile minimal
@@ -73,7 +68,6 @@ jobs:
               replace_required("ui/audited/extra-window.slint", old, new)
 
       - name: Persist UI corrections on branch
-        if: github.event_name == 'push'
         run: |
           if git diff --quiet; then
             echo "UI corrections already persisted"
