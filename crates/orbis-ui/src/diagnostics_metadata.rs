@@ -70,8 +70,7 @@ mod tests {
 
     #[test]
     fn explicitly_embedded_optional_build_metadata_is_preserved() {
-        let metadata =
-            application_diagnostics_from("1.2.3", Some(" abcdef123 "), Some(" beta "));
+        let metadata = application_diagnostics_from("1.2.3", Some(" abcdef123 "), Some(" beta "));
         assert_eq!(metadata.build_revision.as_deref(), Some("abcdef123"));
         assert_eq!(metadata.build_channel.as_deref(), Some("beta"));
     }
