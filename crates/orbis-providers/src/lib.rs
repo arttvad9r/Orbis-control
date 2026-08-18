@@ -22,6 +22,7 @@ pub mod native_asus_eco;
 pub mod probes;
 pub mod supergfxd;
 pub mod sysfs_telemetry;
+pub mod system_metadata;
 pub mod traits;
 pub mod wayland_output;
 
@@ -40,6 +41,7 @@ pub use probes::{
     probe_screen_auto_brightness,
 };
 pub use sysfs_telemetry::SysfsTelemetryProvider;
+pub use system_metadata::SystemMetadataProvider;
 pub use traits::*;
 pub use wayland_output::*;
 
