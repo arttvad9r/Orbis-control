@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   flake-check:
+    if: github.event_name != 'pull_request' || github.head_ref != 'agent/nixos-upower-default-validate-trigger'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -28,3 +29,64 @@ jobs:
 
       - name: Check flake
         run: nix flake check --print-build-logs
+
+  upower-default-targeted:
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/nixos-upower-default-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/nixos-upower-default
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Evaluate UPower module defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(nix eval --impure --raw --expr '
+            let
+              flake = builtins.getFlake (builtins.getEnv "GITHUB_WORKSPACE");
+              lib = flake.inputs.nixpkgs.lib;
+              withOrbis = extra: lib.nixosSystem {
+                system = "x86_64-linux";
+                modules = [ flake.nixosModules.orbis-control extra ];
+              };
+              enabled = withOrbis { services.orbis-control.enable = true; };
+              explicitOff = withOrbis {
+                services.orbis-control.enable = true;
+                services.upower.enable = false;
+              };
+              disabled = withOrbis { services.orbis-control.enable = false; };
+              baseline = lib.nixosSystem {
+                system = "x86_64-linux";
+                modules = [ ];
+              };
+              hardwared = enabled.config.systemd.services.orbis-hardwared;
+              sessiond = enabled.config.systemd.user.services.orbis-sessiond;
+              hasUpower = xs: builtins.elem "upower.service" xs;
+            in
+              assert enabled.config.services.upower.enable;
+              assert !explicitOff.config.services.upower.enable;
+              assert disabled.config.services.upower.enable == baseline.config.services.upower.enable;
+              assert !(hasUpower (hardwared.after or [ ]));
+              assert !(hasUpower (hardwared.requires or [ ]));
+              assert !(hasUpower (sessiond.after or [ ]));
+              assert !(hasUpower (sessiond.requires or [ ]));
+              "ok"
+          ')"
+          test "$result" = "ok"
+
+      - name: Check narrow diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check f0d610a04a8ff16501a02389568c7a4aee62aac8..HEAD
+          test "$(git diff --name-only f0d610a04a8ff16501a02389568c7a4aee62aac8..HEAD)" = "packaging/nix/module.nix"
+          test "$(git rev-list --count f0d610a04a8ff16501a02389568c7a4aee62aac8..HEAD)" = "1"
