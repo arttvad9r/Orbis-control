@@ -1,8 +1,10 @@
+import { FanCurveHwState } from "../components/fan-curve-editor.slint";
+export { FanCurveHwState } from "../components/fan-curve-editor.slint";
+
 export enum ChargeLimitState { Loading, Ready, Unavailable }
 export enum GpuHwState { Loading, Ready, Unavailable }
 export enum PerformanceHwState { Loading, Ready, Unavailable }
 export enum GpuModeHwState { Loading, Ready, Unavailable }
-export enum FanCurveHwState { Loading, Ready, Unavailable }
 
 export struct UiState {
     perf-selected: int,
