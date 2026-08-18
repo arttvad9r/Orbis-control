@@ -66,6 +66,29 @@ pub fn write_allows_mutation(status: CapabilityStatus) -> bool {
     )
 }
 
+/// Единый user-facing disabled reason для mutation capability.
+///
+/// Возвращает `None`, когда mutation разрешена (Supported /
+/// SupportedWithRequirement), иначе короткий нейтральный текст, точно
+/// отражающий `CapabilityAvailability`. Это единственный mapping
+/// `CapabilityAvailability -> reason`; каждый control использует его, не
+/// дублируя логику.
+pub fn mutation_unavailable_reason(availability: CapabilityAvailability) -> Option<String> {
+    match availability {
+        CapabilityAvailability::Supported => None,
+        CapabilityAvailability::ReadOnly => Some("Read-only".to_string()),
+        CapabilityAvailability::Unsupported => Some("Not supported on this system".to_string()),
+        CapabilityAvailability::BackendMissing => {
+            Some("Required backend is not available".to_string())
+        }
+        CapabilityAvailability::TemporarilyUnavailable => {
+            Some("Temporarily unavailable".to_string())
+        }
+        CapabilityAvailability::PermissionDenied => Some("Permission denied".to_string()),
+        CapabilityAvailability::Unknown => Some("Availability is unknown".to_string()),
+    }
+}
+
 /// Состояние готовности/доступности Battery Charge Limit.
 ///
 /// Отделено от `charge_limit_enabled` (фактический hardware/backend state):
@@ -206,8 +229,12 @@ pub struct UiState {
     pub gpu_access_value: i32,
     /// Capability availability: Performance Mode read/write support.
     pub perf_capability: CapabilityAvailability,
+    /// User-facing disabled reason for Performance mutation (None when writable).
+    pub perf_unavailable_reason: Option<String>,
     /// Capability availability: Battery Charge Limit read/write support.
     pub charge_limit_capability: CapabilityAvailability,
+    /// User-facing disabled reason for Charge Limit mutation (None when writable).
+    pub charge_limit_unavailable_reason: Option<String>,
     /// Capability availability: GPU Power state read support.
     pub gpu_power_capability: CapabilityAvailability,
     /// Capability availability: GPU MUX state read support.
@@ -251,6 +278,8 @@ pub struct UiState {
     pub fan_curve_writable: bool,
     /// Capability availability: Fan Curves read/write support.
     pub fan_curve_capability: CapabilityAvailability,
+    /// User-facing disabled reason for Fan Curve mutation (None when writable).
+    pub fan_curve_unavailable_reason: Option<String>,
     /// Выбранный вентилятор: 0=CPU, 1=GPU.
     pub fan_selected: i32,
     /// Выбранный lossless asusd профиль: 0=Balanced, 1=Performance, 2=Quiet, 3=LowPower.
@@ -388,7 +417,9 @@ impl UiState {
             gpu_mux_value: 0,
             gpu_access_value: 0,
             perf_capability: CapabilityAvailability::Unknown,
+            perf_unavailable_reason: None,
             charge_limit_capability: CapabilityAvailability::Unknown,
+            charge_limit_unavailable_reason: None,
             gpu_power_capability: CapabilityAvailability::Unknown,
             gpu_mux_capability: CapabilityAvailability::Unknown,
             gpu_access_capability: CapabilityAvailability::Unknown,
@@ -412,6 +443,7 @@ impl UiState {
             fan_curve_state: FanCurveHwState::Loading,
             fan_curve_writable: false,
             fan_curve_capability: CapabilityAvailability::Unknown,
+            fan_curve_unavailable_reason: None,
             fan_selected: 0,         // CPU
             fan_profile_selected: 0, // Balanced
             fan_curve_temps: [0; 8],
@@ -439,10 +471,16 @@ impl UiState {
         if let Some(cap) = snapshot.capability(FeatureId::Performance) {
             self.perf_capability = CapabilityAvailability::from_status(cap.status);
             self.perf_writable = write_allows_mutation(cap.operations.write.status);
+            self.perf_unavailable_reason = mutation_unavailable_reason(
+                CapabilityAvailability::from_status(cap.operations.write.status),
+            );
         }
         if let Some(cap) = snapshot.capability(FeatureId::ChargeLimit) {
             self.charge_limit_capability = CapabilityAvailability::from_status(cap.status);
             self.charge_limit_writable = write_allows_mutation(cap.operations.write.status);
+            self.charge_limit_unavailable_reason = mutation_unavailable_reason(
+                CapabilityAvailability::from_status(cap.operations.write.status),
+            );
         }
         if let Some(cap) = snapshot.capability(FeatureId::GpuPower) {
             self.gpu_power_capability = CapabilityAvailability::from_status(cap.status);
@@ -456,6 +494,9 @@ impl UiState {
         if let Some(cap) = snapshot.capability(FeatureId::FanCurves) {
             self.fan_curve_capability = CapabilityAvailability::from_status(cap.status);
             self.fan_curve_writable = write_allows_mutation(cap.operations.write.status);
+            self.fan_curve_unavailable_reason = mutation_unavailable_reason(
+                CapabilityAvailability::from_status(cap.operations.write.status),
+            );
         }
     }
 
@@ -1333,6 +1374,7 @@ mod tests {
         s.update_capabilities(&snapshot);
         assert_eq!(s.charge_limit_capability, CapabilityAvailability::Supported);
         assert!(s.charge_limit_writable);
+        assert_eq!(s.charge_limit_unavailable_reason, None);
     }
 
     #[test]
@@ -1351,6 +1393,10 @@ mod tests {
         // Unsupported → not writable. Controller uses write status for gating.
         assert_eq!(s.charge_limit_capability, CapabilityAvailability::Supported);
         assert!(!s.charge_limit_writable);
+        assert_eq!(
+            s.charge_limit_unavailable_reason.as_deref(),
+            Some("Not supported on this system")
+        );
     }
 
     #[test]
@@ -1580,5 +1626,193 @@ mod tests {
         s.update_capabilities(&snapshot);
         assert!(!s.fan_curve_writable);
         assert!(!write_allows_mutation(CapabilityStatus::PermissionDenied));
+    }
+
+    #[test]
+    fn mutation_unavailable_reason_maps_each_availability() {
+        // The single shared mapping must produce a distinct, honest reason for
+        // every non-writable availability and None for Supported.
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::Supported),
+            None
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::ReadOnly).as_deref(),
+            Some("Read-only")
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::Unsupported).as_deref(),
+            Some("Not supported on this system")
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::BackendMissing).as_deref(),
+            Some("Required backend is not available")
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::TemporarilyUnavailable).as_deref(),
+            Some("Temporarily unavailable")
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::PermissionDenied).as_deref(),
+            Some("Permission denied")
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::Unknown).as_deref(),
+            Some("Availability is unknown")
+        );
+    }
+
+    #[test]
+    fn battery_reasons_distinguish_statuses() {
+        // PermissionDenied and TemporarilyUnavailable must not be masked as a
+        // generic unavailable.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::PermissionDenied,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.charge_limit_writable);
+        assert_eq!(
+            s.charge_limit_unavailable_reason.as_deref(),
+            Some("Permission denied")
+        );
+
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.charge_limit_writable);
+        assert_eq!(
+            s.charge_limit_unavailable_reason.as_deref(),
+            Some("Temporarily unavailable")
+        );
+    }
+
+    #[test]
+    fn performance_reasons_distinguish_statuses() {
+        // BackendMissing and Unknown must not be masked as unsupported.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::Performance,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::BackendMissing,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.perf_writable);
+        assert_eq!(
+            s.perf_unavailable_reason.as_deref(),
+            Some("Required backend is not available")
+        );
+
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::Performance,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Unknown,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.perf_writable);
+        assert_eq!(
+            s.perf_unavailable_reason.as_deref(),
+            Some("Availability is unknown")
+        );
+    }
+
+    #[test]
+    fn fan_curve_reasons_distinguish_statuses() {
+        // Unknown and PermissionDenied must not be masked as unsupported.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Unknown,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.fan_curve_writable);
+        assert_eq!(
+            s.fan_curve_unavailable_reason.as_deref(),
+            Some("Availability is unknown")
+        );
+
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::PermissionDenied,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.fan_curve_writable);
+        assert_eq!(
+            s.fan_curve_unavailable_reason.as_deref(),
+            Some("Permission denied")
+        );
+    }
+
+    #[test]
+    fn unavailable_write_does_not_disable_independent_read_domains() {
+        // Battery write PermissionDenied must not affect Performance or GPU
+        // read capability in the same controller state.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![
+            (
+                orbis_core::FeatureId::ChargeLimit,
+                cap(
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::PermissionDenied,
+                ),
+            ),
+            (
+                orbis_core::FeatureId::Performance,
+                cap(
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                ),
+            ),
+            (
+                orbis_core::FeatureId::GpuPower,
+                cap(
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Unsupported,
+                ),
+            ),
+        ]);
+        s.update_capabilities(&snapshot);
+        // Battery write denied, but read capability still present.
+        assert!(!s.charge_limit_writable);
+        assert_eq!(
+            s.charge_limit_unavailable_reason.as_deref(),
+            Some("Permission denied")
+        );
+        // Performance remains writable.
+        assert!(s.perf_writable);
+        assert_eq!(s.perf_unavailable_reason, None);
+        // GPU Power read remains Supported.
+        assert_eq!(s.gpu_power_capability, CapabilityAvailability::Supported);
     }
 }

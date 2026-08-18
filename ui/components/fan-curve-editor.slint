@@ -164,6 +164,7 @@ export component FanCurveEditor inherits Rectangle {
     // ── State ──────────────────────────────────────────────────────
     in property <FanCurveHwState> state: FanCurveHwState.Loading;
     in property <bool> writable: false;
+    in property <string> unavailable-reason: "";
     in property <bool> error-state: false;
     in property <bool> dirty: false;
 
@@ -251,6 +252,14 @@ export component FanCurveEditor inherits Rectangle {
     if (root.state == FanCurveHwState.Ready) : VerticalLayout {
         padding: 8px;
         spacing: 6px;
+
+        if (root.unavailable-reason != "") : Text {
+            text: root.unavailable-reason;
+            height: 16px;
+            font-size: 11px;
+            color: Palette.text-secondary;
+            vertical-alignment: center;
+        }
 
         // Row 1: Profile + Fan selectors
         HorizontalLayout {

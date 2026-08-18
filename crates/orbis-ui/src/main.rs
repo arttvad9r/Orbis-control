@@ -113,6 +113,11 @@ fn to_slint(state: &controller::UiState) -> UiState {
             controller::PerformanceHwState::Unavailable => PerformanceHwState::Unavailable,
         },
         perf_writable: state.perf_writable,
+        perf_unavailable_reason: state
+            .perf_unavailable_reason
+            .clone()
+            .unwrap_or_default()
+            .into(),
         gpu_selected: state.gpu_selected,
         available_gpu_mask: state.available_gpu_mask,
         gpu_ultimate_pending: state.gpu_ultimate_pending,
@@ -127,6 +132,11 @@ fn to_slint(state: &controller::UiState) -> UiState {
         charge_limit: state.charge_limit,
         charge_limit_enabled: state.charge_limit_enabled,
         charge_limit_writable: state.charge_limit_writable,
+        charge_limit_unavailable_reason: state
+            .charge_limit_unavailable_reason
+            .clone()
+            .unwrap_or_default()
+            .into(),
         charge_limit_state: match state.charge_limit_state {
             controller::ChargeLimitState::Loading => ChargeLimitState::Loading,
             controller::ChargeLimitState::Ready => ChargeLimitState::Ready,
@@ -170,6 +180,11 @@ fn to_slint(state: &controller::UiState) -> UiState {
             controller::FanCurveHwState::Unavailable => FanCurveHwState::Unavailable,
         },
         fan_curve_writable: state.fan_curve_writable,
+        fan_curve_unavailable_reason: state
+            .fan_curve_unavailable_reason
+            .clone()
+            .unwrap_or_default()
+            .into(),
         fan_curve_error: state.fan_curve_error,
         fan_curve_dirty: state.fan_curve_dirty,
         fan_selected: state.fan_selected,
@@ -249,7 +264,9 @@ fn from_slint(state: &UiState) -> controller::UiState {
         version: state.version.to_string(),
         mock_profile: state.mock_profile.to_string(),
         perf_capability: controller::CapabilityAvailability::Unknown,
+        perf_unavailable_reason: None,
         charge_limit_capability: controller::CapabilityAvailability::Unknown,
+        charge_limit_unavailable_reason: None,
         gpu_power_capability: controller::CapabilityAvailability::Unknown,
         gpu_mux_capability: controller::CapabilityAvailability::Unknown,
         gpu_access_capability: controller::CapabilityAvailability::Unknown,
@@ -265,6 +282,7 @@ fn from_slint(state: &UiState) -> controller::UiState {
             FanCurveHwState::Unavailable => controller::FanCurveHwState::Unavailable,
         },
         fan_curve_writable: state.fan_curve_writable,
+        fan_curve_unavailable_reason: None,
         fan_curve_error: state.fan_curve_error,
         fan_curve_dirty: state.fan_curve_dirty,
         fan_selected: state.fan_selected,

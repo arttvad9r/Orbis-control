@@ -37,6 +37,7 @@ export struct UiState {
     available-perf-mask: int,       // bit0=Silent, bit1=Balanced, bit2=Turbo
     perf-state: PerformanceHwState,
     perf-writable: bool,
+    perf-unavailable-reason: string,
     gpu-selected: int,              // 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized
     available-gpu-mask: int,        // bit0=Eco, bit1=Standard, bit2=Ultimate, bit3=Optimized
     gpu-ultimate-pending: bool,
@@ -47,6 +48,7 @@ export struct UiState {
     charge-limit: int,
     charge-limit-enabled: bool,
     charge-limit-writable: bool,
+    charge-limit-unavailable-reason: string,
     charge-limit-state: ChargeLimitState,
     gpu-power-state: GpuHwState,
     gpu-mux-state: GpuHwState,
@@ -71,6 +73,7 @@ export struct UiState {
     // ── Fan Curve Editor ──────────────────────────────────────────
     fan-curve-state: FanCurveHwState,
     fan-curve-writable: bool,
+    fan-curve-unavailable-reason: string,
     fan-curve-error: bool,
     fan-curve-dirty: bool,
     fan-selected: int,         // 0=CPU, 1=GPU
@@ -146,6 +149,7 @@ export component AppWindow inherits Window {
         available-perf-mask: 0,
         perf-state: PerformanceHwState.Loading,
         perf-writable: false,
+        perf-unavailable-reason: "",
         gpu-selected: 1,
         available-gpu-mask: 0,
         gpu-ultimate-pending: false,
@@ -156,6 +160,7 @@ export component AppWindow inherits Window {
         charge-limit: 80,
         charge-limit-enabled: false,
         charge-limit-writable: false,
+        charge-limit-unavailable-reason: "",
         charge-limit-state: ChargeLimitState.Loading,
         gpu-power-state: GpuHwState.Loading,
         gpu-mux-state: GpuHwState.Loading,
@@ -178,6 +183,7 @@ export component AppWindow inherits Window {
         mock-profile: "zephyrus-full",
         fan-curve-state: FanCurveHwState.Loading,
         fan-curve-writable: false,
+        fan-curve-unavailable-reason: "",
         fan-curve-error: false,
         fan-curve-dirty: false,
         fan-selected: 0,
@@ -295,6 +301,24 @@ export component AppWindow inherits Window {
                         selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 2;
                         disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 4);
                         clicked => { root.perf-clicked(2); }
+                    }
+                }
+                if (root.ui-state.perf-unavailable-reason != "" && root.ui-state.perf-state == PerformanceHwState.Ready) : Rectangle {
+                    height: 24px;
+                    border-radius: 4px;
+                    background: Palette.surface-pressed;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: root.ui-state.perf-unavailable-reason;
+                            font-size: 12px;
+                            color: Palette.text-secondary;
+                            vertical-alignment: center;
+                        }
                     }
                 }
                 if (root.ui-state.perf-state == PerformanceHwState.Loading) : Rectangle {
@@ -485,6 +509,13 @@ export component AppWindow inherits Window {
                         root.charge-changed(v);
                     }
                 }
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready && root.ui-state.charge-limit-unavailable-reason != "") : Text {
+                    text: root.ui-state.charge-limit-unavailable-reason;
+                    height: 18px;
+                    font-size: 11px;
+                    color: Palette.text-secondary;
+                    vertical-alignment: center;
+                }
                 if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : Text {
                     text: root.ui-state.charge-limit-enabled
                         ? "UPower threshold policy: On"
@@ -547,6 +578,7 @@ export component AppWindow inherits Window {
                 FanCurveEditor {
                     state: root.ui-state.fan-curve-state;
                     writable: root.ui-state.fan-curve-writable;
+                    unavailable-reason: root.ui-state.fan-curve-unavailable-reason;
                     error-state: root.ui-state.fan-curve-error;
                     dirty: root.ui-state.fan-curve-dirty;
                     fan-selected: root.ui-state.fan-selected;
