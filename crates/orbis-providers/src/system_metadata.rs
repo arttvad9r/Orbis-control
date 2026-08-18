@@ -122,9 +122,9 @@ mod tests {
         display: Option<&str>,
     ) -> SessionEnvironment {
         SessionEnvironment {
-            xdg_session_type: xdg_session_type.map(str::to_owned),
-            wayland_display: wayland_display.map(str::to_owned),
-            display: display.map(str::to_owned),
+            xdg_session_type: normalized_value(xdg_session_type.map(str::to_owned)),
+            wayland_display: normalized_value(wayland_display.map(str::to_owned)),
+            display: normalized_value(display.map(str::to_owned)),
         }
     }
 
@@ -148,7 +148,10 @@ mod tests {
         let tty = session(Some("tty"), None, None);
 
         assert_eq!(classify_session_type(&wayland), SessionType::Wayland);
-        assert_eq!(classify_display_protocol(&wayland), DisplayProtocol::Wayland);
+        assert_eq!(
+            classify_display_protocol(&wayland),
+            DisplayProtocol::Wayland
+        );
         assert_eq!(classify_session_type(&x11), SessionType::X11);
         assert_eq!(classify_display_protocol(&x11), DisplayProtocol::X11);
         assert_eq!(classify_session_type(&tty), SessionType::Tty);
@@ -161,7 +164,10 @@ mod tests {
         let x11 = session(None, None, Some(":0"));
 
         assert_eq!(classify_session_type(&wayland), SessionType::Wayland);
-        assert_eq!(classify_display_protocol(&wayland), DisplayProtocol::Wayland);
+        assert_eq!(
+            classify_display_protocol(&wayland),
+            DisplayProtocol::Wayland
+        );
         assert_eq!(classify_session_type(&x11), SessionType::X11);
         assert_eq!(classify_display_protocol(&x11), DisplayProtocol::X11);
     }
@@ -170,7 +176,10 @@ mod tests {
     fn unrecognized_session_type_is_not_relabelled() {
         let unknown = session(Some("custom-session"), None, None);
         assert_eq!(classify_session_type(&unknown), SessionType::Unknown);
-        assert_eq!(classify_display_protocol(&unknown), DisplayProtocol::Unknown);
+        assert_eq!(
+            classify_display_protocol(&unknown),
+            DisplayProtocol::Unknown
+        );
     }
 
     #[test]
