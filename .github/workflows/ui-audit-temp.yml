@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/full-visual-ui
+  pull_request:
+    branches:
+      - agent/fan-curve-editor-ui
 
 permissions:
   contents: read
