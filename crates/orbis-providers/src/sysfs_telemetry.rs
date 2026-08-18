@@ -9,8 +9,10 @@
 //! - каждый вызов `snapshot()` выполняет новый authoritative read (кэш
 //!   отсутствует);
 //! - отсутствующие необязательные файлы → `None` (не ломают snapshot);
-//! - malformed/пустые значения → `ProviderError::Internal`;
-//! - I/O ошибки (кроме `NotFound`) → `ProviderError::Io`;
+//! - ошибки candidate metadata (`hwmon/name`, `power_supply/type`) пропускают
+//!   только этот discovery entry; ошибки после выбора источника не скрываются;
+//! - malformed/пустые значения выбранного источника → `ProviderError::Internal`;
+//! - I/O ошибки выбранного источника (кроме `NotFound`) → `ProviderError::Io`;
 //! - не вычисляются недоказанные значения: `energy_now/full`, `total` power,
 //!   battery power; `FanTelemetry.percent` всегда `None`;
 //! - telemetry НЕ смешивается с `GpuPower/GpuMux/GpuAccess` capability state:
@@ -95,16 +97,18 @@ impl TelemetryProvider for SysfsTelemetryProvider {
         let mut fans = Vec::new();
 
         for dir in read_dir_optional(&hwmon_dir)? {
-            let name = read_string(&dir.join("name"))?;
-            match name.as_deref() {
-                Some("k10temp") => {
+            let Some(name) = read_discovery_string(&dir.join("name")) else {
+                continue;
+            };
+            match name.as_str() {
+                "k10temp" => {
                     cpu_temp = read_temp_c(&dir.join("temp1_input"))?;
                 }
-                Some("amdgpu") => {
+                "amdgpu" => {
                     gpu_temp = read_amdgpu_edge_temp(&dir)?;
                     gpu_power = read_milli_watt(&dir.join("power1_input"))?;
                 }
-                Some("asus") => {
+                "asus" => {
                     fans = read_asus_fans(&dir)?;
                 }
                 _ => {}
@@ -114,9 +118,11 @@ impl TelemetryProvider for SysfsTelemetryProvider {
         let mut battery = None;
         let mut ac_online = None;
         for dir in read_dir_optional(&power_dir)? {
-            let supply_type = read_string(&dir.join("type"))?;
-            match supply_type.as_deref() {
-                Some("Battery") => {
+            let Some(supply_type) = read_discovery_string(&dir.join("type")) else {
+                continue;
+            };
+            match supply_type.as_str() {
+                "Battery" => {
                     if battery.is_none() {
                         battery = read_battery(&dir)?;
                     }
@@ -125,7 +131,7 @@ impl TelemetryProvider for SysfsTelemetryProvider {
                 // USB*, Wireless, ...). Require an explicit non-Battery type
                 // plus the standard `online` attribute instead of selecting
                 // the first arbitrary power_supply that happens to have it.
-                Some(_) if ac_online.is_none() && dir.join("online").exists() => {
+                _ if ac_online.is_none() && dir.join("online").exists() => {
                     ac_online = read_online(&dir)?;
                 }
                 _ => {}
@@ -189,6 +195,13 @@ fn read_string(path: &Path) -> Result<Option<String>, ProviderError> {
         )));
     }
     Ok(Some(trimmed.to_string()))
+}
+
+/// Прочитать metadata, используемый только для классификации discovery entry.
+/// Любая ошибка здесь означает «этот кандидат нельзя надёжно классифицировать»;
+/// она не должна ломать уже доступную telemetry из независимых источников.
+fn read_discovery_string(path: &Path) -> Option<String> {
+    read_string(path).ok().flatten()
 }
 
 /// Прочитать один файл как `u64`.
@@ -617,6 +630,32 @@ mod tests {
             .await
             .expect_err("RPM narrowing must fail");
         assert!(matches!(err, ProviderError::Internal(_)));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn discovery_skips_unclassifiable_entries() {
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/decoy/name", "\n");
+        write_fixture(&root, "class/power_supply/decoy/type", "\n");
+
+        write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
+        write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "47000\n");
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "77\n");
+        external_type(&root, "ACAD");
+        write_fixture(&root, "class/power_supply/ACAD/online", "1\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot");
+
+        assert_eq!(t.cpu_temp, Some(TemperatureC::new(47).expect("c")));
+        assert_eq!(
+            t.battery.expect("battery").percent,
+            Percent::new(77).expect("pct")
+        );
+        assert_eq!(t.ac_online, Some(true));
 
         let _ = std::fs::remove_dir_all(root);
     }
