@@ -167,6 +167,7 @@ async fn connect_composition(
             FakeEffectiveSource,
             Default::default(),
             None,
+            None,
         ),
         session_client_builder.build(),
     )?;

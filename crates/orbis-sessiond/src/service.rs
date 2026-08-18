@@ -9,18 +9,23 @@
 use std::sync::Arc;
 
 use orbis_core::battery::ChargeLimit;
+use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
-use orbis_core::profile::PerformanceProfile;
+use orbis_core::newtypes::{FanPwm, TemperatureC};
+use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
     BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
 };
 use orbis_session_protocol::{ChargeLimitInfo, gpu_access, gpu_mux, gpu_power, performance};
 
+use crate::fans::{AsusdFanCurveSource, asusd_fan_profile_from_wire};
+
 /// Service object session интерфейса.
 ///
 /// Владеет независимыми capability providers: battery + опциональные GPU
-/// capabilities (power / MUX / access) + опциональный Performance Mode.
+/// capabilities (power / MUX / access) + опциональный Performance Mode +
+/// опциональный read-only asusd fan curve источник.
 /// Провайдеры передаются извне. Конструктор не выполняет I/O, не читает
 /// состояние, не открывает D-Bus и не создаёт runtime; кэш/last error/mutable
 /// state отсутствуют.
@@ -30,6 +35,7 @@ pub struct SessionService {
     gpu_mux: Option<Arc<dyn GpuMuxProvider>>,
     gpu_access: Option<Arc<dyn GpuAccessProvider>>,
     performance: Option<Arc<dyn PerformanceProvider>>,
+    fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
 }
 
 impl SessionService {
@@ -41,6 +47,7 @@ impl SessionService {
             gpu_mux: None,
             gpu_access: None,
             performance: None,
+            fan_curves: None,
         }
     }
 
@@ -65,6 +72,12 @@ impl SessionService {
     /// Добавить read-only Performance Mode capability provider.
     pub fn with_performance(mut self, provider: Arc<dyn PerformanceProvider>) -> Self {
         self.performance = Some(provider);
+        self
+    }
+
+    /// Добавить read-only asusd fan curve source (profile-specific curves).
+    pub fn with_fan_curves(mut self, source: Arc<dyn AsusdFanCurveSource>) -> Self {
+        self.fan_curves = Some(source);
         self
     }
 
@@ -112,6 +125,56 @@ impl SessionService {
         let current = provider.current_profile().await?;
         let available = provider.profiles().await?;
         Ok((current, available))
+    }
+
+    /// Прочитать сохранённую fan curve для профиля и вентилятора.
+    ///
+    /// Выполняет один authoritative read через asusd fan curve source
+    /// (`read_curves(profile)`) и выбирает кривую запрошенного вентилятора.
+    /// Кэш отсутствует; CPU/GPU не смешиваются (каждый fan читается из
+    /// собственной кривой одного прочитанного set). Ошибки источника
+    /// сохраняются честно (включая Unsupported/PermissionDenied/malformed).
+    pub async fn read_fan_curve(
+        &self,
+        profile: AsusdFanProfile,
+        fan: FanId,
+    ) -> Result<FanCurve, ProviderError> {
+        let source = self.fan_curves.as_ref().ok_or_else(|| {
+            ProviderError::Unsupported("session: fan curve capability недоступна".into())
+        })?;
+        let set = source.read_curves(profile).await?;
+        let curve = match fan {
+            FanId::Cpu => set.cpu,
+            FanId::Gpu => set.gpu,
+            other => {
+                return Err(ProviderError::Unsupported(format!(
+                    "session: fan curve для {other:?} не поддерживается (только CPU/GPU)"
+                )));
+            }
+        };
+        Ok(domain_from_asusd_curve(profile, curve))
+    }
+}
+
+/// Преобразовать wire-прочитанную `AsusdFanCurve` в доменную `FanCurve`.
+///
+/// Lossless: raw PWM 0..255 переносятся без процентов; профиль отображается
+/// в `PerformanceProfile` (для UI), сам lossless `AsusdFanProfile` сохраняется
+/// на wire (wire DTO включает profile).
+fn domain_from_asusd_curve(
+    profile: AsusdFanProfile,
+    curve: crate::fans::AsusdFanCurve,
+) -> FanCurve {
+    let points = curve
+        .temps
+        .iter()
+        .zip(curve.pwms.iter())
+        .map(|(t, p)| FanCurvePoint::new(*t, *p))
+        .collect();
+    FanCurve {
+        profile: PerformanceProfile::from(profile),
+        fan: curve.fan,
+        points,
     }
 }
 
@@ -193,7 +256,7 @@ pub fn charge_limit_to_wire(value: ChargeLimit) -> ChargeLimitInfo {
     }
 }
 
-/// Преобразовать `ProviderError` в `zbus::fdo::Error`.
+/// Преобразовать domain `ProviderError` в `zbus::fdo::Error`.
 ///
 /// Детерминированное отображение классов ошибок; диагностический смысл строки
 /// сохраняется; чистый mapper не логирует.
@@ -231,6 +294,46 @@ fn charge_limit_info_to_tuple(info: ChargeLimitInfo) -> ChargeLimitTuple {
         info.max_percent,
         info.step_percent,
     )
+}
+
+/// Wire-кодирование `FanCurveInfo` в D-Bus tuple `(uyayay)`.
+///
+/// Ту же причину, что и `ChargeLimitTuple`: кастомный struct не конвертируется
+/// в `Value` в server-side interface macro. Кортеж из четырёх полей имеет ту же
+/// D-Bus signature `(uyayay)`, что и `FanCurveInfo`, поэтому client proxy
+/// декодирует tuple в `FanCurveInfo`.
+type FanCurveTuple = (u32, u8, Vec<u8>, Vec<u8>);
+
+fn asusd_curve_to_wire_tuple(
+    profile: AsusdFanProfile,
+    curve: &crate::fans::AsusdFanCurve,
+) -> FanCurveTuple {
+    (
+        profile.wire(),
+        fan_id_to_wire(&curve.fan),
+        curve.temps.iter().map(|t| t.get() as u8).collect(),
+        curve.pwms.iter().map(|p| p.get()).collect(),
+    )
+}
+
+/// Strict mapping `FanId` → wire `u8` (0=CPU, 1=GPU).
+fn fan_id_to_wire(fan: &FanId) -> u8 {
+    match fan {
+        FanId::Cpu => orbis_session_protocol::fan_id::CPU,
+        FanId::Gpu => orbis_session_protocol::fan_id::GPU,
+        other => panic!("fan_id_to_wire: неподдерживаемый fan {other:?} (только CPU/GPU)"),
+    }
+}
+
+/// Strict decode wire `u8` → `FanId` (0=CPU, 1=GPU).
+fn fan_id_from_wire(raw: u8) -> Result<FanId, ProviderError> {
+    match raw {
+        orbis_session_protocol::fan_id::CPU => Ok(FanId::Cpu),
+        orbis_session_protocol::fan_id::GPU => Ok(FanId::Gpu),
+        other => Err(ProviderError::InvalidRequest(format!(
+            "session: неизвестный fan wire value {other}"
+        ))),
+    }
 }
 
 /// Серверный интерфейс `io.github.orbiscontrol.Session1` (getter-only).
@@ -287,6 +390,38 @@ impl SessionService {
             performance_mask_to_wire(&available),
         ))
     }
+
+    /// Сохранённая fan curve для профиля и вентилятора
+    /// (read-only method, wire signature `(uyayay)`).
+    async fn fan_curve(&self, profile: u32, fan: u8) -> zbus::fdo::Result<FanCurveTuple> {
+        let profile = asusd_fan_profile_from_wire(profile).map_err(provider_error_to_dbus)?;
+        let fan = fan_id_from_wire(fan).map_err(provider_error_to_dbus)?;
+        let curve = self
+            .read_fan_curve(profile, fan.clone())
+            .await
+            .map_err(provider_error_to_dbus)?;
+        let temps: [TemperatureC; 8] = curve
+            .points
+            .iter()
+            .map(|p| p.temp)
+            .collect::<Vec<_>>()
+            .try_into()
+            .map_err(|_| zbus::fdo::Error::Failed("fan curve: 8 точек обязательны".into()))?;
+        let pwms: [FanPwm; 8] = curve
+            .points
+            .iter()
+            .map(|p| p.pwm)
+            .collect::<Vec<_>>()
+            .try_into()
+            .map_err(|_| zbus::fdo::Error::Failed("fan curve: 8 точек обязательны".into()))?;
+        let asusd = crate::fans::AsusdFanCurve {
+            fan,
+            temps,
+            pwms,
+            enabled: true,
+        };
+        Ok(asusd_curve_to_wire_tuple(profile, &asusd))
+    }
 }
 
 #[cfg(test)]
@@ -300,7 +435,7 @@ mod tests {
     use orbis_core::action::ApplyResult;
     use orbis_core::diagnostics::DiagnosticEntry;
     use orbis_core::identity::BackendIdentity;
-    use orbis_core::newtypes::Percent;
+    use orbis_core::newtypes::{FanPwm, Percent, TemperatureC};
     use orbis_providers::error::ValidationResult;
     use orbis_providers::traits::{BatteryProvider, Provider, ProviderHealth};
     use zbus::object_server::Interface;
@@ -876,6 +1011,172 @@ mod tests {
         assert!(matches!(
             svc.performance().await,
             Err(zbus::fdo::Error::NotSupported(_))
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Profile-specific fan curve read (read_fan_curve / fan_curve method)
+    // -----------------------------------------------------------------------
+
+    struct ScriptedAsusdFanSource {
+        cpu_by_profile: std::collections::HashMap<AsusdFanProfile, crate::fans::AsusdFanCurve>,
+        gpu_by_profile: std::collections::HashMap<AsusdFanProfile, crate::fans::AsusdFanCurve>,
+        reads: AtomicUsize,
+    }
+
+    fn asusd_curve(fan: FanId, first_temp: i16, pwm_base: u8) -> crate::fans::AsusdFanCurve {
+        let mut temps = [TemperatureC::new(0).expect("const"); 8];
+        let mut pwms = [FanPwm::new(0).expect("const"); 8];
+        for i in 0..8 {
+            temps[i] = TemperatureC::new(first_temp + i as i16 * 5).expect("temp");
+            pwms[i] = FanPwm::new(pwm_base + i as u8 * 10).expect("pwm");
+        }
+        crate::fans::AsusdFanCurve {
+            fan,
+            temps,
+            pwms,
+            enabled: true,
+        }
+    }
+
+    #[async_trait]
+    impl AsusdFanCurveSource for ScriptedAsusdFanSource {
+        async fn read_curves(
+            &self,
+            profile: AsusdFanProfile,
+        ) -> Result<crate::fans::AsusdFanCurveSet, ProviderError> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            let cpu =
+                self.cpu_by_profile.get(&profile).cloned().ok_or_else(|| {
+                    ProviderError::Unsupported(format!("profile {profile:?} cpu"))
+                })?;
+            let gpu =
+                self.gpu_by_profile.get(&profile).cloned().ok_or_else(|| {
+                    ProviderError::Unsupported(format!("profile {profile:?} gpu"))
+                })?;
+            Ok(crate::fans::AsusdFanCurveSet { profile, cpu, gpu })
+        }
+    }
+
+    impl ScriptedAsusdFanSource {
+        fn reads(&self) -> usize {
+            self.reads.load(Ordering::SeqCst)
+        }
+    }
+
+    fn fan_curve_service() -> (SessionService, Arc<ScriptedAsusdFanSource>) {
+        let source = Arc::new(ScriptedAsusdFanSource {
+            cpu_by_profile: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(AsusdFanProfile::Balanced, asusd_curve(FanId::Cpu, 40, 10));
+                m.insert(AsusdFanProfile::Quiet, asusd_curve(FanId::Cpu, 30, 5));
+                m
+            },
+            gpu_by_profile: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(AsusdFanProfile::Balanced, asusd_curve(FanId::Gpu, 25, 0));
+                m.insert(AsusdFanProfile::Quiet, asusd_curve(FanId::Gpu, 20, 0));
+                m
+            },
+            reads: AtomicUsize::new(0),
+        });
+        let svc = SessionService::new(Arc::new(ScriptedBatteryProvider::new(vec![
+            ScriptedRead::Limit(limit(true, Some(80), 40, 100, 5)),
+        ])))
+        .with_fan_curves(source.clone());
+        (svc, source)
+    }
+
+    #[tokio::test]
+    async fn service_reads_profile_specific_curve_from_own_source() {
+        let (svc, source) = fan_curve_service();
+        let curve = svc
+            .read_fan_curve(AsusdFanProfile::Balanced, FanId::Cpu)
+            .await
+            .expect("balanced curve");
+        assert_eq!(curve.profile, PerformanceProfile::Balanced);
+        assert_eq!(curve.fan, FanId::Cpu);
+        assert_eq!(curve.points[0].temp.get(), 40);
+        assert_eq!(source.reads(), 1);
+    }
+
+    #[tokio::test]
+    async fn service_reads_quiet_pair_returns_own_curve() {
+        // Quiet и Balanced читаются независимо: каждый профиль — собственный
+        // sentinel, а не замена активной кривой.
+        let (svc, source) = fan_curve_service();
+        let quiet = svc
+            .read_fan_curve(AsusdFanProfile::Quiet, FanId::Cpu)
+            .await
+            .expect("quiet curve");
+        assert_eq!(quiet.points[0].temp.get(), 30);
+        assert_eq!(source.reads(), 1);
+
+        let balanced = svc
+            .read_fan_curve(AsusdFanProfile::Balanced, FanId::Cpu)
+            .await
+            .expect("balanced curve");
+        assert_eq!(balanced.points[0].temp.get(), 40);
+        assert_eq!(source.reads(), 2);
+    }
+
+    #[tokio::test]
+    async fn service_cpu_gpu_not_mixed() {
+        let (svc, _) = fan_curve_service();
+        let cpu = svc
+            .read_fan_curve(AsusdFanProfile::Balanced, FanId::Cpu)
+            .await
+            .expect("cpu");
+        let gpu = svc
+            .read_fan_curve(AsusdFanProfile::Balanced, FanId::Gpu)
+            .await
+            .expect("gpu");
+        assert_eq!(cpu.fan, FanId::Cpu);
+        assert_eq!(gpu.fan, FanId::Gpu);
+        assert_eq!(cpu.points[0].temp.get(), 40);
+        assert_eq!(gpu.points[0].temp.get(), 25);
+    }
+
+    #[tokio::test]
+    async fn service_fan_curve_unsupported_when_source_absent() {
+        let (svc, _) = service(vec![ScriptedRead::Limit(limit(true, Some(40), 40, 100, 5))]);
+        let err = svc
+            .read_fan_curve(AsusdFanProfile::Balanced, FanId::Cpu)
+            .await
+            .expect_err("no source");
+        assert!(matches!(err, ProviderError::Unsupported(_)));
+        assert!(matches!(
+            svc.fan_curve(0, 0).await,
+            Err(zbus::fdo::Error::NotSupported(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn service_fan_curve_method_wire_roundtrip() {
+        let (svc, _) = fan_curve_service();
+        let tuple = svc.fan_curve(0, 0).await.expect("method");
+        // (profile, fan, temps, pwms)
+        assert_eq!(tuple.0, orbis_session_protocol::fan_profile::BALANCED);
+        assert_eq!(tuple.1, orbis_session_protocol::fan_id::CPU);
+        assert_eq!(tuple.2.len(), 8);
+        assert_eq!(tuple.2[0], 40);
+        assert_eq!(tuple.2[7], 75);
+        assert_eq!(tuple.3[0], 10);
+        assert_eq!(tuple.3[7], 80);
+    }
+
+    #[tokio::test]
+    async fn service_fan_curve_method_rejects_unknown_wire() {
+        let (svc, _) = fan_curve_service();
+        // unknown profile wire → Internal → Failed (strict decode без fallback).
+        assert!(matches!(
+            svc.fan_curve(7, 0).await,
+            Err(zbus::fdo::Error::Failed(_))
+        ));
+        // unknown fan wire → InvalidArgs.
+        assert!(matches!(
+            svc.fan_curve(0, 9).await,
+            Err(zbus::fdo::Error::InvalidArgs(_))
         ));
     }
 }

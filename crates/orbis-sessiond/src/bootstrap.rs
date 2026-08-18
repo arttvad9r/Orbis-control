@@ -7,6 +7,7 @@ use orbis_providers::error::ProviderError;
 
 use crate::armoury::{ArmouryGpuProvider, SysfsArmouryGpuSource};
 use crate::composition::build_upower_session_server;
+use crate::fans::{AsusdFanCurveSource, ZbusAsusdFanCurveSource};
 use crate::performance::{KernelPerformanceProvider, SysfsKernelPlatformProfileSource};
 use crate::server::GpuCapabilities;
 use crate::supergfxd::{SupergfxdGpuPowerProvider, ZbusSupergfxdGpuPowerSource};
@@ -45,6 +46,7 @@ pub async fn connect_upower_session_server(
         battery_object_path,
         battery_native_path,
         GpuCapabilities::default(),
+        None,
         None,
     )
     .await
@@ -91,6 +93,11 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
         KernelPerformanceProvider::new(SysfsKernelPlatformProfileSource::default()),
     );
 
+    // Read-only asusd fan curve source (profile-specific curves): переиспользуем
+    // ту же system connection. Fan curve reads идут через sessiond, НЕ из GUI.
+    let fan_curves: Arc<dyn AsusdFanCurveSource> =
+        Arc::new(ZbusAsusdFanCurveSource::new(upower_connection.clone()));
+
     Ok(build_upower_session_server(
         session_builder,
         upower_connection,
@@ -98,6 +105,7 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
         battery.native_path,
         gpu,
         Some(performance),
+        Some(fan_curves),
     )
     .await?)
 }
