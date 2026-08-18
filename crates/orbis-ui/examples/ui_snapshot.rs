@@ -98,8 +98,8 @@ fn main() -> anyhow::Result<()> {
     let (width, height) = match kind.as_str() {
         "fans" => (760, 590),
         "extra" => (560, 760),
-        "automation" => (700, 540),
-        "preferences" => (580, 530),
+        "automation" => (700, 600),
+        "preferences" => (580, 550),
         "diagnostics" => (640, 540),
         "updates" => (470, 350),
         "dialog" => (430, 230),
