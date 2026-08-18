@@ -43,11 +43,11 @@ export component ExtraWindow inherits Window {
         width: parent.width;
         height: parent.height;
         viewport-width: scroll.width - 18px;
-        viewport-height: 2100px;
+        viewport-height: 1920px;
 
         VerticalLayout {
             width: scroll.width - 18px;
-            height: 2100px;
+            height: 1920px;
             padding-left: 10px; padding-right: 10px; padding-top: 10px; padding-bottom: 10px;
             spacing: 7px;
 
@@ -92,62 +92,75 @@ export component ExtraWindow inherits Window {
                 }
             }
 
-            SectionTitle { title: "Other / Settings"; }
+            SectionTitle { title: "Other / Settings"; detail: "Compact two-column layout"; }
             SectionCard {
-                height: 402px;
-                VerticalLayout { padding: 8px; spacing: 0px;
-                    ToggleRow { label: "Auto clamshell mode"; checked <=> root.auto-clamshell; }
-                    ToggleRow { label: "Always on top"; checked <=> root.topmost; }
-                    ToggleRow { label: "Disable panel overdrive automation"; checked <=> root.no-overdrive; }
-                    ToggleRow { label: "Boot sound"; checked <=> root.boot-sound; }
-                    ToggleRow { label: "Keystone sound"; checked <=> root.keystone-sound; }
-                    ToggleRow { label: "Keep GPU disabled on USB-C charger in Optimized mode"; checked <=> root.usb-c; }
-                    ToggleRow { label: "Stop all apps using GPU when switching to Eco"; checked <=> root.gpu-apps; }
-                    ToggleRow { label: "Stop/Start NVIDIA services based on dGPU state"; checked <=> root.nv-platform; }
-                    ToggleRow { label: "LED Status Indicators"; checked <=> root.status-led; }
-                    ToggleRow { label: "Touchpad NumberPad"; checked <=> root.number-pad; }
-                    ToggleRow { label: "Disable PCIe Link State Management (plugged in)"; checked <=> root.aspm; }
-                    ToggleRow { label: "Disable networking in Modern Standby"; checked <=> root.standby-networking; }
+                height: 218px;
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 0px;
+                        ToggleRow { label: "Auto clamshell mode"; checked <=> root.auto-clamshell; }
+                        ToggleRow { label: "Always on top"; checked <=> root.topmost; }
+                        ToggleRow { label: "Disable panel overdrive automation"; checked <=> root.no-overdrive; }
+                        ToggleRow { label: "Boot sound"; checked <=> root.boot-sound; }
+                        ToggleRow { label: "Keystone sound"; checked <=> root.keystone-sound; }
+                        ToggleRow { label: "Status LEDs"; checked <=> root.status-led; }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 0px;
+                        ToggleRow { label: "Keep GPU disabled on USB-C charger"; checked <=> root.usb-c; }
+                        ToggleRow { label: "Stop GPU apps when switching to Eco"; checked <=> root.gpu-apps; }
+                        ToggleRow { label: "Manage NVIDIA services with dGPU"; checked <=> root.nv-platform; }
+                        ToggleRow { label: "Touchpad NumberPad"; checked <=> root.number-pad; }
+                        ToggleRow { label: "Disable PCIe ASPM (plugged in)"; checked <=> root.aspm; }
+                        ToggleRow { label: "Disable networking in Modern Standby"; checked <=> root.standby-networking; }
+                    }
                 }
             }
 
             SectionTitle { title: "Power"; }
-            SectionCard { height: 50px; NumericRow { x: 8px; y: 7px; width: parent.width - 16px; label: "Hibernate after"; unit: "min"; minimum: 0; maximum: 1440; step-size: 5; value <=> root.hibernate-after; } }
+            SectionCard {
+                height: 50px;
+                NumericRow { x: 12px; y: 7px; width: 360px; label: "Hibernate after"; unit: "min"; minimum: 0; maximum: 1440; step-size: 5; value <=> root.hibernate-after; }
+            }
 
             SectionTitle { title: "iGPU Memory"; }
-            SectionCard { height: 50px; SelectRow { x: 8px; y: 7px; width: parent.width - 16px; label: "UMA frame buffer"; model: ["Auto", "512 MB", "1 GB", "2 GB", "4 GB", "8 GB"]; current-index <=> root.igpu-memory; } }
+            SectionCard {
+                height: 50px;
+                SelectRow { x: 12px; y: 7px; width: 360px; label: "UMA frame buffer"; model: ["Auto", "512 MB", "1 GB", "2 GB", "4 GB", "8 GB"]; current-index <=> root.igpu-memory; }
+            }
 
             SectionTitle { title: "CPU Cores"; }
             SectionCard {
                 height: 124px;
-                VerticalLayout { padding: 8px; spacing: 2px;
-                    NumericRow { label: "Performance cores"; minimum: 1; maximum: 32; value <=> root.p-cores; }
-                    NumericRow { label: "Efficiency cores"; minimum: 0; maximum: 32; value <=> root.e-cores; }
-                    HorizontalLayout { height: 28px; ActionButton { width: 105px; label: "Apply Cores"; accent: true; clicked => { root.local-status = "CPU core selection applied locally"; } } Rectangle { horizontal-stretch: 1; background: transparent; } }
-                }
+                NumericRow { x: 12px; y: 8px; width: 360px; label: "Performance cores"; minimum: 1; maximum: 32; value <=> root.p-cores; }
+                NumericRow { x: 12px; y: 46px; width: 360px; label: "Efficiency cores"; minimum: 0; maximum: 32; value <=> root.e-cores; }
+                ActionButton { x: 12px; y: 86px; width: 105px; label: "Apply Cores"; accent: true; clicked => { root.local-status = "CPU core selection applied locally"; } }
             }
 
             SectionTitle { title: "ACPI DEVS"; }
             SectionCard {
                 height: 126px;
-                VerticalLayout { padding: 8px; spacing: 2px;
-                    TextInputRow { label: "Command"; placeholder: "Device command"; text <=> root.acpi-command; }
-                    TextInputRow { label: "Parameter"; placeholder: "Value / parameter"; text <=> root.acpi-param; }
-                    HorizontalLayout { height: 28px; ActionButton { width: 90px; label: "Send"; accent: true; clicked => { root.local-status = root.acpi-command == "" ? "Enter an ACPI command first" : "ACPI command staged locally"; } } Rectangle { horizontal-stretch: 1; background: transparent; } }
-                }
+                TextInputRow { x: 12px; y: 8px; width: 400px; label: "Command"; placeholder: "Device command"; text <=> root.acpi-command; }
+                TextInputRow { x: 12px; y: 46px; width: 400px; label: "Parameter"; placeholder: "Value / parameter"; text <=> root.acpi-param; }
+                ActionButton { x: 12px; y: 88px; width: 90px; label: "Send"; accent: true; clicked => { root.local-status = root.acpi-command == "" ? "Enter an ACPI command first" : "ACPI command staged locally"; } }
             }
 
             SectionTitle { title: "Optimal Brightness"; }
-            SectionCard { height: 50px; SelectRow { x: 8px; y: 7px; width: parent.width - 16px; label: "Policy"; model: ["Off", "On Always", "On Battery"]; current-index <=> root.optimal-brightness; } }
+            SectionCard {
+                height: 50px;
+                SelectRow { x: 12px; y: 7px; width: 360px; label: "Policy"; model: ["Off", "On Always", "On Battery"]; current-index <=> root.optimal-brightness; }
+            }
 
             SectionTitle { title: "ASUS Services"; }
             SectionCard {
                 height: 128px;
-                VerticalLayout { padding: 6px; spacing: 0px;
-                    ToggleRow { label: "asusd"; description: "ASUS platform service"; checked <=> root.asusd-service; }
-                    ToggleRow { label: "supergfxd"; description: "GPU lifecycle service"; checked <=> root.supergfx-service; }
-                    HorizontalLayout { height: 28px; ActionButton { width: 110px; label: "Start Services"; clicked => { root.asusd-service = true; root.supergfx-service = true; root.local-status = "Services marked running in preview"; } } Rectangle { horizontal-stretch: 1; background: transparent; } }
-                }
+                ToggleRow { x: 12px; y: 5px; width: 360px; label: "asusd"; description: "ASUS platform service"; checked <=> root.asusd-service; }
+                ToggleRow { x: 12px; y: 47px; width: 360px; label: "supergfxd"; description: "GPU lifecycle service"; checked <=> root.supergfx-service; }
+                ActionButton { x: 12px; y: 94px; width: 110px; label: "Start Services"; clicked => { root.asusd-service = true; root.supergfx-service = true; root.local-status = "Services marked running in preview"; } }
             }
         }
     }
