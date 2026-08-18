@@ -14,6 +14,7 @@
 #![warn(missing_docs)]
 
 pub mod error;
+pub mod fan_defaults;
 pub mod native_asus_eco;
 pub mod probes;
 pub mod supergfxd;
@@ -24,6 +25,7 @@ pub mod traits;
 pub mod mock;
 
 pub use error::{OperationId, ProviderError, ValidationResult};
+pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 pub use native_asus_eco::*;
 pub use probes::{
     probe_charge_limit, probe_fan_curve, probe_gpu_access, probe_gpu_mux, probe_gpu_power,

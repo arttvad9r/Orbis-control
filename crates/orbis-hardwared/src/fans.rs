@@ -1,17 +1,18 @@
 //! Internal ASUS fan curve mutation backend.
 //!
 //! Единственный owner fan curve writes — `asusd` (ADR 0011). Этот модуль
-//! вызывает typed `xyz.ljones.FanCurves.SetFanCurve` D-Bus setter и выполняет
-//! fresh `FanCurveData(profile)` read-back. Никаких direct sysfs writes.
+//! вызывает typed `xyz.ljones.FanCurves` D-Bus methods и выполняет fresh
+//! `FanCurveData(profile)` read-back. Никаких direct sysfs writes.
 //!
 //! - closed API: принимает lossless `AsusdFanProfile` + fan (CPU/GPU) + ровно
-//!   8 `(TemperatureC, FanPwm)` точек; никаких path/string/arbitrary args;
-//! - validation выполняется ДО setter;
+//!   8 `(TemperatureC, FanPwm)` точек для custom curve writes;
+//! - factory defaults reset принимает только lossless profile и является
+//!   profile-wide, как upstream asusd contract;
+//! - validation выполняется ДО custom setter;
 //! - setter вызывается только для выбранного fan (не batch CPU+GPU);
-//! - read-back обязателен: success только если нужная fan curve совпала
-//!   полностью;
+//! - read-back обязателен для custom write и factory reset;
 //! - `FanPwm` raw 0..255, не percent;
-//! - никаких `SetFanCurvesEnabled`/`SetProfileFanCurveEnabled`/defaults/reset.
+//! - никаких generic sysfs/DBus/path/string mutation API.
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
@@ -36,7 +37,7 @@ pub struct FanCurvePoints {
     pub pwms: [FanPwm; CURVE_POINT_COUNT],
 }
 
-/// Typed asusd FanCurves operations required by the mutation algorithm.
+/// Typed asusd FanCurves operations required by the mutation algorithms.
 #[async_trait]
 pub trait AsusdFanCurveClient: Send + Sync {
     /// Установить кривую для одного вентилятора профиля.
@@ -45,6 +46,12 @@ pub trait AsusdFanCurveClient: Send + Sync {
         profile: AsusdFanProfile,
         fan: &FanId,
         curve: &FanCurvePoints,
+    ) -> Result<(), ProviderError>;
+
+    /// Reset all supported fan curves of one profile to platform defaults.
+    async fn reset_curves_to_defaults(
+        &self,
+        profile: AsusdFanProfile,
     ) -> Result<(), ProviderError>;
 
     /// Прочитать сохранённые кривые профиля (fresh read-back).
@@ -83,6 +90,8 @@ trait AsusdFanCurves {
         profile: u32,
         curve: (String, [u8; 8], [u8; 8], bool),
     ) -> zbus::Result<()>;
+
+    fn set_curves_to_defaults(&self, profile: u32) -> zbus::Result<()>;
 
     fn fan_curve_data(&self, profile: u32) -> zbus::Result<Vec<AsusdCurveWire>>;
 }
@@ -124,6 +133,17 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
             .map_err(|error| ProviderError::Dbus(format!("asusd SetFanCurve: {error}")))
     }
 
+    async fn reset_curves_to_defaults(
+        &self,
+        profile: AsusdFanProfile,
+    ) -> Result<(), ProviderError> {
+        self.proxy()
+            .await?
+            .set_curves_to_defaults(profile.wire())
+            .await
+            .map_err(|error| ProviderError::Dbus(format!("asusd SetCurvesToDefaults: {error}")))
+    }
+
     async fn read_curves(
         &self,
         profile: AsusdFanProfile,
@@ -144,6 +164,15 @@ pub struct FanCurveMutationReadback {
     pub result: ApplyResult,
 }
 
+/// Fresh result of a profile-wide factory-default reset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FanCurveDefaultsReadback {
+    pub requested_profile: AsusdFanProfile,
+    pub result: ApplyResult,
+    /// Number of recognized fan curves in the authoritative post-reset read.
+    pub observed_curves: usize,
+}
+
 /// Trait для fan curve mutation backend (для trait object в HardwareService).
 #[async_trait]
 pub trait FanCurveMutationOperation: Send + Sync {
@@ -153,6 +182,13 @@ pub trait FanCurveMutationOperation: Send + Sync {
         fan: &FanId,
         curve: &FanCurvePoints,
     ) -> Result<FanCurveMutationReadback, ProviderError>;
+
+    /// Restore platform defaults for all supported fans of `profile` and
+    /// require a fresh readable FanCurveData observation afterwards.
+    async fn reset_curves_to_defaults(
+        &self,
+        profile: AsusdFanProfile,
+    ) -> Result<FanCurveDefaultsReadback, ProviderError>;
 }
 
 /// Validate the public fan curve input without contacting any backend.
@@ -245,6 +281,32 @@ where
             result: ApplyResult::Applied,
         })
     }
+
+    /// Ask asusd to restore platform defaults for the whole profile, then
+    /// perform a fresh FanCurveData read. The current upstream asusd reset is
+    /// inherently a mutation, so Orbis never calls this for UI preview; it is
+    /// invoked only from the explicit Apply path.
+    pub async fn reset_curves_to_defaults(
+        &self,
+        profile: AsusdFanProfile,
+    ) -> Result<FanCurveDefaultsReadback, ProviderError> {
+        self.asusd.reset_curves_to_defaults(profile).await?;
+        let raw = self.asusd.read_curves(profile).await?;
+        let observed_curves = raw
+            .iter()
+            .filter(|(name, _, _, _)| matches!(name.as_str(), "CPU" | "GPU" | "MID"))
+            .count();
+        if observed_curves == 0 {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "hardwared: factory-default reset completed but FanCurveData returned no recognized curves (profile={profile:?})"
+            )));
+        }
+        Ok(FanCurveDefaultsReadback {
+            requested_profile: profile,
+            result: ApplyResult::Applied,
+            observed_curves,
+        })
+    }
 }
 
 #[async_trait]
@@ -259,6 +321,13 @@ where
         curve: &FanCurvePoints,
     ) -> Result<FanCurveMutationReadback, ProviderError> {
         self.set_fan_curve(profile, fan, curve).await
+    }
+
+    async fn reset_curves_to_defaults(
+        &self,
+        profile: AsusdFanProfile,
+    ) -> Result<FanCurveDefaultsReadback, ProviderError> {
+        self.reset_curves_to_defaults(profile).await
     }
 }
 
@@ -360,7 +429,6 @@ mod tests {
             let profile = fan_profile_from_wire(wire).expect("valid");
             assert_eq!(fan_profile_to_wire(profile), wire);
         }
-        // Quiet и LowPower различимы.
         assert_ne!(
             fan_profile_from_wire(2).unwrap(),
             fan_profile_from_wire(3).unwrap()
@@ -424,7 +492,6 @@ mod tests {
 
     #[test]
     fn validate_accepts_raw_pwm_above_100() {
-        // Raw PWM 112 > 100 допустим (не percent).
         let c = curve(
             [40, 42, 43, 60, 65, 69, 74, 78],
             [5, 20, 38, 43, 56, 66, 84, 112],
@@ -438,16 +505,13 @@ mod tests {
             temps: vec![45; 8],
             pwms: vec![5; 8],
         };
-        // 255 допустим:
         wire.pwms[7] = 255;
         assert!(fan_curve_from_wire(&wire).is_ok());
-        // temp 200 вне диапазона:
         wire.temps[7] = 200;
         assert!(matches!(
             fan_curve_from_wire(&wire),
             Err(ProviderError::InvalidRequest(_))
         ));
-        // Неверное количество точек:
         let short = FanCurveWire {
             temps: vec![45; 7],
             pwms: vec![5; 7],
@@ -458,15 +522,16 @@ mod tests {
         ));
     }
 
-    /// Fake asusd client для deterministic тестов.
     type StoredCurves = std::collections::HashMap<(u32, String), (Vec<u8>, Vec<u8>)>;
 
     struct FakeAsusd {
         stored: std::sync::Mutex<StoredCurves>,
         fail_setter: std::sync::atomic::AtomicBool,
+        fail_reset: std::sync::atomic::AtomicBool,
         fail_readback: std::sync::atomic::AtomicBool,
         mismatch_readback: std::sync::atomic::AtomicBool,
         setter_calls: std::sync::atomic::AtomicUsize,
+        reset_calls: std::sync::atomic::AtomicUsize,
     }
 
     impl FakeAsusd {
@@ -474,9 +539,11 @@ mod tests {
             Self {
                 stored: std::sync::Mutex::new(StoredCurves::new()),
                 fail_setter: std::sync::atomic::AtomicBool::new(false),
+                fail_reset: std::sync::atomic::AtomicBool::new(false),
                 fail_readback: std::sync::atomic::AtomicBool::new(false),
                 mismatch_readback: std::sync::atomic::AtomicBool::new(false),
                 setter_calls: std::sync::atomic::AtomicUsize::new(0),
+                reset_calls: std::sync::atomic::AtomicUsize::new(0),
             }
         }
     }
@@ -504,6 +571,28 @@ mod tests {
             Ok(())
         }
 
+        async fn reset_curves_to_defaults(
+            &self,
+            profile: AsusdFanProfile,
+        ) -> Result<(), ProviderError> {
+            self.reset_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fail_reset.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(ProviderError::Dbus("reset failed".into()));
+            }
+            let mut stored = self.stored.lock().unwrap();
+            for (name, temps, pwms) in [
+                ("CPU", [50u8, 55, 60, 65, 70, 75, 79, 85], [0u8, 8, 13, 26, 36, 54, 77, 100]),
+                ("GPU", [50u8, 55, 60, 65, 70, 75, 79, 85], [0u8, 8, 13, 26, 36, 54, 77, 100]),
+            ] {
+                stored.insert(
+                    (profile.wire(), name.to_string()),
+                    (temps.to_vec(), pwms.to_vec()),
+                );
+            }
+            Ok(())
+        }
+
         async fn read_curves(
             &self,
             profile: AsusdFanProfile,
@@ -525,7 +614,6 @@ mod tests {
                     .mismatch_readback
                     .load(std::sync::atomic::Ordering::SeqCst)
                 {
-                    // Возвращаем кривую с изменённым последним PWM → mismatch.
                     p[7] = p[7].wrapping_add(1);
                 }
                 out.push((name.1.clone(), t, p, false));
@@ -543,6 +631,13 @@ mod tests {
             curve: &FanCurvePoints,
         ) -> Result<(), ProviderError> {
             (**self).set_fan_curve(profile, fan, curve).await
+        }
+
+        async fn reset_curves_to_defaults(
+            &self,
+            profile: AsusdFanProfile,
+        ) -> Result<(), ProviderError> {
+            (**self).reset_curves_to_defaults(profile).await
         }
 
         async fn read_curves(
@@ -576,11 +671,41 @@ mod tests {
             .set_fan_curve(AsusdFanProfile::Balanced, &FanId::Cpu, &curve)
             .await
             .expect("success");
-        // setter вызван ровно один раз (только CPU, не batch).
         assert_eq!(
             asusd.setter_calls.load(std::sync::atomic::Ordering::SeqCst),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn factory_reset_is_profile_wide_and_read_back() {
+        let asusd = FakeAsusd::new();
+        let backend = AsusdFanCurveMutationBackend::new(&asusd);
+        let result = backend
+            .reset_curves_to_defaults(AsusdFanProfile::Quiet)
+            .await
+            .expect("reset");
+        assert_eq!(result.result, ApplyResult::Applied);
+        assert_eq!(result.requested_profile, AsusdFanProfile::Quiet);
+        assert_eq!(result.observed_curves, 2);
+        assert_eq!(
+            asusd.reset_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn factory_reset_error_short_circuits_readback() {
+        let asusd = FakeAsusd::new();
+        asusd
+            .fail_reset
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let backend = AsusdFanCurveMutationBackend::new(&asusd);
+        let err = backend
+            .reset_curves_to_defaults(AsusdFanProfile::Balanced)
+            .await
+            .expect_err("reset error");
+        assert!(matches!(err, ProviderError::Dbus(_)));
     }
 
     #[tokio::test]
@@ -613,7 +738,6 @@ mod tests {
 
     #[tokio::test]
     async fn readback_mismatch_is_error() {
-        // Setter сохраняет, но read-back возвращает другую кривую → mismatch.
         let asusd = FakeAsusd::new();
         asusd
             .mismatch_readback
@@ -631,7 +755,6 @@ mod tests {
     async fn validation_happens_before_setter() {
         let asusd = FakeAsusd::new();
         let backend = AsusdFanCurveMutationBackend::new(&asusd);
-        // Невалидная кривая (убывающие PWM) → reject до setter.
         let bad = curve(
             [45, 49, 54, 68, 74, 79, 84, 89],
             [50, 22, 38, 45, 56, 63, 81, 94],
@@ -648,18 +771,10 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Regression: wire order + PWM >100 roundtrip
-    // -----------------------------------------------------------------------
-
-    /// Verify that wire order is (name, temps, pwms, enabled) by writing a
-    /// curve with PWM > 100 and reading it back. If arrays were swapped,
-    /// the readback would return temps where pwms should be and vice versa.
     #[tokio::test]
     async fn wire_roundtrip_pwm_above_100_preserves_arrays() {
         let asusd = FakeAsusd::new();
         let backend = AsusdFanCurveMutationBackend::new(&asusd);
-        // PWM 112 > 100 — raw hwmon value, not percent.
         let input = curve(
             [40, 42, 43, 60, 65, 69, 74, 78],
             [5, 20, 38, 43, 56, 66, 84, 112],
@@ -670,27 +785,15 @@ mod tests {
             .expect("success");
         assert_eq!(result.result, ApplyResult::Applied);
 
-        // Read back: FakeAsusd returns the exact wire that was stored.
         let raw = asusd.read_curves(AsusdFanProfile::Balanced).await.unwrap();
         let gpu = raw
             .iter()
             .find(|(n, _, _, _)| n == "GPU")
             .expect("GPU entry");
-        // temps must remain temps (not pwms), pwms must remain pwms.
-        assert_eq!(
-            gpu.1,
-            [40, 42, 43, 60, 65, 69, 74, 78],
-            "temps array must match input temps"
-        );
-        assert_eq!(
-            gpu.2,
-            [5, 20, 38, 43, 56, 66, 84, 112],
-            "pwms array must match input pwms"
-        );
+        assert_eq!(gpu.1, [40, 42, 43, 60, 65, 69, 74, 78]);
+        assert_eq!(gpu.2, [5, 20, 38, 43, 56, 66, 84, 112]);
     }
 
-    /// Verify that FakeAsusd roundtrip preserves per-fan isolation:
-    /// writing CPU does not affect GPU and vice versa, even with PWM > 100.
     #[tokio::test]
     async fn per_fan_wire_roundtrip_pwm_above_100() {
         let asusd = FakeAsusd::new();
@@ -715,19 +818,14 @@ mod tests {
         let raw = asusd.read_curves(AsusdFanProfile::Balanced).await.unwrap();
         let cpu_entry = raw.iter().find(|(n, _, _, _)| n == "CPU").expect("CPU");
         let gpu_entry = raw.iter().find(|(n, _, _, _)| n == "GPU").expect("GPU");
-
-        // CPU temps must not be confused with GPU pwms.
         assert_eq!(cpu_entry.1, [45, 49, 54, 68, 74, 79, 84, 89]);
         assert_eq!(cpu_entry.2, [5, 22, 38, 45, 56, 63, 81, 94]);
-        // GPU pwms 112 must survive roundtrip.
         assert_eq!(gpu_entry.1, [40, 42, 43, 60, 65, 69, 74, 78]);
         assert_eq!(gpu_entry.2, [5, 20, 38, 43, 56, 66, 84, 112]);
     }
 
-    /// FanCurveWire decode roundtrip with PWM > 100.
     #[test]
     fn fan_curve_from_wire_pwm_above_100_roundtrip() {
-        use super::{FanCurveWire, fan_curve_from_wire};
         let input = FanCurveWire {
             temps: vec![40, 42, 43, 60, 65, 69, 74, 78],
             pwms: vec![5, 20, 38, 43, 56, 66, 84, 112],
@@ -735,7 +833,6 @@ mod tests {
         let decoded = fan_curve_from_wire(&input).expect("decode");
         assert_eq!(decoded.temps[7].get(), 78);
         assert_eq!(decoded.pwms[7].get(), 112);
-        // Encode back.
         let encoded = FanCurveWire {
             temps: decoded.temps.iter().map(|t| t.get() as u8).collect(),
             pwms: decoded.pwms.iter().map(|p| p.get()).collect(),
