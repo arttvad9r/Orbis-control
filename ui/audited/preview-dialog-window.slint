@@ -7,6 +7,7 @@ export component PreviewDialogWindow inherits Window {
     title: "Orbis Control";
     background: Palette.window-background;
     in-out property <int> kind: 0;
+    callback dismiss-clicked;
 
     VerticalLayout {
         padding: 12px; spacing: 9px;
@@ -24,8 +25,8 @@ export component PreviewDialogWindow inherits Window {
         }
         HorizontalLayout { height: 28px; spacing: 6px;
             Rectangle { horizontal-stretch: 1; background: transparent; }
-            if (root.kind != 2) : ActionButton { width: 90px; label: "Cancel"; clicked => { root.hide(); } }
-            ActionButton { width: 112px; label: root.kind == 0 ? "Reboot Later" : root.kind == 1 ? "Logout Later" : root.kind == 2 ? "Close" : "Confirm"; accent: root.kind != 2; clicked => { root.hide(); } }
+            if (root.kind != 2) : ActionButton { width: 90px; label: "Cancel"; clicked => { root.dismiss-clicked(); } }
+            ActionButton { width: 112px; label: root.kind == 0 ? "Reboot Later" : root.kind == 1 ? "Logout Later" : root.kind == 2 ? "Close" : "Confirm"; accent: root.kind != 2; clicked => { root.dismiss-clicked(); } }
         }
     }
 }
