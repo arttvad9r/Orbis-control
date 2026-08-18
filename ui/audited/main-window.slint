@@ -46,6 +46,7 @@ export component AppWindow inherits Window {
     callback diagnostics-clicked;
     callback updates-clicked;
     callback preview-dialog-clicked(int);
+    callback quit-clicked;
 
     property <int> screen-preview: 2;
     property <float> dimming-preview: 100;
@@ -215,7 +216,7 @@ export component AppWindow inherits Window {
             ActionButton { width: 72px; label: "Donate"; clicked => { root.support-note = !root.support-note; root.more-open = false; } }
             ActionButton { width: 64px; label: "More"; accent: root.more-open; clicked => { root.more-open = !root.more-open; root.support-note = false; } }
             ActionButton { width: 72px; label: "Updates"; clicked => { root.updates-clicked(); root.more-open = false; } }
-            ActionButton { width: 62px; label: "Quit"; clicked => { root.close(); } }
+            ActionButton { width: 62px; label: "Quit"; clicked => { root.quit-clicked(); } }
         }
     }
 

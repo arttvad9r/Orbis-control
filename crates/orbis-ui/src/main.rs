@@ -927,6 +927,33 @@ fn wire_callbacks(
         }
     });
     {
+        let app_weak = app.as_weak();
+        app.on_quit_clicked(move || {
+            FANS_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() { let _ = window.hide(); }
+            });
+            EXTRA_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() { let _ = window.hide(); }
+            });
+            AUTOMATION_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() { let _ = window.hide(); }
+            });
+            PREFERENCES_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() { let _ = window.hide(); }
+            });
+            DIAGNOSTICS_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() { let _ = window.hide(); }
+            });
+            UPDATES_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() { let _ = window.hide(); }
+            });
+            PREVIEW_DIALOG_WINDOW.with(|slot| {
+                if let Some(window) = slot.borrow().as_ref() { let _ = window.hide(); }
+            });
+            if let Some(app) = app_weak.upgrade() { let _ = app.hide(); }
+        });
+    }
+    {
         let worker_tx = worker_tx.clone();
         let app_weak = app.as_weak();
         app.on_fan_changed(move |i| {
