@@ -131,10 +131,7 @@ impl BusPresenceQuery for ZbusPresenceQuery<'_> {
             .await
             .map_err(map_fdo_error)?;
         let bus_name = BusName::try_from(bus_name).map_err(|_| PresenceQueryError::Unknown)?;
-        proxy
-            .name_has_owner(bus_name)
-            .await
-            .map_err(map_fdo_error)
+        proxy.name_has_owner(bus_name).await.map_err(map_fdo_error)
     }
 
     async fn list_activatable_names(&self) -> Result<Vec<String>, PresenceQueryError> {
@@ -255,7 +252,11 @@ mod tests {
             )
         );
         assert_eq!(
-            (ASUSD_SERVICE.service(), ASUSD_SERVICE.bus(), ASUSD_SERVICE.bus_name()),
+            (
+                ASUSD_SERVICE.service(),
+                ASUSD_SERVICE.bus(),
+                ASUSD_SERVICE.bus_name()
+            ),
             (
                 DiagnosticsServiceId::Asusd,
                 ServiceBusScope::System,
@@ -295,7 +296,10 @@ mod tests {
     async fn owner_absent_but_known_activatable_means_activatable() {
         let query = FakeQuery::new(
             Ok(false),
-            Ok(vec![ORBIS_SESSION_BUS_NAME.to_owned(), "other.service".into()]),
+            Ok(vec![
+                ORBIS_SESSION_BUS_NAME.to_owned(),
+                "other.service".into(),
+            ]),
         );
         let diagnostics = check_with_query(
             &query,
