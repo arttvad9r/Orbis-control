@@ -1152,12 +1152,12 @@ impl Platform for SoftwarePlatform {
 }
 
 fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<()> {
-    let height = window_height(state) as u32;
+    let height = 680u32;
     let renderer = Rc::new(slint::platform::software_renderer::SoftwareRenderer::new());
     let adapter = Rc::new(SoftwareWindowAdapter {
         renderer: renderer.clone(),
         window: OnceCell::new(),
-        size: Cell::new(PhysicalSize::new(425, height)),
+        size: Cell::new(PhysicalSize::new(500, height)),
     });
     {
         let dyn_adapter: Rc<dyn WindowAdapter> = adapter.clone();
@@ -1168,7 +1168,7 @@ fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<
     slint::platform::set_platform(Box::new(SoftwarePlatform { adapter })).expect("platform once");
 
     let app = build_app(state, None, None)?;
-    app.window().set_size(LogicalSize::new(425.0, height as f32));
+    app.window().set_size(LogicalSize::new(500.0, height as f32));
     app.show()?;
 
     let size = app.window().size();
@@ -1232,7 +1232,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let app = build_app(&state, Some(worker_tx.clone()), Some(fan_defaults))?;
-    app.window().set_size(LogicalSize::new(425.0, window_height(&state)));
+    app.window().set_size(LogicalSize::new(500.0, 680.0));
 
     let weak = app.as_weak();
     let event_sink = move |event: WorkerEvent| {

@@ -156,7 +156,7 @@ component MiniCurveChart inherits Rectangle {
     Text { x: 3px; y: 139px; width: 29px; text: "0"; font-size: 7px; color: Palette.text-secondary; horizontal-alignment: right; }
     Text { x: 34px; y: 150px; width: 46px; text: root.axis-min + "°"; font-size: 7px; color: Palette.text-secondary; }
     Text { x: parent.width - 74px; y: 150px; width: 62px; text: root.axis-max + "°"; font-size: 7px; color: Palette.text-secondary; horizontal-alignment: right; }
-    touch := TouchArea { clicked => { root.selected(root.fan-id); } }
+    touch := TouchArea { enabled: !root.active; clicked => { root.selected(root.fan-id); } }
 }
 
 component PowerPanel inherits Rectangle {

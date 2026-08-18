@@ -103,13 +103,13 @@ export component ExtraWindow inherits Window {
                     ToggleRow { label: "Disable panel overdrive automation"; checked <=> root.no-overdrive; }
                     ToggleRow { label: "Boot sound"; checked <=> root.boot-sound; }
                     ToggleRow { label: "Keystone sound"; checked <=> root.keystone-sound; }
-                    ToggleRow { label: "USB-C charger profile"; checked <=> root.usb-c; }
-                    ToggleRow { label: "Warn about GPU applications"; checked <=> root.gpu-apps; }
-                    ToggleRow { label: "NVIDIA platform integration"; checked <=> root.nv-platform; }
-                    ToggleRow { label: "Status LEDs"; checked <=> root.status-led; }
-                    ToggleRow { label: "NumberPad"; checked <=> root.number-pad; }
-                    ToggleRow { label: "PCIe ASPM"; checked <=> root.aspm; }
-                    ToggleRow { label: "Standby networking"; checked <=> root.standby-networking; }
+                    ToggleRow { label: "Keep GPU disabled on USB-C charger in Optimized mode"; checked <=> root.usb-c; }
+                    ToggleRow { label: "Stop all apps using GPU when switching to Eco"; checked <=> root.gpu-apps; }
+                    ToggleRow { label: "Stop/Start NVIDIA services based on dGPU state"; checked <=> root.nv-platform; }
+                    ToggleRow { label: "LED Status Indicators"; checked <=> root.status-led; }
+                    ToggleRow { label: "Touchpad NumberPad"; checked <=> root.number-pad; }
+                    ToggleRow { label: "Disable PCIe Link State Management (plugged in)"; checked <=> root.aspm; }
+                    ToggleRow { label: "Disable networking in Modern Standby"; checked <=> root.standby-networking; }
                 }
             }
 
