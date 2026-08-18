@@ -14,6 +14,7 @@
 #![warn(missing_docs)]
 
 pub mod asus_armoury;
+pub mod aura;
 pub mod error;
 pub mod fan_defaults;
 pub mod keyboard_backlight;
@@ -28,6 +29,7 @@ pub mod wayland_output;
 pub mod mock;
 
 pub use asus_armoury::*;
+pub use aura::*;
 pub use error::{OperationId, ProviderError, ValidationResult};
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 pub use keyboard_backlight::*;

@@ -6,6 +6,7 @@ use async_trait::async_trait;
 
 use orbis_capabilities::engine::CapabilityPart;
 use orbis_core::action::{ActionRequirement, ApplyResult};
+use orbis_core::aura::AuraState;
 use orbis_core::automation::AutomationRule;
 use orbis_core::battery::ChargeLimit;
 use orbis_core::diagnostics::DiagnosticEntry;
@@ -321,6 +322,18 @@ pub trait DisplayProvider: Provider {
 
     /// Валидация частоты.
     fn validate_refresh_rate(&self, hz: orbis_core::newtypes::RefreshHz) -> ValidationResult;
+}
+
+/// Read-only Aura RGB capability (ASUS asusd `xyz.ljones.Aura` interface).
+///
+/// Отдельный concept-specific trait (ADR 0005): провайдер, реализующий только
+/// Aura read, не обязан предоставлять полную модель подсветки. Mutation в этом
+/// slice отсутствует (никаких Aura writes). Wire semantics сохраняются
+/// losslessly: unknown enum values не коэрцятся в известные состояния.
+#[async_trait]
+pub trait AuraProvider: Provider {
+    /// Текущее Aura состояние (fresh authoritative read).
+    async fn aura_state(&self) -> Result<AuraState, ProviderError>;
 }
 
 /// Read-only Keyboard Backlight Brightness capability.

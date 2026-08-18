@@ -16,6 +16,7 @@
 #![warn(missing_docs)]
 
 pub mod action;
+pub mod aura;
 pub mod automation;
 pub mod battery;
 pub mod capability;
@@ -37,6 +38,9 @@ pub mod telemetry;
 pub mod warning;
 
 pub use action::{ActionRequirement, ApplyResult, PendingAction};
+pub use aura::{
+    AuraBrightness, AuraDirection, AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraState, AuraZone,
+};
 pub use automation::{AutomationAction, AutomationRule, AutomationTrigger};
 pub use battery::ChargeLimit;
 pub use capability::{
