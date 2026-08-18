@@ -1,0 +1,24 @@
+name: UI audit temporary
+
+on:
+  push:
+    branches:
+      - agent/full-visual-ui
+
+permissions:
+  contents: read
+
+jobs:
+  ui-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust versions
+        run: rustc --version && cargo --version
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Check UI crate
+        run: cargo check -p orbis-ui --all-targets
+      - name: Test UI crate
+        run: cargo test -p orbis-ui
