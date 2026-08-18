@@ -111,7 +111,8 @@ impl Default for AutomationConfig {
 #[serde(default)]
 pub struct BatteryConfig {
     /// Желаемый лимит зарядки (пользовательское намерение; применяется после
-    /// подтверждения backend-ом).
+    /// подтверждения backend-ом). `None` означает, что Orbis не управляет
+    /// threshold; конкретное значение обязано соответствовать Hardware1 ABI.
     pub charge_limit: Option<u8>,
 }
 
@@ -176,9 +177,9 @@ impl AppConfig {
             )));
         }
         if let Some(limit) = self.battery.charge_limit {
-            if !(0..=100).contains(&limit) {
+            if !(20..=100).contains(&limit) {
                 return Err(ConfigError::Schema(format!(
-                    "charge_limit {limit} вне [0,100]"
+                    "charge_limit {limit} вне [20,100]; используйте None, чтобы не управлять threshold"
                 )));
             }
         }
@@ -316,20 +317,43 @@ mod tests {
 
     #[test]
     fn charge_limit_range() {
-        let bad = AppConfig {
+        let below_minimum = AppConfig {
             battery: BatteryConfig {
-                charge_limit: Some(150),
+                charge_limit: Some(19),
             },
             ..AppConfig::default()
         };
-        assert!(bad.validate().is_err());
-        let good = AppConfig {
+        assert!(below_minimum.validate().is_err());
+
+        let minimum = AppConfig {
             battery: BatteryConfig {
-                charge_limit: Some(0),
+                charge_limit: Some(20),
             },
             ..AppConfig::default()
         };
-        assert!(good.validate().is_ok());
+        assert!(minimum.validate().is_ok());
+
+        let maximum = AppConfig {
+            battery: BatteryConfig {
+                charge_limit: Some(100),
+            },
+            ..AppConfig::default()
+        };
+        assert!(maximum.validate().is_ok());
+
+        let above_maximum = AppConfig {
+            battery: BatteryConfig {
+                charge_limit: Some(101),
+            },
+            ..AppConfig::default()
+        };
+        assert!(above_maximum.validate().is_err());
+
+        let unmanaged = AppConfig {
+            battery: BatteryConfig { charge_limit: None },
+            ..AppConfig::default()
+        };
+        assert!(unmanaged.validate().is_ok());
     }
 
     #[test]
