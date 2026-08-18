@@ -115,7 +115,7 @@ impl TelemetryProvider for SysfsTelemetryProvider {
                     gpu_power = read_milli_watt(&dir.join("power1_input")).ok().flatten();
                 }
                 "asus" => {
-                    fans = read_asus_fans(dir).unwrap_or_default();
+                    fans = read_asus_fans(dir);
                 }
                 _ => {}
             }
@@ -307,21 +307,30 @@ fn read_amdgpu_edge_temp(dir: &Path) -> Result<Option<TemperatureC>, ProviderErr
 /// Прочитать CPU/GPU (и другие) вентиляторы ASUS hwmon по labels.
 ///
 /// `FanTelemetry.percent` всегда `None` (нет доказанного источника max RPM).
-fn read_asus_fans(dir: &Path) -> Result<Vec<FanTelemetry>, ProviderError> {
+///
+/// Каждый fan обрабатывается независимо: ошибка одного fan (malformed
+/// label/RPM) пропускает только этот entry, сохраняя остальные.
+fn read_asus_fans(dir: &Path) -> Vec<FanTelemetry> {
     let mut fans = Vec::new();
     for i in 1..=4 {
-        let label = read_string(&dir.join(format!("fan{i}_label")))?;
-        let Some(rpm) = read_rpm(&dir.join(format!("fan{i}_input")))? else {
+        // Skip fans with missing or malformed labels (read_string returns
+        // None for NotFound, Err for malformed — both are skip-safe).
+        let Some(label) = read_string(&dir.join(format!("fan{i}_label")))
+            .ok()
+            .flatten()
+        else {
             continue;
         };
-        let fan = match label.as_deref() {
-            Some("cpu_fan") => FanId::Cpu,
-            Some("gpu_fan") => FanId::Gpu,
-            Some("mid_fan") => FanId::Mid,
-            Some("system_fan") => FanId::System,
-            Some(other) => FanId::Other(other.to_string()),
-            // Без label не знаем, какой это вентилятор — пропускаем.
-            None => continue,
+        let fan = match label.as_str() {
+            "cpu_fan" => FanId::Cpu,
+            "gpu_fan" => FanId::Gpu,
+            "mid_fan" => FanId::Mid,
+            "system_fan" => FanId::System,
+            other => FanId::Other(other.to_string()),
+        };
+        // RPM read failure skips this fan without killing others.
+        let Some(rpm) = read_rpm(&dir.join(format!("fan{i}_input"))).ok().flatten() else {
+            continue;
         };
         fans.push(FanTelemetry {
             fan,
@@ -329,7 +338,7 @@ fn read_asus_fans(dir: &Path) -> Result<Vec<FanTelemetry>, ProviderError> {
             percent: None,
         });
     }
-    Ok(fans)
+    fans
 }
 
 /// Прочитать battery telemetry из power_supply директории.
@@ -1001,6 +1010,159 @@ mod tests {
             t.battery.expect("battery").percent,
             Percent::new(90).expect("pct")
         );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-fan partial-failure regression tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn malformed_fan0_label_preserves_fan1() {
+        // fan0 has malformed label → should be skipped, fan1 preserved.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        // fan0: label is empty (malformed), input exists but irrelevant.
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "9999\n");
+        // fan1: valid.
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "3200\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        // fan1 (gpu_fan) preserved with correct identity.
+        assert_eq!(t.fans.len(), 1);
+        assert_eq!(t.fans[0].fan, FanId::Gpu);
+        assert_eq!(t.fans[0].rpm, Rpm::new(3200).expect("rpm"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn malformed_fan1_preserves_fan0() {
+        // fan0 valid, fan1 malformed → fan0 preserved.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        // fan0: valid.
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "2600\n");
+        // fan1: malformed input.
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "not-a-number\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        assert_eq!(t.fans.len(), 1);
+        assert_eq!(t.fans[0].fan, FanId::Cpu);
+        assert_eq!(t.fans[0].rpm, Rpm::new(2600).expect("rpm"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fan_rpm_zero_with_malformed_neighbor() {
+        // fan0 = 0 RPM (valid), fan1 malformed → fan0 preserved as 0.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "0\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "not-a-number\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        assert_eq!(t.fans.len(), 1);
+        assert_eq!(t.fans[0].fan, FanId::Cpu);
+        assert_eq!(t.fans[0].rpm, Rpm::new(0).expect("rpm"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fan_overflow_preserves_valid_neighbor() {
+        // fan0 overflow (> u16::MAX), fan1 valid → fan1 preserved.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "999999\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "3200\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        // fan0 overflow → skipped, fan1 preserved.
+        assert_eq!(t.fans.len(), 1);
+        assert_eq!(t.fans[0].fan, FanId::Gpu);
+        assert_eq!(t.fans[0].rpm, Rpm::new(3200).expect("rpm"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn missing_fan_input_preserves_valid_neighbor() {
+        // fan0 missing input, fan1 valid → fan1 preserved with identity.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        // fan0: label exists but input missing.
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        // fan1: both present.
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "3200\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        assert_eq!(t.fans.len(), 1);
+        assert_eq!(t.fans[0].fan, FanId::Gpu);
+        assert_eq!(t.fans[0].rpm, Rpm::new(3200).expect("rpm"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn malformed_fan_does_not_break_cpu_battery_ac() {
+        // Malformed fan input should not destroy independent telemetry.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
+        write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "46375\n");
+        write_fixture(&root, "class/hwmon/hwmon1/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon1/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon1/fan1_input", "not-a-number\n");
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "80\n");
+        external_type(&root, "ACAD");
+        write_fixture(&root, "class/power_supply/ACAD/online", "1\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        assert_eq!(t.cpu_temp, Some(TemperatureC::new(46).expect("c")));
+        assert!(t.fans.is_empty());
+        assert!(t.battery.is_some());
+        assert_eq!(t.ac_online, Some(true));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn all_fans_malformed_snapshot_succeeds() {
+        // All fan inputs malformed → fans empty, snapshot succeeds.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "not-a-number\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "overflow\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+        assert!(t.fans.is_empty());
 
         let _ = std::fs::remove_dir_all(root);
     }
