@@ -177,7 +177,7 @@ export component AppWindow inherits Window {
                         background: color-touch.pressed ? Palette.surface-pressed : color-touch.has-hover ? Palette.surface-hover : Palette.surface-default;
                         Text { x: 8px; width: parent.width - 38px; text: "Color"; font-size: 9px; color: Palette.text-primary; horizontal-alignment: center; vertical-alignment: center; }
                         Rectangle { x: parent.width - 25px; y: 7px; width: 14px; height: 14px; border-radius: 2px; border-width: 1px; border-color: Palette.text-secondary; background: root.keyboard-color(); }
-                        color-touch := TouchArea { clicked => { root.keyboard-color-preview = (root.keyboard-color-preview + 1) % 4; } }
+                        color-touch := TouchArea { clicked => { root.keyboard-color-preview = Math.mod(root.keyboard-color-preview + 1, 4); } }
                     }
                     ChoiceChip { width: 70px; label: "FN-Lock"; selected: root.fn-lock-preview; clicked => { root.fn-lock-preview = !root.fn-lock-preview; } }
                     PreviewButton { width: 66px; label: "Extra"; compact: true; clicked => { root.extra-clicked(); } }
