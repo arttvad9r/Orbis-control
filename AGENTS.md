@@ -9,9 +9,11 @@ action. Do not continue to the next architectural task automatically.
 - Orbis Control: lightweight system application for ASUS laptops on Linux
   (G-Helper-like), written in Rust with a Slint GUI.
 - Wayland-first; X11 is a compatibility mode.
-- GUI must not run as root and must not perform direct hardware I/O.
-- All system interaction lives behind provider/service boundaries; the GUI
-  talks to providers and services through application/provider abstractions.
+- GUI must not run as root and must not perform direct privileged hardware I/O.
+- Read-only/session interaction and privileged mutation are separate boundaries:
+  the GUI uses session/client providers for reads and calls the narrow Hardware1
+  system-bus API directly for proven mutations so the original caller identity
+  reaches polkit.
 - Architecture is capability-driven: capabilities are probed, not assumed.
 - Hardware-specific code must not leak into the UI or domain layer.
 
@@ -22,32 +24,40 @@ Rust workspace (`resolver = 3`, edition 2024, MSRV 1.85). Crates:
 - `orbis-core` — domain types and their invariants.
 - `orbis-config` — configuration.
 - `orbis-capabilities` — capability probing/detection.
-- `orbis-providers` — provider traits and mock backends.
+- `orbis-providers` — provider traits plus real/read-only and compatibility backends.
 - `orbis-application` — application layer.
-- `orbis-sessiond` — user-session D-Bus daemon.
+- `orbis-sessiond` — unprivileged user-session D-Bus daemon/read boundary.
 - `orbis-session-protocol` — D-Bus protocol DTOs.
-- `orbis-session-client` — session client.
+- `orbis-session-client` — session + Hardware1 client/provider composition.
 - `orbis-ui` — Slint UI (src + `ui/` slint files).
 - `orbis-cli` — CLI.
 - `orbis-test-support` — test support.
-- `orbis-hardwared` — deliberately NOT in the workspace (ADR 0002).
+- `orbis-hardwared` — narrow privileged Hardware1 system-bus daemon, in the
+  workspace since ADR 0006 proved the first privileged mutation boundary.
 
 ## Architectural boundaries
 
 - `orbis-core` owns domain types and invariants.
 - Provider traits separate domain/application from concrete backends.
 - Session D-Bus protocol, client and daemon stay separate crates; the
-  application layer does not depend on the daemon.
-- The user-session daemon must not gain root without proven need; a separate
-  privileged hardware daemon is only considered after a concrete operation is
-  confirmed to require privileges (ADR 0002).
+  application layer does not depend on the daemon implementation.
+- `orbis-sessiond` remains unprivileged and must never become a mutation deputy.
+  Proven mutations follow original application caller → Hardware1 → polkit
+  (`system-bus-name`) → bounded backend.
+- `orbis-hardwared` exposes only semantic typed mutations. It must never become
+  a generic sysfs/filesystem/shell/D-Bus proxy.
 - D-Bus DTOs are untrusted input, validated at the wire/domain boundary.
 - Use shared constants for bus names, object paths, interface names; don't
   duplicate them.
 - Authoritative reads must not be hidden by an implicit property cache; values
   that must stay fresh use explicit no-cache semantics, and that is tested.
-- GPU MUX, GPU access policy, GPU power state and GPU requirement are separate
-  capabilities; don't collapse them into one value.
+- GPU product policy, physical MUX, access policy, runtime power state and
+  pending/action requirement are separate concepts; don't collapse them.
+- Unknown/Unsupported/Unavailable/ReadOnly are distinct evidence states. Never
+  silently convert insufficient evidence into a known state.
+- asusd/supergfxd compatibility backends are used only where their typed
+  semantics have been evidenced. Prefer standard kernel ABI for reads/control
+  when ownership and semantics are proven.
 
 ## Safety defaults
 
@@ -63,6 +73,8 @@ Rust workspace (`resolver = 3`, edition 2024, MSRV 1.85). Crates:
   real sysfs writes, real D-Bus mutation methods, and live ASUS hardware
   manipulation require explicit permission. VM/fake-system validation does not
   prove real hardware behavior.
+- Fan curve writes are owned by typed asusd through Hardware1; never add direct
+  sysfs fan writes or bypass Hardware1 for production mutation.
 - Do not add `unsafe`; keep existing `forbid`/`deny unsafe_code` lints. Do not
   weaken lint policy or tests to make a check pass.
 
@@ -97,13 +109,17 @@ Verification tiers: выбирай минимальный tier, который �
 изменение. Не ослабляй correctness/security tests — tier выбирается по охвату,
 а не для экономии.
 
+`rustfmt 1.97.1` на текущем dev environment может аварийно завершаться в
+`--check` при печати Unicode-heavy diff. Поэтому сначала форматируй, затем
+проверяй формат. Не трактуй такой rustfmt SIGABRT как сбой Orbis daemon.
+
 ### FAST — default для обычного изменения одного crate
 
-Используй targeted checks, если изменение действительно локализовано в одном
-crate; для cross-crate или boundary changes переходи к INTEGRATION.
+Во время разработки используй targeted checks. Не гоняй весь workspace после
+каждой правки.
 
 ```bash
-cargo fmt --all -- --check
+cargo fmt --all
 cargo check -p <affected-crate> --all-targets
 cargo test -p <affected-crate>
 cargo clippy -p <affected-crate> --all-targets -- -D warnings
@@ -112,7 +128,10 @@ git diff --check
 
 ### INTEGRATION — изменение пересекает несколько crates / service boundaries
 
+Полный workspace tier запускается один раз перед commit/acceptance:
+
 ```bash
+cargo fmt --all
 cargo fmt --all -- --check
 cargo check --workspace --all-targets
 cargo test --workspace
@@ -136,7 +155,6 @@ build-heavy Nix derivations и VM checks. Для изменений в `flake.ni
 tier, затем targeted Nix validation:
 
 ```bash
-nix build .#orbis-control --max-jobs 1 --cores 4
 nix flake check --no-build --system x86_64-linux
 ```
 
@@ -149,14 +167,19 @@ checks.x86_64-linux.performance-mutation-vm
 checks.x86_64-linux.battery-mutation-vm
 ```
 
-### Docs-only
+Standalone development deployment deliberately owns only the hardwared binary
+and `/etc/systemd/system/orbis-hardwared.service`. Static D-Bus/polkit policy is
+registered separately by the policy-only NixOS module. Ordinary host rebuilds
+must not own or restart the standalone daemon lifecycle.
+
+### Docs-only / shell-only
 
 ```bash
 git diff --check
-# + релевантный rg по затронутым docs
+# + релевантный rg/bash -n по затронутым файлам
 ```
 
-Никаких cargo/nix checks без отдельной причины.
+Никаких workspace cargo/nix checks без отдельной причины.
 
 ### Notes
 
@@ -181,19 +204,25 @@ git diff --check
   pre-existing baseline paths remain unchanged; unrelated baseline changes may
   remain in the working tree.
 - Commit messages: `<scope>: <imperative summary>` (scopes like `ui:`,
-  `session:`, `sessiond:`).
+  `session:`, `sessiond:`, `hardwared:`).
 
 ## Known project gotchas
 
-- `orbis-hardwared` exists in `crates/` but is NOT in the workspace — do not
-  add it to members without an ADR decision.
+- `orbis-hardwared` is a workspace member. Its privileged surface must stay
+  narrow; adding a new mutation requires evidence for semantics, ownership,
+  authorization and authoritative read-back.
 - Slint UI files live in `ui/`; Rust glue in `crates/orbis-ui/src`. Theme tokens
   live in `ui/themes/dark.slint`. See `docs/ui-reference.md` and
   `docs/ui-measurements.json`.
 - Dev environment: `nix develop` provides cargo/rustc/rustfmt/clippy and
   headless-Slint test env. Do not install a global Rust toolchain.
-- Provider implementations for real sysfs/asusd are scheduled for later stages;
-  `orbis-providers` currently has traits + mock only.
+- Production providers already include real read-only sysfs/session backends and
+  typed asusd/supergfxd compatibility adapters. Do not reintroduce production
+  mock fallback.
+- Fan curve sysfs values are raw PWM `0..255`, not percentages.
+- GPU product policy (Eco/Standard/Ultimate/Optimized) is not proven merely by
+  exposing backend-level supergfxd modes; keep product controls disabled until
+  evidence establishes the mapping and lifecycle semantics.
 
 ## Reporting
 
