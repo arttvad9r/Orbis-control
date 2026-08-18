@@ -1,0 +1,44 @@
+name: Diagnostics service presence validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    if: github.head_ref == 'agent/diagnostics-service-presence-provider-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/diagnostics-service-presence-provider
+          fetch-depth: 0
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Targeted orbis-providers checks
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all -- --check
+            cargo check -p orbis-providers --all-targets
+            cargo test -p orbis-providers service_presence
+            cargo clippy -p orbis-providers --all-targets -- -D warnings
+          '
+      - name: Check narrow diff
+        run: |
+          set -euo pipefail
+          git diff --check 21148968b15cbb5db8aeaa88f01dfc1b38d7b766..HEAD
+          git diff --name-only 21148968b15cbb5db8aeaa88f01dfc1b38d7b766..HEAD | sort > /tmp/changed.txt
+          cat >/tmp/allowed.txt <<'EOF'
+          crates/orbis-providers/src/lib.rs
+          crates/orbis-providers/src/service_presence.rs
+          EOF
+          sort -o /tmp/allowed.txt /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
