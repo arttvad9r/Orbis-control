@@ -1,0 +1,55 @@
+name: Keyboard LED sandbox validation
+
+on:
+  push:
+    branches:
+      - agent/nixos-keyboard-led-sandbox-validate
+
+permissions:
+  contents: read
+
+jobs:
+  module-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Evaluate sandbox paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(nix eval --raw --impure --expr '
+            let
+              flake = builtins.getFlake (builtins.getEnv "GITHUB_WORKSPACE");
+              cfg = (flake.inputs.nixpkgs.lib.nixosSystem {
+                system = "x86_64-linux";
+                modules = [
+                  flake.nixosModules.orbis-control
+                  { services.orbis-control.enable = true; }
+                ];
+              }).config;
+              service = cfg.systemd.services.orbis-hardwared.serviceConfig;
+              ro = service.ReadOnlyPaths;
+              rw = service.ReadWritePaths;
+            in
+              assert ro == [ "/sys" ];
+              assert rw == [
+                "-/sys/firmware/acpi/platform_profile"
+                "-/sys/class/leds/asus::kbd_backlight/brightness"
+              ];
+              assert !(builtins.elem "-/sys/class/leds/asus::kbd_backlight/max_brightness" rw);
+              assert !(builtins.elem "-/sys/class/leds" rw);
+              "ok"
+          ')"
+          test "$result" = ok
+
+      - name: Check implementation diff whitespace
+        shell: bash
+        run: git diff --check ea286e32d7e86f7965ba101865d2feee5dcf0342 HEAD^
