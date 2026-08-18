@@ -23,6 +23,7 @@ use orbis_providers::supergfxd::{SupergfxdMode, SupergfxdStagedState, SupergfxdU
 
 pub mod battery;
 pub mod fans;
+pub mod keyboard_backlight;
 pub mod panel;
 pub mod supergfxd;
 
@@ -212,6 +213,9 @@ pub const FAN_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-fan-cur
 /// Polkit action id for Panel Overdrive mutation (separate display-panel
 /// capability/security domain; mirrors per-capability action pattern).
 pub const PANEL_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-panel-overdrive";
+/// Polkit action id for keyboard backlight brightness mutation.
+pub const KEYBOARD_BACKLIGHT_POLKIT_ACTION: &str =
+    "io.github.orbiscontrol.hardware.set-keyboard-backlight";
 
 /// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
 pub mod wire {
@@ -641,6 +645,8 @@ pub struct HardwareService {
     fan_backend: Option<Box<dyn fans::FanCurveMutationOperation>>,
     panel_authorizer: Box<dyn Authorizer>,
     panel_backend: Option<Box<dyn panel::PanelOverdriveMutationBackend>>,
+    kb_authorizer: Box<dyn Authorizer>,
+    kb_backend: Option<Box<dyn keyboard_backlight::KeyboardBacklightMutationBackend>>,
 }
 
 impl HardwareService {
@@ -657,6 +663,8 @@ impl HardwareService {
             fan_backend: None,
             panel_authorizer: Box::new(DisabledAuthorizer),
             panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
         }
     }
 
@@ -677,6 +685,8 @@ impl HardwareService {
             fan_backend: None,
             panel_authorizer: Box::new(DisabledAuthorizer),
             panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
         }
     }
 
@@ -699,6 +709,8 @@ impl HardwareService {
             fan_backend: None,
             panel_authorizer: Box::new(DisabledAuthorizer),
             panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
         }
     }
 
@@ -719,6 +731,8 @@ impl HardwareService {
             fan_backend: Some(fan_backend),
             panel_authorizer: Box::new(DisabledAuthorizer),
             panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
         }
     }
 
@@ -743,6 +757,8 @@ impl HardwareService {
             fan_backend: Some(fan_backend),
             panel_authorizer: Box::new(DisabledAuthorizer),
             panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
         }
     }
 
@@ -764,6 +780,8 @@ impl HardwareService {
             fan_backend: None,
             panel_authorizer: Box::new(DisabledAuthorizer),
             panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
         }
     }
 
@@ -779,6 +797,17 @@ impl HardwareService {
     ) -> Self {
         self.panel_backend = Some(panel_backend);
         self.panel_authorizer = panel_authorizer;
+        self
+    }
+
+    /// Attach keyboard backlight brightness mutation backend.
+    pub fn with_keyboard_backlight(
+        mut self,
+        kb_backend: Box<dyn keyboard_backlight::KeyboardBacklightMutationBackend>,
+        kb_authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.kb_backend = Some(kb_backend);
+        self.kb_authorizer = kb_authorizer;
         self
     }
 }
@@ -971,6 +1000,39 @@ impl HardwareService {
                 .unwrap_or(panel::PanelOverdriveMutationStatus::Unknown),
         )
     }
+
+    /// Установить keyboard backlight brightness.
+    async fn set_keyboard_backlight(
+        &self,
+        level: u8,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<u8> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.kb_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("keyboard backlight backend unavailable".into())
+        })?;
+        keyboard_backlight::handle_set_keyboard_backlight(
+            self.kb_authorizer.as_ref(),
+            backend,
+            level,
+            &sender,
+        )
+        .await
+    }
+
+    /// Read-only typed evidence about keyboard backlight mutation backend.
+    fn keyboard_backlight_mutation_status(&self) -> u8 {
+        use keyboard_backlight::keyboard_backlight_mutation_wire;
+        keyboard_backlight_mutation_wire::to_wire(
+            self.kb_backend
+                .as_deref()
+                .map(|b| b.mutation_status())
+                .unwrap_or(keyboard_backlight::KeyboardBacklightMutationStatus::Unknown),
+        )
+    }
 }
 
 #[zbus::proxy(
@@ -1005,6 +1067,12 @@ pub trait Hardware1 {
 
     /// Read-only typed Panel Overdrive mutation backend availability (wire enum).
     fn panel_mutation_status(&self) -> zbus::Result<u8>;
+
+    /// Установить keyboard backlight brightness.
+    fn set_keyboard_backlight(&self, level: u8) -> zbus::Result<u8>;
+
+    /// Read-only typed keyboard backlight mutation backend availability.
+    fn keyboard_backlight_mutation_status(&self) -> zbus::Result<u8>;
 }
 
 #[cfg(test)]

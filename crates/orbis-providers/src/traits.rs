@@ -16,6 +16,7 @@ use orbis_core::display_output::DisplayOutputSnapshot;
 use orbis_core::fan::FanCurve;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
+use orbis_core::keyboard_backlight::KeyboardBacklightState;
 use orbis_core::lighting::LightingMode;
 use orbis_core::limits::{PowerLimitField, PowerLimits};
 use orbis_core::profile::PerformanceProfile;
@@ -320,6 +321,17 @@ pub trait DisplayProvider: Provider {
 
     /// Валидация частоты.
     fn validate_refresh_rate(&self, hz: orbis_core::newtypes::RefreshHz) -> ValidationResult;
+}
+
+/// Read-only Keyboard Backlight Brightness capability.
+///
+/// Яркость клавиатуры — hardware level/index, не Percentage.
+/// Max level определяется из sysfs (`max_brightness`), не hardcode-ится.
+/// Отдельный от `LightingProvider::set_brightness(Percent)` контракт.
+#[async_trait]
+pub trait KeyboardBacklightProvider: Provider {
+    /// Текущее состояние keyboard backlight brightness.
+    async fn keyboard_backlight_state(&self) -> Result<KeyboardBacklightState, ProviderError>;
 }
 
 /// Подсветка (клавиатура/Aura).

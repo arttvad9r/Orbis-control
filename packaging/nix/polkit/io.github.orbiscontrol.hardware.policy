@@ -59,4 +59,15 @@
       <allow_active>yes</allow_active>
     </defaults>
   </action>
+  <action id="io.github.orbiscontrol.hardware.set-keyboard-backlight">
+    <description>Change the Orbis Control keyboard backlight brightness</description>
+    <description xml:lang="ru">Изменить яркость подсветки клавиатуры Orbis Control</description>
+    <message>Permission is required to change the keyboard backlight brightness</message>
+    <message xml:lang="ru">Для изменения яркости подсветки клавиатуры требуется разрешение</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
 </policyconfig>
