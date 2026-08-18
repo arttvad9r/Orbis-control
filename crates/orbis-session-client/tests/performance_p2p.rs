@@ -134,6 +134,7 @@ async fn connect_pair()
             battery,
             Default::default(),
             Some(performance),
+            None,
         ),
         client_builder.build()
     )?;

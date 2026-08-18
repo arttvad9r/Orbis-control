@@ -7,6 +7,7 @@ use orbis_providers::traits::{
 };
 use orbis_session_protocol::{BUS_NAME, OBJECT_PATH};
 
+use crate::fans::AsusdFanCurveSource;
 use crate::service::SessionService;
 
 /// Дополнительные read-only GPU capabilities для session server.
@@ -28,6 +29,9 @@ pub struct GpuCapabilities {
 ///   читаются до первого D-Bus property call);
 /// - helper регистрирует protocol bus name (`BUS_NAME`) и object path
 ///   (`OBJECT_PATH`);
+/// - `fan_curves` — опциональный read-only asusd fan curve source
+///   (profile-specific curves); при отсутствии метод `fan_curve` честно
+///   возвращает `NotSupported`;
 /// - ошибки `Builder::name`/`serve_at`/`build` передаются вызывающему коду как
 ///   `zbus::Error` (без retry/fallback/panic);
 /// - возвращённую Connection необходимо удерживать живой для обслуживания
@@ -37,6 +41,7 @@ pub async fn build_session_server(
     battery: Arc<dyn BatteryProvider>,
     gpu: GpuCapabilities,
     performance: Option<Arc<dyn PerformanceProvider>>,
+    fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
 ) -> zbus::Result<zbus::Connection> {
     let mut service = SessionService::new(battery);
     if let Some(p) = gpu.power {
@@ -50,6 +55,9 @@ pub async fn build_session_server(
     }
     if let Some(p) = performance {
         service = service.with_performance(p);
+    }
+    if let Some(f) = fan_curves {
+        service = service.with_fan_curves(f);
     }
     let builder = builder.name(BUS_NAME)?;
     let builder = builder.serve_at(OBJECT_PATH, service)?;

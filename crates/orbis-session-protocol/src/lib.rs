@@ -220,6 +220,9 @@ pub trait Session1 {
     /// Текущий Performance Mode (current + available, read-only property).
     #[zbus(property)]
     fn performance(&self) -> zbus::Result<PerformanceInfo>;
+
+    /// Сохранённая fan curve для профиля и вентилятора (read-only method).
+    fn fan_curve(&self, profile: u32, fan: u8) -> zbus::Result<FanCurveInfo>;
 }
 
 /// Wire-значения `GpuPowerState` (domain enum в protocol crate).
@@ -272,6 +275,50 @@ pub mod performance {
     pub const BALANCED_BIT: u8 = 1 << 1;
     /// Бит маски: Turbo доступен.
     pub const TURBO_BIT: u8 = 1 << 2;
+}
+
+/// Wire-значения `AsusdFanProfile` (lossless asusd fan profile).
+///
+/// Значения фиксированы и совпадают с asusd wire (0..3); Silent
+/// автоматически в Quiet/LowPower НЕ маппится (остаётся lossless).
+pub mod fan_profile {
+    /// Balanced (wire 0).
+    pub const BALANCED: u32 = 0;
+    /// Performance (wire 1).
+    pub const PERFORMANCE: u32 = 1;
+    /// Quiet (wire 2).
+    pub const QUIET: u32 = 2;
+    /// LowPower (wire 3).
+    pub const LOW_POWER: u32 = 3;
+}
+
+/// Wire-значения `FanId` (вентилятор).
+pub mod fan_id {
+    /// CPU вентилятор.
+    pub const CPU: u8 = 0;
+    /// GPU вентилятор.
+    pub const GPU: u8 = 1;
+}
+
+/// Wire DTO сохранённой fan curve для профиля и вентилятора.
+///
+/// Кривая хранит **raw hwmon PWM** (0..=255), НЕ процент; mapping 0..255 → %
+/// не доказан. Точки фиксированы: 8 температур (°C, raw u8) + 8 PWM (raw);
+/// длина массивов (8) проверяется на wire boundary — protocol не терпит
+/// синтетических/fallback кривых. `profile` — wire `fan_profile::*`,
+/// `fan` — wire `fan_id::*`.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, zbus::zvariant::Type,
+)]
+pub struct FanCurveInfo {
+    /// Wire профиль (`fan_profile::*`).
+    pub profile: u32,
+    /// Wire вентилятор (`fan_id::*`).
+    pub fan: u8,
+    /// 8 температур, °C (raw wire u8).
+    pub temps: Vec<u8>,
+    /// 8 raw PWM 0..255.
+    pub pwms: Vec<u8>,
 }
 
 #[cfg(test)]
@@ -390,6 +437,58 @@ mod tests {
         // u8 u8 -> "(yy)"
         let expected: zbus::zvariant::Signature = "(yy)".try_into().expect("valid signature");
         assert_eq!(*PerformanceInfo::SIGNATURE, expected);
+    }
+
+    #[test]
+    fn fan_wire_constants_are_stable() {
+        // AsusdFanProfile wire values (lossless 0..3).
+        assert_eq!(fan_profile::BALANCED, 0);
+        assert_eq!(fan_profile::PERFORMANCE, 1);
+        assert_eq!(fan_profile::QUIET, 2);
+        assert_eq!(fan_profile::LOW_POWER, 3);
+        // FanId wire values.
+        assert_eq!(fan_id::CPU, 0);
+        assert_eq!(fan_id::GPU, 1);
+    }
+
+    #[test]
+    fn fan_curve_roundtrip_preserves_sentinel_curves() {
+        // Sentinel-кривые (A/B/C) проходят wire round-trip без потери.
+        let sentinel = |profile: u32, temps: &[u8; 8], pwms: &[u8; 8]| FanCurveInfo {
+            profile,
+            fan: fan_id::CPU,
+            temps: temps.to_vec(),
+            pwms: pwms.to_vec(),
+        };
+        let a = sentinel(
+            fan_profile::BALANCED,
+            &[45, 49, 54, 68, 74, 79, 84, 89],
+            &[5, 22, 38, 45, 56, 63, 81, 94],
+        );
+        let b = sentinel(
+            fan_profile::BALANCED,
+            &[40, 44, 50, 60, 70, 76, 82, 90],
+            &[3, 18, 35, 42, 50, 58, 70, 99],
+        );
+        let c = sentinel(
+            fan_profile::QUIET,
+            &[42, 46, 55, 64, 73, 80, 86, 92],
+            &[2, 12, 28, 38, 46, 54, 66, 88],
+        );
+        for info in [a, b, c] {
+            let ctx =
+                zbus::zvariant::serialized::Context::new_dbus(zbus::zvariant::Endian::Little, 0);
+            let data = zbus::zvariant::to_bytes(ctx, &info).expect("serialize");
+            let (decoded, _): (FanCurveInfo, usize) = data.deserialize().expect("deserialize");
+            assert_eq!(decoded, info);
+        }
+    }
+
+    #[test]
+    fn fan_dbus_signature_is_stable() {
+        // u32(u) y(y) 8-temperature array(ay) 8-pwm array(ay).
+        let expected: zbus::zvariant::Signature = "(uyayay)".try_into().expect("valid signature");
+        assert_eq!(*FanCurveInfo::SIGNATURE, expected);
     }
 
     #[test]

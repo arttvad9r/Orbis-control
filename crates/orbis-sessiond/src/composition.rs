@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use orbis_providers::traits::{BatteryProvider, PerformanceProvider};
 
+use crate::fans::AsusdFanCurveSource;
 use crate::server::{GpuCapabilities, build_session_server};
 use crate::upower::{
     AsusdBatteryChargeLimitProvider, SysfsBatteryEndThresholdSource, ZbusAsusdConfiguredSource,
@@ -22,6 +23,9 @@ use crate::upower::{
 ///   будущем session property Get;
 /// - `gpu` — дополнительные read-only GPU capabilities (могут быть пустыми);
 /// - `performance` — опциональный read-only Performance Mode provider;
+/// - `fan_curves` — опциональный read-only asusd fan curve source
+///   (profile-specific curves); при отсутствии метод `fan_curve` честно
+///   возвращает `NotSupported`;
 /// - возвращённую session Connection необходимо удерживать живой; переданная
 ///   UPower Connection удерживается provider внутри service graph.
 pub async fn build_upower_session_server(
@@ -31,6 +35,7 @@ pub async fn build_upower_session_server(
     battery_native_path: String,
     gpu: GpuCapabilities,
     performance: Option<Arc<dyn PerformanceProvider>>,
+    fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
 ) -> zbus::Result<zbus::Connection> {
     let effective_source = SysfsBatteryEndThresholdSource::from_native_path(&battery_native_path)
         .map_err(|e| zbus::Error::Failure(e.to_string()))?;
@@ -43,6 +48,7 @@ pub async fn build_upower_session_server(
         effective_source,
         gpu,
         performance,
+        fan_curves,
     )
     .await
 }
@@ -53,6 +59,7 @@ pub async fn build_upower_session_server(
 /// sysfs source. Injection нужен для hermetic P2P/integration tests, где
 /// `/sys/class/power_supply` недоступен и не должен быть mock-ирован через
 /// реальную файловую систему.
+#[allow(clippy::too_many_arguments)] // composition helper собирает все read capabilities
 pub async fn build_upower_session_server_with_effective_source<E>(
     session_builder: zbus::connection::Builder<'_>,
     upower_connection: zbus::Connection,
@@ -61,6 +68,7 @@ pub async fn build_upower_session_server_with_effective_source<E>(
     effective_source: E,
     gpu: GpuCapabilities,
     performance: Option<Arc<dyn PerformanceProvider>>,
+    fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
 ) -> zbus::Result<zbus::Connection>
 where
     E: crate::upower::BatteryEffectiveSource + 'static,
@@ -69,5 +77,5 @@ where
     let provider =
         AsusdBatteryChargeLimitProvider::new(upower_source, asusd_source, effective_source);
     let battery: Arc<dyn BatteryProvider> = Arc::new(provider);
-    build_session_server(session_builder, battery, gpu, performance).await
+    build_session_server(session_builder, battery, gpu, performance, fan_curves).await
 }

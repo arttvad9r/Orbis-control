@@ -990,7 +990,7 @@ pub async fn build_production_runtime(
 
     let battery_arc = Arc::new(battery_provider);
     let performance_arc = Arc::new(SessionHardwarePerformanceProvider::new(
-        ZbusSessionPerformanceSource::new(session_connection),
+        ZbusSessionPerformanceSource::new(session_connection.clone()),
         ZbusHardwarePerformanceSource::new(system_connection.clone()),
     ));
     let battery = AppService::new(battery_arc.clone());
@@ -1000,13 +1000,21 @@ pub async fn build_production_runtime(
     // writes, no privileged APIs. Construction performs no I/O.
     let telemetry = AppService::new(Arc::new(orbis_providers::SysfsTelemetryProvider::default()));
 
-    // Composed fan curve provider: read через sessiond (asus_custom_fan_curve),
-    // mutation напрямую через Hardware1 (original caller). Write capability
-    // определяется наличием production Hardware1 mutation backend
-    // (hardware_owner). No writes, no privileged APIs.
+    // Composed fan curve provider:
+    // - profile-specific read: Session1 → sessiond → asusd
+    //   (`ZbusAsusdFanCurveSource::read_curves(profile)`), GUI напрямую asusd
+    //   НЕ читает;
+    // - активная кривая остаётся через existing sysfs `asus_custom_fan_curve`;
+    // - capability probe остаётся на active sysfs curve;
+    // - mutation (`set_fan_curve`) остаётся напрямую через Hardware1 (original
+    //   caller). Write capability определяется наличием production Hardware1
+    //   mutation backend (hardware_owner). No writes, no privileged APIs.
     let fan_provider = orbis_session_client::SessionHardwareFanCurveProvider::new(
-        orbis_sessiond::fans::SysfsFanCurveProvider::new(
-            orbis_sessiond::fans::SysfsFanCurveSource::default(),
+        orbis_session_client::SessionProfileFanCurveProvider::new(
+            orbis_session_client::ZbusSessionFanCurveSource::new(session_connection.clone()),
+            orbis_sessiond::fans::SysfsFanCurveProvider::new(
+                orbis_sessiond::fans::SysfsFanCurveSource::default(),
+            ),
         ),
         orbis_session_client::ZbusHardwareFanCurveSource::new(system_connection.clone()),
     );
