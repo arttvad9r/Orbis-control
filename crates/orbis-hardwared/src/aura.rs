@@ -24,7 +24,7 @@
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
-use orbis_core::aura::{AuraDirection, AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraZone};
+use orbis_core::aura::{AuraEffect, AuraMode, AuraRgb, AuraZone};
 use orbis_providers::error::ProviderError;
 use zbus::Connection;
 
@@ -67,8 +67,8 @@ fn effect_from_wire(wire: AuraEffectWire) -> AuraEffect {
             g: wire.3.1,
             b: wire.3.2,
         },
-        speed: AuraSpeed::from_str(&wire.4),
-        direction: AuraDirection::from_str(&wire.5),
+        speed: wire.4.parse().unwrap(),
+        direction: wire.5.parse().unwrap(),
     }
 }
 
@@ -351,9 +351,9 @@ pub const AURA_OUTCOME_CONFIG_CONFIRMED: u32 = 0;
 /// Обработка Aura Static RGB mutation до публичного D-Bus boundary.
 ///
 /// Wire-значения RGB (`u8` × 3) уже строгие типы, поэтому malformed вход
-/// невозможен на этом уровне. После authorization — ровно одна typed mutation
-/// + config-level read-back; результат `Accepted` (hardware state не
-/// подтверждён, `kbd_rgb_mode` write-only).
+/// невозможен на этом уровне. После authorization выполняется ровно одна
+/// typed mutation с config-level read-back; результат `Accepted` означает,
+/// что hardware state не подтверждён (`kbd_rgb_mode` write-only).
 pub async fn handle_set_aura_static_rgb(
     authorizer: &dyn Authorizer,
     backend: &dyn AuraStaticRgbMutationBackend,
@@ -396,6 +396,7 @@ mod tests {
 
     use super::*;
     use crate::{AuthorizeError, Authorizer};
+    use orbis_core::aura::{AuraDirection, AuraSpeed};
 
     #[derive(Clone)]
     struct FakeAsusd {

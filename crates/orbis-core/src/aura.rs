@@ -212,16 +212,6 @@ pub enum AuraSpeed {
 }
 
 impl AuraSpeed {
-    /// Decode a wire string without coercing unknown values.
-    pub fn from_str(value: &str) -> Self {
-        match value {
-            "Low" => Self::Low,
-            "Med" => Self::Med,
-            "High" => Self::High,
-            other => Self::Unknown(other.to_string()),
-        }
-    }
-
     /// Encode back to the wire string (lossless for `Unknown`).
     pub fn as_str(&self) -> &str {
         match self {
@@ -230,6 +220,20 @@ impl AuraSpeed {
             Self::High => "High",
             Self::Unknown(other) => other.as_str(),
         }
+    }
+}
+
+impl std::str::FromStr for AuraSpeed {
+    type Err = std::convert::Infallible;
+
+    /// Decode a wire string without coercing unknown values.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value {
+            "Low" => Self::Low,
+            "Med" => Self::Med,
+            "High" => Self::High,
+            other => Self::Unknown(other.to_string()),
+        })
     }
 }
 
@@ -251,17 +255,6 @@ pub enum AuraDirection {
 }
 
 impl AuraDirection {
-    /// Decode a wire string without coercing unknown values.
-    pub fn from_str(value: &str) -> Self {
-        match value {
-            "Right" => Self::Right,
-            "Left" => Self::Left,
-            "Up" => Self::Up,
-            "Down" => Self::Down,
-            other => Self::Unknown(other.to_string()),
-        }
-    }
-
     /// Encode back to the wire string (lossless for `Unknown`).
     pub fn as_str(&self) -> &str {
         match self {
@@ -271,6 +264,21 @@ impl AuraDirection {
             Self::Down => "Down",
             Self::Unknown(other) => other.as_str(),
         }
+    }
+}
+
+impl std::str::FromStr for AuraDirection {
+    type Err = std::convert::Infallible;
+
+    /// Decode a wire string without coercing unknown values.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value {
+            "Right" => Self::Right,
+            "Left" => Self::Left,
+            "Up" => Self::Up,
+            "Down" => Self::Down,
+            other => Self::Unknown(other.to_string()),
+        })
     }
 }
 
@@ -349,19 +357,28 @@ mod tests {
 
     #[test]
     fn speed_and_direction_strings() {
-        assert_eq!(AuraSpeed::from_str("Low"), AuraSpeed::Low);
-        assert_eq!(AuraSpeed::from_str("Med"), AuraSpeed::Med);
-        assert_eq!(AuraSpeed::from_str("High"), AuraSpeed::High);
+        assert_eq!("Low".parse::<AuraSpeed>().unwrap(), AuraSpeed::Low);
+        assert_eq!("Med".parse::<AuraSpeed>().unwrap(), AuraSpeed::Med);
+        assert_eq!("High".parse::<AuraSpeed>().unwrap(), AuraSpeed::High);
         assert_eq!(
-            AuraSpeed::from_str("Turbo"),
+            "Turbo".parse::<AuraSpeed>().unwrap(),
             AuraSpeed::Unknown("Turbo".to_string())
         );
-        assert_eq!(AuraDirection::from_str("Right"), AuraDirection::Right);
-        assert_eq!(AuraDirection::from_str("Left"), AuraDirection::Left);
-        assert_eq!(AuraDirection::from_str("Up"), AuraDirection::Up);
-        assert_eq!(AuraDirection::from_str("Down"), AuraDirection::Down);
         assert_eq!(
-            AuraDirection::from_str("Diagonal"),
+            "Right".parse::<AuraDirection>().unwrap(),
+            AuraDirection::Right
+        );
+        assert_eq!(
+            "Left".parse::<AuraDirection>().unwrap(),
+            AuraDirection::Left
+        );
+        assert_eq!("Up".parse::<AuraDirection>().unwrap(), AuraDirection::Up);
+        assert_eq!(
+            "Down".parse::<AuraDirection>().unwrap(),
+            AuraDirection::Down
+        );
+        assert_eq!(
+            "Diagonal".parse::<AuraDirection>().unwrap(),
             AuraDirection::Unknown("Diagonal".to_string())
         );
     }
@@ -374,7 +391,7 @@ mod tests {
             AuraSpeed::High,
             AuraSpeed::Unknown("Turbo".to_string()),
         ] {
-            assert_eq!(AuraSpeed::from_str(speed.as_str()), speed);
+            assert_eq!(speed.as_str().parse::<AuraSpeed>().unwrap(), speed);
         }
         for direction in [
             AuraDirection::Right,
@@ -383,7 +400,10 @@ mod tests {
             AuraDirection::Down,
             AuraDirection::Unknown("Diagonal".to_string()),
         ] {
-            assert_eq!(AuraDirection::from_str(direction.as_str()), direction);
+            assert_eq!(
+                direction.as_str().parse::<AuraDirection>().unwrap(),
+                direction
+            );
         }
     }
 

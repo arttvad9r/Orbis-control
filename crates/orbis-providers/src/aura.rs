@@ -22,9 +22,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use orbis_core::aura::{
-    AuraBrightness, AuraDirection, AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraState, AuraZone,
-};
+use orbis_core::aura::{AuraBrightness, AuraEffect, AuraMode, AuraRgb, AuraState, AuraZone};
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::identity::BackendIdentity;
 use zbus::proxy::Builder;
@@ -154,7 +152,7 @@ fn parse_effect(value: Value<'static>) -> Result<AuraEffect, ProviderError> {
     let colour1 = parse_colour(&fields[2], "colour1")?;
     let colour2 = parse_colour(&fields[3], "colour2")?;
     let speed = match &fields[4] {
-        Value::Str(value) => AuraSpeed::from_str(value.as_str()),
+        Value::Str(value) => value.as_str().parse().unwrap(),
         other => {
             return Err(ProviderError::Internal(format!(
                 "asus aura: led_mode_data malformed: speed expected string, got {other:?}"
@@ -162,7 +160,7 @@ fn parse_effect(value: Value<'static>) -> Result<AuraEffect, ProviderError> {
         }
     };
     let direction = match &fields[5] {
-        Value::Str(value) => AuraDirection::from_str(value.as_str()),
+        Value::Str(value) => value.as_str().parse().unwrap(),
         other => {
             return Err(ProviderError::Internal(format!(
                 "asus aura: led_mode_data malformed: direction expected string, got {other:?}"
@@ -313,13 +311,17 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+    use orbis_core::aura::{AuraDirection, AuraSpeed};
     use zbus::connection::Builder;
+
+    /// Wire tuple of `LedModeData`: struct `(uu(yyy)(yyy)ss)`.
+    type EffectWire = (u32, u32, (u8, u8, u8), (u8, u8, u8), String, String);
 
     /// Fake `xyz.ljones.Aura` server for private p2p tests.
     struct FakeAura {
         setter_calls: Arc<AtomicUsize>,
         mode: u32,
-        effect: (u32, u32, (u8, u8, u8), (u8, u8, u8), String, String),
+        effect: EffectWire,
         supported_modes: Vec<u32>,
         supported_zones: Vec<u32>,
         brightness: u32,
@@ -334,7 +336,7 @@ mod tests {
         }
 
         #[zbus(property)]
-        async fn led_mode_data(&self) -> (u32, u32, (u8, u8, u8), (u8, u8, u8), String, String) {
+        async fn led_mode_data(&self) -> EffectWire {
             self.effect.clone()
         }
 
@@ -366,10 +368,7 @@ mod tests {
         }
 
         #[zbus(property)]
-        async fn set_led_mode_data(
-            &mut self,
-            _effect: (u32, u32, (u8, u8, u8), (u8, u8, u8), String, String),
-        ) -> Result<(), zbus::fdo::Error> {
+        async fn set_led_mode_data(&mut self, _effect: EffectWire) -> Result<(), zbus::fdo::Error> {
             self.setter_calls.fetch_add(1, Ordering::SeqCst);
             Err(zbus::fdo::Error::NotSupported("no writes in tests".into()))
         }
@@ -398,7 +397,7 @@ mod tests {
         }
     }
 
-    fn static_effect() -> (u32, u32, (u8, u8, u8), (u8, u8, u8), String, String) {
+    fn static_effect() -> EffectWire {
         (
             0,
             0,
