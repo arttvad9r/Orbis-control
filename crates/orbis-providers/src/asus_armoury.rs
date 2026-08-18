@@ -21,12 +21,16 @@ use std::time::Duration;
 use async_trait::async_trait;
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::display::{
-    MiniLedModeState, MiniLedModeValue, PanelOverdriveState, interpret_mini_led_mode,
+    MiniLedModeState, MiniLedModeValue, PanelOverdriveState, ScreenAutoBrightnessState,
+    interpret_mini_led_mode,
 };
 use orbis_core::identity::BackendIdentity;
 
 use crate::error::ProviderError;
-use crate::traits::{MiniLedModeProvider, PanelOverdriveProvider, Provider, ProviderHealth};
+use crate::traits::{
+    MiniLedModeProvider, PanelOverdriveProvider, Provider, ProviderHealth,
+    ScreenAutoBrightnessProvider,
+};
 
 /// Фиксированный production relative path kernel `asus-armoury` ABI.
 ///
@@ -355,6 +359,148 @@ impl MiniLedModeProvider for AsusArmouryMiniLedModeProvider {
             current,
             semantics,
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Screen Auto Brightness (read-only)
+// ---------------------------------------------------------------------------
+
+/// Фиксированный production relative path kernel `asus-armoury` ABI.
+///
+/// Атрибут создаётся драйвером только если WMI devid
+/// `ASUS_WMI_DEVID_SCREEN_AUTO_BRIGHTNESS` (0x0005002A) присутствует
+/// (`armoury_has_devstate`). Upstream: commit `7725a2dc5863` «add screen
+/// auto-brightness toggle», `ASUS_ATTR_GROUP_BOOL_RW(screen_auto_brightness,
+/// ..., "Set the panel brightness to Off<0> or On<1>")`.
+pub const ASUS_ARMOURY_SCREEN_AUTO_BRIGHTNESS_RELATIVE_PATH: &str =
+    "class/firmware-attributes/asus-armoury/attributes/screen_auto_brightness/current_value";
+
+/// Read-only Screen Auto Brightness provider над kernel firmware-attributes ABI.
+///
+/// Корень sysfs инъектируется извне (production — `/sys`, тесты — временное
+/// fixture-дерево). Конструктор не выполняет I/O.
+///
+/// Read algorithm (fresh, без кэша):
+/// 1. прочитать authoritative `current_value`;
+/// 2. распарсить `0`/`1` (bool polarity документирована upstream);
+/// 3. вернуть typed state.
+///
+/// `possible_values` для этого bool-атрибута статичен (`"0;1"` из
+/// `ASUS_ATTR_GROUP_BOOL_RW`), поэтому consistency проверяется на уровне
+/// парсера: любое значение вне `0`/`1` — malformed evidence → `Internal`,
+/// а не fake default.
+pub struct AsusArmouryScreenAutoBrightnessProvider {
+    sysfs_root: PathBuf,
+}
+
+impl AsusArmouryScreenAutoBrightnessProvider {
+    /// Создать provider над заданным корнем sysfs.
+    pub fn new(sysfs_root: impl Into<PathBuf>) -> Self {
+        Self {
+            sysfs_root: sysfs_root.into(),
+        }
+    }
+
+    fn current_value_path(&self) -> PathBuf {
+        self.sysfs_root
+            .join(ASUS_ARMOURY_SCREEN_AUTO_BRIGHTNESS_RELATIVE_PATH)
+    }
+
+    fn backend_root(&self) -> PathBuf {
+        self.sysfs_root
+            .join("class/firmware-attributes/asus-armoury")
+    }
+}
+
+impl Default for AsusArmouryScreenAutoBrightnessProvider {
+    fn default() -> Self {
+        Self::new(PathBuf::from("/sys"))
+    }
+}
+
+impl Provider for AsusArmouryScreenAutoBrightnessProvider {
+    fn id(&self) -> &'static str {
+        "asus-armoury-screen-auto-brightness"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("asus-armoury")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("asus-armoury: функция '{feature}' недоступна")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.asus-armoury-screen-auto-brightness",
+            "read-only kernel asus-armoury screen_auto_brightness backend",
+        )]
+    }
+}
+
+/// Map a read error on the Screen Auto Brightness attribute path.
+///
+/// Двухуровневая классификация (как MiniLED):
+/// - `NotFound` + отсутствующий backend root (`asus-armoury`) →
+///   `BackendUnavailable` (backend не установлен);
+/// - `NotFound` + существующий backend root → `Unsupported` (capability не
+///   присутствует на этом устройстве);
+/// - `PermissionDenied` сохраняется отдельно;
+/// - остальные I/O ошибки → `Io`.
+fn map_screen_auto_brightness_error(
+    path: &Path,
+    error: std::io::Error,
+    backend_root: &Path,
+) -> ProviderError {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => {
+            if backend_root.exists() {
+                ProviderError::Unsupported(format!(
+                    "asus-armoury screen_auto_brightness attribute absent: {}",
+                    path.display()
+                ))
+            } else {
+                ProviderError::BackendUnavailable(format!(
+                    "asus-armoury backend absent: {}",
+                    backend_root.display()
+                ))
+            }
+        }
+        std::io::ErrorKind::PermissionDenied => ProviderError::PermissionDenied(format!(
+            "asus-armoury screen_auto_brightness read denied: {}",
+            path.display()
+        )),
+        _ => ProviderError::Io(error),
+    }
+}
+
+#[async_trait]
+impl ScreenAutoBrightnessProvider for AsusArmouryScreenAutoBrightnessProvider {
+    async fn screen_auto_brightness_state(
+        &self,
+    ) -> Result<ScreenAutoBrightnessState, ProviderError> {
+        let path = self.current_value_path();
+        let raw = std::fs::read_to_string(&path).map_err(|error| {
+            map_screen_auto_brightness_error(&path, error, &self.backend_root())
+        })?;
+
+        match raw.trim() {
+            "0" => Ok(ScreenAutoBrightnessState::Disabled),
+            "1" => Ok(ScreenAutoBrightnessState::Enabled),
+            other => Err(ProviderError::Internal(format!(
+                "asus-armoury screen_auto_brightness malformed value: {other:?}"
+            ))),
+        }
     }
 }
 
@@ -858,5 +1004,237 @@ mod tests {
             PanelOverdriveState::Enabled
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    // -- Screen Auto Brightness ---------------------------------------------
+
+    fn sab_fixture(current: &str) -> (PathBuf, AsusArmouryScreenAutoBrightnessProvider) {
+        let dir = fixture_root();
+        let path = dir.join(ASUS_ARMOURY_SCREEN_AUTO_BRIGHTNESS_RELATIVE_PATH);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, current).unwrap();
+        let provider = AsusArmouryScreenAutoBrightnessProvider::new(&dir);
+        (dir, provider)
+    }
+
+    #[tokio::test]
+    async fn sab_valid_disabled_state() {
+        let (dir, provider) = sab_fixture("0\n");
+        assert_eq!(
+            provider.screen_auto_brightness_state().await.unwrap(),
+            ScreenAutoBrightnessState::Disabled
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sab_valid_enabled_state() {
+        let (dir, provider) = sab_fixture("1\n");
+        assert_eq!(
+            provider.screen_auto_brightness_state().await.unwrap(),
+            ScreenAutoBrightnessState::Enabled
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sab_false_is_not_none() {
+        // `Some(false)`-аналог: Disabled не становится Unknown/absent.
+        let (dir, provider) = sab_fixture("0\n");
+        let state = provider.screen_auto_brightness_state().await.unwrap();
+        assert_eq!(state, ScreenAutoBrightnessState::Disabled);
+        assert_ne!(state, ScreenAutoBrightnessState::Unknown);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sab_reads_are_fresh_not_cached() {
+        let dir = fixture_root();
+        let path = dir.join(ASUS_ARMOURY_SCREEN_AUTO_BRIGHTNESS_RELATIVE_PATH);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "0\n").unwrap();
+        let provider = AsusArmouryScreenAutoBrightnessProvider::new(&dir);
+
+        assert_eq!(
+            provider.screen_auto_brightness_state().await.unwrap(),
+            ScreenAutoBrightnessState::Disabled
+        );
+        fs::write(&path, "1\n").unwrap();
+        assert_eq!(
+            provider.screen_auto_brightness_state().await.unwrap(),
+            ScreenAutoBrightnessState::Enabled
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sab_attribute_missing_is_unsupported() {
+        // Backend (asus-armoury) присутствует, но атрибут отсутствует.
+        let dir = fixture_root();
+        let backend_root = dir.join("class/firmware-attributes/asus-armoury");
+        fs::create_dir_all(backend_root.join("attributes")).unwrap();
+        let provider = AsusArmouryScreenAutoBrightnessProvider::new(&dir);
+        let error = provider
+            .screen_auto_brightness_state()
+            .await
+            .expect_err("attribute absent");
+        assert!(
+            matches!(error, ProviderError::Unsupported(_)),
+            "missing attribute must be Unsupported, got {error:?}"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sab_backend_missing_is_backend_unavailable() {
+        let dir = fixture_root();
+        let provider = AsusArmouryScreenAutoBrightnessProvider::new(&dir);
+        let error = provider
+            .screen_auto_brightness_state()
+            .await
+            .expect_err("backend absent");
+        assert!(
+            matches!(error, ProviderError::BackendUnavailable(_)),
+            "backend missing must be BackendUnavailable, got {error:?}"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn sab_permission_denied_is_preserved() {
+        let dir = fixture_root();
+        let provider = AsusArmouryScreenAutoBrightnessProvider::new(&dir);
+        let path = provider.current_value_path();
+        let backend_root = provider.backend_root();
+        let error = map_screen_auto_brightness_error(
+            &path,
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+            &backend_root,
+        );
+        assert!(matches!(error, ProviderError::PermissionDenied(_)));
+        assert!(!matches!(error, ProviderError::Unsupported(_)));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn sab_transient_io_error_is_preserved() {
+        let dir = fixture_root();
+        let provider = AsusArmouryScreenAutoBrightnessProvider::new(&dir);
+        let path = provider.current_value_path();
+        let backend_root = provider.backend_root();
+        let error = map_screen_auto_brightness_error(
+            &path,
+            std::io::Error::other("temporary"),
+            &backend_root,
+        );
+        assert!(matches!(error, ProviderError::Io(_)));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sab_malformed_current_is_internal_not_unsupported() {
+        for malformed in ["2\n", "true\n", "abc\n", "0 1\n", "-1\n"] {
+            let (dir, provider) = sab_fixture(malformed);
+            let error = provider
+                .screen_auto_brightness_state()
+                .await
+                .expect_err("malformed");
+            assert!(
+                matches!(error, ProviderError::Internal(_)),
+                "malformed {malformed:?} must be Internal, got {error:?}"
+            );
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn sab_empty_current_is_internal_not_false() {
+        for empty in ["\n", "", "   \n"] {
+            let (dir, provider) = sab_fixture(empty);
+            let error = provider
+                .screen_auto_brightness_state()
+                .await
+                .expect_err("empty");
+            assert!(
+                matches!(error, ProviderError::Internal(_)),
+                "empty {empty:?} must be Internal, got {error:?}"
+            );
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn sab_unexpected_numeric_value_is_rejected() {
+        // Upstream bool contract — только 0/1; 2 и выше не допускается.
+        for unexpected in ["2\n", "3\n", "255\n"] {
+            let (dir, provider) = sab_fixture(unexpected);
+            let error = provider
+                .screen_auto_brightness_state()
+                .await
+                .expect_err("unexpected numeric");
+            assert!(
+                matches!(error, ProviderError::Internal(_)),
+                "unexpected {unexpected:?} must be Internal, got {error:?}"
+            );
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn sab_failure_does_not_corrupt_mini_led() {
+        // Screen Auto Brightness сломан (malformed), MiniLED валиден.
+        let dir = fixture_root();
+        let sab_path = dir.join(ASUS_ARMOURY_SCREEN_AUTO_BRIGHTNESS_RELATIVE_PATH);
+        fs::create_dir_all(sab_path.parent().unwrap()).unwrap();
+        fs::write(&sab_path, "abc\n").unwrap();
+        let mini_dir = dir.join(ASUS_ARMOURY_MINI_LED_MODE_RELATIVE_DIR);
+        fs::create_dir_all(&mini_dir).unwrap();
+        fs::write(mini_dir.join("possible_values"), "0;1\n").unwrap();
+        fs::write(mini_dir.join("current_value"), "1\n").unwrap();
+
+        let sab = AsusArmouryScreenAutoBrightnessProvider::new(&dir);
+        let mini = AsusArmouryMiniLedModeProvider::new(&dir);
+
+        assert!(matches!(
+            sab.screen_auto_brightness_state().await,
+            Err(ProviderError::Internal(_))
+        ));
+        assert_eq!(
+            mini.mini_led_mode_state().await.unwrap().current,
+            MiniLedModeValue::new(1)
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sab_failure_does_not_corrupt_panel_overdrive() {
+        let dir = fixture_root();
+        let sab_path = dir.join(ASUS_ARMOURY_SCREEN_AUTO_BRIGHTNESS_RELATIVE_PATH);
+        fs::create_dir_all(sab_path.parent().unwrap()).unwrap();
+        fs::write(&sab_path, "abc\n").unwrap();
+        let panel_path = dir.join(ASUS_ARMOURY_PANEL_OVERDRIVE_RELATIVE_PATH);
+        fs::create_dir_all(panel_path.parent().unwrap()).unwrap();
+        fs::write(&panel_path, "1\n").unwrap();
+
+        let sab = AsusArmouryScreenAutoBrightnessProvider::new(&dir);
+        let panel = AsusArmouryPanelOverdriveProvider::new(&dir);
+
+        assert!(matches!(
+            sab.screen_auto_brightness_state().await,
+            Err(ProviderError::Internal(_))
+        ));
+        assert_eq!(
+            panel.panel_overdrive_state().await.unwrap(),
+            PanelOverdriveState::Enabled
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sab_production_relative_path_is_fixed() {
+        assert_eq!(
+            ASUS_ARMOURY_SCREEN_AUTO_BRIGHTNESS_RELATIVE_PATH,
+            "class/firmware-attributes/asus-armoury/attributes/screen_auto_brightness/current_value"
+        );
     }
 }

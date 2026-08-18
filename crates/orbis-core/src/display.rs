@@ -35,6 +35,28 @@ pub enum PanelOverdriveState {
     Unknown,
 }
 
+/// Состояние Screen Auto Brightness (бинарная ASUS firmware-настройка).
+///
+/// Backend-семантика (kernel `asus-armoury`, sysfs
+/// `screen_auto_brightness/current_value`): `0` = auto-brightness выключено,
+/// `1` = включено. Полярность документирована upstream: display_name
+/// `"Set the panel brightness to Off<0> or On<1>"`, commit `7725a2dc5863`
+/// «add screen auto-brightness toggle»; attribute — toggle функции
+/// автоматической яркости экрана, не прямое управление панелью.
+/// Отсутствие чтения не подменяется значением `false`: неизвестное состояние
+/// представлено отдельным вариантом
+/// [`ScreenAutoBrightnessState::Unknown`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenAutoBrightnessState {
+    /// Auto-brightness выключено (0).
+    Disabled,
+    /// Auto-brightness включено (1).
+    Enabled,
+    /// Backend не предоставил определённое состояние (например, malformed value).
+    Unknown,
+}
+
 /// Состояние HDR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -199,6 +221,31 @@ mod tests {
         assert_eq!(json, "\"disabled\"");
         let back: PanelOverdriveState = serde_json::from_str(&json).unwrap();
         assert_eq!(back, PanelOverdriveState::Disabled);
+    }
+
+    #[test]
+    fn screen_auto_brightness_state_preserves_disabled_unknown_distinction() {
+        // `Some(false)`-аналог: выключенное состояние не равно Unknown/absent.
+        assert_ne!(
+            ScreenAutoBrightnessState::Disabled,
+            ScreenAutoBrightnessState::Unknown
+        );
+        assert_ne!(
+            ScreenAutoBrightnessState::Enabled,
+            ScreenAutoBrightnessState::Unknown
+        );
+        assert_ne!(
+            ScreenAutoBrightnessState::Disabled,
+            ScreenAutoBrightnessState::Enabled
+        );
+
+        let json = serde_json::to_string(&ScreenAutoBrightnessState::Disabled).unwrap();
+        assert_eq!(json, "\"disabled\"");
+        let back: ScreenAutoBrightnessState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ScreenAutoBrightnessState::Disabled);
+
+        let json = serde_json::to_string(&ScreenAutoBrightnessState::Enabled).unwrap();
+        assert_eq!(json, "\"enabled\"");
     }
 
     #[test]

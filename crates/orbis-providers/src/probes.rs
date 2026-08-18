@@ -21,7 +21,7 @@ use orbis_core::capability::{
 use crate::error::ProviderError;
 use crate::traits::{
     BatteryProvider, FanProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
-    MiniLedModeProvider, PanelOverdriveProvider, PerformanceProvider,
+    MiniLedModeProvider, PanelOverdriveProvider, PerformanceProvider, ScreenAutoBrightnessProvider,
 };
 
 fn operation_from_error(
@@ -381,6 +381,39 @@ where
     P: MiniLedModeProvider + ?Sized,
 {
     match provider.mini_led_mode_state().await {
+        Ok(_) => Ok(capability_from_operations(
+            CapabilityOperations {
+                read: ProbeOperationResult::classified(ProbeClassification::Supported)
+                    .into_operation(),
+                write: read_only_write(),
+            },
+            CapabilityConstraints::Unknown,
+        )),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            let write = write_from_read_failure(&read);
+            Ok(capability_from_read(
+                read,
+                write,
+                CapabilityConstraints::Unknown,
+            ))
+        }
+    }
+}
+
+/// Probe Screen Auto Brightness read capability from an authoritative read.
+///
+/// The observed state is read only to confirm the read contract; the
+/// `Disabled`/`Enabled`/`Unknown` value never enters the capability metadata.
+///
+/// Write capability is fixed at `ReadOnly`: this slice has no production
+/// Screen Auto Brightness mutation backend, so write must never be presented
+/// as Supported just because the sysfs attribute is root-writable.
+pub async fn probe_screen_auto_brightness<P>(provider: &P) -> Result<Capability, ProbeError>
+where
+    P: ScreenAutoBrightnessProvider + ?Sized,
+{
+    match provider.screen_auto_brightness_state().await {
         Ok(_) => Ok(capability_from_operations(
             CapabilityOperations {
                 read: ProbeOperationResult::classified(ProbeClassification::Supported)
@@ -1964,5 +1997,158 @@ mod tests {
             mini_led.operations.read.status,
             CapabilityStatus::BackendMissing
         );
+    }
+
+    /// Scripted Screen Auto Brightness provider.
+    struct ScriptedSabProvider {
+        state: Scripted<orbis_core::display::ScreenAutoBrightnessState>,
+    }
+
+    impl ScriptedSabProvider {
+        fn new(state: Scripted<orbis_core::display::ScreenAutoBrightnessState>) -> Self {
+            Self { state }
+        }
+    }
+
+    impl Provider for ScriptedSabProvider {
+        fn id(&self) -> &'static str {
+            "scripted-sab"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-sab")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted sab: функция '{feature}' недоступна")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl ScreenAutoBrightnessProvider for ScriptedSabProvider {
+        async fn screen_auto_brightness_state(
+            &self,
+        ) -> Result<orbis_core::display::ScreenAutoBrightnessState, ProviderError> {
+            self.state.result()
+        }
+    }
+
+    #[tokio::test]
+    async fn sab_probe_reports_supported_with_readonly_write() {
+        for state in [
+            orbis_core::display::ScreenAutoBrightnessState::Disabled,
+            orbis_core::display::ScreenAutoBrightnessState::Enabled,
+            orbis_core::display::ScreenAutoBrightnessState::Unknown,
+        ] {
+            let capability =
+                probe_screen_auto_brightness(&ScriptedSabProvider::new(Scripted::Value(state)))
+                    .await
+                    .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported
+            );
+            // Write никогда не Supported: mutation backend отсутствует.
+            assert_eq!(
+                capability.operations.write.status,
+                CapabilityStatus::ReadOnly
+            );
+            assert_eq!(capability.status, CapabilityStatus::Supported);
+            assert_eq!(capability.constraints, CapabilityConstraints::Unknown);
+        }
+    }
+
+    #[tokio::test]
+    async fn sab_probe_preserves_backend_missing_and_unsupported() {
+        for (error, expected) in [
+            (
+                ScriptedError::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (ScriptedError::Unsupported, CapabilityStatus::Unsupported),
+        ] {
+            let capability =
+                probe_screen_auto_brightness(&ScriptedSabProvider::new(Scripted::Error(error)))
+                    .await
+                    .unwrap();
+            assert_eq!(capability.operations.read.status, expected);
+            // Write зеркалит read при структурном отказе (не фальсифицируется).
+            assert_eq!(capability.operations.write.status, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn sab_probe_read_permission_denied_does_not_make_write_denied() {
+        // Read PermissionDenied — evidence только о read. Write остаётся
+        // ReadOnly (intentionally), а не PermissionDenied.
+        let capability = probe_screen_auto_brightness(&ScriptedSabProvider::new(Scripted::Error(
+            ScriptedError::PermissionDenied,
+        )))
+        .await
+        .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::PermissionDenied
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
+
+    #[tokio::test]
+    async fn sab_probe_malformed_backend_error_is_not_unsupported() {
+        let capability = probe_screen_auto_brightness(&ScriptedSabProvider::new(Scripted::Error(
+            ScriptedError::Internal,
+        )))
+        .await;
+        assert!(matches!(capability, Err(ProbeError::Internal(_))));
+    }
+
+    #[tokio::test]
+    async fn sab_failure_does_not_corrupt_mini_led_in_registry() {
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let mini_led = probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Value(
+            mini_led_state(1),
+        )))
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::MiniLed, mini_led)
+            .unwrap();
+
+        let sab = probe_screen_auto_brightness(&ScriptedSabProvider::new(Scripted::Error(
+            ScriptedError::BackendMissing,
+        )))
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::ScreenAutoBrightness, sab)
+            .unwrap();
+
+        let snapshot = builder.build().unwrap();
+        let mini_led = snapshot.capability(orbis_core::FeatureId::MiniLed).unwrap();
+        assert_eq!(mini_led.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(mini_led.status, CapabilityStatus::Supported);
+
+        let sab = snapshot
+            .capability(orbis_core::FeatureId::ScreenAutoBrightness)
+            .unwrap();
+        assert_eq!(sab.operations.read.status, CapabilityStatus::BackendMissing);
     }
 }

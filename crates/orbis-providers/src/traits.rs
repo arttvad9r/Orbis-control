@@ -9,7 +9,9 @@ use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::automation::AutomationRule;
 use orbis_core::battery::ChargeLimit;
 use orbis_core::diagnostics::DiagnosticEntry;
-use orbis_core::display::{DisplayMode, MiniLedModeState, PanelOverdriveState};
+use orbis_core::display::{
+    DisplayMode, MiniLedModeState, PanelOverdriveState, ScreenAutoBrightnessState,
+};
 use orbis_core::fan::FanCurve;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
@@ -271,6 +273,21 @@ pub trait PanelOverdriveProvider: Provider {
 pub trait MiniLedModeProvider: Provider {
     /// Текущее состояние MiniLED mode (fresh authoritative snapshot).
     async fn mini_led_mode_state(&self) -> Result<MiniLedModeState, ProviderError>;
+}
+
+/// Read-only Screen Auto Brightness capability (ASUS firmware
+/// `screen_auto_brightness`).
+///
+/// Отдельный concept-specific trait (ADR 0005): провайдер, реализующий только
+/// Screen Auto Brightness, не обязан предоставлять полную модель дисплея.
+/// Состояние бинарное (`0`/`1`), но `Unknown` не подменяется значением
+/// `false`. Mutation в этом slice отсутствует.
+#[async_trait]
+pub trait ScreenAutoBrightnessProvider: Provider {
+    /// Текущее состояние Screen Auto Brightness (fresh authoritative read).
+    async fn screen_auto_brightness_state(
+        &self,
+    ) -> Result<ScreenAutoBrightnessState, ProviderError>;
 }
 
 /// Дисплей.

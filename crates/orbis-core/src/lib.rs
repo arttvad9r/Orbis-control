@@ -43,7 +43,7 @@ pub use capability::{
 pub use diagnostics::{DiagnosticEntry, DiagnosticReport};
 pub use display::{
     DisplayMode, HdrState, MiniLedModeKind, MiniLedModeState, MiniLedModeValue,
-    PanelOverdriveState, RefreshMode, interpret_mini_led_mode,
+    PanelOverdriveState, RefreshMode, ScreenAutoBrightnessState, interpret_mini_led_mode,
 };
 pub use error::CoreError;
 pub use fan::{FanCurve, FanCurvePoint, FanId};

@@ -40,6 +40,8 @@ pub enum FeatureId {
     PanelOverdrive,
     /// MiniLED backlight mode (device-specific firmware enumeration).
     MiniLed,
+    /// Screen auto-brightness toggle (kernel asus-armoury).
+    ScreenAutoBrightness,
     /// PPT PL1 (SPL).
     PptPl1Spl,
     /// PPT PL2 (SPPT).
@@ -93,6 +95,7 @@ impl FeatureId {
         FeatureId::DgpuDisable,
         FeatureId::PanelOverdrive,
         FeatureId::MiniLed,
+        FeatureId::ScreenAutoBrightness,
         FeatureId::PptPl1Spl,
         FeatureId::PptPl2Sppt,
         FeatureId::PptFppt,
@@ -128,6 +131,7 @@ impl FeatureId {
             FeatureId::DgpuDisable => "dgpu_disable",
             FeatureId::PanelOverdrive => "panel_overdrive",
             FeatureId::MiniLed => "mini_led",
+            FeatureId::ScreenAutoBrightness => "screen_auto_brightness",
             FeatureId::PptPl1Spl => "ppt_pl1_spl",
             FeatureId::PptPl2Sppt => "ppt_pl2_sppt",
             FeatureId::PptFppt => "ppt_fppt",
@@ -449,6 +453,14 @@ mod tests {
             "\"mini_led\""
         );
         assert_eq!(FeatureId::MiniLed.as_str(), "mini_led");
+        assert_eq!(
+            serde_json::to_string(&FeatureId::ScreenAutoBrightness).unwrap(),
+            "\"screen_auto_brightness\""
+        );
+        assert_eq!(
+            FeatureId::ScreenAutoBrightness.as_str(),
+            "screen_auto_brightness"
+        );
     }
 
     #[test]

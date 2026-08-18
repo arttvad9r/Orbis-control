@@ -31,7 +31,7 @@ pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsPro
 pub use native_asus_eco::*;
 pub use probes::{
     probe_charge_limit, probe_fan_curve, probe_gpu_access, probe_gpu_mux, probe_gpu_power,
-    probe_mini_led_mode, probe_panel_overdrive, probe_performance,
+    probe_mini_led_mode, probe_panel_overdrive, probe_performance, probe_screen_auto_brightness,
 };
 pub use sysfs_telemetry::SysfsTelemetryProvider;
 pub use traits::*;
