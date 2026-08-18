@@ -1543,4 +1543,42 @@ mod tests {
         assert_eq!(s.fan_curve_capability, CapabilityAvailability::ReadOnly);
         assert!(!s.fan_curve_writable);
     }
+
+    #[test]
+    fn fan_curve_write_temporarily_unavailable_does_not_enable_mutation() {
+        // Read is fine, but the fan curve mutation backend is temporarily
+        // unavailable: the UI must NOT enable the write control. The
+        // distinction is preserved, not collapsed to a bool.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.fan_curve_capability, CapabilityAvailability::Supported);
+        assert!(!s.fan_curve_writable);
+        assert!(!write_allows_mutation(
+            CapabilityStatus::TemporarilyUnavailable
+        ));
+    }
+
+    #[test]
+    fn fan_curve_write_permission_denied_does_not_enable_mutation() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::PermissionDenied,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.fan_curve_writable);
+        assert!(!write_allows_mutation(CapabilityStatus::PermissionDenied));
+    }
 }

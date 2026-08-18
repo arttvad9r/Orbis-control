@@ -454,7 +454,7 @@ where
         runtime.gpu.provider_mux(),
         runtime.gpu.provider_access(),
         runtime.fan.provider_fan(),
-        runtime.fan_write_available(),
+        runtime.fan_mutation_status(),
         runtime.battery_mutation_status(),
         runtime.performance_mutation_status(),
         next_generation,
@@ -567,7 +567,7 @@ mod tests {
                 fan_service,
                 telemetry_service,
                 snapshot,
-                false,
+                CapabilityStatus::Unsupported,
                 CapabilityStatus::Unsupported,
                 CapabilityStatus::Unsupported,
             ),
@@ -670,7 +670,7 @@ mod tests {
             fan_service,
             telemetry,
             snapshot,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         )
@@ -2913,7 +2913,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         )
@@ -2946,7 +2946,7 @@ mod tests {
                     fan_service,
                     telemetry_service,
                     initial_snapshot,
-                    false,
+                    CapabilityStatus::Unsupported,
                     CapabilityStatus::Unsupported,
                     CapabilityStatus::Unsupported,
                 ),
@@ -3012,7 +3012,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         )
@@ -3027,7 +3027,7 @@ mod tests {
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // fan_write_available = false in the runtime: write must be Unsupported.
+        // fan mutation status = Unsupported in the runtime: write must be Unsupported.
         let worker = tokio::spawn(async move {
             run_worker(
                 ApplicationRuntime::new_with_snapshot(
@@ -3042,7 +3042,7 @@ mod tests {
                     fan_service,
                     telemetry_service,
                     initial_snapshot,
-                    false,
+                    CapabilityStatus::Unsupported,
                     CapabilityStatus::Unsupported,
                     CapabilityStatus::Unsupported,
                 ),
@@ -3069,7 +3069,7 @@ mod tests {
                 assert_eq!(
                     fan.operations.write.status,
                     orbis_core::capability::CapabilityStatus::Unsupported,
-                    "write must be Unsupported when fan_write_available=false"
+                    "write must be Unsupported when fan mutation status is Unsupported"
                 );
             }
             other => panic!("expected RegistryChange(Ok(..)), got: {other:?}"),

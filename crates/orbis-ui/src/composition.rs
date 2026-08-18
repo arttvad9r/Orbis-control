@@ -404,12 +404,12 @@ pub trait FanServiceRuntime: Send + Sync {
     /// Probe fan curve capability support metadata.
     ///
     /// Returns a typed `Capability` for the `FanCurves` feature. The write
-    /// status is controlled by `write_available` (Hardware1 evidence), the
-    /// read status is derived from the `active_curve` read contract.
+    /// status is controlled by `mutation_status` (typed Hardware1 evidence),
+    /// the read status is derived from the `active_curve` read contract.
     async fn probe_fan_capability(
         &self,
         fan: FanId,
-        write_available: bool,
+        mutation_status: orbis_core::capability::CapabilityStatus,
     ) -> Result<orbis_core::capability::Capability, orbis_capabilities::ProbeError>;
 
     /// Borrow the inner fan provider for capability probing.
@@ -445,9 +445,9 @@ where
     async fn probe_fan_capability(
         &self,
         fan: FanId,
-        write_available: bool,
+        mutation_status: orbis_core::capability::CapabilityStatus,
     ) -> Result<orbis_core::capability::Capability, orbis_capabilities::ProbeError> {
-        orbis_providers::probe_fan_curve(self.provider(), &fan, write_available).await
+        orbis_providers::probe_fan_curve(self.provider(), &fan, mutation_status).await
     }
 
     fn provider_fan(&self) -> &(dyn orbis_providers::traits::FanProvider + 'static) {
@@ -499,12 +499,13 @@ pub struct ApplicationRuntime<G, B, R> {
     pub telemetry: Arc<dyn TelemetryServiceRuntime>,
     /// Read-only capability registry snapshot.
     pub(crate) capabilities: Arc<CapabilityRegistrySnapshot>,
-    /// Hardware1 mutation backend evidence (NameHasOwner at startup).
+    /// Typed Hardware1 fan curve mutation backend evidence (startup-time).
     ///
-    /// Controls FanCurves write capability: `Supported` only when production
-    /// Hardware1 daemon owns its D-Bus name. This is a stable startup-time
-    /// snapshot — dynamic re-probing is out of scope (ADR 0006).
-    fan_write_available: bool,
+    /// Controls FanCurves write capability. Unlike the old `bool`, it
+    /// preserves Supported / Unsupported / TemporarilyUnavailable /
+    /// PermissionDenied / BackendMissing / Unknown so the UI can distinguish
+    /// them honestly.
+    fan_mutation_status: orbis_core::capability::CapabilityStatus,
     /// Typed Hardware1 Battery mutation backend evidence (startup-time).
     ///
     /// Controls ChargeLimit write capability. Unlike a bool, it preserves
@@ -532,7 +533,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
         fan: F,
         telemetry: T,
         snapshot: CapabilityRegistrySnapshot,
-        fan_write_available: bool,
+        fan_mutation_status: orbis_core::capability::CapabilityStatus,
         battery_mutation_status: orbis_core::capability::CapabilityStatus,
         performance_mutation_status: orbis_core::capability::CapabilityStatus,
     ) -> Self
@@ -547,7 +548,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             fan: Arc::new(fan),
             telemetry: Arc::new(telemetry),
             capabilities: Arc::new(snapshot),
-            fan_write_available,
+            fan_mutation_status,
             battery_mutation_status,
             performance_mutation_status,
         }
@@ -582,12 +583,14 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
     /// without discovered capabilities. Available only to test code in this
     /// crate so that production callers cannot accidentally use it.
     #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
     pub fn empty_for_testing<T, F>(
         gpu: G,
         battery: B,
         performance: R,
         fan: F,
         telemetry: T,
+        fan_mutation_status: orbis_core::capability::CapabilityStatus,
         battery_mutation_status: orbis_core::capability::CapabilityStatus,
         performance_mutation_status: orbis_core::capability::CapabilityStatus,
     ) -> Self
@@ -606,15 +609,15 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             fan: Arc::new(fan),
             telemetry: Arc::new(telemetry),
             capabilities: Arc::new(snapshot),
-            fan_write_available: false,
+            fan_mutation_status,
             battery_mutation_status,
             performance_mutation_status,
         }
     }
 
-    /// Whether the Hardware1 mutation backend is available (startup-time evidence).
-    pub fn fan_write_available(&self) -> bool {
-        self.fan_write_available
+    /// Typed Hardware1 fan curve mutation backend evidence (startup-time).
+    pub fn fan_mutation_status(&self) -> orbis_core::capability::CapabilityStatus {
+        self.fan_mutation_status
     }
 
     /// Typed Hardware1 Battery mutation backend evidence (startup-time).
@@ -695,7 +698,7 @@ pub async fn probe_capability_registry<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     gpu_mux_provider: &Gmux,
     gpu_access_provider: &Gacc,
     fan_provider: &Fp,
-    fan_write_available: bool,
+    fan_mutation_status: orbis_core::capability::CapabilityStatus,
     battery_mutation_status: orbis_core::capability::CapabilityStatus,
     performance_mutation_status: orbis_core::capability::CapabilityStatus,
     generation: u64,
@@ -785,13 +788,13 @@ where
         })?;
 
     // Fan curve read capabilities: CPU and GPU active curve reads. Write
-    // capability = Supported только если доказан production Hardware1 mutation
-    // contract (fan_write_available). Curve points never enter the registry —
-    // only support metadata.
+    // capability comes from typed Hardware1 fan mutation evidence
+    // (fan_mutation_status). Curve points never enter the registry — only
+    // support metadata.
     let cpu_curve = orbis_providers::probe_fan_curve(
         fan_provider,
         &orbis_core::fan::FanId::Cpu,
-        fan_write_available,
+        fan_mutation_status,
     )
     .await?;
     builder
@@ -825,7 +828,7 @@ pub async fn build_initial_registry_snapshot<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     gpu_mux_provider: &Gmux,
     gpu_access_provider: &Gacc,
     fan_provider: &Fp,
-    fan_write_available: bool,
+    fan_mutation_status: orbis_core::capability::CapabilityStatus,
     battery_mutation_status: orbis_core::capability::CapabilityStatus,
     performance_mutation_status: orbis_core::capability::CapabilityStatus,
 ) -> Result<CapabilityRegistrySnapshot, RegistryAssemblyError>
@@ -845,7 +848,7 @@ where
         gpu_mux_provider,
         gpu_access_provider,
         fan_provider,
-        fan_write_available,
+        fan_mutation_status,
         battery_mutation_status,
         performance_mutation_status,
         1,
@@ -868,7 +871,7 @@ pub async fn refresh_capability_registry<Bp, Pp, Gpow, Gmux, Gacc, Fp>(
     gpu_mux_provider: &Gmux,
     gpu_access_provider: &Gacc,
     fan_provider: &Fp,
-    fan_write_available: bool,
+    fan_mutation_status: orbis_core::capability::CapabilityStatus,
     battery_mutation_status: orbis_core::capability::CapabilityStatus,
     performance_mutation_status: orbis_core::capability::CapabilityStatus,
     next_generation: u64,
@@ -889,7 +892,7 @@ where
         gpu_mux_provider,
         gpu_access_provider,
         fan_provider,
-        fan_write_available,
+        fan_mutation_status,
         battery_mutation_status,
         performance_mutation_status,
         next_generation,
@@ -929,6 +932,8 @@ pub async fn build_production_runtime(
     system_connection: zbus::Connection,
 ) -> anyhow::Result<(ProductionRuntime, bool)> {
     let hardware_owner = hardware1_write_available(&system_connection).await;
+    let fan_mutation_status =
+        orbis_session_client::hardware1_fan_mutation_status(&system_connection).await;
     let battery_mutation_status =
         orbis_session_client::hardware1_battery_mutation_status(&system_connection).await;
     let performance_mutation_status =
@@ -985,7 +990,7 @@ pub async fn build_production_runtime(
         gpu.primitive_mux_provider(),
         gpu.primitive_access_provider(),
         fan_service.provider(),
-        hardware_owner,
+        fan_mutation_status,
         battery_mutation_status,
         performance_mutation_status,
     )
@@ -999,7 +1004,7 @@ pub async fn build_production_runtime(
             fan_service,
             telemetry,
             snapshot,
-            hardware_owner,
+            fan_mutation_status,
             battery_mutation_status,
             performance_mutation_status,
         ),
@@ -1052,7 +1057,7 @@ pub fn mock_runtime() -> MockRuntime {
         AppService::new(provider.clone()),
         AppService::new(provider),
         empty,
-        false,
+        CapabilityStatus::Unsupported,
         CapabilityStatus::Unsupported,
         CapabilityStatus::Unsupported,
     )
@@ -1107,7 +1112,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         )
@@ -1124,6 +1129,7 @@ mod tests {
             AppService::new(provider.clone()),
             AppService::new(provider.clone()),
             AppService::new(provider),
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         );
@@ -1158,7 +1164,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         )
@@ -1185,7 +1191,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         )
@@ -1211,7 +1217,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            true,
+            CapabilityStatus::Supported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         )
@@ -1236,7 +1242,7 @@ mod tests {
             provider,
             provider,
             provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         )
@@ -1258,6 +1264,7 @@ mod tests {
             AppService::new(provider),
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
         )
     }
 
@@ -1277,7 +1284,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
@@ -1296,7 +1303,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
@@ -1334,7 +1341,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             pre_generation + 1,
@@ -1365,7 +1372,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
@@ -1400,7 +1407,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
@@ -1423,7 +1430,7 @@ mod tests {
         let mut runtime = script_gpu_runtime(provider.clone());
         runtime.replace_capabilities(initial);
 
-        // fan_write_available = true: write should be Supported after refresh.
+        // fan mutation status = Supported: write should be Supported after refresh.
         let next = refresh_capability_registry(
             &*provider,
             &*provider,
@@ -1431,7 +1438,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            true,
+            CapabilityStatus::Supported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
@@ -1446,7 +1453,7 @@ mod tests {
         assert_eq!(fan.operations.read.status, CapabilityStatus::Supported);
         assert_eq!(fan.operations.write.status, CapabilityStatus::Supported);
 
-        // fan_write_available = false: write should be Unsupported after refresh.
+        // fan mutation status = Unsupported: write should be Unsupported after refresh.
         let next = refresh_capability_registry(
             &*provider,
             &*provider,
@@ -1454,7 +1461,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
@@ -1486,7 +1493,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            true,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             runtime.capabilities().generation() + 1,
@@ -1588,7 +1595,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
         )
@@ -1602,7 +1609,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             2,
@@ -1644,7 +1651,7 @@ mod tests {
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             1,
@@ -1670,7 +1677,7 @@ mod tests {
             &gpu_err,
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             1,
@@ -1727,7 +1734,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             pre_generation + 1,
@@ -1765,7 +1772,7 @@ mod tests {
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
             &MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists")),
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             1,
@@ -1853,7 +1860,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::TemporarilyUnavailable,
             CapabilityStatus::Unsupported,
         )
@@ -1904,7 +1911,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::PermissionDenied,
             CapabilityStatus::Unsupported,
         )
@@ -1935,7 +1942,7 @@ mod tests {
             &*provider,
             &*provider,
             &*provider,
-            false,
+            CapabilityStatus::Unsupported,
             CapabilityStatus::Unsupported,
             CapabilityStatus::TemporarilyUnavailable,
         )
@@ -1968,5 +1975,60 @@ mod tests {
             CapabilityStatus::Supported
         );
         assert!(snapshot.contains(FeatureId::FanCurves));
+    }
+
+    #[tokio::test]
+    async fn fan_write_evidence_flows_through_registry_assembly() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        // Runtime evidence says the fan curve mutation backend is temporarily
+        // unavailable. Read stays Supported; write must NOT become Supported.
+        let snapshot = build_initial_registry_snapshot(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            CapabilityStatus::TemporarilyUnavailable,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .expect("snapshot must assemble");
+        let fan = snapshot
+            .capability(FeatureId::FanCurves)
+            .expect("FanCurves present");
+        assert_eq!(
+            fan.operations.read.status,
+            CapabilityStatus::Supported,
+            "read must stay Supported"
+        );
+        assert_eq!(
+            fan.operations.write.status,
+            CapabilityStatus::TemporarilyUnavailable,
+            "write must mirror runtime mutation evidence"
+        );
+
+        // Independent domains remain unaffected.
+        let battery = snapshot
+            .capability(FeatureId::ChargeLimit)
+            .expect("ChargeLimit present");
+        assert_eq!(battery.operations.read.status, CapabilityStatus::Supported);
+        let performance = snapshot
+            .capability(FeatureId::Performance)
+            .expect("Performance present");
+        assert_eq!(
+            performance.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        let gpu_power = snapshot
+            .capability(FeatureId::GpuPower)
+            .expect("GpuPower present");
+        assert_eq!(
+            gpu_power.operations.read.status,
+            CapabilityStatus::Supported
+        );
     }
 }

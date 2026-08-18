@@ -189,7 +189,7 @@ fn write_from_mutation_status(status: CapabilityStatus) -> OperationCapability {
     OperationCapability {
         status,
         reason: Some(orbis_core::capability::CapabilityReason {
-            reason: "Hardware1 Battery mutation backend runtime evidence".into(),
+            reason: "Hardware1 mutation backend runtime evidence".into(),
             suggestion: String::new(),
             backend: None,
             endpoint: None,
@@ -205,28 +205,24 @@ fn write_from_mutation_status(status: CapabilityStatus) -> OperationCapability {
 /// Reads the active curve (read-only) to establish the read contract; the
 /// curve points are discarded and never enter the capability metadata.
 ///
-/// Write capability: `Supported` только если доказан production Hardware1
-/// mutation contract (`write_available = true`). Никаких пробных writes —
-/// write status определяется декларативно по наличию mutation backend.
+/// Write capability comes from typed runtime evidence about the mutation
+/// backend (`mutation_status`), NOT from `validate_curve` or readable curve
+/// points: those prove reads, not the mutation path. Никаких пробных writes —
+/// write status определяется по runtime evidence.
 pub async fn probe_fan_curve<P>(
     provider: &P,
     fan: &orbis_core::fan::FanId,
-    write_available: bool,
+    mutation_status: CapabilityStatus,
 ) -> Result<Capability, ProbeError>
 where
     P: FanProvider + ?Sized,
 {
-    let write = if write_available {
-        ProbeOperationResult::classified(ProbeClassification::Supported).into_operation()
-    } else {
-        unsupported_write()
-    };
     match provider.active_curve(fan).await {
         Ok(_) => Ok(capability_from_operations(
             CapabilityOperations {
                 read: ProbeOperationResult::classified(ProbeClassification::Supported)
                     .into_operation(),
-                write,
+                write: write_from_mutation_status(mutation_status),
             },
             CapabilityConstraints::Unknown,
         )),
@@ -1186,9 +1182,14 @@ mod tests {
     #[tokio::test]
     async fn fan_curve_probe_reports_write_unsupported_without_hardware_backend() {
         let provider = ScriptedFanProvider::ok();
-        let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, false)
-            .await
-            .unwrap();
+        // Mutation evidence = Unsupported (no proven backend).
+        let capability = probe_fan_curve(
+            &provider,
+            &orbis_core::fan::FanId::Cpu,
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::Supported
@@ -1202,9 +1203,15 @@ mod tests {
     #[tokio::test]
     async fn fan_curve_probe_reports_write_supported_when_hardware_backend_proven() {
         let provider = ScriptedFanProvider::ok();
-        let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, true)
-            .await
-            .unwrap();
+        // Mutation backend evidence = Supported (Hardware1 reports a proven
+        // fan curve mutation backend).
+        let capability = probe_fan_curve(
+            &provider,
+            &orbis_core::fan::FanId::Cpu,
+            CapabilityStatus::Supported,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::Supported
@@ -1214,6 +1221,68 @@ mod tests {
             CapabilityStatus::Supported
         );
         assert_eq!(capability.status, CapabilityStatus::Supported);
+    }
+
+    #[tokio::test]
+    async fn fan_curve_probe_write_status_matches_runtime_evidence() {
+        // Read is Supported in all cases; only the mutation evidence varies.
+        // Each evidence class must be preserved exactly — never collapsed to
+        // a bool or a generic error.
+        for (evidence, expected_write) in [
+            (CapabilityStatus::Supported, CapabilityStatus::Supported),
+            (CapabilityStatus::Unsupported, CapabilityStatus::Unsupported),
+            (
+                CapabilityStatus::TemporarilyUnavailable,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+            (
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::PermissionDenied,
+            ),
+            (CapabilityStatus::Unknown, CapabilityStatus::Unknown),
+        ] {
+            let provider = ScriptedFanProvider::ok();
+            let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, evidence)
+                .await
+                .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported,
+                "read must stay Supported for evidence {evidence:?}"
+            );
+            assert_eq!(
+                capability.operations.write.status, expected_write,
+                "write must mirror evidence {evidence:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn fan_curve_probe_validation_alone_does_not_make_write_supported() {
+        // validate_curve accepts the curve (returns Valid), but the runtime
+        // mutation evidence says Unknown. Validation alone must never make
+        // write Supported.
+        let provider = ScriptedFanProvider::ok();
+        let capability = probe_fan_curve(
+            &provider,
+            &orbis_core::fan::FanId::Cpu,
+            CapabilityStatus::Unknown,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unknown,
+            "validate_curve must not prove mutation availability"
+        );
     }
 
     #[tokio::test]
@@ -1410,9 +1479,15 @@ mod tests {
     #[tokio::test]
     async fn fan_curve_probe_write_mirrors_backend_missing_when_read_fails() {
         let provider = ScriptedFanProvider::backend_missing();
-        let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, true)
-            .await
-            .unwrap();
+        // Even positive mutation evidence must not override a structural read
+        // failure: write mirrors the read classification.
+        let capability = probe_fan_curve(
+            &provider,
+            &orbis_core::fan::FanId::Cpu,
+            CapabilityStatus::Supported,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::BackendMissing
