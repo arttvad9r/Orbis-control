@@ -281,6 +281,12 @@ async fn run_worker_inner<G, B, R, F>(
         poll_timer = Some(timer);
     }
 
+    // GPU capability refresh: piggybacks on the telemetry polling loop at a
+    // reduced frequency. GPU D-Bus property reads are cheap; 5s interval is
+    // semantically reasonable for runtime state changes (dGPU sleep/wake).
+    const GPU_REFRESH_INTERVAL: u32 = 5;
+    let mut gpu_refresh_counter: u32 = 0;
+
     loop {
         // `runtime` is owned exclusively here. Per command we borrow the
         // service fields by mut-reference; the borrow checker ensures we do
@@ -308,6 +314,20 @@ async fn run_worker_inner<G, B, R, F>(
                                 ));
                             });
                             poll_in_progress = true;
+
+                            // GPU capability refresh: дешёвые D-Bus property
+                            // reads, выполняются inline после telemetry spawn.
+                            // Примерно каждые 5s (GPU_REFRESH_INTERVAL * poll_interval).
+                            gpu_refresh_counter += 1;
+                            if gpu_refresh_counter >= GPU_REFRESH_INTERVAL {
+                                gpu_refresh_counter = 0;
+                                let (power, mux, access) =
+                                    runtime.gpu.refresh_gpu_capabilities().await;
+                                emit(WorkerEvent::GpuPowerRefresh(power));
+                                emit(WorkerEvent::GpuMuxRefresh(mux));
+                                emit(WorkerEvent::GpuAccessRefresh(access));
+                            }
+
                             continue;
                         }
                     }
@@ -2727,6 +2747,162 @@ mod tests {
         assert!(saw_power_err, "power error не доставлен");
         assert!(saw_mux_ok, "mux Ok не доставлен");
         assert!(saw_access_ok, "access Ok не доставлен");
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn periodic_gpu_refresh_updates_capability_state() {
+        // GPU capabilities are refreshed periodically during telemetry polling.
+        // With GPU_REFRESH_INTERVAL=5 and poll_interval=50ms, GPU refresh
+        // happens every ~250ms. Verify that changed GPU state is detected
+        // without restart.
+        let cap = Arc::new(CapabilityProvider {
+            power: Ok(GpuPowerState::Suspended),
+            mux: Ok(GpuMuxState::Integrated),
+            access: Ok(GpuAccessPolicy::Blocked),
+        });
+        let (main_service, battery_service, _, _, _, performance_service) = services();
+        let gpu_power_service = AppService::new(cap.clone());
+        let gpu_mux_service = AppService::new(cap.clone());
+        let gpu_access_service = AppService::new(cap);
+
+        let telemetry_state = build_state_arc("zephyrus-full").expect("profile exists");
+        let telemetry_service = AppService::new(Arc::new(MockProvider::new(telemetry_state)));
+        let fan_state = build_state_arc("zephyrus-full").expect("profile exists");
+        let fan_service = AppService::new(Arc::new(MockProvider::new(fan_state)));
+        let snapshot = CapabilityRegistryBuilder::new(1, std::time::SystemTime::now())
+            .build()
+            .expect("empty registry snapshot must build");
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker_with_polling(
+                ApplicationRuntime::new_with_snapshot(
+                    GpuServices::new(
+                        main_service,
+                        gpu_power_service,
+                        gpu_mux_service,
+                        gpu_access_service,
+                    ),
+                    battery_service,
+                    performance_service,
+                    fan_service,
+                    telemetry_service,
+                    snapshot,
+                    CapabilityStatus::Unsupported,
+                    CapabilityStatus::Unsupported,
+                    CapabilityStatus::Unsupported,
+                ),
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+                Duration::from_millis(50),
+            )
+            .await;
+        });
+
+        // Trigger polling via RefreshTelemetry. After 5 ticks (~250ms),
+        // GPU capabilities should be refreshed.
+        tx.send(WorkerCommand::RefreshTelemetry).expect("send");
+
+        let mut saw_gpu_power = false;
+        let mut saw_gpu_mux = false;
+        let mut saw_gpu_access = false;
+        // Wait up to 500ms for GPU events (5 ticks * 50ms = 250ms, with margin).
+        for _ in 0..20 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::task::yield_now().await;
+            while let Ok(event) = result_rx.try_recv() {
+                match event {
+                    WorkerEvent::GpuPowerRefresh(Ok(GpuPowerState::Suspended)) => {
+                        saw_gpu_power = true;
+                    }
+                    WorkerEvent::GpuMuxRefresh(Ok(GpuMuxState::Integrated)) => {
+                        saw_gpu_mux = true;
+                    }
+                    WorkerEvent::GpuAccessRefresh(Ok(GpuAccessPolicy::Blocked)) => {
+                        saw_gpu_access = true;
+                    }
+                    _ => {}
+                }
+            }
+            if saw_gpu_power && saw_gpu_mux && saw_gpu_access {
+                break;
+            }
+        }
+        assert!(saw_gpu_power, "GPU power refresh not delivered");
+        assert!(saw_gpu_mux, "GPU mux refresh not delivered");
+        assert!(saw_gpu_access, "GPU access refresh not delivered");
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn gpu_refresh_failure_does_not_corrupt_other_domains() {
+        // GPU refresh failure must not affect Battery/Performance capabilities.
+        let cap = Arc::new(CapabilityProvider {
+            power: Err(ProviderError::Dbus("power down".into())),
+            mux: Ok(GpuMuxState::Discrete),
+            access: Ok(GpuAccessPolicy::Blocked),
+        });
+        let (main_service, battery_service, _, _, _, performance_service) = services();
+        let gpu_power_service = AppService::new(cap.clone());
+        let gpu_mux_service = AppService::new(cap.clone());
+        let gpu_access_service = AppService::new(cap);
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker_with_services(
+                main_service,
+                battery_service,
+                gpu_power_service,
+                gpu_mux_service,
+                gpu_access_service,
+                performance_service,
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        // Send RefreshGpuCapabilities + RefreshPerformance to verify
+        // independence.
+        tx.send(WorkerCommand::RefreshGpuCapabilities)
+            .expect("send");
+        tx.send(WorkerCommand::RefreshPerformance).expect("send");
+
+        let mut saw_gpu_power_err = false;
+        let mut saw_gpu_mux_ok = false;
+        let mut saw_perf_ok = false;
+        for _ in 0..4 {
+            match result_rx.recv().await.expect("event") {
+                WorkerEvent::GpuPowerRefresh(Err(ProviderError::Dbus(_))) => {
+                    saw_gpu_power_err = true;
+                }
+                WorkerEvent::GpuMuxRefresh(Ok(GpuMuxState::Discrete)) => saw_gpu_mux_ok = true,
+                WorkerEvent::PerformanceRefresh(Ok(_)) => saw_perf_ok = true,
+                _ => {}
+            }
+        }
+        assert!(saw_gpu_power_err, "GPU power error not delivered");
+        assert!(saw_gpu_mux_ok, "GPU mux Ok not delivered");
+        assert!(saw_perf_ok, "Performance Ok not delivered");
 
         drop(tx);
         tokio::time::timeout(std::time::Duration::from_secs(5), worker)
