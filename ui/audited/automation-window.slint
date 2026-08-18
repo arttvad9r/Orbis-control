@@ -4,9 +4,9 @@ import { Palette } from "../themes/dark.slint";
 
 export component AutomationWindow inherits Window {
     width: 700px;
-    height: 540px;
+    height: 600px;
     min-width: 660px;
-    min-height: 520px;
+    min-height: 580px;
     title: "Orbis Control — Automation";
     background: Palette.window-background;
 
@@ -33,9 +33,9 @@ export component AutomationWindow inherits Window {
         WindowHeader { title: "Automation"; subtitle: "Desired-state rules"; }
         LocalStatus { text: root.local-status; accent: Palette.warning; }
         ToggleRow { label: "Enable automation policies"; description: "Local preview only"; checked <=> root.enabled; }
-        HorizontalLayout { spacing: 10px;
+        HorizontalLayout { height: 205px; spacing: 10px;
             SectionCard {
-                horizontal-stretch: 1; height: 205px;
+                horizontal-stretch: 1;
                 VerticalLayout { padding: 9px; spacing: 2px;
                     SectionTitle { title: "AC Power"; }
                     SelectRow { label: "Performance"; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index <=> root.ac-profile; disabled: !root.enabled; }
@@ -45,7 +45,7 @@ export component AutomationWindow inherits Window {
                 }
             }
             SectionCard {
-                horizontal-stretch: 1; height: 205px;
+                horizontal-stretch: 1;
                 VerticalLayout { padding: 9px; spacing: 2px;
                     SectionTitle { title: "Battery"; }
                     SelectRow { label: "Performance"; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index <=> root.battery-profile; disabled: !root.enabled; }
@@ -56,7 +56,7 @@ export component AutomationWindow inherits Window {
             }
         }
         SectionCard {
-            height: 145px;
+            height: 180px;
             VerticalLayout { padding: 8px; spacing: 1px;
                 SectionTitle { title: "Triggers / Reconciliation"; }
                 ToggleRow { label: "Apply on AC / battery change"; checked <=> root.on-ac-change; disabled: !root.enabled; }
@@ -65,6 +65,7 @@ export component AutomationWindow inherits Window {
                 ToggleRow { label: "Notify about staged transitions"; checked <=> root.notify-transitions; disabled: !root.enabled; }
             }
         }
+        Rectangle { vertical-stretch: 1; background: transparent; }
         HorizontalLayout { height: 28px; spacing: 6px;
             Rectangle { horizontal-stretch: 1; background: transparent; }
             ActionButton { width: 92px; label: "Reset"; clicked => { root.reset-values(); } }
