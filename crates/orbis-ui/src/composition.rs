@@ -517,6 +517,13 @@ pub struct ApplicationRuntime<G, B, R> {
     /// Controls Performance write capability with the same honest status
     /// distinctions as the Battery mutation evidence.
     performance_mutation_status: orbis_core::capability::CapabilityStatus,
+    /// Connection for re-querying mutation statuses during periodic refresh.
+    ///
+    /// Stored once at startup; used by `requery_mutation_statuses` to detect
+    /// runtime changes in Battery/Performance/FanCurves mutation availability
+    /// (e.g., asusd daemon starts or stops). Read-only D-Bus queries; no
+    /// mutations or authorization required.
+    mutation_status_connection: Option<zbus::Connection>,
 }
 
 impl<G, B, R> ApplicationRuntime<G, B, R> {
@@ -536,6 +543,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
         fan_mutation_status: orbis_core::capability::CapabilityStatus,
         battery_mutation_status: orbis_core::capability::CapabilityStatus,
         performance_mutation_status: orbis_core::capability::CapabilityStatus,
+        mutation_status_connection: Option<zbus::Connection>,
     ) -> Self
     where
         T: TelemetryServiceRuntime + 'static,
@@ -551,6 +559,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             fan_mutation_status,
             battery_mutation_status,
             performance_mutation_status,
+            mutation_status_connection,
         }
     }
 
@@ -612,22 +621,42 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             fan_mutation_status,
             battery_mutation_status,
             performance_mutation_status,
+            mutation_status_connection: None,
         }
     }
 
-    /// Typed Hardware1 fan curve mutation backend evidence (startup-time).
+    /// Typed Hardware1 fan curve mutation backend evidence.
     pub fn fan_mutation_status(&self) -> orbis_core::capability::CapabilityStatus {
         self.fan_mutation_status
     }
 
-    /// Typed Hardware1 Battery mutation backend evidence (startup-time).
+    /// Typed Hardware1 Battery mutation backend evidence.
     pub fn battery_mutation_status(&self) -> orbis_core::capability::CapabilityStatus {
         self.battery_mutation_status
     }
 
-    /// Typed Hardware1 Performance mutation backend evidence (startup-time).
+    /// Typed Hardware1 Performance mutation backend evidence.
     pub fn performance_mutation_status(&self) -> orbis_core::capability::CapabilityStatus {
         self.performance_mutation_status
+    }
+
+    /// Re-query all three Hardware1 mutation statuses from D-Bus.
+    ///
+    /// Read-only D-Bus queries; no mutations, no authorization, no setter
+    /// calls. Used by periodic capability refresh to detect runtime changes
+    /// in mutation backend availability (e.g., asusd daemon starts or stops).
+    ///
+    /// If no connection is stored (test mode), keeps current values unchanged.
+    pub async fn requery_mutation_statuses(&mut self) {
+        let Some(connection) = &self.mutation_status_connection else {
+            return;
+        };
+        self.fan_mutation_status =
+            orbis_session_client::hardware1_fan_mutation_status(connection).await;
+        self.battery_mutation_status =
+            orbis_session_client::hardware1_battery_mutation_status(connection).await;
+        self.performance_mutation_status =
+            orbis_session_client::hardware1_performance_mutation_status(connection).await;
     }
 }
 
@@ -1007,6 +1036,7 @@ pub async fn build_production_runtime(
             fan_mutation_status,
             battery_mutation_status,
             performance_mutation_status,
+            Some(system_connection),
         ),
         hardware_owner,
     ))
@@ -1060,6 +1090,7 @@ pub fn mock_runtime() -> MockRuntime {
         CapabilityStatus::Unsupported,
         CapabilityStatus::Unsupported,
         CapabilityStatus::Unsupported,
+        None,
     )
 }
 
