@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   flake-check:
+    if: github.event_name != 'pull_request' || github.head_ref != 'agent/diagnostics-domain-foundation-validate-trigger'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -28,3 +29,44 @@ jobs:
 
       - name: Check flake
         run: nix flake check --print-build-logs
+
+  diagnostics-domain-targeted:
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/diagnostics-domain-foundation-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/diagnostics-domain-foundation
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Targeted orbis-core checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all -- --check
+            cargo check -p orbis-core --all-targets
+            cargo test -p orbis-core diagnostics
+            cargo clippy -p orbis-core --all-targets -- -D warnings
+          '
+
+      - name: Check narrow diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check f0d610a04a8ff16501a02389568c7a4aee62aac8..HEAD
+          git diff --name-only f0d610a04a8ff16501a02389568c7a4aee62aac8..HEAD | sort > /tmp/changed.txt
+          cat >/tmp/allowed.txt <<'EOF'
+          crates/orbis-core/src/diagnostics.rs
+          crates/orbis-core/src/lib.rs
+          EOF
+          sort -o /tmp/allowed.txt /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
