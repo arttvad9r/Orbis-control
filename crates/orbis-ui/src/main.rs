@@ -559,6 +559,16 @@ fn apply_gpu_outcome(state: &mut controller::UiState, outcome: &GpuCommandOutcom
             state.gpu_section_error = true;
             tracing::warn!("gpu: результат не применился: {:?}", outcome.result);
         }
+        ApplyResult::Accepted => {
+            // `Accepted` — не hardware-confirmed success; в GPU path он сейчас
+            // не ожидается, поэтому трактуем fail-closed: не показываем режим
+            // как успешно применённый.
+            state.gpu_section_error = true;
+            tracing::warn!(
+                "gpu: результат Accepted не подтверждает применение режима: {:?}",
+                outcome.result
+            );
+        }
     }
 }
 
