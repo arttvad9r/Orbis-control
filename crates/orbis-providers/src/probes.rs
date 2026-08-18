@@ -21,7 +21,7 @@ use orbis_core::capability::{
 use crate::error::ProviderError;
 use crate::traits::{
     BatteryProvider, FanProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
-    PerformanceProvider,
+    PanelOverdriveProvider, PerformanceProvider,
 };
 
 fn operation_from_error(
@@ -309,6 +309,42 @@ where
     }
 }
 
+/// Probe Panel Overdrive read capability from an authoritative read.
+///
+/// The observed state is read only to confirm the read contract; the
+/// `Disabled`/`Enabled`/`Unknown` value never enters the capability metadata.
+///
+/// Write capability comes from typed runtime evidence about the mutation
+/// backend (`mutation_status`), NOT from validation: validation only answers
+/// whether an input could be sent if mutation were available.
+pub async fn probe_panel_overdrive<P>(
+    provider: &P,
+    mutation_status: CapabilityStatus,
+) -> Result<Capability, ProbeError>
+where
+    P: PanelOverdriveProvider + ?Sized,
+{
+    match provider.panel_overdrive_state().await {
+        Ok(_) => Ok(capability_from_operations(
+            CapabilityOperations {
+                read: ProbeOperationResult::classified(ProbeClassification::Supported)
+                    .into_operation(),
+                write: write_from_mutation_status(mutation_status),
+            },
+            CapabilityConstraints::Unknown,
+        )),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            let write = write_from_read_failure(&read);
+            Ok(capability_from_read(
+                read,
+                write,
+                CapabilityConstraints::Unknown,
+            ))
+        }
+    }
+}
+
 fn supported_read_only() -> Capability {
     let read = ProbeOperationResult::classified(ProbeClassification::Supported).into_operation();
     let write = ProbeOperationResult::with_detail(
@@ -347,6 +383,7 @@ mod tests {
         BackendMissing,
         Unsupported,
         PermissionDenied,
+        Internal,
     }
 
     impl ScriptedError {
@@ -355,6 +392,7 @@ mod tests {
                 Self::BackendMissing => ProviderError::BackendUnavailable("missing".into()),
                 Self::Unsupported => ProviderError::Unsupported("unsupported".into()),
                 Self::PermissionDenied => ProviderError::PermissionDenied("denied".into()),
+                Self::Internal => ProviderError::Internal("malformed".into()),
             }
         }
     }
@@ -1496,6 +1534,215 @@ mod tests {
         // BackendMissing, даже если Hardware1 backend доказан.
         assert_eq!(
             capability.operations.write.status,
+            CapabilityStatus::BackendMissing
+        );
+    }
+
+    /// Scripted Panel Overdrive provider.
+    struct ScriptedPanelProvider {
+        state: Scripted<orbis_core::display::PanelOverdriveState>,
+    }
+
+    impl ScriptedPanelProvider {
+        fn new(state: Scripted<orbis_core::display::PanelOverdriveState>) -> Self {
+            Self { state }
+        }
+    }
+
+    impl Provider for ScriptedPanelProvider {
+        fn id(&self) -> &'static str {
+            "scripted-panel"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-panel")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted panel: функция '{feature}' недоступна")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl PanelOverdriveProvider for ScriptedPanelProvider {
+        async fn panel_overdrive_state(
+            &self,
+        ) -> Result<orbis_core::display::PanelOverdriveState, ProviderError> {
+            self.state.result()
+        }
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_probe_reports_supported_without_storing_state() {
+        for state in [
+            orbis_core::display::PanelOverdriveState::Disabled,
+            orbis_core::display::PanelOverdriveState::Enabled,
+            orbis_core::display::PanelOverdriveState::Unknown,
+        ] {
+            let capability = probe_panel_overdrive(
+                &ScriptedPanelProvider::new(Scripted::Value(state)),
+                CapabilityStatus::Unsupported,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported
+            );
+            assert_eq!(
+                capability.operations.write.status,
+                CapabilityStatus::Unsupported
+            );
+            assert_eq!(capability.constraints, CapabilityConstraints::Unknown);
+            assert!(capability.reason.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_probe_preserves_backend_missing_and_unsupported() {
+        for (error, expected) in [
+            (
+                ScriptedError::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (ScriptedError::Unsupported, CapabilityStatus::Unsupported),
+        ] {
+            let capability = probe_panel_overdrive(
+                &ScriptedPanelProvider::new(Scripted::Error(error)),
+                CapabilityStatus::Supported,
+            )
+            .await
+            .unwrap();
+            assert_eq!(capability.operations.read.status, expected);
+            // Write mirrors the read classification on structural failure,
+            // even with positive mutation evidence.
+            assert_eq!(capability.operations.write.status, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_probe_write_status_matches_runtime_evidence() {
+        for (evidence, expected_write) in [
+            (CapabilityStatus::Supported, CapabilityStatus::Supported),
+            (CapabilityStatus::Unsupported, CapabilityStatus::Unsupported),
+            (
+                CapabilityStatus::TemporarilyUnavailable,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+            (
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::PermissionDenied,
+            ),
+            (CapabilityStatus::Unknown, CapabilityStatus::Unknown),
+        ] {
+            let capability = probe_panel_overdrive(
+                &ScriptedPanelProvider::new(Scripted::Value(
+                    orbis_core::display::PanelOverdriveState::Enabled,
+                )),
+                evidence,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported,
+                "read must stay Supported for evidence {evidence:?}"
+            );
+            assert_eq!(
+                capability.operations.write.status, expected_write,
+                "write must mirror evidence {evidence:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_probe_read_permission_denied_does_not_invent_denied_write() {
+        let capability = probe_panel_overdrive(
+            &ScriptedPanelProvider::new(Scripted::Error(ScriptedError::PermissionDenied)),
+            CapabilityStatus::Supported,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::PermissionDenied
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_probe_malformed_backend_error_is_not_unsupported() {
+        let capability = probe_panel_overdrive(
+            &ScriptedPanelProvider::new(Scripted::Error(ScriptedError::Internal)),
+            CapabilityStatus::Unsupported,
+        )
+        .await;
+        // An unknown/malformed backend failure must surface as a probe error,
+        // never as a fake Unsupported (or a fake default).
+        assert!(matches!(capability, Err(ProbeError::Internal(_))));
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_failure_does_not_corrupt_performance_in_registry() {
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let performance = probe_performance(
+            &ScriptedProvider::performance(Scripted::Value(vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ])),
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::Performance, performance)
+            .unwrap();
+
+        let panel = probe_panel_overdrive(
+            &ScriptedPanelProvider::new(Scripted::Error(ScriptedError::BackendMissing)),
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::PanelOverdrive, panel)
+            .unwrap();
+
+        let snapshot = builder.build().unwrap();
+        let perf = snapshot
+            .capability(orbis_core::FeatureId::Performance)
+            .unwrap();
+        assert_eq!(perf.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(perf.status, CapabilityStatus::Supported);
+
+        let panel = snapshot
+            .capability(orbis_core::FeatureId::PanelOverdrive)
+            .unwrap();
+        assert_eq!(
+            panel.operations.read.status,
             CapabilityStatus::BackendMissing
         );
     }

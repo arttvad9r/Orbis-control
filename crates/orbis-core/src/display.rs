@@ -18,6 +18,23 @@ impl RefreshMode {
     }
 }
 
+/// Состояние Panel Overdrive (бинарная ASUS firmware-настройка).
+///
+/// Backend-семантика (kernel `asus-armoury`, sysfs
+/// `panel_overdrive/current_value`): `0` = выключено, `1` = включено.
+/// Отсутствие чтения не подменяется значением `false`: неизвестное
+/// состояние представлено отдельным вариантом [`PanelOverdriveState::Unknown`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelOverdriveState {
+    /// Overdrive выключен (0).
+    Disabled,
+    /// Overdrive включён (1).
+    Enabled,
+    /// Backend не предоставил определённое состояние (например, malformed value).
+    Unknown,
+}
+
 /// Состояние HDR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -40,7 +57,7 @@ pub struct DisplayMode {
     /// Доступные частоты.
     pub modes: Vec<RefreshMode>,
     /// Panel Overdrive (asusd/asus-armoury), если доступен.
-    pub overdrive: Option<bool>,
+    pub overdrive: PanelOverdriveState,
     /// Состояние HDR.
     pub hdr: HdrState,
 }
@@ -50,7 +67,7 @@ impl Default for DisplayMode {
         Self {
             current_hz: None,
             modes: Vec::new(),
-            overdrive: None,
+            overdrive: PanelOverdriveState::Unknown,
             hdr: HdrState::Unknown,
         }
     }
@@ -65,7 +82,19 @@ mod tests {
         let d = DisplayMode::default();
         assert!(d.current_hz.is_none());
         assert!(d.modes.is_empty());
+        assert_eq!(d.overdrive, PanelOverdriveState::Unknown);
         assert_eq!(d.hdr, HdrState::Unknown);
+    }
+
+    #[test]
+    fn panel_overdrive_state_preserves_disabled_unknown_distinction() {
+        assert_ne!(PanelOverdriveState::Disabled, PanelOverdriveState::Unknown);
+        assert_ne!(PanelOverdriveState::Enabled, PanelOverdriveState::Unknown);
+
+        let json = serde_json::to_string(&PanelOverdriveState::Disabled).unwrap();
+        assert_eq!(json, "\"disabled\"");
+        let back: PanelOverdriveState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, PanelOverdriveState::Disabled);
     }
 
     #[test]
@@ -76,7 +105,7 @@ mod tests {
                 RefreshMode::new(RefreshHz::new(60).unwrap()),
                 RefreshMode::new(RefreshHz::new(165).unwrap()),
             ],
-            overdrive: Some(true),
+            overdrive: PanelOverdriveState::Enabled,
             hdr: HdrState::Disabled,
         };
         assert_eq!(d.modes.len(), 2);

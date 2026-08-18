@@ -16,6 +16,7 @@ use orbis_core::automation::{AutomationAction, AutomationRule, AutomationTrigger
 use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::display::DisplayMode;
+use orbis_core::display::PanelOverdriveState;
 use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
@@ -30,7 +31,8 @@ use crate::traits::{
     AnimeProvider, AutomationProvider, BatteryProvider, DisplayProvider, FanCurveMutationProvider,
     FanCurvePoints, FanProvider, FirmwareUpdate, FirmwareUpdateProvider, GpuAccessProvider,
     GpuMuxProvider, GpuPowerProvider, GpuProvider, HotkeyProvider, LightingProvider,
-    PerformanceProvider, PowerLimitProvider, Provider, ProviderHealth, TelemetryProvider,
+    PanelOverdriveProvider, PerformanceProvider, PowerLimitProvider, Provider, ProviderHealth,
+    TelemetryProvider,
 };
 
 /// Способ имитации ошибки в mock-режиме.
@@ -165,7 +167,7 @@ impl MockState {
                     orbis_core::display::RefreshMode::new(RefreshHz::new(120).expect("const")),
                     orbis_core::display::RefreshMode::new(RefreshHz::new(165).expect("const")),
                 ],
-                overdrive: Some(true),
+                overdrive: PanelOverdriveState::Enabled,
                 hdr: orbis_core::display::HdrState::Disabled,
             },
             lighting: LightingMode::Static,
@@ -697,8 +699,13 @@ impl DisplayProvider for MockProvider {
     }
 
     async fn set_overdrive(&self, enabled: bool) -> Result<ApplyResult, ProviderError> {
+        let state = if enabled {
+            PanelOverdriveState::Enabled
+        } else {
+            PanelOverdriveState::Disabled
+        };
         self.mutate(|s| {
-            s.display.overdrive = Some(enabled);
+            s.display.overdrive = state;
             Ok(ApplyResult::Applied)
         })
         .await
@@ -710,6 +717,13 @@ impl DisplayProvider for MockProvider {
         } else {
             ValidationResult::invalid("частота вне [30, 360] Гц")
         }
+    }
+}
+
+#[async_trait]
+impl PanelOverdriveProvider for MockProvider {
+    async fn panel_overdrive_state(&self) -> Result<PanelOverdriveState, ProviderError> {
+        self.read(|s| Ok(s.display.overdrive)).await
     }
 }
 

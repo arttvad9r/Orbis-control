@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod asus_armoury;
 pub mod error;
 pub mod fan_defaults;
 pub mod native_asus_eco;
@@ -24,12 +25,13 @@ pub mod traits;
 #[cfg(feature = "mock")]
 pub mod mock;
 
+pub use asus_armoury::*;
 pub use error::{OperationId, ProviderError, ValidationResult};
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 pub use native_asus_eco::*;
 pub use probes::{
     probe_charge_limit, probe_fan_curve, probe_gpu_access, probe_gpu_mux, probe_gpu_power,
-    probe_performance,
+    probe_panel_overdrive, probe_performance,
 };
 pub use sysfs_telemetry::SysfsTelemetryProvider;
 pub use traits::*;

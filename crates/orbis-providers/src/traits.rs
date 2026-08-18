@@ -9,7 +9,7 @@ use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::automation::AutomationRule;
 use orbis_core::battery::ChargeLimit;
 use orbis_core::diagnostics::DiagnosticEntry;
-use orbis_core::display::DisplayMode;
+use orbis_core::display::{DisplayMode, PanelOverdriveState};
 use orbis_core::fan::FanCurve;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
@@ -248,6 +248,17 @@ pub trait GpuMuxProvider: Provider {
 pub trait GpuAccessProvider: Provider {
     /// Политика доступа приложений к dGPU.
     async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError>;
+}
+
+/// Read-only Panel Overdrive capability (ASUS firmware `panel_overdrive`).
+///
+/// Отдельный concept-specific trait (ADR 0005): провайдер, реализующий только
+/// Panel Overdrive, не обязан предоставлять полную модель дисплея. Состояние
+/// бинарное (`0`/`1`), но `Unknown` не подменяется значением `false`.
+#[async_trait]
+pub trait PanelOverdriveProvider: Provider {
+    /// Текущее состояние Panel Overdrive (fresh authoritative read).
+    async fn panel_overdrive_state(&self) -> Result<PanelOverdriveState, ProviderError>;
 }
 
 /// Дисплей.
