@@ -17,6 +17,22 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Work around inherited manifest syntax
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("crates/orbis-ui/Cargo.toml")
+          text = path.read_text()
+          old = '''orbis-providers = {
+              path = "../orbis-providers",
+              version = "0.1.0",
+              default-features = false,
+              features = ["mock"],
+          }'''
+          new = 'orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }'
+          if old not in text:
+              raise SystemExit("expected inherited manifest block not found")
+          path.write_text(text.replace(old, new))
       - name: Rust versions
         run: rustc --version && cargo --version
       - name: Formatting
