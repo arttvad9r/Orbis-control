@@ -13,11 +13,11 @@ export component PreferencesWindow inherits Window {
     property <int> language: 0; property <int> update-channel: 0; property <int> close-action: 0;
     property <bool> startup: true; property <bool> notifications: true; property <bool> update-check: true; property <bool> tray: true; property <bool> restore-window: true;
     property <float> telemetry-rate: 1; property <float> ui-scale: 100;
-    property <string> local-status: "Theme changes apply immediately · persistence not connected";
+    property <string> local-status: "Theme changes save immediately · other controls remain preview-only";
 
     function set-theme(light: bool) {
         ThemeState.mode = light ? ThemeMode.Light : ThemeMode.Dark;
-        root.local-status = light ? "Light theme active · session only" : "Dark theme active · session only";
+        root.local-status = light ? "Light theme active · save requested" : "Dark theme active · save requested";
         root.theme-changed(light);
     }
 
@@ -75,7 +75,7 @@ export component PreferencesWindow inherits Window {
         HorizontalLayout { height: 28px; spacing: 6px;
             Rectangle { horizontal-stretch: 1; background: transparent; }
             ActionButton { width: 92px; label: "Reset"; clicked => { root.reset-values(); } }
-            ActionButton { width: 92px; label: "Save"; accent: true; clicked => { root.local-status = "Preferences saved locally · theme persistence not connected"; } }
+            ActionButton { width: 92px; label: "Save"; accent: true; clicked => { root.local-status = "Other preferences remain preview-only · theme saves immediately"; } }
         }
     }
 }

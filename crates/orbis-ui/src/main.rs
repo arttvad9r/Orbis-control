@@ -15,6 +15,10 @@ use orbis_application::{
     ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome, PerformanceCommandOutcome,
     PerformanceState, SetChargeLimitError, SetGpuModeError,
 };
+use orbis_config::{
+    PreferencesConfig, PreferencesError, PreferencesLoad, PreferencesWarning, ThemePreference,
+    load_preferences, save_preferences,
+};
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
@@ -322,8 +326,7 @@ fn build_app(
     fan_defaults: Option<FanDefaultsContext>,
 ) -> Result<AppWindow, slint::PlatformError> {
     let app = AppWindow::new()?;
-    app.global::<ThemeState>()
-        .set_mode(theme_mode(current_theme_light()));
+    app.global::<ThemeState>().set_mode(current_theme_mode());
     app.set_ui_state(to_slint(state));
     wire_callbacks(&app, worker_tx, fan_defaults);
     Ok(app)
@@ -341,43 +344,146 @@ fn current_theme_light() -> bool {
     THEME_LIGHT.with(Cell::get)
 }
 
-fn apply_theme_to_all(app: &AppWindow, light: bool) {
+fn current_theme_mode() -> ThemeMode {
+    theme_mode(current_theme_light())
+}
+
+fn set_current_theme_light(light: bool) {
     THEME_LIGHT.with(|state| state.set(light));
+}
+
+fn initial_theme_light_with(
+    load: impl FnOnce() -> Result<PreferencesLoad, PreferencesError>,
+) -> bool {
+    match load() {
+        Ok(load) => {
+            if let Some(warning) = &load.warning {
+                tracing::warn!(
+                    path = ?warning.path,
+                    kind = ?warning.kind,
+                    "preferences load warning; using safe runtime theme"
+                );
+            }
+            matches!(load.preferences.appearance.theme, ThemePreference::Light)
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "preferences load failed; using dark theme");
+            false
+        }
+    }
+}
+
+fn initialize_runtime_theme_with(
+    load: impl FnOnce() -> Result<PreferencesLoad, PreferencesError>,
+) -> bool {
+    let light = initial_theme_light_with(load);
+    set_current_theme_light(light);
+    light
+}
+
+fn initialize_runtime_theme() {
+    initialize_runtime_theme_with(load_preferences);
+}
+
+#[derive(Debug)]
+enum ThemePersistenceFailure {
+    Load(PreferencesError),
+    Preserve(PreferencesWarning),
+    Save(PreferencesError),
+}
+
+impl std::fmt::Display for ThemePersistenceFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Load(error) => {
+                write!(f, "failed to load preferences before saving theme: {error}")
+            }
+            Self::Preserve(warning) => write!(
+                f,
+                "refusing to overwrite preserved preferences source {:?}: {:?}",
+                warning.path, warning.kind
+            ),
+            Self::Save(error) => write!(f, "failed to save theme preference: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for ThemePersistenceFailure {}
+
+fn persist_theme_with<L, S>(light: bool, load: L, save: S) -> Result<(), ThemePersistenceFailure>
+where
+    L: FnOnce() -> Result<PreferencesLoad, PreferencesError>,
+    S: FnOnce(&PreferencesConfig) -> Result<std::path::PathBuf, PreferencesError>,
+{
+    let load = load().map_err(ThemePersistenceFailure::Load)?;
+    if let Some(warning) = load.warning {
+        return Err(ThemePersistenceFailure::Preserve(warning));
+    }
+
+    let mut preferences = load.preferences;
+    preferences.appearance.theme = if light {
+        ThemePreference::Light
+    } else {
+        ThemePreference::Dark
+    };
+    save(&preferences).map_err(ThemePersistenceFailure::Save)?;
+    Ok(())
+}
+
+fn persist_theme(light: bool) -> Result<(), ThemePersistenceFailure> {
+    persist_theme_with(light, load_preferences, save_preferences)
+}
+
+fn apply_theme_if_open<T>(window: Option<&T>, light: bool, apply: impl FnOnce(&T, ThemeMode)) {
+    if let Some(window) = window {
+        apply(window, theme_mode(light));
+    }
+}
+
+fn apply_theme_to_all(app: &AppWindow, light: bool) {
+    set_current_theme_light(light);
     app.global::<ThemeState>().set_mode(theme_mode(light));
     FANS_WINDOW.with(|slot| {
-        if let Some(window) = slot.borrow().as_ref() {
-            window.global::<ThemeState>().set_mode(theme_mode(light));
-        }
+        let slot = slot.borrow();
+        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
+            window.global::<ThemeState>().set_mode(mode);
+        });
     });
     EXTRA_WINDOW.with(|slot| {
-        if let Some(window) = slot.borrow().as_ref() {
-            window.global::<ThemeState>().set_mode(theme_mode(light));
-        }
+        let slot = slot.borrow();
+        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
+            window.global::<ThemeState>().set_mode(mode);
+        });
     });
     AUTOMATION_WINDOW.with(|slot| {
-        if let Some(window) = slot.borrow().as_ref() {
-            window.global::<ThemeState>().set_mode(theme_mode(light));
-        }
+        let slot = slot.borrow();
+        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
+            window.global::<ThemeState>().set_mode(mode);
+        });
     });
     PREFERENCES_WINDOW.with(|slot| {
-        if let Some(window) = slot.borrow().as_ref() {
-            window.global::<ThemeState>().set_mode(theme_mode(light));
-        }
+        let slot = slot.borrow();
+        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
+            window.global::<ThemeState>().set_mode(mode);
+        });
     });
     DIAGNOSTICS_WINDOW.with(|slot| {
-        if let Some(window) = slot.borrow().as_ref() {
-            window.global::<ThemeState>().set_mode(theme_mode(light));
-        }
+        let slot = slot.borrow();
+        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
+            window.global::<ThemeState>().set_mode(mode);
+        });
     });
     UPDATES_WINDOW.with(|slot| {
-        if let Some(window) = slot.borrow().as_ref() {
-            window.global::<ThemeState>().set_mode(theme_mode(light));
-        }
+        let slot = slot.borrow();
+        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
+            window.global::<ThemeState>().set_mode(mode);
+        });
     });
     PREVIEW_DIALOG_WINDOW.with(|slot| {
-        if let Some(window) = slot.borrow().as_ref() {
-            window.global::<ThemeState>().set_mode(theme_mode(light));
-        }
+        let slot = slot.borrow();
+        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
+            window.global::<ThemeState>().set_mode(mode);
+        });
     });
 }
 
@@ -455,9 +561,7 @@ fn show_fans_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
 
         let window = slot.as_ref().expect("FansWindow initialized");
         window.set_ui_state(to_slint(&from_slint(&app.get_ui_state())));
-        window
-            .global::<ThemeState>()
-            .set_mode(theme_mode(current_theme_light()));
+        window.global::<ThemeState>().set_mode(current_theme_mode());
         window.show()
     })
 }
@@ -470,9 +574,7 @@ fn show_extra_window() -> Result<(), slint::PlatformError> {
             *slot = Some(ExtraWindow::new()?);
         }
         let window = slot.as_ref().expect("ExtraWindow initialized");
-        window
-            .global::<ThemeState>()
-            .set_mode(theme_mode(current_theme_light()));
+        window.global::<ThemeState>().set_mode(current_theme_mode());
         window.show()
     })
 }
@@ -484,9 +586,7 @@ fn show_automation_window() -> Result<(), slint::PlatformError> {
             *slot = Some(AutomationWindow::new()?);
         }
         let window = slot.as_ref().expect("AutomationWindow initialized");
-        window
-            .global::<ThemeState>()
-            .set_mode(theme_mode(current_theme_light()));
+        window.global::<ThemeState>().set_mode(current_theme_mode());
         window.show()
     })
 }
@@ -496,21 +596,24 @@ fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> 
         let mut slot = slot.borrow_mut();
         if slot.is_none() {
             let window = PreferencesWindow::new()?;
-            window
-                .global::<ThemeState>()
-                .set_mode(theme_mode(current_theme_light()));
+            window.global::<ThemeState>().set_mode(current_theme_mode());
             let app_weak = app.as_weak();
             window.on_theme_changed(move |light| {
                 if let Some(app) = app_weak.upgrade() {
                     apply_theme_to_all(&app, light);
                 }
+
+                if let Err(error) = persist_theme(light) {
+                    tracing::warn!(
+                        error = %error,
+                        "theme preference save failed; runtime theme remains active"
+                    );
+                }
             });
             *slot = Some(window);
         }
         let window = slot.as_ref().expect("PreferencesWindow initialized");
-        window
-            .global::<ThemeState>()
-            .set_mode(theme_mode(current_theme_light()));
+        window.global::<ThemeState>().set_mode(current_theme_mode());
         window.show()
     })
 }
@@ -523,9 +626,7 @@ fn show_diagnostics_window(app: &AppWindow) -> Result<(), slint::PlatformError> 
         }
         let window = slot.as_ref().expect("DiagnosticsWindow initialized");
         window.set_version(app.get_ui_state().version.clone());
-        window
-            .global::<ThemeState>()
-            .set_mode(theme_mode(current_theme_light()));
+        window.global::<ThemeState>().set_mode(current_theme_mode());
         window.show()
     })
 }
@@ -538,9 +639,7 @@ fn show_updates_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
         }
         let window = slot.as_ref().expect("UpdatesWindow initialized");
         window.set_version(app.get_ui_state().version.clone());
-        window
-            .global::<ThemeState>()
-            .set_mode(theme_mode(current_theme_light()));
+        window.global::<ThemeState>().set_mode(current_theme_mode());
         window.show()
     })
 }
@@ -560,9 +659,7 @@ fn show_preview_dialog(kind: i32) -> Result<(), slint::PlatformError> {
         }
         let window = slot.as_ref().expect("PreviewDialogWindow initialized");
         window.set_kind(kind.clamp(0, 3));
-        window
-            .global::<ThemeState>()
-            .set_mode(theme_mode(current_theme_light()));
+        window.global::<ThemeState>().set_mode(current_theme_mode());
         window.show()
     })
 }
@@ -1484,6 +1581,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     init_tracing();
+    initialize_runtime_theme();
     let runtime = tokio::runtime::Runtime::new()?;
 
     state.charge_limit_state = controller::ChargeLimitState::Loading;
