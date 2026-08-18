@@ -1,0 +1,66 @@
+import { SelectRow, ToggleRow, PreviewSliderRow } from "../components/visual-controls.slint";
+import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
+import { Palette } from "../themes/dark.slint";
+
+export component PreferencesWindow inherits Window {
+    width: 580px;
+    height: 530px;
+    min-width: 540px;
+    min-height: 500px;
+    title: "Orbis Control — Preferences";
+    background: Palette.window-background;
+
+    property <int> language: 0; property <int> appearance: 0; property <int> update-channel: 0; property <int> close-action: 0;
+    property <bool> startup: true; property <bool> notifications: true; property <bool> update-check: true; property <bool> tray: true; property <bool> restore-window: true;
+    property <float> telemetry-rate: 1; property <float> ui-scale: 100;
+    property <string> local-status: "Visual preference model · persistence not connected";
+
+    function reset-values() {
+        root.language = 0; root.appearance = 0; root.update-channel = 0; root.close-action = 0;
+        root.startup = true; root.notifications = true; root.update-check = true; root.tray = true; root.restore-window = true;
+        root.telemetry-rate = 1; root.ui-scale = 100;
+        root.local-status = "Preferences reset locally";
+    }
+
+    VerticalLayout {
+        padding: 10px; spacing: 7px;
+        WindowHeader { title: "Preferences"; subtitle: "Application behavior and presentation"; }
+        LocalStatus { text: root.local-status; accent: Palette.warning; }
+        HorizontalLayout { spacing: 10px;
+            SectionCard {
+                horizontal-stretch: 1; height: 190px;
+                VerticalLayout { padding: 9px; spacing: 2px;
+                    SectionTitle { title: "General"; }
+                    SelectRow { label: "Language"; model: ["System", "English", "Русский", "Deutsch", "Français"]; current-index <=> root.language; }
+                    SelectRow { label: "Appearance"; model: ["Dark", "System", "Light"]; current-index <=> root.appearance; }
+                    SelectRow { label: "Close button"; model: ["Hide to tray", "Quit", "Ask every time"]; current-index <=> root.close-action; }
+                    ToggleRow { label: "Restore window position"; checked <=> root.restore-window; }
+                }
+            }
+            SectionCard {
+                horizontal-stretch: 1; height: 190px;
+                VerticalLayout { padding: 9px; spacing: 1px;
+                    SectionTitle { title: "Startup / notifications"; }
+                    ToggleRow { label: "Run on startup"; checked <=> root.startup; }
+                    ToggleRow { label: "Desktop notifications"; checked <=> root.notifications; }
+                    ToggleRow { label: "Tray indicator"; checked <=> root.tray; }
+                    ToggleRow { label: "Automatic update checks"; checked <=> root.update-check; }
+                }
+            }
+        }
+        SectionCard {
+            height: 142px;
+            VerticalLayout { padding: 9px; spacing: 2px;
+                SectionTitle { title: "Updates / sampling"; }
+                SelectRow { label: "Update channel"; model: ["Stable", "Preview", "Development"]; current-index <=> root.update-channel; }
+                PreviewSliderRow { label: "Telemetry refresh"; unit: " Hz"; minimum: 0.5; maximum: 5; step: 0.5; value <=> root.telemetry-rate; }
+                PreviewSliderRow { label: "UI scale preview"; unit: "%"; minimum: 80; maximum: 160; step: 5; value <=> root.ui-scale; }
+            }
+        }
+        HorizontalLayout { height: 28px; spacing: 6px;
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            ActionButton { width: 92px; label: "Reset"; clicked => { root.reset-values(); } }
+            ActionButton { width: 92px; label: "Save"; accent: true; clicked => { root.local-status = "Preferences saved locally · persistence not connected"; } }
+        }
+    }
+}
