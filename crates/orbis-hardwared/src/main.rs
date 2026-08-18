@@ -17,12 +17,17 @@ use std::error::Error;
 use async_trait::async_trait;
 use orbis_hardwared::{
     BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION, GPU_POLKIT_ACTION,
-    HardwareService, PolkitAuthorizer,
+    HardwareService, PANEL_POLKIT_ACTION, PolkitAuthorizer,
     battery::{
         AsusdBatteryMutationBackend, BatteryMutationBackend, BatteryMutationReadback,
         BatteryMutationStatus, ZbusAsusdBatteryClient, discover_effective_reader,
     },
     fans::{AsusdFanCurveMutationBackend, ZbusAsusdFanCurveClient},
+    panel::{
+        AsusdPanelOverdriveMutationBackend, PanelOverdriveMutationBackend,
+        PanelOverdriveMutationReadback, PanelOverdriveMutationStatus,
+        ZbusAsusdPanelOverdriveClient, discover_panel_overdrive_reader,
+    },
     supergfxd::{MutationObservation, SupergfxdMutationOperation},
 };
 use orbis_providers::{error::ProviderError, supergfxd::SupergfxdMode};
@@ -109,6 +114,80 @@ impl BatteryMutationBackend for DisabledBatteryMutationBackend {
     }
 }
 
+/// Why Panel Overdrive mutation was disabled during startup discovery.
+///
+/// Keep this classification separate so a temporary discovery failure never
+/// masquerades as permanent hardware/capability Unsupported.
+enum DisabledPanelOverdriveReason {
+    Unsupported(String),
+    Unavailable(String),
+    PermissionDenied(String),
+}
+
+/// Capability-local fallback used when no readable authoritative
+/// `panel_overdrive` attribute exists. Keeping a typed disabled backend makes
+/// `SetPanelOverdrive` fail locally without making the entire Hardware1
+/// service unavailable.
+struct DisabledPanelOverdriveMutationBackend {
+    reason: DisabledPanelOverdriveReason,
+}
+
+impl DisabledPanelOverdriveMutationBackend {
+    fn from_discovery_error(error: ProviderError) -> Self {
+        let reason = match error {
+            ProviderError::Unsupported(message) => {
+                DisabledPanelOverdriveReason::Unsupported(message)
+            }
+            ProviderError::PermissionDenied(message) => {
+                DisabledPanelOverdriveReason::PermissionDenied(message)
+            }
+            ProviderError::Io(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                DisabledPanelOverdriveReason::PermissionDenied(format!(
+                    "panel_overdrive discovery permission denied: {error}"
+                ))
+            }
+            other => DisabledPanelOverdriveReason::Unavailable(format!(
+                "panel_overdrive discovery failed: {other}"
+            )),
+        };
+        Self { reason }
+    }
+}
+
+#[async_trait]
+impl PanelOverdriveMutationBackend for DisabledPanelOverdriveMutationBackend {
+    async fn set_panel_overdrive(
+        &self,
+        _enabled: bool,
+    ) -> Result<PanelOverdriveMutationReadback, ProviderError> {
+        match &self.reason {
+            DisabledPanelOverdriveReason::Unsupported(message) => {
+                Err(ProviderError::Unsupported(message.clone()))
+            }
+            DisabledPanelOverdriveReason::Unavailable(message) => {
+                Err(ProviderError::BackendUnavailable(message.clone()))
+            }
+            DisabledPanelOverdriveReason::PermissionDenied(message) => {
+                Err(ProviderError::PermissionDenied(message.clone()))
+            }
+        }
+    }
+
+    fn mutation_status(&self) -> PanelOverdriveMutationStatus {
+        match &self.reason {
+            DisabledPanelOverdriveReason::Unsupported(_) => {
+                PanelOverdriveMutationStatus::Unsupported
+            }
+            DisabledPanelOverdriveReason::Unavailable(_) => {
+                PanelOverdriveMutationStatus::TemporarilyUnavailable
+            }
+            DisabledPanelOverdriveReason::PermissionDenied(_) => {
+                PanelOverdriveMutationStatus::PermissionDenied
+            }
+        }
+    }
+}
+
 fn init_tracing() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,orbis_hardwared=info"));
@@ -139,6 +218,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let fan_backend =
         AsusdFanCurveMutationBackend::new(ZbusAsusdFanCurveClient::new(connection.clone()));
 
+    // Panel Overdrive support is capability-local. Failure to discover its
+    // authoritative kernel read-back must not prevent Performance/Battery/Fan
+    // Hardware1 startup.
+    let panel_backend: Box<dyn PanelOverdriveMutationBackend> =
+        match discover_panel_overdrive_reader() {
+            Ok(reader) => Box::new(AsusdPanelOverdriveMutationBackend::new(
+                ZbusAsusdPanelOverdriveClient::new(connection.clone()),
+                reader,
+            )),
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "panel_overdrive attribute unavailable; Panel Overdrive mutation will remain capability-local"
+                );
+                Box::new(DisabledPanelOverdriveMutationBackend::from_discovery_error(
+                    error,
+                ))
+            }
+        };
+
     let service = HardwareService::with_battery_gpu_and_fan_backends(
         Box::new(PolkitAuthorizer::new(connection.clone())),
         battery_backend,
@@ -155,6 +254,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             FAN_POLKIT_ACTION,
+        )),
+    )
+    .with_panel(
+        panel_backend,
+        Box::new(PolkitAuthorizer::with_action(
+            connection.clone(),
+            PANEL_POLKIT_ACTION,
         )),
     );
 
@@ -262,5 +368,86 @@ mod tests {
             assert_eq!(battery_mutation_wire::from_wire(wire), Some(status));
         }
         assert_eq!(battery_mutation_wire::from_wire(99), None);
+    }
+
+    #[tokio::test]
+    async fn disabled_panel_preserves_unsupported_discovery() {
+        let backend = DisabledPanelOverdriveMutationBackend::from_discovery_error(
+            ProviderError::Unsupported("no panel_overdrive ABI".into()),
+        );
+        let error = backend
+            .set_panel_overdrive(true)
+            .await
+            .expect_err("unsupported must remain unsupported");
+        assert!(matches!(error, ProviderError::Unsupported(_)));
+    }
+
+    #[tokio::test]
+    async fn disabled_panel_preserves_permission_failure() {
+        let backend =
+            DisabledPanelOverdriveMutationBackend::from_discovery_error(ProviderError::Io(
+                std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+            ));
+        let error = backend
+            .set_panel_overdrive(true)
+            .await
+            .expect_err("permission failure must remain distinct");
+        assert!(matches!(error, ProviderError::PermissionDenied(_)));
+    }
+
+    #[tokio::test]
+    async fn disabled_panel_maps_other_discovery_failures_to_unavailable() {
+        let backend = DisabledPanelOverdriveMutationBackend::from_discovery_error(
+            ProviderError::Io(std::io::Error::other("temporary read failure")),
+        );
+        let error = backend
+            .set_panel_overdrive(true)
+            .await
+            .expect_err("temporary failure must remain unavailable");
+        assert!(matches!(error, ProviderError::BackendUnavailable(_)));
+    }
+
+    #[test]
+    fn disabled_panel_mutation_status_preserves_typed_reason() {
+        let unsupported = DisabledPanelOverdriveMutationBackend::from_discovery_error(
+            ProviderError::Unsupported("no panel_overdrive ABI".into()),
+        );
+        assert_eq!(
+            unsupported.mutation_status(),
+            PanelOverdriveMutationStatus::Unsupported
+        );
+
+        let denied =
+            DisabledPanelOverdriveMutationBackend::from_discovery_error(ProviderError::Io(
+                std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+            ));
+        assert_eq!(
+            denied.mutation_status(),
+            PanelOverdriveMutationStatus::PermissionDenied
+        );
+
+        let unavailable = DisabledPanelOverdriveMutationBackend::from_discovery_error(
+            ProviderError::Io(std::io::Error::other("temporary read failure")),
+        );
+        assert_eq!(
+            unavailable.mutation_status(),
+            PanelOverdriveMutationStatus::TemporarilyUnavailable
+        );
+    }
+
+    #[test]
+    fn panel_mutation_wire_roundtrip_is_total() {
+        use orbis_hardwared::panel::panel_mutation_wire;
+        for status in [
+            PanelOverdriveMutationStatus::Supported,
+            PanelOverdriveMutationStatus::Unsupported,
+            PanelOverdriveMutationStatus::TemporarilyUnavailable,
+            PanelOverdriveMutationStatus::PermissionDenied,
+            PanelOverdriveMutationStatus::Unknown,
+        ] {
+            let wire = panel_mutation_wire::to_wire(status);
+            assert_eq!(panel_mutation_wire::from_wire(wire), Some(status));
+        }
+        assert_eq!(panel_mutation_wire::from_wire(99), None);
     }
 }

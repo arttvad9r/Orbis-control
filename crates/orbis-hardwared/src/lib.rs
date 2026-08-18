@@ -23,6 +23,7 @@ use orbis_providers::supergfxd::{SupergfxdMode, SupergfxdStagedState, SupergfxdU
 
 pub mod battery;
 pub mod fans;
+pub mod panel;
 pub mod supergfxd;
 
 use battery::{BatteryMutationBackend, BatteryMutationReadback};
@@ -208,6 +209,9 @@ pub const BATTERY_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-cha
 pub const GPU_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-gpu-mode";
 /// Polkit action id for fan curve mutation, including profile-wide factory reset.
 pub const FAN_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-fan-curve";
+/// Polkit action id for Panel Overdrive mutation (separate display-panel
+/// capability/security domain; mirrors per-capability action pattern).
+pub const PANEL_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-panel-overdrive";
 
 /// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
 pub mod wire {
@@ -635,6 +639,8 @@ pub struct HardwareService {
     gpu_sender_fallback: Option<String>,
     fan_authorizer: Box<dyn Authorizer>,
     fan_backend: Option<Box<dyn fans::FanCurveMutationOperation>>,
+    panel_authorizer: Box<dyn Authorizer>,
+    panel_backend: Option<Box<dyn panel::PanelOverdriveMutationBackend>>,
 }
 
 impl HardwareService {
@@ -649,6 +655,8 @@ impl HardwareService {
             gpu_sender_fallback: None,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
         }
     }
 
@@ -667,6 +675,8 @@ impl HardwareService {
             gpu_sender_fallback: None,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
         }
     }
 
@@ -687,6 +697,8 @@ impl HardwareService {
             gpu_sender_fallback: None,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
         }
     }
 
@@ -705,6 +717,8 @@ impl HardwareService {
             gpu_sender_fallback: None,
             fan_authorizer,
             fan_backend: Some(fan_backend),
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
         }
     }
 
@@ -727,6 +741,8 @@ impl HardwareService {
             gpu_sender_fallback: None,
             fan_authorizer,
             fan_backend: Some(fan_backend),
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
         }
     }
 
@@ -746,7 +762,24 @@ impl HardwareService {
             gpu_sender_fallback: p2p_sender,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
         }
+    }
+
+    /// Attach the Panel Overdrive mutation backend to an existing service.
+    ///
+    /// Builder-style so production main can keep the proven combined
+    /// constructor and attach the new capability without a 9-argument
+    /// constructor.
+    pub fn with_panel(
+        mut self,
+        panel_backend: Box<dyn panel::PanelOverdriveMutationBackend>,
+        panel_authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.panel_backend = Some(panel_backend);
+        self.panel_authorizer = panel_authorizer;
+        self
     }
 }
 
@@ -904,6 +937,40 @@ impl HardwareService {
         )
         .await
     }
+
+    /// Установить Panel Overdrive; возвращает подтверждённое observed значение
+    /// (`0`/`1`) после typed asusd setter + authoritative fresh read-back.
+    async fn set_panel_overdrive(
+        &self,
+        enabled: bool,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<u8> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.panel_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("panel overdrive backend unavailable".into())
+        })?;
+        panel::handle_set_panel_overdrive(self.panel_authorizer.as_ref(), backend, enabled, &sender)
+            .await
+    }
+
+    /// Read-only typed evidence about Panel Overdrive mutation backend
+    /// availability.
+    ///
+    /// This is capability metadata, not a mutation: no authorization is
+    /// required and no hardware I/O occurs. The returned wire value is one of
+    /// `panel::panel_mutation_wire::*`.
+    fn panel_mutation_status(&self) -> u8 {
+        use panel::panel_mutation_wire;
+        panel_mutation_wire::to_wire(
+            self.panel_backend
+                .as_deref()
+                .map(|b| b.mutation_status())
+                .unwrap_or(panel::PanelOverdriveMutationStatus::Unknown),
+        )
+    }
 }
 
 #[zbus::proxy(
@@ -931,6 +998,13 @@ pub trait Hardware1 {
 
     /// Restore platform factory fan curves for the whole lossless ASUS profile.
     fn reset_fan_curves_to_defaults(&self, profile: u32) -> zbus::Result<u32>;
+
+    /// Установить Panel Overdrive; возвращает подтверждённое observed значение
+    /// (`0`/`1`) после typed asusd setter + authoritative fresh read-back.
+    fn set_panel_overdrive(&self, enabled: bool) -> zbus::Result<u8>;
+
+    /// Read-only typed Panel Overdrive mutation backend availability (wire enum).
+    fn panel_mutation_status(&self) -> zbus::Result<u8>;
 }
 
 #[cfg(test)]
