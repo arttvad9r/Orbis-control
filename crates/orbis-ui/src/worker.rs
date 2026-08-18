@@ -468,6 +468,17 @@ where
             .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))?;
     }
 
+    // Fan curve probe: read capability from the fan provider, write capability
+    // controlled by Hardware1 evidence (fan_write_available) preserved from
+    // startup. This matches the initial registry assembly policy.
+    let fan_curve = runtime
+        .fan
+        .probe_fan_capability(orbis_core::fan::FanId::Cpu, runtime.fan_write_available())
+        .await?;
+    builder
+        .add(orbis_core::FeatureId::FanCurves, fan_curve)
+        .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))?;
+
     builder
         .build()
         .map_err(|err| orbis_capabilities::ProbeError::ContractViolation(err.to_string()))
@@ -576,6 +587,7 @@ mod tests {
                 fan_service,
                 telemetry_service,
                 snapshot,
+                false,
             ),
             receiver,
             emit,
@@ -676,6 +688,7 @@ mod tests {
             fan_service,
             telemetry,
             snapshot,
+            false,
         )
     }
 
@@ -2884,6 +2897,179 @@ mod tests {
             provider.current_profile().await.unwrap(),
             PerformanceProfile::Balanced
         );
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression: FanCurves preserved across worker RefreshCapabilities
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn refresh_capabilities_preserves_fan_curves() {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
+        let gpu_power_service = AppService::new(provider.clone());
+        let gpu_mux_service = AppService::new(provider.clone());
+        let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
+
+        // Build initial snapshot with FanCurves via the shared assembly path.
+        let initial_snapshot = crate::composition::build_initial_registry_snapshot(
+            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, false,
+        )
+        .await
+        .expect("initial snapshot must succeed");
+        assert!(
+            initial_snapshot.contains(orbis_core::FeatureId::FanCurves),
+            "initial snapshot must contain FanCurves"
+        );
+
+        let telemetry_state = build_state_arc("zephyrus-full").expect("profile exists");
+        let telemetry_service = AppService::new(Arc::new(MockProvider::new(telemetry_state)));
+        let fan_state = build_state_arc("zephyrus-full").expect("profile exists");
+        let fan_service = AppService::new(Arc::new(MockProvider::new(fan_state)));
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker(
+                ApplicationRuntime::new_with_snapshot(
+                    GpuServices::new(
+                        main_service,
+                        gpu_power_service,
+                        gpu_mux_service,
+                        gpu_access_service,
+                    ),
+                    battery_service,
+                    performance_service,
+                    fan_service,
+                    telemetry_service,
+                    initial_snapshot,
+                    false,
+                ),
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        tx.send(WorkerCommand::RefreshCapabilities).expect("send");
+
+        let event = result_rx.recv().await.expect("registry change event");
+        match event {
+            WorkerEvent::RegistryChange(Ok((generation, snapshot))) => {
+                assert_eq!(generation, 2, "generation must advance to 2");
+                assert!(
+                    snapshot.contains(orbis_core::FeatureId::FanCurves),
+                    "refreshed snapshot must still contain FanCurves"
+                );
+                // All six canonical capabilities must survive the refresh.
+                for feature in [
+                    orbis_core::FeatureId::Performance,
+                    orbis_core::FeatureId::ChargeLimit,
+                    orbis_core::FeatureId::GpuPower,
+                    orbis_core::FeatureId::GpuMux,
+                    orbis_core::FeatureId::GpuAccess,
+                    orbis_core::FeatureId::FanCurves,
+                ] {
+                    assert!(
+                        snapshot.contains(feature),
+                        "refreshed snapshot missing {feature:?}"
+                    );
+                }
+            }
+            other => panic!("expected RegistryChange(Ok(..)), got: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn refresh_capabilities_fan_curves_write_status_matches_evidence() {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
+        let gpu_power_service = AppService::new(provider.clone());
+        let gpu_mux_service = AppService::new(provider.clone());
+        let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider.clone());
+
+        let initial_snapshot = crate::composition::build_initial_registry_snapshot(
+            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, false,
+        )
+        .await
+        .expect("initial snapshot must succeed");
+
+        let telemetry_state = build_state_arc("zephyrus-full").expect("profile exists");
+        let telemetry_service = AppService::new(Arc::new(MockProvider::new(telemetry_state)));
+        let fan_state = build_state_arc("zephyrus-full").expect("profile exists");
+        let fan_service = AppService::new(Arc::new(MockProvider::new(fan_state)));
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // fan_write_available = false in the runtime: write must be Unsupported.
+        let worker = tokio::spawn(async move {
+            run_worker(
+                ApplicationRuntime::new_with_snapshot(
+                    GpuServices::new(
+                        main_service,
+                        gpu_power_service,
+                        gpu_mux_service,
+                        gpu_access_service,
+                    ),
+                    battery_service,
+                    performance_service,
+                    fan_service,
+                    telemetry_service,
+                    initial_snapshot,
+                    false,
+                ),
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        tx.send(WorkerCommand::RefreshCapabilities).expect("send");
+
+        let event = result_rx.recv().await.expect("registry change event");
+        match event {
+            WorkerEvent::RegistryChange(Ok((_, snapshot))) => {
+                let fan = snapshot
+                    .capability(orbis_core::FeatureId::FanCurves)
+                    .expect("FanCurves present");
+                assert_eq!(
+                    fan.operations.read.status,
+                    orbis_core::capability::CapabilityStatus::Supported
+                );
+                assert_eq!(
+                    fan.operations.write.status,
+                    orbis_core::capability::CapabilityStatus::Unsupported,
+                    "write must be Unsupported when fan_write_available=false"
+                );
+            }
+            other => panic!("expected RegistryChange(Ok(..)), got: {other:?}"),
+        }
 
         drop(tx);
         tokio::time::timeout(std::time::Duration::from_secs(5), worker)

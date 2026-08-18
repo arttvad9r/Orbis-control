@@ -345,6 +345,17 @@ pub trait FanServiceRuntime: Send + Sync {
         fan: FanId,
         curve: FanCurvePoints,
     ) -> Result<ApplyResult, ProviderError>;
+
+    /// Probe fan curve capability support metadata.
+    ///
+    /// Returns a typed `Capability` for the `FanCurves` feature. The write
+    /// status is controlled by `write_available` (Hardware1 evidence), the
+    /// read status is derived from the `active_curve` read contract.
+    async fn probe_fan_capability(
+        &self,
+        fan: FanId,
+        write_available: bool,
+    ) -> Result<orbis_core::capability::Capability, orbis_capabilities::ProbeError>;
 }
 
 #[async_trait]
@@ -371,6 +382,14 @@ where
         curve: FanCurvePoints,
     ) -> Result<ApplyResult, ProviderError> {
         AppService::set_fan_curve(self, profile, &fan, &curve).await
+    }
+
+    async fn probe_fan_capability(
+        &self,
+        fan: FanId,
+        write_available: bool,
+    ) -> Result<orbis_core::capability::Capability, orbis_capabilities::ProbeError> {
+        orbis_providers::probe_fan_curve(self.provider(), &fan, write_available).await
     }
 }
 
@@ -418,6 +437,12 @@ pub struct ApplicationRuntime<G, B, R> {
     pub telemetry: Arc<dyn TelemetryServiceRuntime>,
     /// Read-only capability registry snapshot.
     pub(crate) capabilities: Arc<CapabilityRegistrySnapshot>,
+    /// Hardware1 mutation backend evidence (NameHasOwner at startup).
+    ///
+    /// Controls FanCurves write capability: `Supported` only when production
+    /// Hardware1 daemon owns its D-Bus name. This is a stable startup-time
+    /// snapshot — dynamic re-probing is out of scope (ADR 0006).
+    fan_write_available: bool,
 }
 
 impl<G, B, R> ApplicationRuntime<G, B, R> {
@@ -433,6 +458,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
         fan: F,
         telemetry: T,
         snapshot: CapabilityRegistrySnapshot,
+        fan_write_available: bool,
     ) -> Self
     where
         T: TelemetryServiceRuntime + 'static,
@@ -445,6 +471,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             fan: Arc::new(fan),
             telemetry: Arc::new(telemetry),
             capabilities: Arc::new(snapshot),
+            fan_write_available,
         }
     }
 
@@ -493,7 +520,13 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             fan: Arc::new(fan),
             telemetry: Arc::new(telemetry),
             capabilities: Arc::new(snapshot),
+            fan_write_available: false,
         }
+    }
+
+    /// Whether the Hardware1 mutation backend is available (startup-time evidence).
+    pub fn fan_write_available(&self) -> bool {
+        self.fan_write_available
     }
 }
 
@@ -849,6 +882,7 @@ pub async fn build_production_runtime(
             fan_service,
             telemetry,
             snapshot,
+            hardware_owner,
         ),
         hardware_owner,
     ))
@@ -898,6 +932,7 @@ pub fn mock_runtime() -> MockRuntime {
         AppService::new(provider.clone()),
         AppService::new(provider),
         empty,
+        false,
     )
 }
 
@@ -1164,6 +1199,135 @@ mod tests {
         .await
         .expect("refresh must succeed");
         runtime.replace_capabilities(next);
+        assert!(!runtime.capabilities().contains(FeatureId::GpuProductPolicy));
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression: FanCurves preserved across refresh
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn refresh_preserves_fan_curves() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let initial = build_initial_snapshot_for_refresh(&provider).await;
+        assert!(
+            initial.contains(FeatureId::FanCurves),
+            "initial snapshot must contain FanCurves"
+        );
+        let mut runtime = script_gpu_runtime(provider.clone());
+        runtime.replace_capabilities(initial);
+
+        let next = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            false,
+            runtime.capabilities().generation() + 1,
+        )
+        .await
+        .expect("refresh must succeed");
+        runtime.replace_capabilities(next);
+        assert!(
+            runtime.capabilities().contains(FeatureId::FanCurves),
+            "refreshed snapshot must still contain FanCurves"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_fan_curves_write_status_matches_evidence() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let initial = build_initial_snapshot_for_refresh(&provider).await;
+        let mut runtime = script_gpu_runtime(provider.clone());
+        runtime.replace_capabilities(initial);
+
+        // fan_write_available = true: write should be Supported after refresh.
+        let next = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            true,
+            runtime.capabilities().generation() + 1,
+        )
+        .await
+        .expect("refresh must succeed");
+        runtime.replace_capabilities(next);
+        let fan = runtime
+            .capabilities()
+            .capability(FeatureId::FanCurves)
+            .expect("FanCurves present");
+        assert_eq!(fan.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(fan.operations.write.status, CapabilityStatus::Supported);
+
+        // fan_write_available = false: write should be Unsupported after refresh.
+        let next = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            false,
+            runtime.capabilities().generation() + 1,
+        )
+        .await
+        .expect("refresh must succeed");
+        runtime.replace_capabilities(next);
+        let fan = runtime
+            .capabilities()
+            .capability(FeatureId::FanCurves)
+            .expect("FanCurves present");
+        assert_eq!(fan.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(fan.operations.write.status, CapabilityStatus::Unsupported);
+    }
+
+    #[tokio::test]
+    async fn refresh_contains_all_six_canonical_capabilities() {
+        let provider = std::sync::Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let initial = build_initial_snapshot_for_refresh(&provider).await;
+        let mut runtime = script_gpu_runtime(provider.clone());
+        runtime.replace_capabilities(initial);
+
+        let next = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            true,
+            runtime.capabilities().generation() + 1,
+        )
+        .await
+        .expect("refresh must succeed");
+        runtime.replace_capabilities(next);
+
+        // All six canonical capability entries must be present.
+        for feature in [
+            FeatureId::Performance,
+            FeatureId::ChargeLimit,
+            FeatureId::GpuPower,
+            FeatureId::GpuMux,
+            FeatureId::GpuAccess,
+            FeatureId::FanCurves,
+        ] {
+            assert!(
+                runtime.capabilities().contains(feature),
+                "refreshed snapshot missing {feature:?}"
+            );
+        }
+        // Negative: GpuProductPolicy must NOT be synthesised.
         assert!(!runtime.capabilities().contains(FeatureId::GpuProductPolicy));
     }
 }

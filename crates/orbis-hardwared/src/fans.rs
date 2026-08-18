@@ -672,10 +672,21 @@ mod tests {
 
         // Read back: FakeAsusd returns the exact wire that was stored.
         let raw = asusd.read_curves(AsusdFanProfile::Balanced).await.unwrap();
-        let gpu = raw.iter().find(|(n, _, _, _)| n == "GPU").expect("GPU entry");
+        let gpu = raw
+            .iter()
+            .find(|(n, _, _, _)| n == "GPU")
+            .expect("GPU entry");
         // temps must remain temps (not pwms), pwms must remain pwms.
-        assert_eq!(gpu.1, [40, 42, 43, 60, 65, 69, 74, 78], "temps array must match input temps");
-        assert_eq!(gpu.2, [5, 20, 38, 43, 56, 66, 84, 112], "pwms array must match input pwms");
+        assert_eq!(
+            gpu.1,
+            [40, 42, 43, 60, 65, 69, 74, 78],
+            "temps array must match input temps"
+        );
+        assert_eq!(
+            gpu.2,
+            [5, 20, 38, 43, 56, 66, 84, 112],
+            "pwms array must match input pwms"
+        );
     }
 
     /// Verify that FakeAsusd roundtrip preserves per-fan isolation:
