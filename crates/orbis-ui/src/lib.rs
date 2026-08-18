@@ -9,4 +9,5 @@
 #![forbid(unsafe_code)]
 
 pub mod composition;
+pub mod diagnostics_metadata;
 pub mod worker;
