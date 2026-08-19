@@ -50,10 +50,12 @@
             cargo-audit
             cargo-machete
             check-jsonschema
+            libxml2
+            desktop-file-utils
             dejavu_fonts
           ];
           QT_XKB_CONFIG_ROOT = "${pkgs.xkeyboard_config}/share/X11/xkb";
-          XDG_DATA_DIRS = "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}";
+          XDG_DATA_DIRS = "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}";
         };
 
         # Canonical Rust workspace check. The package derivation already vendors
@@ -88,6 +90,22 @@
           check-jsonschema \
             --schemafile ${./docs/support-matrix.schema.json} \
             ${./docs/support-matrix.examples}/*.json
+          touch $out
+        '';
+
+        # Catch malformed policy/metadata before package/runtime tests. This is
+        # syntax-level evidence only; policy semantics are asserted separately
+        # by the hardwared lifecycle VM.
+        checks.packaging-metadata = pkgs.runCommand "orbis-packaging-metadata" {
+          nativeBuildInputs = [
+            pkgs.libxml2
+            pkgs.desktop-file-utils
+          ];
+        } ''
+          xmllint --noout ${./packaging/nix/polkit/io.github.orbiscontrol.hardware.policy}
+          xmllint --noout ${./packaging/nix/dbus/io.github.orbiscontrol.Hardware.conf}
+          xmllint --noout ${./data/metainfo/io.github.orbiscontrol.Orbis.metainfo.xml}
+          desktop-file-validate ${./data/applications/io.github.orbiscontrol.Orbis.desktop}
           touch $out
         '';
 
