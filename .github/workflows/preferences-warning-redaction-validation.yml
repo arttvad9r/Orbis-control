@@ -1,0 +1,155 @@
+name: Preferences warning redaction validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/preferences-warning-redaction-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout implementation staging branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/preferences-warning-redaction
+          fetch-depth: 0
+
+      - name: Apply redaction implementation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/orbis-config/src/preferences.rs')
+          text = path.read_text()
+
+          old = '''#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreferencesWarningKind {
+    /// The file was not syntactically valid TOML.
+    MalformedToml(String),
+    /// The mandatory `schema_version` key was absent.
+    MissingSchemaVersion,
+    /// `schema_version` was present but not a non-negative `u32` integer.
+    InvalidSchemaVersion,
+    /// An older unsupported preferences schema was encountered.
+    UnsupportedOlderVersion(u32),
+    /// Current-version TOML did not match the strict owned schema.
+    InvalidSchema(String),
+    /// Legacy `config.toml` could not be safely imported.
+    LegacyImport(String),
+}
+'''
+          new = '''#[derive(Clone, PartialEq, Eq)]
+pub enum PreferencesWarningKind {
+    /// The file was not syntactically valid TOML.
+    MalformedToml(String),
+    /// The mandatory `schema_version` key was absent.
+    MissingSchemaVersion,
+    /// `schema_version` was present but not a non-negative `u32` integer.
+    InvalidSchemaVersion,
+    /// An older unsupported preferences schema was encountered.
+    UnsupportedOlderVersion(u32),
+    /// Current-version TOML did not match the strict owned schema.
+    InvalidSchema(String),
+    /// Legacy `config.toml` could not be safely imported.
+    LegacyImport(String),
+}
+
+impl PreferencesWarningKind {
+    /// Fixed category safe for logs and support diagnostics.
+    ///
+    /// Embedded parser/schema messages may contain excerpts from user-owned
+    /// configuration and must never be emitted through production logging.
+    pub const fn log_category(&self) -> &'static str {
+        match self {
+            Self::MalformedToml(_) => "malformed_toml",
+            Self::MissingSchemaVersion => "missing_schema_version",
+            Self::InvalidSchemaVersion => "invalid_schema_version",
+            Self::UnsupportedOlderVersion(_) => "unsupported_older_version",
+            Self::InvalidSchema(_) => "invalid_schema",
+            Self::LegacyImport(_) => "legacy_import",
+        }
+    }
+}
+
+impl std::fmt::Debug for PreferencesWarningKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.log_category())
+    }
+}
+'''
+          if text.count(old) != 1:
+              raise SystemExit('PreferencesWarningKind block did not match exactly once')
+          text = text.replace(old, new, 1)
+
+          test = r'''
+
+    #[test]
+    fn warning_debug_redacts_embedded_diagnostics() {
+        const SECRET: &str = "ORBIS_SYNTHETIC_SECRET_MARKER_7f3b";
+
+        for kind in [
+            PreferencesWarningKind::MalformedToml(SECRET.into()),
+            PreferencesWarningKind::InvalidSchema(SECRET.into()),
+            PreferencesWarningKind::LegacyImport(SECRET.into()),
+        ] {
+            let rendered = format!("{kind:?}");
+            assert_eq!(rendered, kind.log_category());
+            assert!(!rendered.contains(SECRET));
+        }
+
+        let warning = PreferencesWarning {
+            path: PathBuf::from("/tmp/preferences.toml"),
+            kind: PreferencesWarningKind::MalformedToml(SECRET.into()),
+        };
+        assert!(!format!("{warning:?}").contains(SECRET));
+    }
+'''
+          marker = '\n}\n'
+          if not text.endswith(marker):
+              raise SystemExit('unexpected preferences.rs ending')
+          text = text[:-len(marker)] + test + marker
+          path.write_text(text)
+          PY
+
+      - name: Normalize known Cargo 1.85 parse blocker in checkout only
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/orbis-ui/Cargo.toml')
+          text = path.read_text()
+          old = '''orbis-providers = {
+              path = "../orbis-providers",
+              version = "0.1.0",
+              default-features = false,
+              features = ["mock"],
+          }'''
+          new = 'orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }'
+          if text.count(old) != 1:
+              raise SystemExit('known orbis-providers manifest block did not match exactly once')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Verify scope and targeted tests
+        run: |
+          set -euo pipefail
+          rustfmt --check crates/orbis-config/src/preferences.rs
+          cargo test --locked -p orbis-config preferences
+          cargo clippy --locked -p orbis-config --all-targets -- -D warnings
+          git diff --check -- crates/orbis-config/src/preferences.rs
+          test "$(git diff --name-only -- crates/orbis-config/src/preferences.rs)" = "crates/orbis-config/src/preferences.rs"
+
+      - name: Publish validated implementation
+        run: |
+          set -euo pipefail
+          git checkout -- crates/orbis-ui/Cargo.toml
+          git diff --check
+          test "$(git diff --name-only)" = "crates/orbis-config/src/preferences.rs"
+          git config user.name "arttvad9r"
+          git config user.email "arttvad9r@gmail.com"
+          git add crates/orbis-config/src/preferences.rs
+          git commit -m "fix(config): redact preference warning diagnostics [skip ci]"
+          git push origin HEAD:agent/preferences-warning-redaction
