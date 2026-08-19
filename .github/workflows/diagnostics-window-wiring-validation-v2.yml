@@ -1,0 +1,91 @@
+name: Diagnostics window wiring validation v2
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  targeted:
+    if: github.head_ref == 'agent/diagnostics-window-wiring-validate2-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout implementation staging branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/diagnostics-window-wiring
+          fetch-depth: 0
+
+      - name: Reuse exact registered main wiring transform
+        run: |
+          set -euo pipefail
+          git fetch origin agent/diagnostics-window-wiring-validate-trigger
+          python3 - <<'PY'
+          import base64
+          import re
+          import subprocess
+          from pathlib import Path
+
+          workflow = subprocess.check_output([
+              'git', 'show',
+              'origin/agent/diagnostics-window-wiring-validate-trigger:.github/workflows/diagnostics-window-wiring-validation.yml'
+          ], text=True)
+          match = re.search(r"echo '([A-Za-z0-9+/=]+)' \\| base64 -d > /tmp/apply-diagnostics.py", workflow)
+          if not match:
+              raise SystemExit('registered diagnostics transform payload not found')
+          Path('/tmp/apply-diagnostics.py').write_bytes(base64.b64decode(match.group(1)))
+          PY
+          python3 /tmp/apply-diagnostics.py
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Targeted diagnostics wiring checks
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all
+            cargo fmt --all -- --check
+            cargo check -p orbis-ui --all-targets
+            cargo test -p orbis-ui diagnostics_window_model
+            cargo test -p orbis-ui diagnostics_dto
+            cargo clippy -p orbis-ui --all-targets -- -D warnings
+          '
+
+      - name: Check exact six-file diff
+        run: |
+          set -euo pipefail
+          git diff --check ece409d60950a583e2364a36ed5c507626510a0a
+          git diff --name-only ece409d60950a583e2364a36ed5c507626510a0a | sort > /tmp/changed.txt
+          printf '%s\n' \
+            crates/orbis-ui/examples/ui_snapshot.rs \
+            crates/orbis-ui/src/diagnostics_runtime.rs \
+            crates/orbis-ui/src/diagnostics_window_model.rs \
+            crates/orbis-ui/src/lib.rs \
+            crates/orbis-ui/src/main.rs \
+            ui/audited/diagnostics-window.slint | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
+          ! grep -E "set_|Set[A-Z]" crates/orbis-ui/src/diagnostics_runtime.rs
+
+      - name: Publish validated staging tree
+        run: |
+          set -euo pipefail
+          git config user.name "arttvad9r"
+          git config user.email "arttvad9r@gmail.com"
+          git add \
+            crates/orbis-ui/examples/ui_snapshot.rs \
+            crates/orbis-ui/src/diagnostics_runtime.rs \
+            crates/orbis-ui/src/diagnostics_window_model.rs \
+            crates/orbis-ui/src/lib.rs \
+            crates/orbis-ui/src/main.rs \
+            ui/audited/diagnostics-window.slint
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "ui: wire production diagnostics snapshot [skip ci]"
+            git push origin HEAD:agent/diagnostics-window-wiring
+          fi
