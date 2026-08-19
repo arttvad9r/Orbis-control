@@ -71,6 +71,11 @@ fn resolve_dir_checked(
     )
 }
 
+/// Fail-closed config directory resolver for legacy migration/compatibility code.
+pub fn config_dir_checked() -> Result<PathBuf, PathResolutionError> {
+    resolve_dir_checked("XDG_CONFIG_HOME", ".config")
+}
+
 /// Fail-closed state directory resolver for new production consumers.
 pub fn state_dir_checked() -> Result<PathBuf, PathResolutionError> {
     resolve_dir_checked("XDG_STATE_HOME", ".local/state")
