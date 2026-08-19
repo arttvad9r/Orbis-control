@@ -6,10 +6,14 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Orbis Control: diagnostic CLI placeholder (orbisctl)"
+description = "Orbis Control read-only command-line client (orbisctl)"
 
 [[bin]]
 name = "orbisctl"
 path = "src/main.rs"
 
 [dependencies]
+tokio = { workspace = true }
+zbus = { workspace = true }
+orbis-session-client = { path = "../orbis-session-client", version = "0.1.0" }
+orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false }
