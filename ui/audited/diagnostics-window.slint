@@ -8,9 +8,11 @@ export component DiagnosticsWindow inherits Window {
     title: "Orbis Control — Diagnostics";
     background: Palette.window-background;
 
+    // Compatibility alias retained while Rust lifecycle wiring is migrated.
+    in property <string> version: "Unknown";
     in property <string> kernel-value: "Unknown";
     in property <string> platform-value: "Unknown";
-    in property <string> version-value: "Unknown";
+    in property <string> version-value: root.version;
     in property <string> build-detail: "Build metadata not embedded";
     in property <string> system-detail: "";
     in property <string> capabilities-text: "No capability entries";
