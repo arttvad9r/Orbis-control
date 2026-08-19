@@ -23,7 +23,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.87"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/orbis-control/orbis-control"
+repository = "https://github.com/arttvad9r/Orbis-control"
 authors = ["Orbis Control contributors"]
 
 [workspace.dependencies]
