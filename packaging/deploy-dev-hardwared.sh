@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # deploy-dev-hardwared — standalone Orbis Hardware1 deployment.
 #
-# Обновляет ТОЛЬКО бинарник и systemd unit.
+# Обновляет ТОЛЬКО бинарник и regular-file systemd unit.
 # D-Bus policy и polkit actions регистрируются через NixOS один раз
 # (nixosModules.orbis-hardwared-policies), НЕ через этот скрипт.
 #
-# Идемпотентен: повторный запуск обновляет binary + unit.
+# Если /etc/systemd/system/orbis-hardwared.service является symlink (обычный
+# NixOS-owned unit), скрипт отказывается его перезаписывать. Для standalone
+# lifecycle сначала отключите full services.orbis-control и используйте только
+# policy-only module.
+#
+# Идемпотентен: повторный запуск обновляет binary + unit, которые ранее создал
+# именно standalone deploy.
 #
 # Использование:
 #   sudo bash packaging/deploy-dev-hardwared.sh [--stop]
 #
-# --stop  остановить service перед обновлением (для аккуратного upgrade).
+# --stop  остановить standalone service перед обновлением.
 
 set -euo pipefail
 
@@ -23,11 +29,25 @@ SYSTEMD_DIR="/etc/systemd/system"
 SERVICE_NAME="orbis-hardwared"
 SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 GC_ROOT="/nix/var/nix/gcroots/orbis-hardwared"
+POLKIT_POLICY="/etc/polkit-1/actions/io.github.orbiscontrol.hardware.policy"
 
 # ─── Preconditions ──────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
   echo "ERROR: запустите через sudo: sudo bash $0 $*"
   exit 1
+fi
+
+if [[ -L "$SERVICE_FILE" ]]; then
+  echo "ERROR: standalone deploy отказан: $SERVICE_FILE — symlink → $(readlink "$SERVICE_FILE")" >&2
+  echo "       Это похоже на NixOS-owned unit. Не перезаписывайте его dev-script'ом." >&2
+  echo "       Отключите full services.orbis-control и включите только nixosModules.orbis-hardwared-policies." >&2
+  exit 2
+fi
+
+if [[ ! -r "$POLKIT_POLICY" ]]; then
+  echo "ERROR: не найден зарегистрированный Hardware1 polkit policy: $POLKIT_POLICY" >&2
+  echo "       Сначала включите nixosModules.orbis-hardwared-policies." >&2
+  exit 2
 fi
 
 if [[ "${1:-}" == "--stop" ]]; then
@@ -37,8 +57,7 @@ if [[ "${1:-}" == "--stop" ]]; then
 fi
 
 # ─── BUILD ─────────────────────────────────────────────────────────
-# Собираем НАРЯДНЫЙ пакет orbis-hardwared (только daemon, без GUI/Slint).
-# Build time: ~1-2 min (clean) / ~10-20s (incremental).
+# Собираем узкий пакет orbis-hardwared (только daemon, без GUI/Slint).
 # --print-out-paths пишет store path в stdout; stderr оставляем на терминале,
 # чтобы progress/messages Nix не смешивались с машинно-читаемым результатом.
 echo "→ [BUILD] Собираем orbis-hardwared через nix build…"
@@ -91,7 +110,7 @@ install -m 0755 "$BUILD_PATH/bin/orbis-hardwared" "${STABLE_BIN}/orbis-hardwared
 echo "✓ ${STABLE_BIN}/orbis-hardwared"
 
 # ─── SYSTEMD ────────────────────────────────────────────────────────
-echo "→ [SYSTEMD] Устанавливаем systemd unit…"
+echo "→ [SYSTEMD] Устанавливаем standalone systemd unit…"
 install -m 0644 "${SCRIPT_DIR}/orbis-hardwared.service" "${SERVICE_FILE}"
 echo "✓ Unit: ${SERVICE_FILE}"
 
