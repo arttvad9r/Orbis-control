@@ -298,7 +298,10 @@ mod tests {
             dto.summary.hardware_vendor.as_deref(),
             Some("ASUSTeK COMPUTER INC.")
         );
-        assert_eq!(dto.summary.hardware_product.as_deref(), Some("Example Model"));
+        assert_eq!(
+            dto.summary.hardware_product.as_deref(),
+            Some("Example Model")
+        );
         assert_eq!(dto.summary.compositor, None);
     }
 
@@ -325,10 +328,7 @@ mod tests {
         assert_eq!(dto.capabilities[0].read_status, CapabilityStatus::Supported);
         assert_eq!(dto.capabilities[0].write_status, CapabilityStatus::ReadOnly);
         assert_eq!(dto.capabilities[1].feature, FeatureId::Aura);
-        assert_eq!(
-            dto.capabilities[1].status,
-            CapabilityStatus::BackendMissing
-        );
+        assert_eq!(dto.capabilities[1].status, CapabilityStatus::BackendMissing);
     }
 
     #[test]
@@ -337,7 +337,10 @@ mod tests {
 
         assert_eq!(dto.services.len(), 2);
         assert_eq!(dto.services[0].service, DiagnosticsServiceId::Asusd);
-        assert_eq!(dto.services[0].availability, ServiceAvailability::Unavailable);
+        assert_eq!(
+            dto.services[0].availability,
+            ServiceAvailability::Unavailable
+        );
         assert_eq!(dto.services[1].service, DiagnosticsServiceId::OrbisSessiond);
         assert_eq!(dto.services[1].availability, ServiceAvailability::Running);
     }
@@ -373,7 +376,10 @@ mod tests {
         dto.summary.package_version = "changed-for-ui".into();
         dto.services.clear();
 
-        assert_eq!(snapshot.sections().application.package_version, "0.1.0-test");
+        assert_eq!(
+            snapshot.sections().application.package_version,
+            "0.1.0-test"
+        );
         assert_eq!(snapshot.sections().services.len(), 2);
     }
 }
