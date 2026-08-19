@@ -9,6 +9,7 @@
 #![warn(missing_docs)]
 
 pub mod autostart;
+pub mod desired_state;
 pub mod paths;
 pub mod preferences;
 pub mod store;
@@ -18,6 +19,12 @@ pub use autostart::{
     AUTOSTART_ENTRY, AUTOSTART_FILE_NAME, AutostartError, AutostartPathError, AutostartStatus,
     autostart_dir, autostart_dir_with, autostart_file, autostart_status, autostart_status_from_dir,
     disable_autostart, disable_autostart_from_dir, enable_autostart, enable_autostart_from_dir,
+};
+pub use desired_state::{
+    DESIRED_STATE_FILE, DESIRED_STATE_SCHEMA_VERSION, DesiredStateDocument, DesiredStateError,
+    DesiredStateLoad, DesiredStateLoadSource, DesiredStatePathError, DesiredStateWarning,
+    DesiredStateWarningKind, desired_state_dir, desired_state_dir_with, desired_state_file,
+    load_desired_state, load_desired_state_from_dir, save_desired_state, save_desired_state_to_dir,
 };
 pub use preferences::{
     AppearancePreferences, CloseAction, PREFERENCES_FILE, PREFERENCES_SCHEMA_VERSION,
