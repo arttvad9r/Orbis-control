@@ -22,6 +22,9 @@ static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// Ошибки конфигурации.
 #[derive(Debug, Error)]
 pub enum ConfigError {
+    /// Ошибка разрешения XDG-пути legacy config.
+    #[error(transparent)]
+    Path(#[from] paths::PathResolutionError),
     /// Ошибка ввода-вывода.
     #[error("io: {0}")]
     Io(#[from] io::Error),
@@ -197,11 +200,13 @@ pub fn load_from_dir(dir: &Path) -> Result<AppConfig, ConfigError> {
     from_toml_with_migration(&text)
 }
 
-/// Загрузить legacy-конфиг из стандартного XDG-каталога.
+/// Загрузить legacy-конфиг из fail-closed XDG-каталога.
 ///
 /// Этот compatibility API не является источником автоматического desired state.
+/// Missing/relative HOME/XDG is a typed error; this function never falls back
+/// to the current working directory.
 pub fn load_or_default() -> Result<AppConfig, ConfigError> {
-    load_from_dir(&crate::config_dir())
+    load_from_dir(&paths::config_dir_checked()?)
 }
 
 /// Разобрать TOML с миграцией версий.
@@ -474,12 +479,10 @@ mod tests {
     }
 
     #[test]
-    fn never_writes_user_home() {
-        // unit-тесты не пишут в real XDG: only explicit temp paths.
-        let td = temp_test_env();
-        let dir = td.path().join("iso");
-        save_to_dir(&AppConfig::default(), &dir).unwrap();
-        let real = crate::config_dir();
-        assert!(!real.join(paths::CONFIG_FILE).exists() || real != dir);
+    fn checked_path_resolver_never_selects_cwd_without_home() {
+        assert_eq!(
+            paths::config_dir_with_checked(None, None),
+            Err(paths::PathResolutionError::MissingHome)
+        );
     }
 }
