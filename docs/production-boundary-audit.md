@@ -1,37 +1,36 @@
 # Production Boundary Audit
 
-## Scope
+> **Historical snapshot.** This file records an earlier hardening review after the first Hardware1 mutation path. It is not the current operational or security source of truth. Use [`current-state.md`](current-state.md), [`architecture.md`](architecture.md) and [`threat-model.md`](threat-model.md) for current behavior and blockers.
 
-This document tracks production-hardening boundaries after the first Hardware1 mutation path.
+## Durable rules retained from this audit
 
-## Rules
-
-- GUI never performs privileged hardware I/O.
-- Session daemon remains unprivileged and read-oriented.
+- GUI does not perform privileged hardware I/O directly.
+- Session daemon remains unprivileged and read-oriented; it is not a mutation deputy.
 - Hardware1 exposes only typed semantic mutations.
-- No generic sysfs, shell, filesystem, or arbitrary D-Bus proxy methods.
-- Unsupported capability states remain explicit.
+- No generic sysfs, shell, filesystem or arbitrary D-Bus proxy methods.
+- Unsupported/Unavailable/PermissionDenied/Unknown evidence remains explicit.
+- Every mutation needs a proven owner, bounded authorization and defined confirmation semantics.
 
-## Current verified areas
+## Historical reviewed areas
 
-- Performance mutation: Hardware1 path with authorization boundary.
-- Battery charge-limit mutation: typed backend path.
-- GPU product mutation: intentionally disabled until semantics are proven.
-- Fan curve writes: remain owned by asusd boundary.
+- Performance mutation established the Hardware1/polkit boundary.
+- Battery charge-limit mutation added a typed owner/read-back path.
+- GPU product mutation remained intentionally disabled.
+- Fan mutation ownership was assigned to the typed asusd boundary rather than direct sysfs writes.
 
-## Review checklist for new mutations
+The last point is **ownership only, not current write acceptance**. Current fan mutation/default-reset is fail-closed because later audits found unresolved safety/evidence defects. See `current-state.md` and issues #104/#105/#109/#116/#120.
 
-Before adding a mutation:
+## Durable review checklist for new mutations
 
-1. Identify hardware owner.
-2. Define authoritative read-back source.
-3. Define authorization requirement.
-4. Add typed domain API.
-5. Add unavailable/unsupported behavior.
-6. Add tests without requiring live hardware.
+Before adding or re-enabling a mutation:
 
-## Not in scope
+1. identify the actual write owner and non-mutating support evidence;
+2. define authoritative read-back or explicit Accepted/Pending semantics;
+3. define the authorization boundary for the original caller;
+4. expose a narrow typed domain/API contract;
+5. preserve unavailable/unsupported/permission-denied/unknown distinctions;
+6. add deterministic tests without real hardware mutation;
+7. obtain executable package/CI validation on the exact revision;
+8. add controlled dated hardware evidence when the claim depends on real device semantics.
 
-- Direct hardware writes from UI.
-- New raw backend passthrough methods.
-- Enabling disabled GPU controls without evidence.
+This historical file does not override later safety blocks or current capability status.
