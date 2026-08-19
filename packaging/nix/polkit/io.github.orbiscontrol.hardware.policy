@@ -2,7 +2,7 @@
 <!DOCTYPE policyconfig PUBLIC
  "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
- <!-- Mutation actions orbis-hardwared: только активный локальный пользователь. -->
+ <!-- Mutation actions orbis-hardwared: per-capability fail-closed defaults. -->
 <policyconfig>
   <action id="io.github.orbiscontrol.hardware.set-performance-profile">
     <description>Change the Orbis Control performance profile</description>
@@ -51,12 +51,12 @@
   <action id="io.github.orbiscontrol.hardware.set-panel-overdrive">
     <description>Change the Orbis Control panel overdrive state</description>
     <description xml:lang="ru">Изменить состояние panel overdrive Orbis Control</description>
-    <message>Permission is required to change the panel overdrive state</message>
-    <message xml:lang="ru">Для изменения состояния panel overdrive требуется разрешение</message>
+    <message>Panel overdrive writes are disabled until backend owner liveness and release evidence are proven</message>
+    <message xml:lang="ru">Запись panel overdrive отключена до подтверждения доступности backend-владельца и release evidence</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
-      <allow_active>yes</allow_active>
+      <allow_active>no</allow_active>
     </defaults>
   </action>
   <action id="io.github.orbiscontrol.hardware.set-keyboard-backlight">
@@ -73,12 +73,12 @@
   <action id="io.github.orbiscontrol.hardware.set-aura-static-rgb">
     <description>Change the Orbis Control Aura Static RGB colour</description>
     <description xml:lang="ru">Изменить цвет Aura Static RGB Orbis Control</description>
-    <message>Permission is required to change the Aura Static RGB colour</message>
-    <message xml:lang="ru">Для изменения цвета Aura Static RGB требуется разрешение</message>
+    <message>Aura Static RGB writes are disabled until backend owner liveness and release evidence are proven</message>
+    <message xml:lang="ru">Запись Aura Static RGB отключена до подтверждения доступности backend-владельца и release evidence</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
-      <allow_active>yes</allow_active>
+      <allow_active>no</allow_active>
     </defaults>
   </action>
 </policyconfig>
