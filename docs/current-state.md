@@ -11,7 +11,7 @@
 
 Orbis уже имеет рабочие production vertical slices для Battery, Performance и независимых GPU primitives. Узкие privileged mutations проходят только через typed `Hardware1` → polkit → bounded backend; `sessiond` остаётся read/session boundary и не является mutation deputy.
 
-`main` также содержит production telemetry polling, profile-specific fan reads, fan-curve mutation wiring, безопасное preferences persistence, XDG window state, typed diagnostics snapshot/export stack, desktop/AppStream packaging integration и support-matrix tooling.
+`main` также содержит production telemetry polling, profile-specific fan reads, fan-curve mutation wiring, безопасное preferences persistence, XDG window state, generic desired-state persistence, Desired/Observed/Pending + lifecycle domain foundations, typed diagnostics snapshot/export/runtime/window-model layers, desktop/AppStream packaging integration и support-matrix tooling.
 
 Главный текущий release blocker: GitHub Actions job завершается `failure` **до выполнения workflow steps** (`steps=[]`, log blob недоступен). Это не является доказанным `cargo`/`nix` regression, но release gate остаётся закрытым до реально выполненного green `nix flake check`.
 
@@ -19,11 +19,13 @@ Orbis уже имеет рабочие production vertical slices для Battery
 
 | Area | Status | Current fact |
 |---|---|---|
-| Repository baseline | IMPLEMENTED | Consolidated production hardening merged into `main` on 2026-08-19. |
+| Repository baseline | IMPLEMENTED | Consolidated production hardening merged into `main` on 2026-08-19; obsolete active PRs were closed after ancestry/integration checks. |
 | Rust/build contract | IMPLEMENTED | Workspace/toolchain pinned to Rust **1.87**, matching the locked UI dependency graph. |
-| Core/domain | IMPLEMENTED | Typed domain/invariants and explicit capability evidence states. |
+| Core/domain | IMPLEMENTED | Typed domain/invariants, explicit capability evidence states, Desired/Observed/Pending values and inert lifecycle events. |
 | Config/preferences | TESTED | Versioned XDG `preferences.toml`, atomic/durable writes, permission preservation, Dark/Light persistence, Start Minimized, redacted warning diagnostics. |
+| Desired-state storage | TESTED FOUNDATION | Generic versioned `desired-state.toml` storage is integrated and inert; it does not apply settings automatically. |
 | Window state | TESTED | Independent versioned XDG state store for window position; not mixed with preferences. |
+| XDG Run on Startup | PARTIAL | Safe owned-entry backend, exports and user-only Slint toggle contract are integrated. Remaining work is Rust `main.rs` lifecycle glue that reads/applies the actual entry state. |
 | Capabilities | IMPLEMENTED | Runtime registry/probes for current production concepts; read/write evidence remains independent. |
 | Battery read | LIVE-VALIDATED | UPower/asusd/kernel semantics through Session1; no mock fallback in production. |
 | Battery mutation | LIVE-VALIDATED | Typed Hardware1/asusd path with authoritative read-back; historical controlled `100 → 80 → 100` evidence. |
@@ -32,17 +34,16 @@ Orbis уже имеет рабочие production vertical slices для Battery
 | GPU primitives | LIVE-VALIDATED (read) | Runtime power, physical MUX and access policy are separate production read concepts. |
 | GPU product mode | BLOCKED | Eco/Standard/Ultimate/Optimized production mapping/mutation is not proven; controls remain unsupported/disabled. |
 | Telemetry | IMPLEMENTED / TESTED | Production sysfs telemetry provider and worker-owned polling exist; this is not automatically live hardware acceptance evidence. |
-| Fan curves | IMPLEMENTED / TESTED | Profile-specific read is Session1 → sessiond → asusd; active curve remains sysfs; typed Hardware1 mutation path exists. Live mutation acceptance remains UNKNOWN until dated hardware validation. |
+| Fan curves | IMPLEMENTED / TESTED | Profile-specific read is Session1 → sessiond → asusd; active curve remains sysfs; typed Hardware1 mutation/reset paths and visual editor are in `main`. Live mutation/reset acceptance remains revision-scoped and must not be inferred from UI presence. |
 | `sessiond` resilience | TESTED | Battery/UPower discovery is lazy/capability-local; UPower absence no longer blocks independent Performance/GPU/Fan Session1 startup. |
 | NixOS UPower integration | TESTED | Orbis enables UPower with `lib.mkDefault true`; explicit host override remains stronger; no hard service lifecycle coupling. |
 | Privileged helper | IMPLEMENTED / historically LIVE-VALIDATED | Typed Hardware1 helper; no generic sysfs/filesystem/shell/D-Bus proxy. |
-| Diagnostics core/export | TESTED | Typed diagnostics domain/providers/collector/DTO and privacy-bounded text/JSON exporters are integrated in `main`; end-to-end pure-data regression is included. |
-| Diagnostics window wiring | PARTIAL | Backend/export stack is integrated; the separate UI wiring branch currently conflicts with the consolidated `main.rs`/UI baseline. |
+| Diagnostics core/export | TESTED | Typed diagnostics domain/providers/collector/DTO and privacy-bounded text/JSON exporters are integrated; end-to-end pure-data regression is included. |
+| Diagnostics runtime/window model | TESTED FOUNDATION | Read-only production source orchestration, presentation model and typed Slint surface are integrated. Remaining work is Rust `main.rs` open/refresh lifecycle wiring. |
 | Desktop/AppStream packaging | TESTED | Canonical metadata sources and Nix package installation wiring are integrated; prior targeted packaging validation built the package and asserted installation. |
 | Support matrix tooling | TESTED | Schema, evidence rules, fixtures and locked-nixpkgs validator are integrated; runtime capability detection remains probe-driven. |
+| Reconciliation engine | NOT IMPLEMENTED | Foundations are present, but no startup/resume planner/executor automatically applies desired state. |
 | CLI | NOT IMPLEMENTED | `orbisctl` binary remains a stub. |
-| Automation/reconciliation | PARTIAL | Foundations exist in a conflicting branch; production Desired/Observed/Pending + lifecycle/reconciliation stack is not fully integrated. |
-| XDG Run on Startup | PARTIAL | Backend + UI stack is implemented/tested in a branch but conflicts with the consolidated config/UI baseline. |
 | CI/release gate | BLOCKED | GitHub Actions currently fails before exposing/executing steps; green `nix flake check` is still required. |
 
 ## Production boundaries
@@ -86,13 +87,13 @@ These observations are not universal ASUS specifications and must not be convert
 ## Current blockers / unfinished work
 
 1. Restore executable GitHub Actions runs and obtain a green `nix flake check` on current `main`.
-2. Resolve and integrate the XDG autostart backend/UI conflict (#57) against the consolidated preferences stack.
-3. Reconcile the Desired/Observed/Pending + desired-state + lifecycle foundation (#59) against current config, then add reconciliation semantics separately.
-4. Resolve Diagnostics window wiring (#101) against current `main.rs`/UI; the typed diagnostics/export backend is already integrated.
-5. Perform dated live validation before claiming production fan mutation support.
+2. Finish XDG Run on Startup Rust lifecycle wiring (#57); backend and Slint contract are already in `main`.
+3. Finish Diagnostics window Rust lifecycle/refresh wiring (#101); backend/runtime/model/Slint layers are already in `main`.
+4. Design reconciliation semantics on top of the now-integrated Desired/Observed/Pending, lifecycle and desired-state foundations; do not auto-apply merely because persisted intent exists.
+5. Perform dated live validation before promoting additional fan mutation/reset claims on the current revision.
 6. Keep GPU product mode, power limits and extended ASUS controls disabled/unknown until concept-specific evidence exists.
 7. Implement a real CLI; current `orbisctl` is a stub.
-8. Factory Defaults / large visual UI stack (#2/#3/#4) remains outside `main` until the root hardware-related slice receives the required compile/live validation.
+8. Obtain final packaged acceptance evidence on the exact release revision.
 
 ## Evidence and design references
 
