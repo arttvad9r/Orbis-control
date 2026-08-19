@@ -24,7 +24,7 @@ pub fn capability_snapshot_diagnostics(
 mod tests {
     use std::time::{Duration, SystemTime};
 
-    use orbis_core::capability::{CapabilityStatus, FeatureId};
+    use orbis_core::capability::{CapabilityReason, CapabilityStatus, FeatureId, RiskLevel};
 
     use super::*;
     use crate::{CapabilityRegistryBuilder, engine::CapabilityPart};
@@ -37,7 +37,15 @@ mod tests {
             .add_part(CapabilityPart {
                 feature: FeatureId::GpuPower,
                 status: CapabilityStatus::BackendMissing,
-                reason: Some("backend not present".into()),
+                reason: Some(CapabilityReason {
+                    reason: "backend not present".into(),
+                    suggestion: "check backend availability".into(),
+                    backend: None,
+                    endpoint: None,
+                    requirement: None,
+                    risk: RiskLevel::Safe,
+                    checked_at: Some(checked_at),
+                }),
             })
             .unwrap();
         let snapshot = builder.build().unwrap();
