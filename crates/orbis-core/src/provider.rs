@@ -1,21 +1,32 @@
-//! Статус провайдера.
+//! Canonical provider status used by core diagnostics/state models.
+//!
+//! This type is intentionally small and transport-agnostic. Detailed backend
+//! error text and operational evidence belong in provider/capability layers;
+//! callers should not infer feature support from this coarse health value.
 
 use serde::{Deserialize, Serialize};
 
-/// Здоровье провайдера/backend.
+/// Coarse health of a provider/backend.
+///
+/// This is not a capability-support result. A healthy provider may still not
+/// implement a particular feature, while a degraded provider may continue to
+/// serve some independent capabilities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderStatus {
-    /// Работает нормально.
+    /// Provider is operating normally.
     Healthy,
-    /// Работает с ограничениями.
+    /// Provider is operating with reduced functionality or reliability.
     Degraded,
-    /// Недоступен.
+    /// Provider is currently unavailable.
     Unavailable,
 }
 
 impl ProviderStatus {
-    /// Имя для диагностики.
+    /// Return the stable diagnostic/serialization-style label.
+    ///
+    /// The returned string is intended for diagnostics and machine-adjacent
+    /// presentation, not as localized end-user copy.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Healthy => "healthy",
