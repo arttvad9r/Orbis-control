@@ -123,9 +123,8 @@ impl DiagnosticsRuntime {
         let gpu_power = SessionGpuPowerProvider::new(ZbusSessionGpuSource::new(
             self.session_connection.clone(),
         ));
-        let gpu_mux = SessionGpuMuxProvider::new(ZbusSessionGpuSource::new(
-            self.session_connection.clone(),
-        ));
+        let gpu_mux =
+            SessionGpuMuxProvider::new(ZbusSessionGpuSource::new(self.session_connection.clone()));
         let gpu_access = SessionGpuAccessProvider::new(ZbusSessionGpuSource::new(
             self.session_connection.clone(),
         ));
@@ -149,7 +148,8 @@ impl DiagnosticsRuntime {
             .lock()
             .expect("diagnostics telemetry lock poisoned") = Some(telemetry.clone());
 
-        let display_provider = WaylandDisplayOutputProvider::new(WaylandCompositorOutputSource::new());
+        let display_provider =
+            WaylandDisplayOutputProvider::new(WaylandCompositorOutputSource::new());
         let display = display_diagnostics_snapshot(&display_provider, Some(generated_at)).await;
 
         DiagnosticsCollector::new().collect(

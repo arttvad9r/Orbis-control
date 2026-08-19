@@ -106,12 +106,7 @@ impl DiagnosticsWindowModel {
         } else {
             dto.services
                 .iter()
-                .map(|row| {
-                    format!(
-                        "{:?} ({:?}): {:?}",
-                        row.service, row.bus, row.availability
-                    )
-                })
+                .map(|row| format!("{:?} ({:?}): {:?}", row.service, row.bus, row.availability))
                 .collect::<Vec<_>>()
                 .join("\n")
         };

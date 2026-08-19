@@ -1,8 +1,8 @@
 //! Orbis Control — GUI entry point.
 //!
-//! Existing hardware-backed controls keep their worker/provider paths. The
-//! additional visual windows are local UI prototypes only and never perform
-//! hardware, D-Bus, sysfs, or persistence operations.
+//! Existing hardware-backed controls keep their worker/provider paths.
+//! Diagnostics uses a separate application-owned read-only snapshot source;
+//! other additional visual windows remain local UI prototypes.
 
 #[allow(dead_code)]
 mod controller;
@@ -22,6 +22,9 @@ use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 use orbis_providers::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 use orbis_ui::composition::build_production_runtime;
+use orbis_ui::diagnostics_dto::DiagnosticsUiDto;
+use orbis_ui::diagnostics_runtime::DiagnosticsRuntime;
+use orbis_ui::diagnostics_window_model::DiagnosticsWindowModel;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker_with_polling};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
 use slint::{ComponentHandle, LogicalSize, PhysicalSize, Rgb8Pixel, WindowSize};
@@ -51,6 +54,14 @@ struct FanDefaultsContext {
     runtime: tokio::runtime::Handle,
     provider: Arc<dyn FanCurveDefaultsMutationProvider>,
     worker_tx: UnboundedSender<WorkerCommand>,
+}
+
+/// Read-only diagnostics refresh context. It exposes no mutation provider and
+/// runs source collection off the Slint callback thread.
+#[derive(Clone)]
+struct DiagnosticsContext {
+    runtime: tokio::runtime::Handle,
+    source: DiagnosticsRuntime,
 }
 
 /// Разобранные аргументы командной строки.
@@ -320,12 +331,13 @@ fn build_app(
     state: &controller::UiState,
     worker_tx: Option<UnboundedSender<WorkerCommand>>,
     fan_defaults: Option<FanDefaultsContext>,
+    diagnostics: Option<DiagnosticsContext>,
 ) -> Result<AppWindow, slint::PlatformError> {
     let app = AppWindow::new()?;
     app.global::<ThemeState>()
         .set_mode(theme_mode(current_theme_light()));
     app.set_ui_state(to_slint(state));
-    wire_callbacks(&app, worker_tx, fan_defaults);
+    wire_callbacks(&app, worker_tx, fan_defaults, diagnostics);
     Ok(app)
 }
 
@@ -515,18 +527,64 @@ fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> 
     })
 }
 
-fn show_diagnostics_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
+fn apply_diagnostics_model(window: &DiagnosticsWindow, model: DiagnosticsWindowModel) {
+    window.set_kernel_value(model.kernel.into());
+    window.set_platform_value(model.platform.into());
+    window.set_version_value(model.version.into());
+    window.set_build_detail(model.build.into());
+    window.set_system_detail(model.system.into());
+    window.set_capabilities_text(model.capabilities.into());
+    window.set_services_text(model.services.into());
+    window.set_gpu_text(model.gpu.into());
+    window.set_telemetry_text(model.telemetry.into());
+    window.set_display_text(model.display.into());
+    window.set_snapshot_meta(model.snapshot_meta.into());
+    window.set_local_status("Read-only production snapshot loaded".into());
+}
+
+fn refresh_diagnostics_window(weak: slint::Weak<DiagnosticsWindow>, context: DiagnosticsContext) {
+    if let Some(window) = weak.upgrade() {
+        window.set_local_status("Refreshing read-only diagnostics…".into());
+    }
+    context.runtime.spawn(async move {
+        let snapshot = context.source.snapshot().await;
+        let dto = DiagnosticsUiDto::from_snapshot(&snapshot);
+        let model = DiagnosticsWindowModel::from_dto(&dto);
+        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
+            apply_diagnostics_model(&window, model);
+        }) {
+            tracing::warn!("diagnostics: failed to publish snapshot to UI: {error:?}");
+        }
+    });
+}
+
+fn show_diagnostics_window(
+    _app: &AppWindow,
+    diagnostics: Option<DiagnosticsContext>,
+) -> Result<(), slint::PlatformError> {
     DIAGNOSTICS_WINDOW.with(|slot| {
         let mut slot = slot.borrow_mut();
         if slot.is_none() {
-            *slot = Some(DiagnosticsWindow::new()?);
+            let window = DiagnosticsWindow::new()?;
+            if let Some(context) = diagnostics.clone() {
+                let weak = window.as_weak();
+                window.on_refresh_requested(move || {
+                    refresh_diagnostics_window(weak.clone(), context.clone());
+                });
+            } else {
+                window.set_local_status("Diagnostics unavailable outside interactive mode".into());
+            }
+            *slot = Some(window);
         }
         let window = slot.as_ref().expect("DiagnosticsWindow initialized");
-        window.set_version(app.get_ui_state().version.clone());
         window
             .global::<ThemeState>()
             .set_mode(theme_mode(current_theme_light()));
-        window.show()
+        window.show()?;
+        if let Some(context) = diagnostics {
+            refresh_diagnostics_window(window.as_weak(), context);
+        }
+        Ok(())
     })
 }
 
@@ -980,6 +1038,7 @@ fn wire_callbacks(
     app: &AppWindow,
     worker_tx: Option<UnboundedSender<WorkerCommand>>,
     fan_defaults: Option<FanDefaultsContext>,
+    diagnostics: Option<DiagnosticsContext>,
 ) {
     let app_weak = app.as_weak();
     {
@@ -1097,12 +1156,13 @@ fn wire_callbacks(
         });
     }
     {
+        let diagnostics = diagnostics.clone();
         let app_weak = app.as_weak();
         app.on_diagnostics_clicked(move || {
             let Some(app) = app_weak.upgrade() else {
                 return;
             };
-            if let Err(e) = show_diagnostics_window(&app) {
+            if let Err(e) = show_diagnostics_window(&app, diagnostics.clone()) {
                 tracing::warn!("не удалось открыть DiagnosticsWindow: {e:?}");
             }
         });
@@ -1450,7 +1510,7 @@ fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<
     }
     slint::platform::set_platform(Box::new(SoftwarePlatform { adapter })).expect("platform once");
 
-    let app = build_app(state, None, None)?;
+    let app = build_app(state, None, None, None)?;
     app.window()
         .set_size(LogicalSize::new(500.0, height as f32));
     app.show()?;
@@ -1498,6 +1558,8 @@ fn main() -> anyhow::Result<()> {
     let system_connection = runtime
         .block_on(zbus::Connection::system())
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
+    let diagnostics_session_connection = session_connection.clone();
+    let diagnostics_system_connection = system_connection.clone();
     let fan_defaults_provider: Arc<dyn FanCurveDefaultsMutationProvider> =
         Arc::new(Hardware1FanDefaultsProvider::new(system_connection.clone()));
     let (application_runtime, _hardware_owner) = runtime.block_on(build_production_runtime(
@@ -1506,6 +1568,17 @@ fn main() -> anyhow::Result<()> {
     ))?;
     state.perf_writable = false;
     state.charge_limit_writable = false;
+    let poll_interval = application_runtime.telemetry.poll_interval();
+    let diagnostics_source = DiagnosticsRuntime::new(
+        diagnostics_session_connection,
+        diagnostics_system_connection,
+        application_runtime.capabilities_arc(),
+        poll_interval.saturating_mul(3),
+    );
+    let diagnostics_context = DiagnosticsContext {
+        runtime: runtime.handle().clone(),
+        source: diagnostics_source.clone(),
+    };
 
     let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();
     let fan_defaults = FanDefaultsContext {
@@ -1514,11 +1587,20 @@ fn main() -> anyhow::Result<()> {
         worker_tx: worker_tx.clone(),
     };
 
-    let app = build_app(&state, Some(worker_tx.clone()), Some(fan_defaults))?;
+    let app = build_app(
+        &state,
+        Some(worker_tx.clone()),
+        Some(fan_defaults),
+        Some(diagnostics_context),
+    )?;
     app.window().set_size(LogicalSize::new(500.0, 680.0));
 
     let weak = app.as_weak();
+    let diagnostics_source_for_events = diagnostics_source.clone();
     let event_sink = move |event: WorkerEvent| {
+        if let WorkerEvent::RegistryChange(Ok((_, snapshot))) = &event {
+            diagnostics_source_for_events.replace_capabilities(snapshot.clone());
+        }
         let weak = weak.clone();
         if let Err(e) = weak.upgrade_in_event_loop(move |app| {
             handle_worker_event(&app, event);
@@ -1526,7 +1608,6 @@ fn main() -> anyhow::Result<()> {
             tracing::warn!("не удалось вернуть событие worker-а в event loop: {e:?}");
         }
     };
-    let poll_interval = application_runtime.telemetry.poll_interval();
     runtime.spawn(run_worker_with_polling(
         application_runtime,
         worker_rx,
