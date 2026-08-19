@@ -249,7 +249,7 @@ mod tests {
                 TelemetryCollectionStatus::Unknown,
             ),
             (
-                ProviderError::Io("io".into()),
+                ProviderError::Io(std::io::Error::other("io")),
                 TelemetryCollectionStatus::Unknown,
             ),
             (
