@@ -46,6 +46,7 @@ in
 
   config = lib.mkIf cfg.enable {
     security.polkit.enable = lib.mkDefault true;
+    services.upower.enable = lib.mkDefault true;
 
     systemd.user.services.orbis-sessiond = {
       description = "Orbis Control session daemon";
