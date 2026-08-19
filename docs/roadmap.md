@@ -4,180 +4,149 @@
 > Фактическое состояние и evidence — в [`current-state.md`](current-state.md).
 > Обновлено: **2026-08-19**.
 
-## Ordering principles
+## Principles
 
-1. Сначала green build/CI и чистая интеграционная линия.
-2. Затем read-only evidence и capability-local failure handling.
-3. Только потом privileged mutation для конкретной доказанной операции.
-4. Read/write evidence всегда независимы.
-5. Никаких runtime model-name tables вместо typed probes.
-6. `Accepted` не считается `Applied`; authoritative observed state требует подтверждения.
-7. Live hardware claims делаются только по dated revision-scoped evidence.
+1. Сначала green build/CI и одна понятная интеграционная линия.
+2. Фактическая поддержка определяется typed probes и evidence, а не названием модели.
+3. Read/write evidence хранится раздельно.
+4. `Accepted` не считается подтверждённым текущим состоянием.
+5. Live claims всегда revision-scoped и требуют отдельной проверки.
 
-## Milestone 0 — Repository/integration baseline
+## Milestone 0 — Repository baseline
 
-**Status: ACTIVE**
+**Status: COMPLETED for consolidation; release CI remains BLOCKED**
 
-Цель: один понятный production baseline вместо разросшегося дерева Draft/validation веток.
+Выполнено:
 
-Done:
+- production hardening объединён с `main`;
+- Rust toolchain приведён к 1.87;
+- startup resilience для Battery/UPower интегрирован;
+- preferences и window-state foundations интегрированы;
+- diagnostics backend/export stack интегрирован;
+- desktop/AppStream packaging и support-matrix tooling интегрированы;
+- source-of-truth документация обновлена;
+- одноразовые validation/audit PR закрыты как integrated/superseded.
 
-- Rust toolchain приведён к 1.87, совместимому с locked dependency graph;
-- UPower startup coupling исправлен: Battery failure capability-local;
-- NixOS UPower default добавлен без hard lifecycle dependency;
-- preferences stack консолидирован;
-- window-state foundation интегрирован;
-- release evidence taxonomy и security-boundary docs интегрированы;
-- устаревшие/одноразовые audit/validation PR закрываются как superseded.
+Остаётся:
 
-Remaining gate:
+- GitHub Actions должен реально выполнить и успешно завершить `nix flake check`;
+- старые remote validation refs можно физически удалить только через доступный branch-delete/git интерфейс.
 
-- `nix flake check` должен быть green на актуальном hardening HEAD;
-- после green CI hardening переводится в `main`;
-- remote validation refs удаляются отдельно, когда доступен git/branch-delete интерфейс.
-
-## Milestone 1 — Existing production vertical slices
+## Milestone 1 — Stable production capabilities
 
 **Status: COMPLETED with revision-scoped live evidence**
 
-- Battery read.
-- Battery controlled mutation with read-back.
-- Performance read.
-- Performance controlled mutation with read-back.
-- GPU primitive reads: power / physical MUX / access policy.
-- Narrow Hardware1 privilege boundary.
+- Battery read path.
+- Battery controlled setting path with confirmation.
+- Performance read path.
+- Performance controlled setting path with confirmation.
+- Independent GPU power / MUX / access observations.
+- Narrow typed system boundary.
 
-Эти результаты не означают поддержку product GPU mode или всех ASUS устройств.
+Эти результаты не являются универсальной таблицей поддержки всех ASUS моделей.
 
-## Milestone 2 — Production resilience and lifecycle
+## Milestone 2 — Lifecycle and desired state
 
 **Status: PARTIAL**
 
 Completed:
 
-- Session1 survives missing/unready UPower; Battery rediscovery is lazy.
-- Independent capabilities do not depend on Battery startup success.
+- Session1 no longer depends on Battery availability at startup.
+- Independent capabilities remain available when UPower is absent/unready.
 
 Next:
 
-- reconcile Desired / Observed / Pending domain foundation with the integrated config baseline;
-- integrate inert lifecycle events;
-- design reconciliation separately: startup/resume compares authoritative observed state before any action;
-- no retry/poll loops that mask races or ownership conflicts.
+- reconcile Desired / Observed / Pending foundation (#59) with current `main`;
+- integrate desired-state storage and lifecycle values without automatic application;
+- define startup/resume reconciliation separately and keep authoritative observation primary.
 
-## Milestone 3 — User persistence and desktop integration
+## Milestone 3 — Preferences and desktop integration
 
 **Status: PARTIAL**
 
 Completed:
 
-- versioned safe `preferences.toml`;
-- atomic + durable writes and permission preservation;
+- versioned `preferences.toml`;
+- durable atomic writes and permission preservation;
 - persisted Dark/Light theme;
 - persisted Start Minimized;
-- redacted config warning diagnostics;
-- independent XDG window-state store.
+- redacted config warnings;
+- independent XDG window-state store;
+- desktop/AppStream metadata and Nix installation wiring.
 
 Next:
 
-- resolve/integrate XDG Run on Startup stack against current preferences/UI baseline;
-- integrate desktop/AppStream metadata only after packaged validation is green;
-- keep automation policy and desired hardware state separate from UI preferences.
+- resolve XDG Run on Startup conflict (#57) against current preferences/UI baseline;
+- keep automation policy and desired hardware state separate from UI preferences;
+- repeat packaged metadata validation on the final release revision.
 
 ## Milestone 4 — Fans and telemetry
 
 **Status: IMPLEMENTED/TESTED; acceptance incomplete**
 
-Telemetry:
+Telemetry provider and worker-owned polling are present in `main`.
 
-- production sysfs provider exists;
-- worker-owned polling exists;
-- failures preserve honest availability/freshness semantics.
-
-Fans:
-
-- active curve authority remains sysfs;
-- profile-specific reads go through Session1 → sessiond → asusd;
-- Hardware1 typed mutation path exists;
-- Quiet/LowPower profile identity is preserved losslessly.
-
-Gate before completion:
-
-- dated live fan mutation validation with authoritative post-write read-back and restored final hardware state;
-- no universal ranges/defaults inferred from one model.
+Fan support in `main` includes active/profile-specific reads, lossless profile identity and a typed control path. Before calling the feature fully accepted, perform dated live validation and confirm final state against the authoritative backend.
 
 ## Milestone 5 — Diagnostics and supportability
 
-**Status: ACTIVE in Draft stack**
+**Status: TESTED backend/export; UI integration PARTIAL**
 
-Target architecture:
+Integrated in `main`:
 
-- application-owned immutable diagnostics snapshot;
-- privacy-safe application/system/hardware identity sources;
-- service presence independent from capability support;
-- GPU primitives remain independent;
-- telemetry freshness preserved;
-- display observation read-only;
-- presentation DTO separated from collectors;
-- text/JSON export uses a strict allowlist and versioned schema.
+- typed diagnostics domain;
+- privacy-safe metadata sources;
+- service/capability/GPU/telemetry/display observations;
+- application collector;
+- UI DTO;
+- allowlisted versioned text/JSON exporters;
+- end-to-end pure-data regression.
 
 Next:
 
-- consolidate the already validated read-only diagnostics stack into the current hardening baseline;
-- wire Diagnostics UI only from the typed snapshot;
-- integrate privacy-bounded exporters and their end-to-end regression;
-- never collect raw journals, arbitrary files, full environment dumps, serial/UUID/asset-tag fields or shell output by default.
+- resolve Diagnostics window wiring conflict (#101) against current `main.rs`/UI;
+- keep export collection strictly allowlisted and privacy-bounded.
 
 ## Milestone 6 — GPU product policy
 
 **Status: BLOCKED**
 
-Eco / Standard / Ultimate / Optimized are product policy, not aliases for one primitive.
-
-Before implementation:
-
-- prove mapping between product intent and independent MUX/access/power primitives;
-- define pending/reboot/logout requirements explicitly;
-- define owner and authoritative read-back;
-- add P2P/fake-system tests;
-- only then permit controlled live mutation.
-
-Until then production product-mode controls remain unsupported/disabled.
+Eco / Standard / Ultimate / Optimized remain product-level policy rather than aliases for one low-level observation. Keep them unsupported/disabled until mapping, pending requirements, ownership and confirmation semantics are proven and tested.
 
 ## Milestone 7 — Power limits and extended ASUS controls
 
 **Status: BLOCKED / UNKNOWN by concept**
 
-Power limits:
-
-- typed scaffolding exists;
-- production provider, units/ranges/default evidence and Hardware1 per-field contract do not.
-
-Extended controls:
-
-- Panel OD / keyboard / Aura have narrower foundations;
-- MiniLED / Screen Auto Brightness remain read-only where write evidence is absent;
-- AniMe/Slash and boot sound/MCU powersave/panel HD/eGPU require concept-specific evidence/design.
-
-Do not add generic firmware writers or enable features from DMI model names.
+Typed scaffolding exists for some areas, but production evidence remains incomplete. Follow the dedicated readiness documents and add support concept-by-concept; do not infer support from DMI model names.
 
 ## Milestone 8 — CLI and release packaging
 
-**Status: NOT COMPLETE**
+**Status: PARTIAL**
 
-- Replace the `orbisctl` stub with a real read/diagnostic CLI before calling CLI support complete.
-- Integrate desktop/AppStream assets into the Nix package and validate installed metadata.
-- Maintain support matrix evidence separately from runtime capability detection.
-- Run full packaged acceptance after green CI and integration into `main`.
+Completed:
+
+- desktop/AppStream metadata and Nix installation wiring;
+- release evidence taxonomy;
+- support-matrix schema and validation tooling.
+
+Remaining:
+
+- replace the `orbisctl` stub with a real read/diagnostic CLI;
+- obtain a green executable CI run on final `main`;
+- perform final package/metadata acceptance on the release revision.
+
+## Deferred UI stack
+
+PRs #2/#3/#4 remain outside `main`. Their root slice still requires the validation explicitly recorded in that PR before the visual descendants should be considered for integration.
 
 ## Release gate
 
-A beta/release candidate requires all of the following:
+A beta/release candidate requires:
 
-- `main` contains the intended production baseline;
-- `cargo fmt/check/test/clippy` relevant integration tier is green;
-- `nix flake check` is green;
-- package builds and required metadata is installed/validated;
-- no Draft branch is being treated as integrated functionality;
-- hardware mutation claims have exact dated live evidence;
-- remaining unsupported controls are explicitly disabled/unknown rather than simulated.
+- intended baseline in `main`;
+- relevant Cargo integration checks green;
+- `nix flake check` executed and green;
+- package/metadata acceptance complete;
+- Draft branches not counted as integrated behavior;
+- dated evidence for device-specific claims;
+- unsupported controls shown honestly as unavailable/unknown.
