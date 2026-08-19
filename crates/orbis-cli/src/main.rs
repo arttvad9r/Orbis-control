@@ -87,27 +87,24 @@ async fn status() -> ExitCode {
 
     let mut successful_reads = 0usize;
 
-    successful_reads += usize::from(print_observation(
-        "battery.charge_limit",
-        battery.charge_limit().await,
-    ));
-    successful_reads += usize::from(print_observation(
-        "performance.current",
-        performance.current_profile().await,
-    ));
-    successful_reads += usize::from(print_observation(
-        "performance.available",
-        performance.profiles().await,
-    ));
-    successful_reads += usize::from(print_observation(
-        "gpu.power",
-        gpu_power.power_state().await,
-    ));
-    successful_reads += usize::from(print_observation("gpu.mux", gpu_mux.mux_state().await));
-    successful_reads += usize::from(print_observation(
-        "gpu.access",
-        gpu_access.access_policy().await,
-    ));
+    if print_observation("battery.charge_limit", battery.charge_limit().await) {
+        successful_reads += 1;
+    }
+    if print_observation("performance.current", performance.current_profile().await) {
+        successful_reads += 1;
+    }
+    if print_observation("performance.available", performance.profiles().await) {
+        successful_reads += 1;
+    }
+    if print_observation("gpu.power", gpu_power.power_state().await) {
+        successful_reads += 1;
+    }
+    if print_observation("gpu.mux", gpu_mux.mux_state().await) {
+        successful_reads += 1;
+    }
+    if print_observation("gpu.access", gpu_access.access_policy().await) {
+        successful_reads += 1;
+    }
 
     if successful_reads == 0 {
         eprintln!("orbisctl: no Session1 reads succeeded");
