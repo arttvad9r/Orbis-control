@@ -111,7 +111,8 @@ rustPlatform.buildRustPackage {
     install -Dm644 ${./dbus/io.github.orbiscontrol.Hardware.conf} \
       $out/share/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf
 
-    # Polkit actions: Performance, Battery и GPU mutation.
+    # Per-capability Hardware1 polkit actions. Individual defaults may be
+    # fail-closed while a mutation contract is blocked (for example fan writes).
     install -Dm644 ${./polkit/io.github.orbiscontrol.hardware.policy} \
       $out/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy
   '';
@@ -121,7 +122,7 @@ rustPlatform.buildRustPackage {
 
   meta = with lib; {
     description = "G-Helper-подобное приложение для ASUS-ноутбуков на Linux (нативный, Slint)";
-    homepage = "https://github.com/orbis-control/orbis-control";
+    homepage = "https://github.com/arttvad9r/Orbis-control";
     license = licenses.gpl3Plus;
     platforms = platforms.linux;
     maintainers = with maintainers; [ ];
