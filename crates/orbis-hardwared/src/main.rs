@@ -8,7 +8,7 @@
 //! Production mutation policy is intentionally narrower than the set of typed
 //! backend implementations present in this crate:
 //! - Performance is enabled through its validated Hardware1 path;
-//! - Battery is enabled only when effective threshold discovery succeeds;
+//! - Battery is enabled only after read-only asusd + effective-threshold preflight;
 //! - GPU/Fan/Panel/Keyboard/Aura mutations are hard-disabled in composition;
 //! - startup performs no hardware writes;
 //! - reconnect/restart policy belongs to systemd.
@@ -23,8 +23,9 @@ use orbis_hardwared::{
     PolkitAuthorizer,
     aura::{AuraMutationStatus, AuraStaticRgbMutationBackend, AuraStaticRgbMutationReadback},
     battery::{
-        AsusdBatteryMutationBackend, BatteryMutationBackend, BatteryMutationReadback,
-        BatteryMutationStatus, ZbusAsusdBatteryClient, discover_effective_reader,
+        AsusdBatteryClient, AsusdBatteryMutationBackend, BatteryEffectiveReader,
+        BatteryMutationBackend, BatteryMutationReadback, BatteryMutationStatus,
+        ZbusAsusdBatteryClient, discover_effective_reader,
     },
     fans::{
         FanCurveDefaultsReadback, FanCurveMutationOperation, FanCurveMutationReadback,
@@ -46,7 +47,6 @@ const PRODUCT_MUTATION_DISABLED: &str =
 const FAN_MUTATION_DISABLED: &str =
     "fan mutation is disabled until enabled-state preservation and factory-reset restoration are fixed";
 
-/// Production guardrail for the raw GPU Hardware1 method.
 struct DisabledGpuMutationBackend;
 
 #[async_trait]
@@ -61,12 +61,6 @@ impl SupergfxdMutationOperation for DisabledGpuMutationBackend {
     }
 }
 
-/// Production hard stop for fan mutations.
-///
-/// The asusd compatibility setter currently cannot safely preserve the stored
-/// `CurveData.enabled` field, and upstream factory-default reset can fail before
-/// restoring the previous performance profile. Polkit is also default-deny,
-/// but a local policy override must not be enough to reach those unsafe writes.
 struct DisabledFanMutationBackend;
 
 #[async_trait]
@@ -92,8 +86,6 @@ impl FanCurveMutationOperation for DisabledFanMutationBackend {
     }
 }
 
-/// Panel Overdrive typed backend code remains available for validation, but it
-/// is not an enabled production mutation until owner/evidence work is complete.
 struct DisabledPanelOverdriveMutationBackend;
 
 #[async_trait]
@@ -110,9 +102,6 @@ impl PanelOverdriveMutationBackend for DisabledPanelOverdriveMutationBackend {
     }
 }
 
-/// Keyboard mutation remains code-present for future validation but is not
-/// part of the production write surface. The systemd sandbox also keeps the
-/// brightness path read-only.
 struct DisabledKeyboardBacklightMutationBackend;
 
 #[async_trait]
@@ -129,8 +118,6 @@ impl KeyboardBacklightMutationBackend for DisabledKeyboardBacklightMutationBacke
     }
 }
 
-/// Aura Static RGB backend code is intentionally not composed into production
-/// until owner liveness and release evidence are proven.
 struct DisabledAuraStaticRgbMutationBackend;
 
 #[async_trait]
@@ -147,16 +134,12 @@ impl AuraStaticRgbMutationBackend for DisabledAuraStaticRgbMutationBackend {
     }
 }
 
-/// Why Battery mutation was disabled during startup discovery.
 enum DisabledBatteryReason {
     Unsupported(String),
     Unavailable(String),
     PermissionDenied(String),
 }
 
-/// Capability-local fallback used when no usable effective battery threshold
-/// source exists. A temporary discovery failure never masquerades as permanent
-/// hardware/capability Unsupported.
 struct DisabledBatteryMutationBackend {
     reason: DisabledBatteryReason,
 }
@@ -170,11 +153,11 @@ impl DisabledBatteryMutationBackend {
             }
             ProviderError::Io(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
                 DisabledBatteryReason::PermissionDenied(format!(
-                    "battery effective threshold discovery permission denied: {error}"
+                    "battery mutation preflight permission denied: {error}"
                 ))
             }
             other => DisabledBatteryReason::Unavailable(format!(
-                "battery effective threshold discovery failed: {other}"
+                "battery mutation preflight failed: {other}"
             )),
         };
         Self { reason }
@@ -209,6 +192,35 @@ impl BatteryMutationBackend for DisabledBatteryMutationBackend {
     }
 }
 
+async fn build_battery_backend(
+    connection: &zbus::Connection,
+) -> Box<dyn BatteryMutationBackend> {
+    let effective_reader = match discover_effective_reader() {
+        Ok(reader) => reader,
+        Err(error) => {
+            tracing::warn!(?error, "battery effective threshold discovery failed");
+            return Box::new(DisabledBatteryMutationBackend::from_discovery_error(error));
+        }
+    };
+
+    let asusd = ZbusAsusdBatteryClient::new(connection.clone());
+
+    // Read-only owner/liveness preflight. A local effective threshold file does
+    // not by itself prove the asusd mutation owner is reachable. Conversely,
+    // an asusd property read without an authoritative kernel read-back is not
+    // sufficient for an Applied contract either.
+    if let Err(error) = asusd.get_charge_control_end_threshold().await {
+        tracing::warn!(?error, "battery asusd owner/property preflight failed");
+        return Box::new(DisabledBatteryMutationBackend::from_discovery_error(error));
+    }
+    if let Err(error) = effective_reader.read_effective_threshold().await {
+        tracing::warn!(?error, "battery effective read-back preflight failed");
+        return Box::new(DisabledBatteryMutationBackend::from_discovery_error(error));
+    }
+
+    Box::new(AsusdBatteryMutationBackend::new(asusd, effective_reader))
+}
+
 fn init_tracing() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,orbis_hardwared=info"));
@@ -220,22 +232,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     init_tracing();
     let connection = zbus::connection::Builder::system()?.build().await?;
 
-    // Battery remains capability-local. Its typed asusd mutation backend is
-    // composed only when the authoritative effective kernel read-back source
-    // is discoverable; otherwise Hardware1 remains available with typed status.
-    let battery_backend: Box<dyn BatteryMutationBackend> = match discover_effective_reader() {
-        Ok(effective_reader) => Box::new(AsusdBatteryMutationBackend::new(
-            ZbusAsusdBatteryClient::new(connection.clone()),
-            effective_reader,
-        )),
-        Err(error) => {
-            tracing::warn!(
-                ?error,
-                "battery effective threshold unavailable; Battery mutation will remain capability-local"
-            );
-            Box::new(DisabledBatteryMutationBackend::from_discovery_error(error))
-        }
-    };
+    let battery_backend = build_battery_backend(&connection).await;
 
     let service = HardwareService::with_battery_gpu_and_fan_backends(
         Box::new(PolkitAuthorizer::new(connection.clone())),
@@ -419,19 +416,23 @@ mod tests {
         };
 
         assert_eq!(
-            aura_mutation_wire::from_wire(aura_mutation_wire::to_wire(AuraMutationStatus::Unsupported)),
+            aura_mutation_wire::from_wire(aura_mutation_wire::to_wire(
+                AuraMutationStatus::Unsupported
+            )),
             Some(AuraMutationStatus::Unsupported)
         );
         assert_eq!(
             keyboard_backlight_mutation_wire::from_wire(
-                keyboard_backlight_mutation_wire::to_wire(KeyboardBacklightMutationStatus::Unsupported)
+                keyboard_backlight_mutation_wire::to_wire(
+                    KeyboardBacklightMutationStatus::Unsupported
+                )
             ),
             Some(KeyboardBacklightMutationStatus::Unsupported)
         );
         assert_eq!(
-            panel_mutation_wire::from_wire(
-                panel_mutation_wire::to_wire(PanelOverdriveMutationStatus::Unsupported)
-            ),
+            panel_mutation_wire::from_wire(panel_mutation_wire::to_wire(
+                PanelOverdriveMutationStatus::Unsupported
+            )),
             Some(PanelOverdriveMutationStatus::Unsupported)
         );
     }
