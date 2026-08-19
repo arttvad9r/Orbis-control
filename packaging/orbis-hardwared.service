@@ -1,11 +1,17 @@
 # orbis-hardwared.service — standalone dev deployment unit.
 #
-# Устанавливается deploy-dev-hardwared.sh в /etc/systemd/system/.
-# NixOS НЕ управляет этим service (module.nix не создаёт его).
+# Устанавливается deploy-dev-hardwared.sh как regular file в
+# /etc/systemd/system/. Full services.orbis-control также умеет создавать
+# NixOS-managed hardwared unit, поэтому deploy script отказывается перезаписывать
+# symlink и ожидает policy-only module для standalone lifecycle.
 #
 # X-StopOnRemoval=false: при удалении unit'а systemd НЕ останавливает service.
 # X-RestartIfChanged=false: при обновлении unit'а systemd НЕ перезапускает
-#   service (deploy скрипт делает explicit restart).
+# service (deploy скрипт делает explicit restart).
+#
+# Важно: writable sysfs scope этого standalone unit сейчас Performance-only.
+# Наличие других typed Hardware1 methods в бинарнике не является effective
+# write support этого deployment profile; alignment tracked by issue #126.
 
 [Unit]
 Description=Orbis Control hardware helper (standalone dev deployment)
