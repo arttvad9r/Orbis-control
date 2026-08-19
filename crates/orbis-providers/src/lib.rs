@@ -26,6 +26,7 @@ pub mod service_presence;
 pub mod supergfxd;
 pub mod sysfs_telemetry;
 pub mod system_metadata;
+pub mod telemetry_diagnostics;
 pub mod traits;
 pub mod wayland_output;
 
@@ -48,6 +49,7 @@ pub use probes::{
 pub use service_presence::*;
 pub use sysfs_telemetry::SysfsTelemetryProvider;
 pub use system_metadata::SystemMetadataProvider;
+pub use telemetry_diagnostics::telemetry_diagnostics_after_attempt;
 pub use traits::*;
 pub use wayland_output::*;
 
