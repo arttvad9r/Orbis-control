@@ -6,20 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Orbis Control: диагностический CLI (orbisctl)"
+description = "Orbis Control: diagnostic CLI placeholder (orbisctl)"
 
 [[bin]]
 name = "orbisctl"
 path = "src/main.rs"
 
 [dependencies]
-serde = { workspace = true }
-serde_json = { workspace = true }
-anyhow = { workspace = true }
-tokio = { workspace = true }
-zbus = { workspace = true }
-clap = { workspace = true }
-orbis-core = { workspace = true }
-orbis-capabilities = { workspace = true }
-orbis-sessiond = { workspace = true }
-orbis-test-support = { workspace = true }
