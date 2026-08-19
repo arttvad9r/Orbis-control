@@ -8,9 +8,9 @@
 //! Production mutation policy is intentionally narrower than the set of typed
 //! backend implementations present in this crate:
 //! - Performance is enabled through its validated Hardware1 path;
-//! - Battery is enabled only after read-only asusd + effective-threshold preflight;
+//! - Battery is enabled only after non-activating asusd-owner + effective-threshold preflight;
 //! - GPU/Fan/Panel/Keyboard/Aura mutations are hard-disabled in composition;
-//! - startup performs no hardware writes;
+//! - startup performs no hardware writes and does not activate asusd merely to probe Battery writability;
 //! - reconnect/restart policy belongs to systemd.
 
 use std::error::Error;
@@ -23,7 +23,7 @@ use orbis_hardwared::{
     PolkitAuthorizer,
     aura::{AuraMutationStatus, AuraStaticRgbMutationBackend, AuraStaticRgbMutationReadback},
     battery::{
-        AsusdBatteryClient, AsusdBatteryMutationBackend, BatteryEffectiveReader,
+        ASUSD_BUS_NAME, AsusdBatteryMutationBackend, BatteryEffectiveReader,
         BatteryMutationBackend, BatteryMutationReadback, BatteryMutationStatus,
         ZbusAsusdBatteryClient, discover_effective_reader,
     },
@@ -41,6 +41,7 @@ use orbis_hardwared::{
     supergfxd::{MutationObservation, SupergfxdMutationOperation},
 };
 use orbis_providers::{error::ProviderError, supergfxd::SupergfxdMode};
+use zbus::{fdo::DBusProxy, names::BusName};
 
 const PRODUCT_MUTATION_DISABLED: &str =
     "mutation is disabled until the Orbis product contract and release evidence are proven";
@@ -192,6 +193,26 @@ impl BatteryMutationBackend for DisabledBatteryMutationBackend {
     }
 }
 
+/// Query only the D-Bus daemon's current ownership table.
+///
+/// `NameHasOwner` does not activate a stopped service, unlike constructing an
+/// asusd proxy and reading a property. A stopped-but-activatable asusd therefore
+/// keeps Battery mutation unavailable until hardwared refresh/restart instead of
+/// being started as a side effect of capability probing.
+async fn asusd_has_owner(connection: &zbus::Connection) -> Result<bool, ProviderError> {
+    let proxy = DBusProxy::new(connection)
+        .await
+        .map_err(|error| ProviderError::Dbus(format!("system D-Bus daemon proxy: {error}")))?;
+    let bus_name = BusName::try_from(ASUSD_BUS_NAME).map_err(|error| {
+        ProviderError::Internal(format!("invalid fixed asusd D-Bus name {ASUSD_BUS_NAME}: {error}"))
+    })?;
+
+    proxy.name_has_owner(bus_name).await.map_err(|error| match error {
+        zbus::fdo::Error::AccessDenied(message) => ProviderError::PermissionDenied(message),
+        other => ProviderError::Dbus(format!("NameHasOwner({ASUSD_BUS_NAME}): {other}")),
+    })
+}
+
 async fn build_battery_backend(
     connection: &zbus::Connection,
 ) -> Box<dyn BatteryMutationBackend> {
@@ -203,21 +224,29 @@ async fn build_battery_backend(
         }
     };
 
-    let asusd = ZbusAsusdBatteryClient::new(connection.clone());
-
-    // Read-only owner/liveness preflight. A local effective threshold file does
-    // not by itself prove the asusd mutation owner is reachable. Conversely,
-    // an asusd property read without an authoritative kernel read-back is not
-    // sufficient for an Applied contract either.
-    if let Err(error) = asusd.get_charge_control_end_threshold().await {
-        tracing::warn!(?error, "battery asusd owner/property preflight failed");
-        return Box::new(DisabledBatteryMutationBackend::from_discovery_error(error));
+    match asusd_has_owner(connection).await {
+        Ok(true) => {}
+        Ok(false) => {
+            let error = ProviderError::BackendUnavailable(
+                "asusd is not currently running; Battery mutation remains disabled".into(),
+            );
+            tracing::warn!(?error, "battery asusd owner preflight failed closed");
+            return Box::new(DisabledBatteryMutationBackend::from_discovery_error(error));
+        }
+        Err(error) => {
+            tracing::warn!(?error, "battery asusd owner preflight failed");
+            return Box::new(DisabledBatteryMutationBackend::from_discovery_error(error));
+        }
     }
+
     if let Err(error) = effective_reader.read_effective_threshold().await {
         tracing::warn!(?error, "battery effective read-back preflight failed");
         return Box::new(DisabledBatteryMutationBackend::from_discovery_error(error));
     }
 
+    // Construction performs no I/O. The first actual asusd property access is
+    // part of an authorized mutation/read-back path, not startup probing.
+    let asusd = ZbusAsusdBatteryClient::new(connection.clone());
     Box::new(AsusdBatteryMutationBackend::new(asusd, effective_reader))
 }
 
