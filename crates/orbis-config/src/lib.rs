@@ -1,9 +1,11 @@
 //! # Orbis Config
 //!
-//! Пользовательская конфигурация: TOML, атомарная запись, миграции, XDG-пути.
+//! User-owned configuration and state persistence for Orbis Control.
 //!
-//! На Этапе 2 конфигурация хранит mock-настройки UI и пользовательские намерения;
-//! она НЕ имитирует постоянное применение настроек к железу.
+//! Hardened production stores keep concerns separate: application preferences,
+//! window state, XDG autostart and desired hardware state are independent. The
+//! legacy `store::AppConfig` API remains for compatibility only and must not be
+//! treated as an automatic reconciliation source (see issue #113).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -52,7 +54,10 @@ pub const CONFIG_DIR_NAME: &str = "orbis-control";
 /// Текущая версия формата конфигурации.
 pub const CONFIG_VERSION: u32 = 1;
 
-/// Определить каталог конфигурации по XDG.
+/// Legacy config directory resolver used only by `store::AppConfig`.
+///
+/// Unlike the hardened stores above, this compatibility API still has legacy
+/// fallback semantics and must not be introduced into new production paths.
 pub fn config_dir() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
