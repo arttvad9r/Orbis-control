@@ -176,7 +176,7 @@ mod tests {
         ServiceAvailability, ServiceBusScope, ServiceCriticality, SessionType,
         TelemetryCollectionStatus, TelemetryDiagnostics, TelemetryFreshness,
     };
-    use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
+    use orbis_core::gpu::{GpuMuxState, GpuPowerState};
 
     use super::*;
     use crate::diagnostics_dto::{
