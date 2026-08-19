@@ -26,45 +26,9 @@ in
       defaultText = lib.literalExpression "pkgs.callPackage ./package.nix { }";
       description = "Orbis Control package to use.";
     };
-
-    # Compatibility options retained so existing configurations fail with an
-    # explicit message instead of silently changing meaning. Current sessiond
-    # does not parse the historical argv flags; see issue #122.
-    mockDevice = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = ''
-        Legacy development option. Temporarily unsupported: current
-        orbis-sessiond does not implement --mock-device. Setting this option
-        causes NixOS evaluation to fail instead of silently running production
-        discovery.
-      '';
-    };
-
-    readOnlyEmpty = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Legacy development option. Temporarily unsupported: current
-        orbis-sessiond does not implement --read-only-empty. Setting this option
-        causes NixOS evaluation to fail instead of silently performing production
-        reads.
-      '';
-    };
   };
 
   config = lib.mkIf cfg.enable {
-    assertions = [
-      {
-        assertion = cfg.mockDevice == null;
-        message = "services.orbis-control.mockDevice is currently unsupported: orbis-sessiond does not parse --mock-device (see Orbis issue #122)";
-      }
-      {
-        assertion = !cfg.readOnlyEmpty;
-        message = "services.orbis-control.readOnlyEmpty is currently unsupported: orbis-sessiond does not parse --read-only-empty (see Orbis issue #122)";
-      }
-    ];
-
     security.polkit.enable = lib.mkDefault true;
     services.upower.enable = lib.mkDefault true;
 
