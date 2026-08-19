@@ -9,7 +9,9 @@
 # - CapEff/CapBnd == 0 (generated `CapabilityBoundingSet=` реально работает);
 # - invalid-wire smoke: SetPerformanceProfile(255) -> InvalidArgs, daemon жив,
 #   writer не вызывается (strict decode раньше authorizer);
-# - effective systemd sandbox properties.
+# - effective systemd sandbox properties;
+# - direct sysfs write surface содержит только production-enabled
+#   `platform_profile`; blocked keyboard paths не writable.
 #
 # Hardware1 может содержать другие отдельно типизированные capability methods /
 # status properties; этот lifecycle smoke не утверждает, что Performance —
@@ -74,8 +76,6 @@
         "/io/github/orbiscontrol/Hardware io.github.orbiscontrol.Hardware1 "
         "SetPerformanceProfile y 255 2>&1; echo EXIT:$?'"
     )
-    # busctl не печатает D-Bus error name; сообщение уникально для ветки
-    # strict decode (InvalidArgs) и доказывает, что polkit/writer не вызывались.
     assert "неизвестный performance wire value" in out, (
         f"expected InvalidArgs message, got: {out}"
     )
@@ -93,10 +93,7 @@
       "RestrictAddressFamilies": "AF_UNIX",
       "MemoryDenyWriteExecute": "yes",
       "ReadOnlyPaths": "/sys",
-      "ReadWritePaths": (
-          "-/sys/firmware/acpi/platform_profile "
-          "-/sys/class/leds/asus::kbd_backlight/brightness"
-      ),
+      "ReadWritePaths": "-/sys/firmware/acpi/platform_profile",
       "CapabilityBoundingSet": "",
     }
     for key, expected in props.items():
@@ -110,8 +107,8 @@
     read_write_paths = machine.succeed(
         "systemctl show -p ReadWritePaths --value orbis-hardwared.service"
     ).strip().split()
-    assert "-/sys/firmware/acpi/platform_profile" in read_write_paths
-    assert "-/sys/class/leds/asus::kbd_backlight/brightness" in read_write_paths
+    assert read_write_paths == ["-/sys/firmware/acpi/platform_profile"], read_write_paths
+    assert "-/sys/class/leds/asus::kbd_backlight/brightness" not in read_write_paths
     assert "-/sys/class/leds/asus::kbd_backlight/max_brightness" not in read_write_paths
     assert "-/sys/class/leds" not in read_write_paths
   '';
