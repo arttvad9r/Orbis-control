@@ -25,10 +25,11 @@ Orbis уже имеет рабочие production vertical slices для Battery
 | Config/preferences | TESTED | Versioned XDG `preferences.toml`, atomic/durable writes, permission preservation, Dark/Light persistence, Start Minimized, redacted warning diagnostics. |
 | Desired-state storage | TESTED FOUNDATION | Generic versioned `desired-state.toml` storage is integrated and inert; it does not apply settings automatically. |
 | Window state | TESTED | Independent versioned XDG state store for window position; not mixed with preferences. |
-| XDG Run on Startup | PARTIAL | Safe owned-entry backend, exports and user-only Slint toggle contract are integrated. Remaining work is Rust `main.rs` lifecycle glue that reads/applies the actual entry state. |
+| XDG Run on Startup | PARTIAL / FAIL-CLOSED UI | Safe owned-entry backend, exports and Slint callback contract are integrated. Until Rust lifecycle glue is connected, the Preferences toggle is disabled and the main-window fake local toggle has been removed. |
 | Capabilities | IMPLEMENTED | Runtime registry/probes for current production concepts; read/write evidence remains independent. |
 | Battery read | LIVE-VALIDATED | UPower/asusd/kernel semantics through Session1; no mock fallback in production. |
 | Battery mutation | LIVE-VALIDATED | Typed Hardware1/asusd path with authoritative read-back; historical controlled `100 → 80 → 100` evidence. |
+| Battery UI evidence | FAIL-CLOSED | Numeric threshold is shown only while `ChargeLimitState::Ready`; Loading/Unavailable no longer expose the mock fixture value as an authoritative threshold. |
 | Performance read | LIVE-VALIDATED | Kernel `platform_profile` via Session1 with authoritative fresh reads. |
 | Performance mutation | LIVE-VALIDATED | Typed Hardware1/polkit/kernel path with read-back; controlled `Balanced → Silent → Balanced` evidence. |
 | GPU primitives | LIVE-VALIDATED (read) | Runtime power, physical MUX and access policy are separate production read concepts. |
@@ -39,7 +40,7 @@ Orbis уже имеет рабочие production vertical slices для Battery
 | NixOS UPower integration | TESTED | Orbis enables UPower with `lib.mkDefault true`; explicit host override remains stronger; no hard service lifecycle coupling. |
 | Privileged helper | IMPLEMENTED / historically LIVE-VALIDATED | Typed Hardware1 helper; no generic sysfs/filesystem/shell/D-Bus proxy. |
 | Diagnostics core/export | TESTED | Typed diagnostics domain/providers/collector/DTO and privacy-bounded text/JSON exporters are integrated; end-to-end pure-data regression is included. |
-| Diagnostics runtime/window model | TESTED FOUNDATION | Read-only production source orchestration, presentation model and typed Slint surface are integrated. Remaining work is Rust `main.rs` open/refresh lifecycle wiring. |
+| Diagnostics runtime/window model | TESTED FOUNDATION / FAIL-CLOSED UI | Read-only production source orchestration, presentation model and typed Slint surface are integrated. Until Rust lifecycle/refresh wiring is connected, the window explicitly reports unavailable and Refresh is disabled. |
 | Desktop/AppStream packaging | TESTED | Canonical metadata sources and Nix package installation wiring are integrated; prior targeted packaging validation built the package and asserted installation. |
 | Support matrix tooling | TESTED | Schema, evidence rules, fixtures and locked-nixpkgs validator are integrated; runtime capability detection remains probe-driven. |
 | Reconciliation engine | NOT IMPLEMENTED | Foundations are present, but no startup/resume planner/executor automatically applies desired state. |
@@ -87,8 +88,8 @@ These observations are not universal ASUS specifications and must not be convert
 ## Current blockers / unfinished work
 
 1. Restore executable GitHub Actions runs and obtain a green `nix flake check` on current `main`.
-2. Finish XDG Run on Startup Rust lifecycle wiring (#57); backend and Slint contract are already in `main`.
-3. Finish Diagnostics window Rust lifecycle/refresh wiring (#101); backend/runtime/model/Slint layers are already in `main`.
+2. Finish XDG Run on Startup Rust lifecycle wiring (#57); backend exists and the UI remains disabled until it is genuinely connected.
+3. Finish Diagnostics window Rust lifecycle/refresh wiring (#101); backend/runtime/model/Slint layers exist and the UI remains disabled until connected.
 4. Design reconciliation semantics on top of the now-integrated Desired/Observed/Pending, lifecycle and desired-state foundations; do not auto-apply merely because persisted intent exists.
 5. Perform dated live validation before promoting additional fan mutation/reset claims on the current revision.
 6. Keep GPU product mode, power limits and extended ASUS controls disabled/unknown until concept-specific evidence exists.
