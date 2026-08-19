@@ -7,11 +7,11 @@
 #
 # X-StopOnRemoval=false: при удалении unit'а systemd НЕ останавливает service.
 # X-RestartIfChanged=false: при обновлении unit'а systemd НЕ перезапускает
-# service (deploy скрипт делает explicit restart).
+# service (deploy script делает explicit restart).
 #
-# Важно: writable sysfs scope этого standalone unit сейчас Performance-only.
-# Наличие других typed Hardware1 methods в бинарнике не является effective
-# write support этого deployment profile; alignment tracked by issue #126.
+# Direct sysfs write scope intentionally matches the full NixOS module:
+# Performance platform_profile + ASUS keyboard backlight brightness only.
+# Other Hardware1 mutations use typed service backends and do not widen /sys.
 
 [Unit]
 Description=Orbis Control hardware helper (standalone dev deployment)
@@ -39,6 +39,8 @@ MemoryDenyWriteExecute=true
 AmbientCapabilities=
 CapabilityBoundingSet=
 
-# /sys read-only, на write ТОЛЬКО platform_profile
+# /sys stays read-only except the same two exact optional attributes used by
+# the full NixOS module. A missing path does not widen the sandbox.
 ReadOnlyPaths=/sys
 ReadWritePaths=-/sys/firmware/acpi/platform_profile
+ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/brightness
