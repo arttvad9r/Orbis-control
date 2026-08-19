@@ -25,13 +25,12 @@ orbis-core = { workspace = true }
 orbis-config = { workspace = true }
 orbis-capabilities = { workspace = true }
 orbis-application = { path = "../orbis-application", version = "0.1.0" }
-# Production read-only Battery backend поверх session D-Bus protocol.
 orbis-session-client = { path = "../orbis-session-client", version = "0.1.0" }
-# Прямая зависимость на provider traits для worker; default-features=false,
-# чтобы не добавлять новых причин включения mock в production (mock уже идёт
-# транзитивно через orbis-sessiond на текущем этапе).
-orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }
+orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false }
 orbis-sessiond = { workspace = true }
+# Still a production dependency only because UiState::from_mock_profile is used
+# by the current shared production/offscreen bootstrap. Removing this dependency
+# is the remaining #115 UI-state refactor.
 orbis-test-support = { workspace = true }
 image = { workspace = true }
 
@@ -41,7 +40,10 @@ slint-build = "1"
 [dev-dependencies]
 async-trait = { workspace = true }
 tempfile = { workspace = true }
+orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }
 
 [features]
-mock = ["orbis-sessiond/mock"]
-default = ["mock"]
+# Explicit compatibility feature for dedicated mock/dev builds. Production
+# default no longer turns on sessiond/mock.
+mock = ["orbis-providers/mock", "orbis-sessiond/mock"]
+default = []
