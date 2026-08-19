@@ -207,7 +207,7 @@ export component AppWindow inherits Window {
 
         VerticalLayout {
             spacing: 3px;
-            SectionTitle { title: "Battery Charge Limit: " + root.ui-state.charge-limit + "%"; detail: root.ui-state.power-ac-mw; }
+            SectionTitle { title: root.ui-state.charge-limit-state == ChargeLimitState.Ready ? "Battery Charge Limit: " + root.ui-state.charge-limit + "%" : "Battery Charge Limit: Unknown"; detail: root.ui-state.power-ac-mw; }
             SectionCard {
                 height: 58px;
                 VerticalLayout { padding: 5px; spacing: 2px;
@@ -219,7 +219,7 @@ export component AppWindow inherits Window {
                     HorizontalLayout { height: 20px;
                         DarkCheckBox { text: "Run on Startup"; checked <=> root.startup-preview; }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
-                        Text { text: root.ui-state.battery_percent + " · " + root.ui-state.battery_health; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; }
+                        Text { text: root.ui-state.battery-percent + " · " + root.ui-state.battery-health; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; }
                     }
                 }
             }
