@@ -1,9 +1,12 @@
 use std::fmt::Debug;
+use std::future::Future;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
     BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
+    Provider,
 };
 use orbis_session_client::{
     SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
@@ -50,6 +53,22 @@ fn error_state(error: &ProviderError) -> &'static str {
     }
 }
 
+async fn bounded_read<T, F>(
+    label: &'static str,
+    timeout: Duration,
+    future: F,
+) -> Result<T, ProviderError>
+where
+    F: Future<Output = Result<T, ProviderError>>,
+{
+    match tokio::time::timeout(timeout, future).await {
+        Ok(result) => result,
+        Err(_) => Err(ProviderError::Timeout(format!(
+            "{label} exceeded provider timeout {timeout:?}"
+        ))),
+    }
+}
+
 fn print_observation<T>(label: &str, result: Result<T, ProviderError>) -> bool
 where
     T: Debug,
@@ -87,22 +106,69 @@ async fn status() -> ExitCode {
 
     let mut successful_reads = 0usize;
 
-    if print_observation("battery.charge_limit", battery.charge_limit().await) {
+    let battery_timeout = battery.timeout();
+    if print_observation(
+        "battery.charge_limit",
+        bounded_read(
+            "battery.charge_limit",
+            battery_timeout,
+            battery.charge_limit(),
+        )
+        .await,
+    ) {
         successful_reads += 1;
     }
-    if print_observation("performance.current", performance.current_profile().await) {
+
+    let performance_timeout = performance.timeout();
+    if print_observation(
+        "performance.current",
+        bounded_read(
+            "performance.current",
+            performance_timeout,
+            performance.current_profile(),
+        )
+        .await,
+    ) {
         successful_reads += 1;
     }
-    if print_observation("performance.available", performance.profiles().await) {
+    if print_observation(
+        "performance.available",
+        bounded_read(
+            "performance.available",
+            performance_timeout,
+            performance.profiles(),
+        )
+        .await,
+    ) {
         successful_reads += 1;
     }
-    if print_observation("gpu.power", gpu_power.power_state().await) {
+
+    let gpu_power_timeout = gpu_power.timeout();
+    if print_observation(
+        "gpu.power",
+        bounded_read("gpu.power", gpu_power_timeout, gpu_power.power_state()).await,
+    ) {
         successful_reads += 1;
     }
-    if print_observation("gpu.mux", gpu_mux.mux_state().await) {
+
+    let gpu_mux_timeout = gpu_mux.timeout();
+    if print_observation(
+        "gpu.mux",
+        bounded_read("gpu.mux", gpu_mux_timeout, gpu_mux.mux_state()).await,
+    ) {
         successful_reads += 1;
     }
-    if print_observation("gpu.access", gpu_access.access_policy().await) {
+
+    let gpu_access_timeout = gpu_access.timeout();
+    if print_observation(
+        "gpu.access",
+        bounded_read(
+            "gpu.access",
+            gpu_access_timeout,
+            gpu_access.access_policy(),
+        )
+        .await,
+    ) {
         successful_reads += 1;
     }
 
@@ -170,6 +236,10 @@ mod tests {
         );
         assert_eq!(
             error_state(&ProviderError::BackendUnavailable("x".into())),
+            "Unavailable"
+        );
+        assert_eq!(
+            error_state(&ProviderError::Timeout("x".into())),
             "Unavailable"
         );
         assert_eq!(
