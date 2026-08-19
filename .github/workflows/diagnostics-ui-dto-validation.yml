@@ -1,0 +1,47 @@
+name: Diagnostics UI DTO validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    if: github.head_ref == 'agent/diagnostics-ui-dto-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/diagnostics-ui-dto
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Targeted orbis-ui checks
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all -- --check
+            cargo check -p orbis-ui --all-targets
+            cargo test -p orbis-ui diagnostics_dto
+            cargo clippy -p orbis-ui --all-targets -- -D warnings
+          '
+
+      - name: Check narrow diff
+        run: |
+          set -euo pipefail
+          git diff --check 81a669849c4fcd7329883042a4ace7ba150a21fa..HEAD
+          git diff --name-only 81a669849c4fcd7329883042a4ace7ba150a21fa..HEAD | sort > /tmp/changed.txt
+          cat >/tmp/allowed.txt <<'EOF'
+          crates/orbis-ui/src/diagnostics_dto.rs
+          crates/orbis-ui/src/lib.rs
+          EOF
+          sort -o /tmp/allowed.txt /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
