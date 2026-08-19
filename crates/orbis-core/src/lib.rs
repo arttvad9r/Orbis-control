@@ -20,6 +20,7 @@ pub mod aura;
 pub mod automation;
 pub mod battery;
 pub mod capability;
+pub mod desired_observed;
 pub mod diagnostics;
 pub mod display;
 pub mod display_output;
@@ -28,6 +29,7 @@ pub mod fan;
 pub mod gpu;
 pub mod identity;
 pub mod keyboard_backlight;
+pub mod lifecycle;
 pub mod lighting;
 pub mod limits;
 pub mod newtypes;
@@ -46,6 +48,7 @@ pub use battery::ChargeLimit;
 pub use capability::{
     Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId,
 };
+pub use desired_observed::{DesiredObservedState, DesiredValue, ObservedValue, PendingValue};
 pub use diagnostics::{
     ApplicationDiagnostics, CapabilitySnapshotDiagnostics, DIAGNOSTICS_SNAPSHOT_SCHEMA_VERSION,
     DiagnosticEntry, DiagnosticObservation, DiagnosticReport, DiagnosticsServiceId,
@@ -67,6 +70,7 @@ pub use fan::{FanCurve, FanCurvePoint, FanId};
 pub use gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 pub use identity::{BackendIdentity, DeviceIdentity};
 pub use keyboard_backlight::{KeyboardBacklightState, KeyboardBrightnessLevel};
+pub use lifecycle::LifecycleEvent;
 pub use lighting::LightingMode;
 pub use limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
 pub use newtypes::{EnergyMWh, FanPwm, MilliWatt, Percent, PowerW, RefreshHz, Rpm, TemperatureC};
