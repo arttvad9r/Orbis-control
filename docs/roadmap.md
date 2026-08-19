@@ -27,6 +27,7 @@
 - diagnostics backend/export/runtime/window-model layers интегрированы;
 - desktop/AppStream packaging и support-matrix tooling интегрированы;
 - historical visual/theme PRs подтверждены как ancestors `main` и закрыты;
+- старые non-mergeable autostart/diagnostics PR закрыты, оставшийся scope перенесён в #110/#111;
 - source-of-truth документация обновлена;
 - одноразовые validation/audit PR закрыты как integrated/superseded.
 
@@ -92,7 +93,7 @@ Completed:
 
 Next:
 
-- finish the remaining Rust lifecycle glue for Run on Startup (#57); until then the Preferences toggle stays disabled;
+- finish the remaining Rust lifecycle glue for Run on Startup (#110); until then the Preferences toggle stays disabled;
 - keep automation policy and desired hardware state separate from UI preferences;
 - repeat packaged metadata validation on the final release revision.
 
@@ -131,7 +132,7 @@ Integrated in `main`:
 
 Next:
 
-- finish Diagnostics window open/refresh lifecycle glue in current `main.rs` (#101); until then Refresh stays disabled and the window reports unavailable;
+- finish Diagnostics window open/refresh lifecycle glue in current `main.rs` (#111); until then Refresh stays disabled and the window reports unavailable;
 - keep export collection strictly allowlisted and privacy-bounded.
 
 ## Milestone 6 — GPU product policy
