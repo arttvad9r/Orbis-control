@@ -1,0 +1,291 @@
+//! Privacy-bounded diagnostics export projections.
+//!
+//! Exporters consume only `DiagnosticsUiDto`: no journal access, arbitrary file
+//! reads, environment dumps, shell commands, serial/UUID/asset-tag fields, or
+//! provider calls are available at this layer.
+
+use std::fmt::Debug;
+
+use orbis_core::diagnostics::DiagnosticObservation;
+use serde_json::{Value, json};
+
+use crate::diagnostics_dto::DiagnosticsUiDto;
+
+const UNKNOWN: &str = "unknown";
+
+fn optional(value: &Option<String>) -> &str {
+    value.as_deref().unwrap_or(UNKNOWN)
+}
+
+fn observation<T: Debug>(value: &DiagnosticObservation<T>) -> String {
+    match value {
+        DiagnosticObservation::Value(value) => format!("{value:?}"),
+        DiagnosticObservation::Unavailable => "Unavailable".into(),
+        DiagnosticObservation::PermissionDenied => "PermissionDenied".into(),
+        DiagnosticObservation::Unknown => "Unknown".into(),
+    }
+}
+
+/// Stable, human-readable allowlisted summary suitable for clipboard export.
+pub fn summary_text(dto: &DiagnosticsUiDto) -> String {
+    let s = &dto.summary;
+    let mut out = String::new();
+
+    out.push_str("[application]\n");
+    out.push_str(&format!("version={}\n", s.package_version));
+    out.push_str(&format!("build_revision={}\n", optional(&s.build_revision)));
+    out.push_str(&format!("build_channel={}\n", optional(&s.build_channel)));
+
+    out.push_str("\n[system]\n");
+    out.push_str(&format!("kernel={}\n", optional(&s.kernel_release)));
+    out.push_str(&format!("architecture={}\n", optional(&s.architecture)));
+    out.push_str(&format!("session={:?}\n", s.session_type));
+    out.push_str(&format!("display_protocol={:?}\n", s.display_protocol));
+    out.push_str(&format!("compositor={}\n", optional(&s.compositor)));
+
+    out.push_str("\n[hardware]\n");
+    out.push_str(&format!("vendor={}\n", optional(&s.hardware_vendor)));
+    out.push_str(&format!("product={}\n", optional(&s.hardware_product)));
+    out.push_str(&format!("board={}\n", optional(&s.hardware_board)));
+    out.push_str(&format!("bios_version={}\n", optional(&s.bios_version)));
+    out.push_str(&format!("bios_date={}\n", optional(&s.bios_date)));
+
+    out.push_str("\n[capabilities]\n");
+    if dto.capabilities.is_empty() {
+        out.push_str("none\n");
+    } else {
+        for row in &dto.capabilities {
+            out.push_str(&format!(
+                "{} overall={} read={} write={}\n",
+                row.feature.as_str(),
+                row.status.as_str(),
+                row.read_status.as_str(),
+                row.write_status.as_str()
+            ));
+        }
+    }
+
+    out.push_str("\n[services]\n");
+    if dto.services.is_empty() {
+        out.push_str("none\n");
+    } else {
+        for row in &dto.services {
+            out.push_str(&format!(
+                "{:?} bus={:?} availability={:?} criticality={:?}\n",
+                row.service, row.bus, row.availability, row.criticality
+            ));
+        }
+    }
+
+    out.push_str("\n[gpu]\n");
+    out.push_str(&format!("mux={}\n", observation(&dto.gpu.mux)));
+    out.push_str(&format!(
+        "access_policy={}\n",
+        observation(&dto.gpu.access_policy)
+    ));
+    out.push_str(&format!(
+        "runtime_power={}\n",
+        observation(&dto.gpu.runtime_power)
+    ));
+
+    out.push_str("\n[telemetry]\n");
+    out.push_str(&format!("status={:?}\n", dto.telemetry.status));
+    out.push_str(&format!("freshness={:?}\n", dto.telemetry.freshness));
+    out.push_str(&format!(
+        "sample_present={}\n",
+        dto.telemetry.latest.is_some()
+    ));
+
+    out.push_str("\n[display]\n");
+    match &dto.display.outputs {
+        DiagnosticObservation::Value(snapshot) => {
+            out.push_str(&format!("outputs_count={}\n", snapshot.outputs.len()));
+        }
+        other => out.push_str(&format!("outputs={}\n", observation(other))),
+    }
+
+    out
+}
+
+/// Stable JSON allowlist projection. It intentionally omits raw telemetry,
+/// timestamps, arbitrary paths, environment contents, logs, and identifiers
+/// outside the privacy-reviewed DTO summary fields.
+pub fn report_json_value(dto: &DiagnosticsUiDto) -> Value {
+    let s = &dto.summary;
+    let capabilities = dto
+        .capabilities
+        .iter()
+        .map(|row| {
+            json!({
+                "id": row.feature.as_str(),
+                "overall": row.status.as_str(),
+                "read": row.read_status.as_str(),
+                "write": row.write_status.as_str(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let services = dto
+        .services
+        .iter()
+        .map(|row| {
+            json!({
+                "service": format!("{:?}", row.service),
+                "bus": format!("{:?}", row.bus),
+                "availability": format!("{:?}", row.availability),
+                "criticality": format!("{:?}", row.criticality),
+            })
+        })
+        .collect::<Vec<_>>();
+    let display = match &dto.display.outputs {
+        DiagnosticObservation::Value(snapshot) => json!({
+            "status": "Value",
+            "outputs_count": snapshot.outputs.len(),
+        }),
+        other => json!({ "status": observation(other) }),
+    };
+
+    json!({
+        "schema_version": 1,
+        "application": {
+            "version": s.package_version,
+            "build_revision": s.build_revision,
+            "build_channel": s.build_channel,
+        },
+        "system": {
+            "kernel": s.kernel_release,
+            "architecture": s.architecture,
+            "session": format!("{:?}", s.session_type),
+            "display_protocol": format!("{:?}", s.display_protocol),
+            "compositor": s.compositor,
+        },
+        "hardware": {
+            "vendor": s.hardware_vendor,
+            "product": s.hardware_product,
+            "board": s.hardware_board,
+            "bios_version": s.bios_version,
+            "bios_date": s.bios_date,
+        },
+        "capability_generation": dto.capability_generation,
+        "capabilities": capabilities,
+        "services": services,
+        "gpu": {
+            "mux": observation(&dto.gpu.mux),
+            "access_policy": observation(&dto.gpu.access_policy),
+            "runtime_power": observation(&dto.gpu.runtime_power),
+        },
+        "telemetry": {
+            "status": format!("{:?}", dto.telemetry.status),
+            "freshness": format!("{:?}", dto.telemetry.freshness),
+            "sample_present": dto.telemetry.latest.is_some(),
+        },
+        "display": display,
+    })
+}
+
+/// Pretty JSON form for clipboard/file consumers.
+pub fn report_json(dto: &DiagnosticsUiDto) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(&report_json_value(dto))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::SystemTime;
+
+    use orbis_core::capability::{CapabilityStatus, FeatureId};
+    use orbis_core::diagnostics::{
+        DiagnosticObservation, DisplayDiagnostics, DisplayProtocol, GpuDiagnostics, SessionType,
+        TelemetryCollectionStatus, TelemetryDiagnostics, TelemetryFreshness,
+    };
+
+    use super::*;
+    use crate::diagnostics_dto::{CapabilityRowDto, DiagnosticsSummaryDto};
+
+    fn dto() -> DiagnosticsUiDto {
+        DiagnosticsUiDto {
+            generated_at: SystemTime::UNIX_EPOCH,
+            summary: DiagnosticsSummaryDto {
+                package_version: "0.1.0-test".into(),
+                build_revision: Some("deadbeef".into()),
+                build_channel: Some("beta".into()),
+                kernel_release: Some("6.12-test".into()),
+                architecture: Some("x86_64".into()),
+                session_type: SessionType::Wayland,
+                display_protocol: DisplayProtocol::Wayland,
+                compositor: None,
+                hardware_vendor: Some("ASUSTeK COMPUTER INC.".into()),
+                hardware_product: Some("Example Model".into()),
+                hardware_board: Some("EXAMPLE-BOARD".into()),
+                bios_version: Some("1.2.3".into()),
+                bios_date: None,
+            },
+            capability_generation: 17,
+            capability_checked_at: SystemTime::UNIX_EPOCH,
+            capabilities: vec![CapabilityRowDto {
+                feature: FeatureId::Performance,
+                status: CapabilityStatus::ReadOnly,
+                read_status: CapabilityStatus::Supported,
+                write_status: CapabilityStatus::ReadOnly,
+            }],
+            services: Vec::new(),
+            gpu: GpuDiagnostics {
+                mux: DiagnosticObservation::Unknown,
+                access_policy: DiagnosticObservation::PermissionDenied,
+                runtime_power: DiagnosticObservation::Unavailable,
+            },
+            telemetry: TelemetryDiagnostics {
+                latest: None,
+                status: TelemetryCollectionStatus::Unavailable,
+                last_attempt_at: None,
+                last_success_at: None,
+                freshness: TelemetryFreshness::Unknown,
+            },
+            display: DisplayDiagnostics {
+                outputs: DiagnosticObservation::Unknown,
+                checked_at: None,
+            },
+        }
+    }
+
+    #[test]
+    fn text_export_has_stable_allowlisted_sections() {
+        let text = summary_text(&dto());
+        for section in [
+            "[application]",
+            "[system]",
+            "[hardware]",
+            "[capabilities]",
+            "[services]",
+            "[gpu]",
+            "[telemetry]",
+            "[display]",
+        ] {
+            assert!(text.contains(section));
+        }
+        assert!(text.contains("performance overall=read_only read=supported write=read_only"));
+        for forbidden in ["serial", "uuid", "asset_tag", "journal", "environment"] {
+            assert!(!text.to_ascii_lowercase().contains(forbidden));
+        }
+    }
+
+    #[test]
+    fn json_export_is_versioned_and_omits_raw_collection_surfaces() {
+        let value = report_json_value(&dto());
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["hardware"]["product"], "Example Model");
+        assert_eq!(value["capabilities"][0]["read"], "supported");
+        assert_eq!(value["capabilities"][0]["write"], "read_only");
+        let rendered = report_json(&dto()).unwrap().to_ascii_lowercase();
+        for forbidden in ["serial", "uuid", "asset_tag", "journal", "environment"] {
+            assert!(!rendered.contains(forbidden));
+        }
+    }
+
+    #[test]
+    fn unknown_and_permission_states_survive_export() {
+        let text = summary_text(&dto());
+        assert!(text.contains("mux=Unknown"));
+        assert!(text.contains("access_policy=PermissionDenied"));
+        assert!(text.contains("runtime_power=Unavailable"));
+        assert!(text.contains("freshness=Unknown"));
+    }
+}
