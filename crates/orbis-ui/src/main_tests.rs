@@ -1053,3 +1053,47 @@ fn main_window_height_no_longer_reserves_fan_editor_space() {
     error.gpu_section_error = true;
     assert_eq!(window_height(&error), 466.0);
 }
+
+#[test]
+fn autostart_status_maps_only_canonical_entry_to_checked() {
+    assert!(autostart_checked(AutostartStatus::Enabled));
+    assert!(!autostart_checked(AutostartStatus::Missing));
+    assert!(!autostart_checked(AutostartStatus::Invalid));
+}
+
+#[test]
+fn autostart_toggle_calls_only_requested_backend_operation() {
+    let enable_calls = Cell::new(0usize);
+    let disable_calls = Cell::new(0usize);
+    let enabled = apply_autostart_toggle_with(
+        true,
+        || {
+            enable_calls.set(enable_calls.get() + 1);
+            Ok(std::path::PathBuf::from("owned.desktop"))
+        },
+        || {
+            disable_calls.set(disable_calls.get() + 1);
+            Ok(true)
+        },
+    )
+    .unwrap();
+    assert_eq!(enabled, AutostartStatus::Enabled);
+    assert_eq!(enable_calls.get(), 1);
+    assert_eq!(disable_calls.get(), 0);
+
+    let disabled = apply_autostart_toggle_with(
+        false,
+        || {
+            enable_calls.set(enable_calls.get() + 1);
+            Ok(std::path::PathBuf::from("owned.desktop"))
+        },
+        || {
+            disable_calls.set(disable_calls.get() + 1);
+            Ok(true)
+        },
+    )
+    .unwrap();
+    assert_eq!(disabled, AutostartStatus::Missing);
+    assert_eq!(enable_calls.get(), 1);
+    assert_eq!(disable_calls.get(), 1);
+}

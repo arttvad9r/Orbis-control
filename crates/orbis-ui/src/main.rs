@@ -15,6 +15,9 @@ use orbis_application::{
     ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome, PerformanceCommandOutcome,
     PerformanceState, SetChargeLimitError, SetGpuModeError,
 };
+use orbis_config::{
+    AutostartError, AutostartStatus, autostart_status, disable_autostart, enable_autostart,
+};
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
@@ -491,6 +494,56 @@ fn show_automation_window() -> Result<(), slint::PlatformError> {
     })
 }
 
+fn autostart_checked(status: AutostartStatus) -> bool {
+    matches!(status, AutostartStatus::Enabled)
+}
+
+fn autostart_status_text(status: AutostartStatus) -> &'static str {
+    match status {
+        AutostartStatus::Enabled => "Run on startup enabled · user XDG autostart entry valid",
+        AutostartStatus::Missing => "Run on startup disabled · user XDG autostart entry absent",
+        AutostartStatus::Invalid => "Run on startup disabled · owned autostart entry is invalid",
+    }
+}
+
+fn apply_autostart_toggle_with<E, D>(
+    enabled: bool,
+    enable: E,
+    disable: D,
+) -> Result<AutostartStatus, AutostartError>
+where
+    E: FnOnce() -> Result<std::path::PathBuf, AutostartError>,
+    D: FnOnce() -> Result<bool, AutostartError>,
+{
+    if enabled {
+        enable()?;
+        Ok(AutostartStatus::Enabled)
+    } else {
+        disable()?;
+        Ok(AutostartStatus::Missing)
+    }
+}
+
+fn apply_autostart_toggle(enabled: bool) -> Result<AutostartStatus, AutostartError> {
+    apply_autostart_toggle_with(enabled, enable_autostart, disable_autostart)
+}
+
+fn refresh_preferences_autostart(window: &PreferencesWindow) {
+    match autostart_status() {
+        Ok(status) => {
+            window.set_startup(autostart_checked(status));
+            window.set_local_status(autostart_status_text(status).into());
+        }
+        Err(error) => {
+            window.set_startup(false);
+            window.set_local_status(
+                "Run on startup unavailable · could not read user XDG entry".into(),
+            );
+            tracing::warn!(error = %error, "failed to read user autostart entry");
+        }
+    }
+}
+
 fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
     PREFERENCES_WINDOW.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -505,12 +558,29 @@ fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> 
                     apply_theme_to_all(&app, light);
                 }
             });
+            let window_weak = window.as_weak();
+            window.on_startup_changed(move |enabled| {
+                let result = apply_autostart_toggle(enabled);
+                if let Some(window) = window_weak.upgrade() {
+                    match result {
+                        Ok(status) => {
+                            window.set_startup(autostart_checked(status));
+                            window.set_local_status(autostart_status_text(status).into());
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "failed to update user autostart entry");
+                            refresh_preferences_autostart(&window);
+                        }
+                    }
+                }
+            });
             *slot = Some(window);
         }
         let window = slot.as_ref().expect("PreferencesWindow initialized");
         window
             .global::<ThemeState>()
             .set_mode(theme_mode(current_theme_light()));
+        refresh_preferences_autostart(window);
         window.show()
     })
 }
