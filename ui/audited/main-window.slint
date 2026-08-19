@@ -67,6 +67,10 @@ export component AppWindow inherits Window {
     callback preview-dialog-clicked(int);
     callback quit-clicked;
 
+    // These controls remain visible as product direction only. They must not
+    // look applied or emit local pseudo-state until a production backend is
+    // wired with capability evidence.
+    property <bool> preview-controls-enabled: false;
     property <int> screen-preview: 2;
     property <float> dimming-preview: 100;
     property <int> visual-preview: 0;
@@ -131,7 +135,7 @@ export component AppWindow inherits Window {
             SectionTitle { title: root.gpu-label(); detail: root.ui-state.gpu-temp + " · " + root.ui-state.gpu-fan-rpm; }
             HorizontalLayout {
                 height: 60px; spacing: 5px;
-                ModeCard { title: "Eco"; compact: true; accent: Palette.eco; icon-kind: 0; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1); clicked => { root.gpu-clicked(0); } }
+                ModeCard { title: "Eco"; compact: true; accent: Palette.eco; icon-kind: 0; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu_mode_writable || !root.bit-set(root.ui-state.available-gpu-mask, 1); clicked => { root.gpu-clicked(0); } }
                 ModeCard { title: "Standard"; compact: true; accent: Palette.standard; icon-kind: 1; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2); clicked => { root.gpu-clicked(1); } }
                 ModeCard { title: "Ultimate"; compact: true; accent: Palette.ultimate; icon-kind: 2; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2; pending: root.ui-state.gpu-ultimate-pending; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4); clicked => { root.gpu-clicked(2); } }
                 ModeCard { title: "Optimized"; compact: true; accent: Palette.optimized; icon-kind: 1; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 8); clicked => { root.gpu-clicked(3); } }
@@ -140,25 +144,25 @@ export component AppWindow inherits Window {
 
         VerticalLayout {
             spacing: 3px;
-            SectionTitle { title: "Laptop Screen"; detail: root.screen-preview == 0 ? "Auto" : root.screen-preview == 1 ? "60 Hz" : "120 Hz + Overdrive"; }
+            SectionTitle { title: "Laptop Screen · Preview"; detail: "No production backend"; }
             HorizontalLayout { height: 28px; spacing: 5px;
-                ChoiceChip { horizontal-stretch: 1; label: "Auto"; selected: root.screen-preview == 0; clicked => { root.screen-preview = 0; } }
-                ChoiceChip { horizontal-stretch: 1; label: "60 Hz"; selected: root.screen-preview == 1; clicked => { root.screen-preview = 1; } }
-                ChoiceChip { horizontal-stretch: 1; label: "120 Hz + OD"; selected: root.screen-preview == 2; clicked => { root.screen-preview = 2; } }
+                ChoiceChip { horizontal-stretch: 1; label: "Auto"; selected: root.preview-controls-enabled && root.screen-preview == 0; disabled: !root.preview-controls-enabled; clicked => { root.screen-preview = 0; } }
+                ChoiceChip { horizontal-stretch: 1; label: "60 Hz"; selected: root.preview-controls-enabled && root.screen-preview == 1; disabled: !root.preview-controls-enabled; clicked => { root.screen-preview = 1; } }
+                ChoiceChip { horizontal-stretch: 1; label: "120 Hz + OD"; selected: root.preview-controls-enabled && root.screen-preview == 2; disabled: !root.preview-controls-enabled; clicked => { root.screen-preview = 2; } }
             }
         }
 
         VerticalLayout {
             spacing: 3px;
-            SectionTitle { title: "Flicker-free Dimming / Visual Mode"; detail: Math.round(root.dimming-preview) + "%"; }
+            SectionTitle { title: "Flicker-free / Visual Mode · Preview"; detail: "No production backend"; }
             SectionCard {
                 height: 70px;
                 VerticalLayout { padding: 6px; spacing: 3px;
-                    Slider { minimum: 0; maximum: 100; step: 1; value <=> root.dimming-preview; }
+                    Slider { enabled: root.preview-controls-enabled; minimum: 0; maximum: 100; step: 1; value <=> root.dimming-preview; }
                     HorizontalLayout { height: 28px; spacing: 5px;
-                        ComboBox { horizontal-stretch: 1; model: ["Default", "Vivid", "Cinema", "Eye Care", "Racing", "Scenery"]; current-index <=> root.visual-preview; }
-                        ComboBox { horizontal-stretch: 1; model: ["Cool", "Neutral", "Warm"]; current-index <=> root.color-temp-preview; }
-                        ComboBox { horizontal-stretch: 1; model: ["Gamut: Native", "sRGB", "DCI-P3", "Display P3"]; current-index <=> root.gamut-preview; }
+                        ComboBox { horizontal-stretch: 1; enabled: root.preview-controls-enabled; model: ["Default", "Vivid", "Cinema", "Eye Care", "Racing", "Scenery"]; current-index <=> root.visual-preview; }
+                        ComboBox { horizontal-stretch: 1; enabled: root.preview-controls-enabled; model: ["Cool", "Neutral", "Warm"]; current-index <=> root.color-temp-preview; }
+                        ComboBox { horizontal-stretch: 1; enabled: root.preview-controls-enabled; model: ["Gamut: Native", "sRGB", "DCI-P3", "Display P3"]; current-index <=> root.gamut-preview; }
                     }
                 }
             }
@@ -166,18 +170,18 @@ export component AppWindow inherits Window {
 
         VerticalLayout {
             spacing: 3px;
-            SectionTitle { title: "Slash Lighting / AniMe"; }
+            SectionTitle { title: "Slash Lighting / AniMe · Preview"; detail: "No production backend"; }
             SectionCard {
                 height: 64px;
                 VerticalLayout { padding: 6px; spacing: 3px;
                     HorizontalLayout { height: 28px; spacing: 5px;
-                        ComboBox { horizontal-stretch: 1; model: ["Off", "Static", "Breathing", "Banner", "Picture / GIF"]; current-index <=> root.slash-effect-preview; }
-                        ComboBox { horizontal-stretch: 1; model: ["Battery Level", "Clock", "Audio", "Notification"]; current-index <=> root.slash-mode-preview; }
-                        ComboBox { horizontal-stretch: 1; model: ["Interval Off", "Slow", "Medium", "Fast"]; current-index <=> root.slash-interval-preview; }
+                        ComboBox { horizontal-stretch: 1; enabled: root.preview-controls-enabled; model: ["Off", "Static", "Breathing", "Banner", "Picture / GIF"]; current-index <=> root.slash-effect-preview; }
+                        ComboBox { horizontal-stretch: 1; enabled: root.preview-controls-enabled; model: ["Battery Level", "Clock", "Audio", "Notification"]; current-index <=> root.slash-mode-preview; }
+                        ComboBox { horizontal-stretch: 1; enabled: root.preview-controls-enabled; model: ["Interval Off", "Slow", "Medium", "Fast"]; current-index <=> root.slash-interval-preview; }
                     }
                     HorizontalLayout { height: 20px; spacing: 10px;
-                        DarkCheckBox { text: "Disable on battery"; checked <=> root.slash-battery-preview; }
-                        DarkCheckBox { text: "Disable on lid close"; checked <=> root.slash-lid-preview; }
+                        DarkCheckBox { text: "Disable on battery"; disabled: !root.preview-controls-enabled; checked <=> root.slash-battery-preview; }
+                        DarkCheckBox { text: "Disable on lid close"; disabled: !root.preview-controls-enabled; checked <=> root.slash-lid-preview; }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
                 }
@@ -186,19 +190,19 @@ export component AppWindow inherits Window {
 
         VerticalLayout {
             spacing: 3px;
-            SectionTitle { title: "Laptop Keyboard"; }
+            SectionTitle { title: "Laptop Keyboard · Preview"; detail: "No production backend"; }
             SectionCard {
                 height: 50px;
                 HorizontalLayout { padding: 6px; spacing: 6px; alignment: center;
-                    ComboBox { horizontal-stretch: 1; model: ["Static", "Breathing", "Color Cycle", "Strobing", "Rainbow"]; current-index <=> root.keyboard-mode-preview; }
+                    ComboBox { horizontal-stretch: 1; enabled: root.preview-controls-enabled; model: ["Static", "Breathing", "Color Cycle", "Strobing", "Rainbow"]; current-index <=> root.keyboard-mode-preview; }
                     color-button := Rectangle {
                         width: 128px; height: 28px; border-radius: 3px; border-width: 1px; border-color: Palette.border-default;
-                        background: color-touch.pressed ? Palette.surface-pressed : color-touch.has-hover ? Palette.surface-hover : Palette.surface-default;
-                        Text { x: 8px; width: parent.width - 38px; text: "Color"; font-size: 9px; color: Palette.text-primary; horizontal-alignment: center; vertical-alignment: center; }
+                        background: root.preview-controls-enabled ? (color-touch.pressed ? Palette.surface-pressed : color-touch.has-hover ? Palette.surface-hover : Palette.surface-default) : Palette.surface-disabled;
+                        Text { x: 8px; width: parent.width - 38px; text: "Color"; font-size: 9px; color: root.preview-controls-enabled ? Palette.text-primary : Palette.text-disabled; horizontal-alignment: center; vertical-alignment: center; }
                         Rectangle { x: parent.width - 25px; y: 7px; width: 14px; height: 14px; border-radius: 2px; border-width: 1px; border-color: Palette.text-secondary; background: root.keyboard-color(); }
-                        color-touch := TouchArea { clicked => { root.keyboard-color-preview = Math.mod(root.keyboard-color-preview + 1, 4); } }
+                        color-touch := TouchArea { enabled: root.preview-controls-enabled; clicked => { root.keyboard-color-preview = Math.mod(root.keyboard-color-preview + 1, 4); } }
                     }
-                    ChoiceChip { width: 70px; label: "FN-Lock"; selected: root.fn-lock-preview; clicked => { root.fn-lock-preview = !root.fn-lock-preview; } }
+                    ChoiceChip { width: 70px; label: "FN-Lock"; disabled: !root.preview-controls-enabled; selected: root.preview-controls-enabled && root.fn-lock-preview; clicked => { root.fn-lock-preview = !root.fn-lock-preview; } }
                     PreviewButton { width: 66px; label: "Extra"; compact: true; clicked => { root.extra-clicked(); } }
                 }
             }
