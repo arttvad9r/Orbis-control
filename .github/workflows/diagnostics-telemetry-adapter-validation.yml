@@ -1,0 +1,44 @@
+name: Diagnostics telemetry adapter validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    if: github.head_ref == 'agent/diagnostics-telemetry-adapter-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/diagnostics-telemetry-adapter
+          fetch-depth: 0
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Targeted orbis-providers checks
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all -- --check
+            cargo check -p orbis-providers --all-targets
+            cargo test -p orbis-providers telemetry_diagnostics
+            cargo clippy -p orbis-providers --all-targets -- -D warnings
+          '
+      - name: Check narrow diff
+        run: |
+          set -euo pipefail
+          git diff --check df0869602636500d902da0c9533ca1badafd9658..HEAD
+          git diff --name-only df0869602636500d902da0c9533ca1badafd9658..HEAD | sort > /tmp/changed.txt
+          cat >/tmp/allowed.txt <<'EOF'
+          crates/orbis-providers/src/lib.rs
+          crates/orbis-providers/src/telemetry_diagnostics.rs
+          EOF
+          sort -o /tmp/allowed.txt /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
