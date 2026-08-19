@@ -11,6 +11,10 @@ export component FansWindow inherits Window {
     background: Palette.window-background;
 
     in-out property <UiState> ui-state;
+    // Safety gate: current Hardware1/asusd custom setter does not yet preserve
+    // CurveData.enabled. Keep authoritative reads available, but do not expose
+    // custom/default mutation until that contract is fixed and revalidated.
+    property <bool> mutation-safety-blocked: true;
     property <bool> factory-reset-pending: false;
     property <bool> fan-clamp-preview: true;
     property <float> hysteresis-up-preview: 3;
@@ -29,7 +33,7 @@ export component FansWindow inherits Window {
         FanCurveEditor {
             height: 460px;
             state: root.ui-state.fan-curve-state;
-            writable: root.ui-state.fan-curve-writable;
+            writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked;
             error-state: root.ui-state.fan-curve-error;
             dirty: root.ui-state.fan-curve-dirty;
             fan-selected: root.ui-state.fan-selected;
@@ -55,20 +59,20 @@ export component FansWindow inherits Window {
         }
 
         HorizontalLayout { height: 32px; spacing: 8px; alignment: center;
-            Rectangle { width: 3px; height: 16px; border-radius: 1.5px; background: root.ui-state.fan-curve-error ? Palette.error : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning : Palette.success; }
+            Rectangle { width: 3px; height: 16px; border-radius: 1.5px; background: root.mutation-safety-blocked ? Palette.warning : root.ui-state.fan-curve-error ? Palette.error : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning : Palette.success; }
             Text {
-                text: root.ui-state.fan-curve-error ? "Apply failed" : root.factory-reset-pending ? "Factory defaults pending · no hardware write yet" : !root.ui-state.fan-curve-writable ? "Read only" : root.ui-state.fan-curve-dirty ? "Modified" : "Current";
+                text: root.mutation-safety-blocked ? "Write disabled · preserving fan enabled-state is not fixed yet" : root.ui-state.fan-curve-error ? "Apply failed" : root.factory-reset-pending ? "Factory defaults pending · no hardware write yet" : !root.ui-state.fan-curve-writable ? "Read only" : root.ui-state.fan-curve-dirty ? "Modified" : "Current";
                 font-size: 9px;
-                color: root.ui-state.fan-curve-error ? Palette.error : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning : Palette.text-secondary;
+                color: root.mutation-safety-blocked ? Palette.warning : root.ui-state.fan-curve-error ? Palette.error : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning : Palette.text-secondary;
                 vertical-alignment: center;
             }
             Rectangle { horizontal-stretch: 1; background: transparent; }
-            ActionButton { width: 116px; label: "Factory Defaults"; disabled: !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error; clicked => { root.factory-reset-pending = true; } }
+            ActionButton { width: 116px; label: "Factory Defaults"; disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error; clicked => { root.factory-reset-pending = true; } }
             ActionButton {
                 width: 166px;
                 label: root.factory-reset-pending ? "Apply Factory Defaults" : "Apply Custom Fan Curve";
                 accent: true;
-                disabled: !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
+                disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
                 clicked => { let reset = root.factory-reset-pending; root.fan-apply-clicked(reset); if (reset) { root.factory-reset-pending = false; } }
             }
         }
