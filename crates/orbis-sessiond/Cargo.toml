@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Orbis Control: пользовательский демон (mock-first) и D-Bus API"
+description = "Orbis Control: read-only user session daemon and typed D-Bus API"
 
 [[bin]]
 name = "orbis-sessiond"
@@ -31,6 +31,8 @@ orbis-test-support = { workspace = true }
 orbis-session-protocol = { path = "../orbis-session-protocol", version = "0.1.0" }
 
 [features]
+# Kept for test/development compatibility; production bootstrap composes real
+# UPower/kernel/supergfxd/asusd providers and does not instantiate MockProvider.
 mock = ["orbis-providers/mock"]
 default = ["mock"]
 
