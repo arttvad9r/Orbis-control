@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
           python3 -c "import xml.etree.ElementTree as ET; ET.parse('packaging/nix/dbus/io.github.orbiscontrol.Hardware.conf')"
           git diff --check
-          git diff --name-only chatgpt/production-hardening-20260818..HEAD | sort > /tmp/changed.txt
+          git diff --name-only origin/chatgpt/production-hardening-20260818..HEAD | sort > /tmp/changed.txt
           printf '%s\n' crates/orbis-hardwared/src/lib.rs packaging/nix/dbus/io.github.orbiscontrol.Hardware.conf packaging/nix/module.nix | sort > /tmp/allowed.txt
           diff -u /tmp/allowed.txt /tmp/changed.txt
 
