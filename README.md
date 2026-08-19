@@ -2,57 +2,93 @@
 
 Orbis Control — нативное Rust + Slint приложение для управления и наблюдения за
 возможностями ASUS-ноутбуков на Linux. Проект Wayland-first; X11 поддерживается
-как compatibility mode. GUI не запускается от root и не выполняет direct
-hardware I/O.
+как compatibility mode. GUI работает без root; privileged hardware mutations
+проходят только через отдельный typed `Hardware1` boundary с polkit.
 
 ## Текущий статус
 
-Проект находится в ранней development стадии (`0.1.0`). Реализованы domain,
-provider и application boundaries, Slint mock UI и первый **read-only MVP**:
-production GUI реально показывает Battery Charge Limit, Performance Mode и
-GPU Power/MUX/Access через session path:
+Проект находится в ранней development стадии (`0.1.0`). `main` является текущей
+интеграционной линией после production-hardening pass.
 
-```text
-UPower / kernel platform_profile / supergfxd / ASUS Armoury sysfs
-→ orbis-sessiond → session D-Bus → orbis-session-client → GUI
-```
+Подтверждённые production-направления включают:
 
-Путь протестирован и live-validated как Nix-installed systemd user service с
-`Type=dbus` и clean SIGTERM shutdown (daemon absent → честный Unavailable без
-mock fallback; daemon present → Ready со значениями, совпадающими с
-authoritative backends). Все mutation controls в production read-only/disabled
-(Battery slider, Performance cards, GPU Eco/Standard/Ultimate/Optimized);
-product GPU mode пока mock-only внутри legacy code. Hardware mutations не
-реализованы.
+- Battery Charge Limit read path через Session1/UPower;
+- controlled Battery mutation через Hardware1/asusd с authoritative read-back;
+- Performance read через kernel `platform_profile` и controlled mutation через
+  Hardware1 с read-back;
+- независимые GPU Power / physical MUX / access-policy reads;
+- production sysfs telemetry polling;
+- profile-specific fan reads через asusd и active-curve reads через sysfs;
+- runtime capability registry с отдельным read/write evidence;
+- versioned XDG preferences, window state и desired-state foundations;
+- typed privacy-bounded diagnostics/export foundations;
+- NixOS package/module, desktop/AppStream metadata и support-matrix tooling.
 
-Точный статус по областям: [`docs/current-state.md`](docs/current-state.md).
+Некоторые функции намеренно остаются fail-closed. В частности, product GPU mode
+(Eco/Standard/Ultimate/Optimized), power limits и неподтверждённые ASUS controls
+не включаются без concept-specific evidence. Fan mutation/reset code существует,
+но сейчас заблокирован в UI и packaged polkit policy из-за открытых safety-contract
+дефектов; fan reads остаются доступны.
+
+Release также заблокирован до восстановления исполняемого GitHub Actions CI и
+успешного `nix flake check` на точном `main` revision.
+
+Точный фактический статус и список blockers: [`docs/current-state.md`](docs/current-state.md).
+План работ: [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Архитектура
 
+Read path:
+
 ```text
-Slint UI → sequential worker → AppService → provider traits
-                                      |
-                                      +→ session client → sessiond → UPower / kernel / supergfxd / Armoury (real reads)
-                                      +→ MockProvider (product GpuMode / legacy / offscreen-mock)
+UPower / kernel / supergfxd / ASUS firmware attributes / asusd
+→ orbis-sessiond → Session1
+→ orbis-session-client / providers
+→ application worker → GUI
 ```
 
-- Backend state обновляется только из authoritative reads/read-back.
-- Architecture capability-driven: unknown не подменяется unsupported или
-  product defaults.
-- `orbis-sessiond` — user daemon.
-- `orbis-hardwared` не входит в workspace и не вводится без доказанной
-  privileged hardware operation.
+Privileged mutation path:
 
-Подробнее: [`docs/architecture.md`](docs/architecture.md).
+```text
+GUI/application original caller
+→ Hardware1 system bus
+→ per-capability polkit authorization
+→ typed bounded backend
+→ authoritative read-back where the operation can be confirmed
+```
+
+Основные правила:
+
+- GUI не запускается от root и не имеет generic privileged proxy;
+- `sessiond` остаётся read/session boundary и не является mutation deputy;
+- `Unsupported`, `Unavailable`, `PermissionDenied` и `Unknown` не подменяют друг
+  друга;
+- read/write evidence хранится раздельно;
+- `ApplyResult::Accepted` не считается `Applied`;
+- model-name tables не заменяют runtime probes;
+- device-specific/live claims всегда revision-scoped.
+
+Подробнее: [`docs/architecture.md`](docs/architecture.md) и ADRs в
+[`docs/adr/`](docs/adr/).
 
 ## Workspace
 
-Основные crates: `orbis-core`, `orbis-config`, `orbis-capabilities`,
-`orbis-providers`, `orbis-application`, `orbis-session-protocol`,
-`orbis-session-client`, `orbis-sessiond`, `orbis-ui`, `orbis-cli` и
-`orbis-test-support`.
+Основные crates:
+
+- `orbis-core` — domain model и invariants;
+- `orbis-config` — XDG preferences/state foundations;
+- `orbis-capabilities` — capability registry/evidence;
+- `orbis-providers` — typed platform/provider implementations;
+- `orbis-application` — application services/commands/diagnostics collector;
+- `orbis-session-protocol`, `orbis-session-client`, `orbis-sessiond` — read/session D-Bus path;
+- `orbis-hardwared` — narrow privileged Hardware1 service;
+- `orbis-ui` — Slint GUI + worker/composition;
+- `orbis-cli` — CLI crate (currently incomplete);
+- `orbis-test-support` — test/demo fixtures.
 
 ## Development
+
+Rust toolchain: **1.87**.
 
 Dev environment:
 
@@ -77,11 +113,15 @@ nix flake check
 nix build .#orbis-control
 ```
 
+Не используйте наличие UI control, provider object или файла в sysfs как
+доказательство write support. Для release/evidence правил см.
+[`docs/release-evidence-taxonomy.md`](docs/release-evidence-taxonomy.md).
+
 ## Документация
 
-Начните с [`docs/README.md`](docs/README.md): там определены source-of-truth
-hierarchy и роли current/historical документов. План развития —
-[`docs/roadmap.md`](docs/roadmap.md).
+Начните с [`docs/README.md`](docs/README.md): там определены роли current,
+architecture, ADR и historical документов. Operational source of truth —
+[`docs/current-state.md`](docs/current-state.md).
 
 ## Лицензия
 
