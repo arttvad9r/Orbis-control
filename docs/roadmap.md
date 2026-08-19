@@ -21,9 +21,11 @@
 - production hardening объединён с `main`;
 - Rust toolchain приведён к 1.87;
 - startup resilience для Battery/UPower интегрирован;
-- preferences и window-state foundations интегрированы;
-- diagnostics backend/export stack интегрирован;
+- preferences, window-state и desired-state foundations интегрированы;
+- Desired/Observed/Pending и lifecycle domain foundations интегрированы;
+- diagnostics backend/export/runtime/window-model layers интегрированы;
 - desktop/AppStream packaging и support-matrix tooling интегрированы;
+- historical visual/theme PRs подтверждены как ancestors `main` и закрыты;
 - source-of-truth документация обновлена;
 - одноразовые validation/audit PR закрыты как integrated/superseded.
 
@@ -47,18 +49,22 @@
 
 ## Milestone 2 — Lifecycle and desired state
 
-**Status: PARTIAL**
+**Status: FOUNDATIONS INTEGRATED; reconciliation NOT IMPLEMENTED**
 
 Completed:
 
 - Session1 no longer depends on Battery availability at startup.
 - Independent capabilities remain available when UPower is absent/unready.
+- Desired / Observed / Pending typed state is in `main`.
+- Inert Startup / Resume / BackendRecovered / CapabilityChanged events are in `main`.
+- Generic versioned `desired-state.toml` persistence is in `main` and does not automatically apply anything.
 
 Next:
 
-- reconcile Desired / Observed / Pending foundation (#59) with current `main`;
-- integrate desired-state storage and lifecycle values without automatic application;
-- define startup/resume reconciliation separately and keep authoritative observation primary.
+- define reconciliation policy separately;
+- compare authoritative observed state before proposing any action;
+- preserve `Accepted != Applied` and explicit pending semantics;
+- add integration tests before connecting lifecycle events to execution.
 
 ## Milestone 3 — Preferences and desktop integration
 
@@ -72,11 +78,12 @@ Completed:
 - persisted Start Minimized;
 - redacted config warnings;
 - independent XDG window-state store;
+- XDG autostart backend and Slint user-only toggle contract;
 - desktop/AppStream metadata and Nix installation wiring.
 
 Next:
 
-- resolve XDG Run on Startup conflict (#57) against current preferences/UI baseline;
+- finish the remaining Rust lifecycle glue for Run on Startup (#57);
 - keep automation policy and desired hardware state separate from UI preferences;
 - repeat packaged metadata validation on the final release revision.
 
@@ -86,11 +93,11 @@ Next:
 
 Telemetry provider and worker-owned polling are present in `main`.
 
-Fan support in `main` includes active/profile-specific reads, lossless profile identity and a typed control path. Before calling the feature fully accepted, perform dated live validation and confirm final state against the authoritative backend.
+Fan support in `main` includes active/profile-specific reads, lossless profile identity, the visual editor and typed control/reset paths. Before promoting additional mutation/reset claims on the current revision, perform dated live validation and confirm final state against the authoritative backend.
 
 ## Milestone 5 — Diagnostics and supportability
 
-**Status: TESTED backend/export; UI integration PARTIAL**
+**Status: TESTED foundations; lifecycle wiring PARTIAL**
 
 Integrated in `main`:
 
@@ -100,11 +107,14 @@ Integrated in `main`:
 - application collector;
 - UI DTO;
 - allowlisted versioned text/JSON exporters;
-- end-to-end pure-data regression.
+- end-to-end pure-data regression;
+- read-only production DiagnosticsRuntime;
+- pure DiagnosticsWindowModel;
+- typed read-only DiagnosticsWindow Slint surface.
 
 Next:
 
-- resolve Diagnostics window wiring conflict (#101) against current `main.rs`/UI;
+- finish Diagnostics window open/refresh lifecycle glue in current `main.rs` (#101);
 - keep export collection strictly allowlisted and privacy-bounded.
 
 ## Milestone 6 — GPU product policy
@@ -134,10 +144,6 @@ Remaining:
 - replace the `orbisctl` stub with a real read/diagnostic CLI;
 - obtain a green executable CI run on final `main`;
 - perform final package/metadata acceptance on the release revision.
-
-## Deferred UI stack
-
-PRs #2/#3/#4 remain outside `main`. Their root slice still requires the validation explicitly recorded in that PR before the visual descendants should be considered for integration.
 
 ## Release gate
 
