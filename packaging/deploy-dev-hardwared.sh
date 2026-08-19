@@ -23,7 +23,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# ─── Пути ───────────────────────────────────────────────────────────
 STABLE_BIN="/usr/local/bin"
 SYSTEMD_DIR="/etc/systemd/system"
 SERVICE_NAME="orbis-hardwared"
@@ -31,7 +30,6 @@ SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 GC_ROOT="/nix/var/nix/gcroots/orbis-hardwared"
 POLKIT_POLICY="/etc/polkit-1/actions/io.github.orbiscontrol.hardware.policy"
 
-# ─── Preconditions ──────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
   echo "ERROR: запустите через sudo: sudo bash $0 $*"
   exit 1
@@ -57,9 +55,6 @@ if [[ "${1:-}" == "--stop" ]]; then
 fi
 
 # ─── BUILD ─────────────────────────────────────────────────────────
-# Собираем узкий пакет orbis-hardwared (только daemon, без GUI/Slint).
-# --print-out-paths пишет store path в stdout; --no-link не оставляет
-# root-owned ./result в рабочем дереве. stderr оставляем на терминале.
 echo "→ [BUILD] Собираем orbis-hardwared через nix build…"
 cd "$PROJECT_ROOT"
 
@@ -88,7 +83,7 @@ if [[ ! -d "$BUILD_PATH" ]]; then
 fi
 echo "✓ [BUILD] Пакет: $BUILD_PATH"
 
-# ─── DIRECTORY PREP ──────────────────────────────────────────────────
+# ─── DIRECTORY PREP ─────────────────────────────────────────────────
 echo "→ [DIR] Создаём целевые директории…"
 install -d -m 0755 "${STABLE_BIN}"
 install -d -m 0755 "${SYSTEMD_DIR}"
@@ -104,7 +99,7 @@ else
   echo "✓ GC root создан: $GC_ROOT"
 fi
 
-# ─── INSTALL BINARY ────────────────────────────────────────────────
+# ─── INSTALL BINARY ─────────────────────────────────────────────────
 echo "→ [INSTALL] Устанавливаем бинарник…"
 install -m 0755 "$BUILD_PATH/bin/orbis-hardwared" "${STABLE_BIN}/orbis-hardwared"
 echo "✓ ${STABLE_BIN}/orbis-hardwared"
@@ -128,16 +123,22 @@ busctl list 2>/dev/null | grep -q "io.github.orbiscontrol.Hardware" && \
   echo "✓ D-Bus name registered" || echo "✗ D-Bus name NOT found"
 
 READ_WRITE_PATHS="$(systemctl show "${SERVICE_NAME}.service" -p ReadWritePaths --value)"
-for expected_path in \
-  "/sys/firmware/acpi/platform_profile" \
-  "/sys/class/leds/asus::kbd_backlight/brightness"; do
-  if grep -Fq "$expected_path" <<<"$READ_WRITE_PATHS"; then
-    echo "✓ Sandbox write path: $expected_path"
-  else
-    echo "✗ Sandbox missing expected write path: $expected_path" >&2
-    exit 1
-  fi
-done
+PERFORMANCE_PATH="/sys/firmware/acpi/platform_profile"
+KEYBOARD_PATH="/sys/class/leds/asus::kbd_backlight/brightness"
+
+if grep -Fq "$PERFORMANCE_PATH" <<<"$READ_WRITE_PATHS"; then
+  echo "✓ Sandbox write path: $PERFORMANCE_PATH"
+else
+  echo "✗ Sandbox missing expected write path: $PERFORMANCE_PATH" >&2
+  exit 1
+fi
+
+if grep -Fq "$KEYBOARD_PATH" <<<"$READ_WRITE_PATHS"; then
+  echo "✗ Sandbox unexpectedly exposes blocked keyboard write path: $KEYBOARD_PATH" >&2
+  exit 1
+else
+  echo "✓ Blocked keyboard write path absent"
+fi
 
 echo ""
 echo "✓ Deploy завершён."
