@@ -1,9 +1,13 @@
 //! Хранилище конфигурации: TOML, атомарная запись, миграции, резервные копии.
 
-use std::fs;
-use std::io;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -12,6 +16,8 @@ use orbis_core::profile::PerformanceProfile;
 
 use crate::CONFIG_VERSION;
 use crate::paths;
+
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Ошибки конфигурации.
 #[derive(Debug, Error)]
@@ -181,7 +187,7 @@ impl AppConfig {
     }
 }
 
-/// Загрузить конфиг из каталога; при отсутствии — дефолт.
+/// Загрузить конфиг из каталога; при отсутствии — инертный дефолт.
 pub fn load_from_dir(dir: &Path) -> Result<AppConfig, ConfigError> {
     let file = dir.join(paths::CONFIG_FILE);
     if !file.exists() {
@@ -191,7 +197,9 @@ pub fn load_from_dir(dir: &Path) -> Result<AppConfig, ConfigError> {
     from_toml_with_migration(&text)
 }
 
-/// Загрузить конфиг из стандартного XDG-каталога.
+/// Загрузить legacy-конфиг из стандартного XDG-каталога.
+///
+/// Этот compatibility API не является источником автоматического desired state.
 pub fn load_or_default() -> Result<AppConfig, ConfigError> {
     load_from_dir(&crate::config_dir())
 }
@@ -215,15 +223,95 @@ fn migrate(cfg: &mut AppConfig) -> Result<(), ConfigError> {
     }
 }
 
-/// Атомарная запись: temp-файл + rename.
+fn unique_temp_path(dir: &Path) -> PathBuf {
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    dir.join(format!(
+        ".{}.tmp.{}.{}.{}",
+        paths::CONFIG_FILE,
+        std::process::id(),
+        nanos,
+        sequence
+    ))
+}
+
+fn create_unique_temp(dir: &Path) -> Result<(File, PathBuf), ConfigError> {
+    for _ in 0..64 {
+        let path = unique_temp_path(dir);
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        match options.open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "unable to allocate a unique legacy config temporary file",
+    )
+    .into())
+}
+
+fn sync_parent_directory(dir: &Path) -> Result<(), ConfigError> {
+    File::open(dir)?.sync_all()?;
+    Ok(())
+}
+
+/// Durable atomic write: serialize first, create an exclusive same-directory
+/// temporary file, preserve existing regular-file permissions, fsync temp,
+/// rename, then fsync the parent directory.
 pub fn save_to_dir(cfg: &AppConfig, dir: &Path) -> Result<PathBuf, ConfigError> {
     cfg.validate()?;
-    fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!("{}.tmp", paths::CONFIG_FILE));
     let text = toml::to_string_pretty(cfg)?;
-    fs::write(&tmp, text)?;
+    fs::create_dir_all(dir)?;
+
     let final_path = dir.join(paths::CONFIG_FILE);
-    fs::rename(&tmp, &final_path)?;
+    let existing_permissions = match fs::symlink_metadata(&final_path) {
+        Ok(metadata) if metadata.file_type().is_file() => Some(metadata.permissions()),
+        Ok(_) => None,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+
+    let (mut temp, temp_path) = create_unique_temp(dir)?;
+    if let Some(permissions) = existing_permissions {
+        if let Err(error) = temp.set_permissions(permissions) {
+            drop(temp);
+            let _ = fs::remove_file(&temp_path);
+            return Err(error.into());
+        }
+    }
+
+    if let Err(error) = temp.write_all(text.as_bytes()) {
+        drop(temp);
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.into());
+    }
+    if let Err(error) = temp.flush() {
+        drop(temp);
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.into());
+    }
+    if let Err(error) = temp.sync_all() {
+        drop(temp);
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.into());
+    }
+    drop(temp);
+
+    if let Err(error) = fs::rename(&temp_path, &final_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.into());
+    }
+
+    sync_parent_directory(dir)?;
     Ok(final_path)
 }
 
@@ -233,8 +321,8 @@ pub fn backup_before_migration(dir: &Path) -> Result<Option<PathBuf>, ConfigErro
     if !src.exists() {
         return Ok(None);
     }
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let dst = dir.join(format!("{}.bak-{}", paths::CONFIG_FILE, stamp));
@@ -245,6 +333,7 @@ pub fn backup_before_migration(dir: &Path) -> Result<Option<PathBuf>, ConfigErro
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn temp_test_env() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")
     }
@@ -270,15 +359,34 @@ mod tests {
     }
 
     #[test]
-    fn save_load_atomic() {
+    fn save_load_atomic_and_cleans_temp() {
         let td = temp_test_env();
         let dir = td.path().join("cfg");
         let cfg = AppConfig::default();
         save_to_dir(&cfg, &dir).unwrap();
         let loaded = load_from_dir(&dir).unwrap();
         assert_eq!(loaded, cfg);
-        // temp-файл не должен остаться
-        assert!(!dir.join(format!("{}.tmp", paths::CONFIG_FILE)).exists());
+        let leftovers = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp."))
+            .count();
+        assert_eq!(leftovers, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_file_is_private_and_existing_permissions_are_preserved() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let td = temp_test_env();
+        let dir = td.path().join("cfg");
+        let final_path = save_to_dir(&AppConfig::default(), &dir).unwrap();
+        assert_eq!(fs::metadata(&final_path).unwrap().permissions().mode() & 0o777, 0o600);
+
+        fs::set_permissions(&final_path, fs::Permissions::from_mode(0o640)).unwrap();
+        save_to_dir(&AppConfig::default(), &dir).unwrap();
+        assert_eq!(fs::metadata(&final_path).unwrap().permissions().mode() & 0o777, 0o640);
     }
 
     #[test]
@@ -367,7 +475,7 @@ mod tests {
 
     #[test]
     fn never_writes_user_home() {
-        // unit-тесты не пишут в реальный XDG: только temp
+        // unit-тесты не пишут в real XDG: only explicit temp paths.
         let td = temp_test_env();
         let dir = td.path().join("iso");
         save_to_dir(&AppConfig::default(), &dir).unwrap();
