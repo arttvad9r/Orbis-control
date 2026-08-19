@@ -3639,6 +3639,7 @@ dependencies = [
  "image",
  "orbis-application",
  "orbis-capabilities",
+ "orbis-config",
  "orbis-core",
  "orbis-providers",
  "orbis-session-client",
