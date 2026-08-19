@@ -26,5 +26,20 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check flake
+      - name: Evaluate flake
+        run: nix flake check --no-build --print-build-logs
+
+      - name: Build Rust workspace check
+        run: nix build .#checks.x86_64-linux.default --print-build-logs
+
+      - name: Build hardwared lifecycle VM check
+        run: nix build .#checks.x86_64-linux.hardwared-lifecycle --print-build-logs
+
+      - name: Build Performance mutation VM check
+        run: nix build .#checks.x86_64-linux.performance-mutation-vm --print-build-logs
+
+      - name: Build Battery mutation VM check
+        run: nix build .#checks.x86_64-linux.battery-mutation-vm --print-build-logs
+
+      - name: Check full flake
         run: nix flake check --print-build-logs
