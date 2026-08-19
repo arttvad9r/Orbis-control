@@ -49,27 +49,22 @@
             rustc
             rustfmt
             clippy
-            # Language servers для editor/OpenCode LSP интеграции
             rust-analyzer
             slint-lsp
             pkg-config
-            # D-Bus для integration-тестов (временная шина); dbus-daemon входит в pkgs.dbus
             dbus
-            # Инструменты проверки
             cargo-deny
             cargo-audit
             cargo-machete
-            # Шрифт для screenshot-тестов в CI
             dejavu_fonts
           ];
-          # Окружение для headless-рендера Slint (MockRenderingBackend) и тестов
           QT_XKB_CONFIG_ROOT = "${pkgs.xkeyboard_config}/share/X11/xkb";
           XDG_DATA_DIRS = "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}";
         };
 
         # nix flake check
-        # Переиспользует offline Cargo dependency machinery package
-        # derivation (cargoLock vendoring) и реально выполняет fmt/clippy/test.
+        # Reuses the package derivation's cargoLock vendoring and also requires
+        # every Cargo command to accept the committed lockfile unchanged.
         checks.default = orbis-control.overrideAttrs (old: {
           pname = "orbis-control-flake-check";
           nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
@@ -80,9 +75,9 @@
             export XDG_CACHE_HOME=$TMPDIR/cache
             export XDG_DATA_HOME=$TMPDIR/data
             export XDG_CONFIG_HOME=$TMPDIR/config
-            cargo fmt --check
-            cargo clippy --workspace --all-targets -- -D warnings
-            cargo test --workspace
+            cargo fmt --all -- --check
+            cargo clippy --locked --workspace --all-targets -- -D warnings
+            cargo test --locked --workspace
           '';
           installPhase = ''
             mkdir -p $out
