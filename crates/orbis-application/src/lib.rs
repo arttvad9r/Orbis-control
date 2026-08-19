@@ -15,6 +15,8 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod diagnostics;
+
 use std::sync::Arc;
 
 use orbis_core::action::{ActionRequirement, ApplyResult};
