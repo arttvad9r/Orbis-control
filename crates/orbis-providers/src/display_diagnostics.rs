@@ -53,7 +53,9 @@ mod tests {
 
     #[test]
     fn successful_empty_snapshot_is_still_a_successful_observation() {
-        let snapshot = DisplayOutputSnapshot { outputs: Vec::new() };
+        let snapshot = DisplayOutputSnapshot {
+            outputs: Vec::new(),
+        };
         assert_eq!(
             observation_from_result(Ok(snapshot.clone())),
             DiagnosticObservation::Value(snapshot)
@@ -101,7 +103,9 @@ mod tests {
     #[test]
     fn caller_owned_timestamp_can_remain_absent() {
         let diagnostics = DisplayDiagnostics {
-            outputs: observation_from_result(Ok(DisplayOutputSnapshot { outputs: Vec::new() })),
+            outputs: observation_from_result(Ok(DisplayOutputSnapshot {
+                outputs: Vec::new(),
+            })),
             checked_at: None,
         };
         assert!(diagnostics.checked_at.is_none());
@@ -111,7 +115,9 @@ mod tests {
     fn caller_owned_timestamp_is_preserved_exactly() {
         let checked_at = SystemTime::UNIX_EPOCH + Duration::from_secs(42);
         let diagnostics = DisplayDiagnostics {
-            outputs: observation_from_result(Ok(DisplayOutputSnapshot { outputs: Vec::new() })),
+            outputs: observation_from_result(Ok(DisplayOutputSnapshot {
+                outputs: Vec::new(),
+            })),
             checked_at: Some(checked_at),
         };
         assert_eq!(diagnostics.checked_at, Some(checked_at));
