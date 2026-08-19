@@ -1,0 +1,39 @@
+name: Support matrix tooling validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/support-matrix-tooling-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact implementation
+        uses: actions/checkout@v5
+        with:
+          ref: agent/support-matrix-tooling
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate fixtures and rejection path
+        run: |
+          set -euo pipefail
+          bash scripts/validate-support-matrix.sh
+          python3 -c 'import json; p="docs/support-matrix.examples/unknown.json"; d=json.load(open(p)); d["models"][0]["capabilities"][0]["read"]["status"]="fake_supported"; json.dump(d, open("/tmp/invalid-support-matrix.json","w"))'
+          ! bash scripts/validate-support-matrix.sh /tmp/invalid-support-matrix.json
+
+      - name: Verify exact scope
+        run: |
+          set -euo pipefail
+          git diff --check agent/support-matrix-schema..HEAD
+          git diff --name-only agent/support-matrix-schema..HEAD | sort > /tmp/changed.txt
+          printf '%s\n' docs/support-matrix.examples/empty.json docs/support-matrix.examples/unknown.json scripts/validate-support-matrix.sh | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
