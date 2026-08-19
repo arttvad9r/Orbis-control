@@ -36,24 +36,26 @@ jobs:
           path = Path('crates/orbis-config/src/preferences.rs')
           text = path.read_text()
 
-          old = '''use std::io::{self, Write};
-          use std::path::{Path, PathBuf};
-          use std::sync::atomic::{AtomicU64, Ordering};'''
-          new = '''use std::io::{self, Write};
-          #[cfg(unix)]
-          use std::os::unix::fs::OpenOptionsExt;
-          use std::path::{Path, PathBuf};
-          use std::sync::atomic::{AtomicU64, Ordering};'''
-          assert old in text
-          text = text.replace(old, new, 1)
+          import_anchor = 'use std::io::{self, Write};\n'
+          assert text.count(import_anchor) == 1
+          text = text.replace(
+              import_anchor,
+              import_anchor + '#[cfg(unix)]\nuse std::os::unix::fs::OpenOptionsExt;\n',
+              1,
+          )
 
-          old = '''    fs::create_dir_all(dir)
-              .map_err(|source| io_failure("create preferences directory", dir.to_path_buf(), source))?;
+          save_start = text.index('pub fn save_preferences_to_dir(')
+          save_end = text.index('\nfn default_load', save_start)
+          save_function = r'''pub fn save_preferences_to_dir(
+              config: &PreferencesConfig,
+              dir: &Path,
+          ) -> Result<PathBuf, PreferencesError> {
+              config.validate()?;
+              let text = toml::to_string_pretty(config)?;
 
-              let (mut temp, temp_path) = create_unique_temp(dir)?;
-          '''
-          new = '''    fs::create_dir_all(dir)
-              .map_err(|source| io_failure("create preferences directory", dir.to_path_buf(), source))?;
+              fs::create_dir_all(dir).map_err(|source| {
+                  io_failure("create preferences directory", dir.to_path_buf(), source)
+              })?;
 
               let final_path = dir.join(PREFERENCES_FILE);
               let existing_permissions = match fs::symlink_metadata(&final_path) {
@@ -81,32 +83,37 @@ jobs:
                       ));
                   }
               }
-          '''
-          assert old in text
-          text = text.replace(old, new, 1)
 
-          old = '''    let final_path = dir.join(PREFERENCES_FILE);
-              if let Err(source) = fs::rename(&temp_path, &final_path) {
-          '''
-          new = '''    if let Err(source) = fs::rename(&temp_path, &final_path) {
-          '''
-          assert old in text
-          text = text.replace(old, new, 1)
-
-          old = '''    if let Err(source) = fs::rename(&temp_path, &final_path) {
+              if let Err(source) = temp.write_all(text.as_bytes()) {
+                  drop(temp);
                   let _ = fs::remove_file(&temp_path);
                   return Err(io_failure(
-                      "rename preferences temporary file",
-                      final_path,
+                      "write preferences temporary file",
+                      temp_path,
                       source,
                   ));
               }
+              if let Err(source) = temp.flush() {
+                  drop(temp);
+                  let _ = fs::remove_file(&temp_path);
+                  return Err(io_failure(
+                      "flush preferences temporary file",
+                      temp_path,
+                      source,
+                  ));
+              }
+              if let Err(source) = temp.sync_all() {
+                  drop(temp);
+                  let _ = fs::remove_file(&temp_path);
+                  return Err(io_failure(
+                      "sync preferences temporary file",
+                      temp_path,
+                      source,
+                  ));
+              }
+              drop(temp);
 
-              Ok(final_path)
-          }
-
-          fn default_load'''
-          new = '''    if let Err(source) = fs::rename(&temp_path, &final_path) {
+              if let Err(source) = fs::rename(&temp_path, &final_path) {
                   let _ = fs::remove_file(&temp_path);
                   return Err(io_failure(
                       "rename preferences temporary file",
@@ -135,33 +142,41 @@ jobs:
                   )
               })
           }
-
-          fn default_load'''
-          assert old in text
-          text = text.replace(old, new, 1)
-
-          old = '''        let path = unique_temp_path(dir);
-                  match OpenOptions::new().write(true).create_new(true).open(&path) {
           '''
-          new = '''        let path = unique_temp_path(dir);
+          text = text[:save_start] + save_function + text[save_end:]
+
+          temp_start = text.index('fn create_unique_temp(')
+          temp_end = text.index('\nfn unique_temp_path', temp_start)
+          temp_function = r'''fn create_unique_temp(dir: &Path) -> Result<(File, PathBuf), PreferencesError> {
+              for _ in 0..64 {
+                  let path = unique_temp_path(dir);
                   let mut options = OpenOptions::new();
                   options.write(true).create_new(true);
                   #[cfg(unix)]
                   options.mode(0o600);
                   match options.open(&path) {
+                      Ok(file) => return Ok((file, path)),
+                      Err(source) if source.kind() == io::ErrorKind::AlreadyExists => continue,
+                      Err(source) => {
+                          return Err(io_failure(
+                              "create preferences temporary file",
+                              path,
+                              source,
+                          ));
+                      }
+                  }
+              }
+
+              Err(PreferencesError::TempFileExhausted {
+                  dir: dir.to_path_buf(),
+              })
+          }
           '''
-          assert old in text
-          text = text.replace(old, new, 1)
+          text = text[:temp_start] + temp_function + text[temp_end:]
 
-          old = '''        assert!(leftovers.is_empty());
-              }
-
-              #[test]
-              fn legacy_safe_fields_import_with_close_mapping()'''
-          new = '''        assert!(leftovers.is_empty());
-              }
-
-              #[cfg(unix)]
+          test_anchor = '''    #[test]\n    fn legacy_safe_fields_import_with_close_mapping()'''
+          assert text.count(test_anchor) == 1
+          permission_tests = r'''    #[cfg(unix)]
               #[test]
               fn new_preferences_file_is_owner_only() {
                   use std::os::unix::fs::PermissionsExt;
@@ -192,11 +207,8 @@ jobs:
                   assert_eq!(mode, 0o640);
               }
 
-              #[test]
-              fn legacy_safe_fields_import_with_close_mapping()'''
-          assert old in text
-          text = text.replace(old, new, 1)
-
+          '''
+          text = text.replace(test_anchor, permission_tests + test_anchor, 1)
           path.write_text(text)
           PY
 
