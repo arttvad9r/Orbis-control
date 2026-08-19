@@ -1,0 +1,42 @@
+name: Rust 1.87 toolchain validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/rust-187-toolchain-compat-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact implementation
+        uses: actions/checkout@v5
+        with:
+          ref: agent/rust-187-toolchain-compat
+          fetch-depth: 0
+
+      - name: Verify pinned compiler and exact scope
+        run: |
+          set -euo pipefail
+          rustc --version
+          rustc --version | grep '^rustc 1\.87\.'
+          git diff --check f0d610a04a8ff16501a02389568c7a4aee62aac8..HEAD
+          git diff --name-only f0d610a04a8ff16501a02389568c7a4aee62aac8..HEAD | sort > /tmp/changed.txt
+          printf '%s\n' Cargo.toml crates/orbis-ui/Cargo.toml rust-toolchain.toml | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
+          git diff --exit-code f0d610a04a8ff16501a02389568c7a4aee62aac8..HEAD -- Cargo.lock
+
+      - name: Inspect locked fontdue path
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --no-deps --format-version 1 >/dev/null
+          cargo tree --locked -p orbis-ui -i fontdue@0.9.4
+
+      - name: Validate locked UI graph on Rust 1.87
+        run: |
+          set -euo pipefail
+          cargo check --locked -p orbis-ui --all-targets
+          cargo clippy --locked -p orbis-ui --all-targets -- -D warnings
