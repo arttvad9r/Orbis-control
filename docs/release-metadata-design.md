@@ -1,100 +1,102 @@
-# Orbis Control release metadata design
+# Orbis Control release metadata contract
 
-Scope: backlog item #80. This is a design/packaging contract only; it does not modify `package.nix` or `module.nix`.
+> Роль: **CURRENT PACKAGING DESIGN**. Фактический package/release status — в
+> [`current-state.md`](current-state.md). Обновлено: 2026-08-19.
 
 ## Canonical application identity
 
-Use one reverse-DNS desktop/application identifier everywhere:
+Use one reverse-DNS identity everywhere:
 
-- application ID: `io.github.orbiscontrol.Orbis`
-- desktop file ID: `io.github.orbiscontrol.Orbis.desktop`
-- AppStream component ID: `io.github.orbiscontrol.Orbis`
-- icon name: `io.github.orbiscontrol.Orbis`
-- executable: `orbis-control`
+- application/component ID: `io.github.orbiscontrol.Orbis`;
+- desktop file: `io.github.orbiscontrol.Orbis.desktop`;
+- executable: `orbis-control`;
+- XDG autostart owned filename: `io.github.orbiscontrol.Orbis.desktop`.
 
-This matches the already implemented user-autostart filename and avoids introducing a second launcher identity.
+Current canonical repository/homepage is
+`https://github.com/arttvad9r/Orbis-control`.
 
-## Desktop entry
+## Current packaged desktop entry
 
-Install as:
+Installed path:
 
-`$out/share/applications/io.github.orbiscontrol.Orbis.desktop`
-
-Required/selected fields:
-
-```ini
-[Desktop Entry]
-Type=Application
-Name=Orbis Control
-GenericName=ASUS Laptop Control Center
-Comment=Monitor and control supported ASUS laptop features on Linux
-Exec=orbis-control
-Icon=io.github.orbiscontrol.Orbis
-Terminal=false
-Categories=Settings;HardwareSettings;
-Keywords=ASUS;laptop;hardware;performance;battery;fans;GPU;
+```text
+$out/share/applications/io.github.orbiscontrol.Orbis.desktop
 ```
 
-Rules:
+Current source intentionally uses:
 
-- Keep `Exec` argument-free until there is a stable documented launcher CLI contract.
-- Do not set `DBusActivatable=true`: the GUI does not currently expose a matching application-activation D-Bus contract.
-- Do not set `StartupNotify` or `StartupWMClass` until the actual Slint/winit behavior is verified.
-- Do not set `PrefersNonDefaultGPU=true`; a control/monitoring application must not request the dGPU and accidentally defeat power-saving behavior.
-- Do not use the reserved `TrayIcon` category merely because future tray integration may exist.
-- Do not add `SingleMainWindow=true`; Orbis owns additional native windows.
+- `Type=Application`;
+- `Name=Orbis Control`;
+- `GenericName=ASUS Laptop Control Center`;
+- capability-driven comment/keywords;
+- `TryExec=orbis-control` and `Exec=orbis-control`;
+- `Terminal=false`;
+- `Settings;HardwareSettings;` categories.
 
-## AppStream metadata
+It intentionally does **not** claim:
 
-Prepare:
+- `DBusActivatable=true` — no application-activation contract exists;
+- `PrefersNonDefaultGPU=true` — Orbis must not wake/request the dGPU merely to launch;
+- `StartupWMClass` / `StartupNotify` without verified Slint/winit behavior;
+- an application icon that is not actually packaged.
 
-`$out/share/metainfo/io.github.orbiscontrol.Orbis.metainfo.xml`
+A future icon must use one project-owned name (recommended
+`io.github.orbiscontrol.Orbis`), be installed into the hicolor hierarchy and be
+validated before adding `Icon=` to the desktop entry. Do not use ASUS branding in
+a way that implies affiliation.
 
-Minimum product metadata should include:
+## Current packaged AppStream metadata
+
+Installed path:
+
+```text
+$out/share/metainfo/io.github.orbiscontrol.Orbis.metainfo.xml
+```
+
+Current metadata uses:
 
 - component type `desktop-application`;
 - component ID `io.github.orbiscontrol.Orbis`;
-- name `Orbis Control`;
-- concise summary;
-- metadata license suitable for redistribution;
 - project license `GPL-3.0-or-later`;
-- `<launchable type="desktop-id">io.github.orbiscontrol.Orbis.desktop</launchable>`;
-- project homepage/source URL only when the canonical public repository URL is settled;
-- categories consistent with the desktop entry;
-- developer/project name;
-- content rating declaration when release tooling requires it;
-- release entries only for actual released versions/dates;
-- screenshots only from real packaged UI artifacts, never mock/live-hardware claims disguised as release evidence.
+- matching desktop launchable ID;
+- capability-driven description rather than universal ASUS support claims;
+- canonical homepage URL.
 
-Do not describe unsupported ASUS features as universally available. Product description must remain capability-driven and model-agnostic.
+Do not add release entries for unreleased versions/dates. Screenshots must come
+from real packaged UI artifacts and must not imply hardware support that the
+current capability/evidence state does not establish.
 
-## Icons
+## Nix packaging state
 
-Use the same icon name `io.github.orbiscontrol.Orbis` for all sizes. Preferred source is a scalable SVG plus rendered PNG sizes only if packaging/desktop tooling requires them.
+`packaging/nix/package.nix` currently includes `data/**` in its source filter and
+installs both desktop and AppStream files during `postInstall`. It also installs
+the Hardware1 D-Bus policy and per-capability polkit policy.
 
-Target install locations:
-
-- `share/icons/hicolor/scalable/apps/io.github.orbiscontrol.Orbis.svg`
-- optional raster variants under `share/icons/hicolor/<size>x<size>/apps/`.
-
-The icon must not use ASUS trademarks/logos in a way that implies affiliation. Orbis Control is an independent project.
+This means metadata source files are not merely design assets: they are part of
+the current package. Any metadata change therefore requires package-level
+validation when executable CI is available.
 
 ## Validation contract
 
-Before packaging integration is considered complete:
+Before release metadata is accepted on a release revision:
 
-1. validate desktop file syntax with `desktop-file-validate`;
-2. validate AppStream metadata with `appstreamcli validate --pedantic` (or the repository's pinned equivalent);
-3. verify desktop ID and AppStream launchable match exactly;
-4. verify `Exec=orbis-control` resolves inside the built package;
-5. verify the named icon resolves through the hicolor icon theme;
-6. run a packaged launcher smoke test without root and without hardware writes;
-7. keep packaged/runtime evidence separate from live-hardware evidence.
+1. validate desktop syntax with `desktop-file-validate`;
+2. validate AppStream metadata with `appstreamcli validate --pedantic` or the repository's pinned equivalent;
+3. verify AppStream launchable ID exactly matches the installed desktop filename;
+4. verify `TryExec`/`Exec=orbis-control` resolves inside the built package;
+5. if an icon is added, verify the named hicolor asset resolves in the built package;
+6. launch the packaged GUI as a normal user without hardware writes;
+7. verify package output actually contains the desktop/AppStream files;
+8. keep PACKAGED evidence separate from LIVE-VALIDATED hardware evidence.
 
-## Current repository blockers
+Current release acceptance remains blocked by non-executing GitHub Actions
+(#106), so prior targeted packaging checks are historical evidence, not a green
+validation of the latest `main`.
 
-The current Nix package source filter explicitly excludes `data/**`, and `postInstall` installs only the D-Bus system policy and polkit action file. Therefore adding desktop/AppStream/icon source assets alone will not make them appear in the built package.
+## Rules
 
-Backlog item #81 may safely prepare the source assets in a separate branch, but actual installation must wait for a packaging slice that is explicitly allowed to modify `packaging/nix/package.nix`.
-
-No D-Bus activation change is required for desktop integration at this stage.
+- Keep launcher `Exec` argument-free until there is a stable launcher CLI contract.
+- `orbisctl` is not the desktop launcher and remains a separate read-only-first CLI work item (#119).
+- Do not add D-Bus activation merely to improve desktop integration.
+- Do not add product features to metadata until current-state/evidence supports them.
+- Package metadata and workspace/Nix repository URLs must remain consistent with the canonical repository.
