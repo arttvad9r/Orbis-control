@@ -24,6 +24,7 @@ tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 slint = { workspace = true }
 orbis-core = { workspace = true }
+orbis-config = { workspace = true }
 orbis-capabilities = { workspace = true }
 orbis-application = { path = "../orbis-application", version = "0.1.0" }
 # Production read-only Battery backend поверх session D-Bus protocol.

@@ -1053,3 +1053,179 @@ fn main_window_height_no_longer_reserves_fan_editor_space() {
     error.gpu_section_error = true;
     assert_eq!(window_height(&error), 466.0);
 }
+
+#[test]
+fn missing_preferences_initialize_dark_before_first_render() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let light =
+        initialize_runtime_theme_with(|| orbis_config::load_preferences_from_dir(td.path()));
+
+    assert!(!light);
+    assert!(matches!(current_theme_mode(), ThemeMode::Dark));
+}
+
+#[test]
+fn persisted_dark_initializes_dark_before_first_render() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let preferences = orbis_config::PreferencesConfig::default();
+    orbis_config::save_preferences_to_dir(&preferences, td.path()).expect("save dark preferences");
+
+    let light =
+        initialize_runtime_theme_with(|| orbis_config::load_preferences_from_dir(td.path()));
+
+    assert!(!light);
+    assert!(matches!(current_theme_mode(), ThemeMode::Dark));
+}
+
+#[test]
+fn persisted_light_initializes_light_before_first_render() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let mut preferences = orbis_config::PreferencesConfig::default();
+    preferences.appearance.theme = orbis_config::ThemePreference::Light;
+    orbis_config::save_preferences_to_dir(&preferences, td.path()).expect("save light preferences");
+
+    let light =
+        initialize_runtime_theme_with(|| orbis_config::load_preferences_from_dir(td.path()));
+
+    assert!(light);
+    assert!(matches!(current_theme_mode(), ThemeMode::Light));
+}
+
+#[test]
+fn persisted_start_minimized_is_loaded_before_first_render() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let mut preferences = orbis_config::PreferencesConfig::default();
+    preferences.appearance.theme = orbis_config::ThemePreference::Light;
+    preferences.window.start_minimized = true;
+    orbis_config::save_preferences_to_dir(&preferences, td.path())
+        .expect("save start minimized preferences");
+
+    let startup =
+        initialize_runtime_preferences_with(|| orbis_config::load_preferences_from_dir(td.path()));
+
+    assert!(startup.theme_light);
+    assert!(startup.start_minimized);
+    assert!(matches!(current_theme_mode(), ThemeMode::Light));
+}
+
+#[test]
+fn missing_start_minimized_defaults_to_visible_startup() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let startup =
+        initialize_runtime_preferences_with(|| orbis_config::load_preferences_from_dir(td.path()));
+
+    assert!(!startup.start_minimized);
+    assert!(!startup.theme_light);
+    assert!(matches!(current_theme_mode(), ThemeMode::Dark));
+}
+
+#[test]
+fn start_minimized_window_state_is_applied_only_when_enabled() {
+    let calls = Cell::new(0usize);
+    let requested = Cell::new(false);
+    apply_start_minimized(false, |value| {
+        calls.set(calls.get() + 1);
+        requested.set(value);
+    });
+    assert_eq!(calls.get(), 0);
+
+    apply_start_minimized(true, |value| {
+        calls.set(calls.get() + 1);
+        requested.set(value);
+    });
+    assert_eq!(calls.get(), 1);
+    assert!(requested.get());
+}
+
+#[test]
+fn theme_toggle_persists_only_theme_field() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let mut preferences = orbis_config::PreferencesConfig::default();
+    preferences.window.close_action = orbis_config::CloseAction::Ask;
+    preferences.window.start_minimized = true;
+    preferences.window.remember_position = false;
+    orbis_config::save_preferences_to_dir(&preferences, td.path()).expect("save fixture");
+
+    persist_theme_with(
+        true,
+        || orbis_config::load_preferences_from_dir(td.path()),
+        |preferences| orbis_config::save_preferences_to_dir(preferences, td.path()),
+    )
+    .expect("persist light theme");
+
+    let reloaded = orbis_config::load_preferences_from_dir(td.path()).expect("reload preferences");
+    assert_eq!(
+        reloaded.preferences.appearance.theme,
+        orbis_config::ThemePreference::Light
+    );
+    assert_eq!(
+        reloaded.preferences.window.close_action,
+        orbis_config::CloseAction::Ask
+    );
+    assert!(reloaded.preferences.window.start_minimized);
+    assert!(!reloaded.preferences.window.remember_position);
+}
+
+#[test]
+fn all_open_theme_targets_receive_same_runtime_theme() {
+    let targets = [
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+        Cell::new(false),
+    ];
+
+    for target in &targets {
+        apply_theme_if_open(Some(target), true, |target, mode| {
+            target.set(matches!(mode, ThemeMode::Light));
+        });
+    }
+
+    assert!(targets.iter().all(Cell::get));
+}
+
+#[test]
+fn new_window_theme_is_derived_from_current_runtime_theme() {
+    set_current_theme_light(true);
+    assert!(matches!(current_theme_mode(), ThemeMode::Light));
+
+    set_current_theme_light(false);
+    assert!(matches!(current_theme_mode(), ThemeMode::Dark));
+}
+
+#[test]
+fn theme_save_error_preserves_runtime_theme_and_is_diagnosable() {
+    set_current_theme_light(true);
+
+    let result = persist_theme_with(
+        true,
+        || {
+            Ok(orbis_config::PreferencesLoad {
+                preferences: orbis_config::PreferencesConfig::default(),
+                source: orbis_config::PreferencesLoadSource::Defaults,
+                warning: None,
+            })
+        },
+        |_| {
+            Err(orbis_config::PreferencesError::Io {
+                operation: "test theme save",
+                path: std::path::PathBuf::from("/test/preferences.toml"),
+                source: std::io::Error::other("simulated save failure"),
+            })
+        },
+    );
+
+    let error = result.expect_err("save must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("failed to save theme preference")
+    );
+    assert!(current_theme_light());
+    // Theme persistence has no worker/provider input, so this failure path cannot
+    // enqueue a Hardware1/sessiond/hardwared operation.
+}
