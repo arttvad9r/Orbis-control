@@ -27,7 +27,7 @@ mod tests {
     use orbis_core::capability::{CapabilityStatus, FeatureId};
 
     use super::*;
-    use crate::{CapabilityPart, CapabilityRegistryBuilder};
+    use crate::{CapabilityRegistryBuilder, engine::CapabilityPart};
 
     #[test]
     fn preserves_registry_metadata_and_canonical_capabilities_exactly() {
@@ -63,7 +63,8 @@ mod tests {
                 .get(&FeatureId::GpuPower)
                 .unwrap()
                 .reason
-                .as_deref(),
+                .as_ref()
+                .map(|reason| reason.reason.as_str()),
             Some("backend not present")
         );
     }
