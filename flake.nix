@@ -34,7 +34,7 @@
         # nix build .#orbis-hardwared-policies  (D-Bus + polkit only, no binary)
         packages.orbis-hardwared-policies = orbis-hardwared-policies;
 
-        # nix run .#orbis-control -- --mock-device zephyrus-full
+        # nix run .#orbis-control
         apps.default = {
           type = "app";
           program = "${orbis-control}/bin/orbis-control";
