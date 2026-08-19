@@ -14,6 +14,7 @@
 #![warn(missing_docs)]
 
 pub mod asus_armoury;
+pub mod asus_diagnostics;
 pub mod aura;
 pub mod display_diagnostics;
 pub mod error;
@@ -35,6 +36,9 @@ pub mod wayland_output;
 pub mod mock;
 
 pub use asus_armoury::*;
+pub use asus_diagnostics::{
+    probe_asus_diagnostics_capabilities, probe_aura, probe_keyboard_backlight,
+};
 pub use aura::*;
 pub use display_diagnostics::display_diagnostics_snapshot;
 pub use error::{OperationId, ProviderError, ValidationResult};
