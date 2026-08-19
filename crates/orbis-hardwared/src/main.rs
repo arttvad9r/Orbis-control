@@ -1,26 +1,27 @@
 //! # orbis-hardwared — production system-bus service.
 //!
-//! Подключается к system bus, создаёт production [`HardwareService`] (polkit
-//! authorizer + writer с фиксированными kernel paths), регистрирует
-//! `/io/github/orbiscontrol/Hardware`, занимает
+//! Подключается к system bus, создаёт production [`HardwareService`],
+//! регистрирует `/io/github/orbiscontrol/Hardware`, занимает
 //! `io.github.orbiscontrol.Hardware` (readiness для `Type=dbus`) и ждёт
 //! SIGINT/SIGTERM.
 //!
-//! - при startup НИКАКИХ hardware writes;
-//! - Battery mutation включается только при наличии effective threshold reader;
-//! - raw GPU SetMode намеренно отключён до доказанной product-level semantics;
-//! - fan mutation намеренно hard-disabled до исправления известных write/reset contracts;
-//! - reconnect/restart policy принадлежит внешнему supervisor/systemd.
+//! Production mutation policy is intentionally narrower than the set of typed
+//! backend implementations present in this crate:
+//! - Performance is enabled through its validated Hardware1 path;
+//! - Battery is enabled only when effective threshold discovery succeeds;
+//! - GPU/Fan/Panel/Keyboard/Aura mutations are hard-disabled in composition;
+//! - startup performs no hardware writes;
+//! - reconnect/restart policy belongs to systemd.
 
 use std::error::Error;
 
 use async_trait::async_trait;
-use orbis_core::{fan::FanId, profile::AsusdFanProfile};
+use orbis_core::{aura::AuraRgb, fan::FanId, profile::AsusdFanProfile};
 use orbis_hardwared::{
     AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION,
     GPU_POLKIT_ACTION, HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
     PolkitAuthorizer,
-    aura::{AsusdAuraStaticRgbMutationBackend, ZbusAsusdAuraClient},
+    aura::{AuraMutationStatus, AuraStaticRgbMutationBackend, AuraStaticRgbMutationReadback},
     battery::{
         AsusdBatteryMutationBackend, BatteryMutationBackend, BatteryMutationReadback,
         BatteryMutationStatus, ZbusAsusdBatteryClient, discover_effective_reader,
@@ -29,18 +30,23 @@ use orbis_hardwared::{
         FanCurveDefaultsReadback, FanCurveMutationOperation, FanCurveMutationReadback,
         FanCurvePoints, FanMutationStatus,
     },
+    keyboard_backlight::{
+        KeyboardBacklightMutationBackend, KeyboardBacklightMutationReadback,
+        KeyboardBacklightMutationStatus,
+    },
     panel::{
-        AsusdPanelOverdriveMutationBackend, PanelOverdriveMutationBackend,
-        PanelOverdriveMutationReadback, PanelOverdriveMutationStatus,
-        ZbusAsusdPanelOverdriveClient, discover_panel_overdrive_reader,
+        PanelOverdriveMutationBackend, PanelOverdriveMutationReadback, PanelOverdriveMutationStatus,
     },
     supergfxd::{MutationObservation, SupergfxdMutationOperation},
 };
 use orbis_providers::{error::ProviderError, supergfxd::SupergfxdMode};
 
-/// Production guardrail: Hardware1 keeps its stable method surface, but raw
-/// supergfxd SetMode is not a proven product-level Orbis mutation contract yet.
-/// Authorized callers therefore receive NotSupported without touching hardware.
+const PRODUCT_MUTATION_DISABLED: &str =
+    "mutation is disabled until the Orbis product contract and release evidence are proven";
+const FAN_MUTATION_DISABLED: &str =
+    "fan mutation is disabled until enabled-state preservation and factory-reset restoration are fixed";
+
+/// Production guardrail for the raw GPU Hardware1 method.
 struct DisabledGpuMutationBackend;
 
 #[async_trait]
@@ -62,9 +68,6 @@ impl SupergfxdMutationOperation for DisabledGpuMutationBackend {
 /// restoring the previous performance profile. Polkit is also default-deny,
 /// but a local policy override must not be enough to reach those unsafe writes.
 struct DisabledFanMutationBackend;
-
-const FAN_MUTATION_DISABLED: &str =
-    "fan mutation is disabled until enabled-state preservation and factory-reset restoration are fixed";
 
 #[async_trait]
 impl FanCurveMutationOperation for DisabledFanMutationBackend {
@@ -89,10 +92,62 @@ impl FanCurveMutationOperation for DisabledFanMutationBackend {
     }
 }
 
+/// Panel Overdrive typed backend code remains available for validation, but it
+/// is not an enabled production mutation until owner/evidence work is complete.
+struct DisabledPanelOverdriveMutationBackend;
+
+#[async_trait]
+impl PanelOverdriveMutationBackend for DisabledPanelOverdriveMutationBackend {
+    async fn set_panel_overdrive(
+        &self,
+        _enabled: bool,
+    ) -> Result<PanelOverdriveMutationReadback, ProviderError> {
+        Err(ProviderError::Unsupported(PRODUCT_MUTATION_DISABLED.into()))
+    }
+
+    fn mutation_status(&self) -> PanelOverdriveMutationStatus {
+        PanelOverdriveMutationStatus::Unsupported
+    }
+}
+
+/// Keyboard mutation remains code-present for future validation but is not
+/// part of the production write surface. The systemd sandbox also keeps the
+/// brightness path read-only.
+struct DisabledKeyboardBacklightMutationBackend;
+
+#[async_trait]
+impl KeyboardBacklightMutationBackend for DisabledKeyboardBacklightMutationBackend {
+    async fn set_brightness(
+        &self,
+        _level: u8,
+    ) -> Result<KeyboardBacklightMutationReadback, ProviderError> {
+        Err(ProviderError::Unsupported(PRODUCT_MUTATION_DISABLED.into()))
+    }
+
+    fn mutation_status(&self) -> KeyboardBacklightMutationStatus {
+        KeyboardBacklightMutationStatus::Unsupported
+    }
+}
+
+/// Aura Static RGB backend code is intentionally not composed into production
+/// until owner liveness and release evidence are proven.
+struct DisabledAuraStaticRgbMutationBackend;
+
+#[async_trait]
+impl AuraStaticRgbMutationBackend for DisabledAuraStaticRgbMutationBackend {
+    async fn set_static_rgb(
+        &self,
+        _rgb: AuraRgb,
+    ) -> Result<AuraStaticRgbMutationReadback, ProviderError> {
+        Err(ProviderError::Unsupported(PRODUCT_MUTATION_DISABLED.into()))
+    }
+
+    fn mutation_status(&self) -> AuraMutationStatus {
+        AuraMutationStatus::Unsupported
+    }
+}
+
 /// Why Battery mutation was disabled during startup discovery.
-///
-/// Keep this classification separate so a temporary discovery failure never
-/// masquerades as permanent hardware/capability Unsupported.
 enum DisabledBatteryReason {
     Unsupported(String),
     Unavailable(String),
@@ -100,8 +155,8 @@ enum DisabledBatteryReason {
 }
 
 /// Capability-local fallback used when no usable effective battery threshold
-/// source exists. Keeping a typed disabled backend makes `SetChargeLimit` fail
-/// locally without making the entire Hardware1 service unavailable.
+/// source exists. A temporary discovery failure never masquerades as permanent
+/// hardware/capability Unsupported.
 struct DisabledBatteryMutationBackend {
     reason: DisabledBatteryReason,
 }
@@ -154,80 +209,6 @@ impl BatteryMutationBackend for DisabledBatteryMutationBackend {
     }
 }
 
-/// Why Panel Overdrive mutation was disabled during startup discovery.
-///
-/// Keep this classification separate so a temporary discovery failure never
-/// masquerades as permanent hardware/capability Unsupported.
-enum DisabledPanelOverdriveReason {
-    Unsupported(String),
-    Unavailable(String),
-    PermissionDenied(String),
-}
-
-/// Capability-local fallback used when no readable authoritative
-/// `panel_overdrive` attribute exists. Keeping a typed disabled backend makes
-/// `SetPanelOverdrive` fail locally without making the entire Hardware1
-/// service unavailable.
-struct DisabledPanelOverdriveMutationBackend {
-    reason: DisabledPanelOverdriveReason,
-}
-
-impl DisabledPanelOverdriveMutationBackend {
-    fn from_discovery_error(error: ProviderError) -> Self {
-        let reason = match error {
-            ProviderError::Unsupported(message) => {
-                DisabledPanelOverdriveReason::Unsupported(message)
-            }
-            ProviderError::PermissionDenied(message) => {
-                DisabledPanelOverdriveReason::PermissionDenied(message)
-            }
-            ProviderError::Io(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-                DisabledPanelOverdriveReason::PermissionDenied(format!(
-                    "panel_overdrive discovery permission denied: {error}"
-                ))
-            }
-            other => DisabledPanelOverdriveReason::Unavailable(format!(
-                "panel_overdrive discovery failed: {other}"
-            )),
-        };
-        Self { reason }
-    }
-}
-
-#[async_trait]
-impl PanelOverdriveMutationBackend for DisabledPanelOverdriveMutationBackend {
-    async fn set_panel_overdrive(
-        &self,
-        _enabled: bool,
-    ) -> Result<PanelOverdriveMutationReadback, ProviderError> {
-        match &self.reason {
-            DisabledPanelOverdriveReason::Unsupported(message) => {
-                Err(ProviderError::Unsupported(message.clone()))
-            }
-            DisabledPanelOverdriveReason::Unavailable(message) => {
-                Err(ProviderError::BackendUnavailable(message.clone()))
-            }
-            DisabledPanelOverdriveReason::PermissionDenied(message) => {
-                Err(ProviderError::PermissionDenied(message.clone()))
-            }
-        }
-    }
-
-    fn mutation_status(&self) -> PanelOverdriveMutationStatus {
-        match &self.reason {
-            DisabledPanelOverdriveReason::Unsupported(_) => {
-                PanelOverdriveMutationStatus::Unsupported
-            }
-            DisabledPanelOverdriveReason::Unavailable(_) => {
-                PanelOverdriveMutationStatus::TemporarilyUnavailable
-            }
-            DisabledPanelOverdriveReason::PermissionDenied(_) => {
-                PanelOverdriveMutationStatus::PermissionDenied
-            }
-        }
-    }
-}
-
 fn init_tracing() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,orbis_hardwared=info"));
@@ -239,8 +220,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     init_tracing();
     let connection = zbus::connection::Builder::system()?.build().await?;
 
-    // Battery support is capability-local. Failure to discover its effective
-    // kernel read-back must not prevent unrelated Hardware1 capabilities.
+    // Battery remains capability-local. Its typed asusd mutation backend is
+    // composed only when the authoritative effective kernel read-back source
+    // is discoverable; otherwise Hardware1 remains available with typed status.
     let battery_backend: Box<dyn BatteryMutationBackend> = match discover_effective_reader() {
         Ok(effective_reader) => Box::new(AsusdBatteryMutationBackend::new(
             ZbusAsusdBatteryClient::new(connection.clone()),
@@ -255,30 +237,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    // Known fan write/reset correctness bugs are stronger than a policy-level
-    // warning: production Hardware1 never constructs the live asusd fan writer.
-    let fan_backend = DisabledFanMutationBackend;
-
-    // Panel Overdrive support is capability-local. Failure to discover its
-    // authoritative kernel read-back must not prevent unrelated Hardware1
-    // capabilities. Product policy remains default-deny pending owner evidence.
-    let panel_backend: Box<dyn PanelOverdriveMutationBackend> =
-        match discover_panel_overdrive_reader() {
-            Ok(reader) => Box::new(AsusdPanelOverdriveMutationBackend::new(
-                ZbusAsusdPanelOverdriveClient::new(connection.clone()),
-                reader,
-            )),
-            Err(error) => {
-                tracing::warn!(
-                    ?error,
-                    "panel_overdrive attribute unavailable; Panel Overdrive mutation will remain capability-local"
-                );
-                Box::new(DisabledPanelOverdriveMutationBackend::from_discovery_error(
-                    error,
-                ))
-            }
-        };
-
     let service = HardwareService::with_battery_gpu_and_fan_backends(
         Box::new(PolkitAuthorizer::new(connection.clone())),
         battery_backend,
@@ -291,32 +249,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
             connection.clone(),
             GPU_POLKIT_ACTION,
         )),
-        Box::new(fan_backend),
+        Box::new(DisabledFanMutationBackend),
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             FAN_POLKIT_ACTION,
         )),
     )
     .with_panel(
-        panel_backend,
+        Box::new(DisabledPanelOverdriveMutationBackend),
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             PANEL_POLKIT_ACTION,
         )),
     )
     .with_keyboard_backlight(
-        Box::new(
-            orbis_hardwared::keyboard_backlight::SysfsKeyboardBacklightMutationBackend::default(),
-        ),
+        Box::new(DisabledKeyboardBacklightMutationBackend),
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             KEYBOARD_BACKLIGHT_POLKIT_ACTION,
         )),
     )
     .with_aura_static_rgb(
-        Box::new(AsusdAuraStaticRgbMutationBackend::new(
-            ZbusAsusdAuraClient::new(connection.clone()),
-        )),
+        Box::new(DisabledAuraStaticRgbMutationBackend),
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             AURA_POLKIT_ACTION,
@@ -328,8 +282,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .at(DBUS_OBJECT_PATH, service)
         .await?;
 
-    // Readiness для Type=dbus наступает после получения BusName. Если имя уже
-    // занято другим peer-ом — zbus::Error::NameTaken, startup завершится.
     connection.request_name(DBUS_NAME).await?;
 
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
@@ -348,14 +300,36 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn disabled_fan_is_hard_stopped_in_production_composition() {
-        let backend = DisabledFanMutationBackend;
-        assert_eq!(backend.mutation_status().await, FanMutationStatus::Unsupported);
-        let error = backend
-            .reset_curves_to_defaults(AsusdFanProfile::Balanced)
-            .await
-            .expect_err("disabled fan reset must never reach asusd");
-        assert!(matches!(error, ProviderError::Unsupported(_)));
+    async fn unvalidated_product_mutations_are_hard_disabled() {
+        let fan = DisabledFanMutationBackend;
+        assert_eq!(fan.mutation_status().await, FanMutationStatus::Unsupported);
+        assert!(matches!(
+            fan.reset_curves_to_defaults(AsusdFanProfile::Balanced).await,
+            Err(ProviderError::Unsupported(_))
+        ));
+
+        let panel = DisabledPanelOverdriveMutationBackend;
+        assert_eq!(
+            panel.mutation_status(),
+            PanelOverdriveMutationStatus::Unsupported
+        );
+        assert!(matches!(
+            panel.set_panel_overdrive(true).await,
+            Err(ProviderError::Unsupported(_))
+        ));
+
+        let keyboard = DisabledKeyboardBacklightMutationBackend;
+        assert_eq!(
+            keyboard.mutation_status(),
+            KeyboardBacklightMutationStatus::Unsupported
+        );
+        assert!(matches!(
+            keyboard.set_brightness(1).await,
+            Err(ProviderError::Unsupported(_))
+        ));
+
+        let aura = DisabledAuraStaticRgbMutationBackend;
+        assert_eq!(aura.mutation_status(), AuraMutationStatus::Unsupported);
     }
 
     #[tokio::test]
@@ -437,84 +411,28 @@ mod tests {
         assert_eq!(battery_mutation_wire::from_wire(99), None);
     }
 
-    #[tokio::test]
-    async fn disabled_panel_preserves_unsupported_discovery() {
-        let backend = DisabledPanelOverdriveMutationBackend::from_discovery_error(
-            ProviderError::Unsupported("no panel_overdrive ABI".into()),
-        );
-        let error = backend
-            .set_panel_overdrive(true)
-            .await
-            .expect_err("unsupported must remain unsupported");
-        assert!(matches!(error, ProviderError::Unsupported(_)));
-    }
-
-    #[tokio::test]
-    async fn disabled_panel_preserves_permission_failure() {
-        let backend =
-            DisabledPanelOverdriveMutationBackend::from_discovery_error(ProviderError::Io(
-                std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
-            ));
-        let error = backend
-            .set_panel_overdrive(true)
-            .await
-            .expect_err("permission failure must remain distinct");
-        assert!(matches!(error, ProviderError::PermissionDenied(_)));
-    }
-
-    #[tokio::test]
-    async fn disabled_panel_maps_other_discovery_failures_to_unavailable() {
-        let backend = DisabledPanelOverdriveMutationBackend::from_discovery_error(
-            ProviderError::Io(std::io::Error::other("temporary read failure")),
-        );
-        let error = backend
-            .set_panel_overdrive(true)
-            .await
-            .expect_err("temporary failure must remain unavailable");
-        assert!(matches!(error, ProviderError::BackendUnavailable(_)));
-    }
-
     #[test]
-    fn disabled_panel_mutation_status_preserves_typed_reason() {
-        let unsupported = DisabledPanelOverdriveMutationBackend::from_discovery_error(
-            ProviderError::Unsupported("no panel_overdrive ABI".into()),
+    fn product_disabled_status_wire_values_remain_total() {
+        use orbis_hardwared::{
+            aura::aura_mutation_wire, keyboard_backlight::keyboard_backlight_mutation_wire,
+            panel::panel_mutation_wire,
+        };
+
+        assert_eq!(
+            aura_mutation_wire::from_wire(aura_mutation_wire::to_wire(AuraMutationStatus::Unsupported)),
+            Some(AuraMutationStatus::Unsupported)
         );
         assert_eq!(
-            unsupported.mutation_status(),
-            PanelOverdriveMutationStatus::Unsupported
-        );
-
-        let denied =
-            DisabledPanelOverdriveMutationBackend::from_discovery_error(ProviderError::Io(
-                std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
-            ));
-        assert_eq!(
-            denied.mutation_status(),
-            PanelOverdriveMutationStatus::PermissionDenied
-        );
-
-        let unavailable = DisabledPanelOverdriveMutationBackend::from_discovery_error(
-            ProviderError::Io(std::io::Error::other("temporary read failure")),
+            keyboard_backlight_mutation_wire::from_wire(
+                keyboard_backlight_mutation_wire::to_wire(KeyboardBacklightMutationStatus::Unsupported)
+            ),
+            Some(KeyboardBacklightMutationStatus::Unsupported)
         );
         assert_eq!(
-            unavailable.mutation_status(),
-            PanelOverdriveMutationStatus::TemporarilyUnavailable
+            panel_mutation_wire::from_wire(
+                panel_mutation_wire::to_wire(PanelOverdriveMutationStatus::Unsupported)
+            ),
+            Some(PanelOverdriveMutationStatus::Unsupported)
         );
-    }
-
-    #[test]
-    fn panel_mutation_wire_roundtrip_is_total() {
-        use orbis_hardwared::panel::panel_mutation_wire;
-        for status in [
-            PanelOverdriveMutationStatus::Supported,
-            PanelOverdriveMutationStatus::Unsupported,
-            PanelOverdriveMutationStatus::TemporarilyUnavailable,
-            PanelOverdriveMutationStatus::PermissionDenied,
-            PanelOverdriveMutationStatus::Unknown,
-        ] {
-            let wire = panel_mutation_wire::to_wire(status);
-            assert_eq!(panel_mutation_wire::from_wire(wire), Some(status));
-        }
-        assert_eq!(panel_mutation_wire::from_wire(99), None);
     }
 }
