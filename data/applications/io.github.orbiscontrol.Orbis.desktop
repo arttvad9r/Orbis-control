@@ -6,7 +6,6 @@ GenericName=ASUS Laptop Control Center
 Comment=Monitor and control supported ASUS laptop features on Linux
 TryExec=orbis-control
 Exec=orbis-control
-Icon=io.github.orbiscontrol.Orbis
 Terminal=false
 Categories=Settings;HardwareSettings;
 Keywords=ASUS;laptop;hardware;performance;battery;fans;GPU;
