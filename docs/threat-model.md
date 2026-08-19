@@ -1,199 +1,246 @@
 # Threat Model — Orbis Control
 
-> Роль: **CURRENT/FUTURE SECURITY DESIGN**. Меры ниже являются обязательным
-> design baseline, но не все перечисленные компоненты и mitigations реализованы.
-> Фактический статус — в [`current-state.md`](current-state.md).
+> Роль: **CURRENT SECURITY DESIGN**. Документ описывает текущие trust boundaries,
+> реализованные mitigations и отдельно открытые security work items. Фактическая
+> готовность функций — в [`current-state.md`](current-state.md), architecture — в
+> [`architecture.md`](architecture.md).
 >
-> Дата: 2026-08-06 (обновлено 2026-08-17: актуализирован статус hardwared и
-> Hardware1/original-caller model). Статус: baseline; hardwared реализован для
-> Performance и Battery mutation.
-> Методология: STRIDE по компонентам; отдельные модели для user-space (GUI,
-> sessiond) и root-границы (hardwared). Обновляется при добавлении функций.
+> Обновлено: 2026-08-19.
 
 ## 1. Trust boundaries
 
-```
-Trust level 0: пользователь, GUI (orbis-ui)          — недоверенный код не запускается
-Trust level 1: orbis-sessiond (user daemon)           — доверенный, но без привилегий
-Trust level 2: аппаратные сервисы (asusd, UPower,     — системные доверенные сервисы
-               supergfxd, fwupd, logind, ppd)
-Trust level 3: kernel ABI (sysfs, hwmon)              — ядро
-Trust level 4: orbis-hardwared (root helper)          — доверенный, минимальный
-```
+```text
+TL0  user session / orbis-ui
+  │ session D-Bus reads
+  ▼
+TL1  orbis-sessiond (unprivileged user daemon)
+  │ read-only system D-Bus / kernel reads
+  ▼
+TL2  system services: UPower / asusd / supergfxd / logind
+  │
+  └──────────────► kernel ABI / sysfs / hwmon
 
-Границы:
+Separate privileged mutation boundary:
 
-- **TL0 → TL1**: D-Bus session bus, типизированные команды. GUI не имеет
-  аппаратных прав; любой вредоносный код в GUI ограничен правами пользователя.
-- **TL1 → TL2**: D-Bus system bus, read-only для большинства операций; записи
-  только через публичные методы сервисов (asusd и т.п.).
-- **TL1 → TL3**: чтение sysfs/hwmon (read-only). Записи в sysfs напрямую — только
-  через hardwared (TL4) при необходимости root.
-- **TL2/TL3 → TL4**: hardwared принимает только allowlist-команды с polkit.
-
-Interactive privileged mutations идут **напрямую от original application caller
-→ Hardware1 → hardwared → polkit(original system-bus-name) → bounded backend →
-read-back**. `orbis-sessiond` (TL1) не является privileged mutation deputy:
-второй D-Bus hop теряет original caller identity и создаёт confused-deputy risk
-(ADR 0006 amendment).
-
-## 2. Ассеты
-
-| Ассет | Ценность | Владелец |
-|---|---|---|
-| Пользовательский конфиг (TOML) | модификация → вредоносные автоматизации | TL1 |
-| Состояние/логи (XDG_STATE) | утечка персональных данных | TL1 |
-| Аппаратные интерфейсы (sysfs write, D-Bus write) | перегрев, повреждение данных, отказ системы | TL4/TL2 |
-| Пользовательские команды (hotkeys) | RCE от имени пользователя | TL1 |
-| Диагностический отчёт | утечка serial/MAC/путей | TL1 |
-
-## 3. Угрозы по компонентам (STRIDE)
-
-### 3.1 orbis-ui (GUI)
-
-| Угроза | Митигация |
-|---|---|
-| S: спуфинг состояния — GUI верит мок-состоянию | состояние всегда от sessiond; команды типизированы |
-| T: подмена команд через D-Bus | имя `io.github.orbiscontrol.Session` принадлежит sessiond; GUI не принимает команды |
-| I: раскрытие данных через логи GUI | GUI не логирует конфиденциальное |
-| D: DoS — GUI зависает | асинхронный слой, таймауты, отмена устаревших запросов |
-| E: эскалация — GUI запущен от root | жёсткий запрет: отказ запуска при euid==0; GUI без sudo |
-| (доп.) RCE через «пользовательскую команду» | список аргументов, без /bin/sh -c, явный executable, подтверждение; команды из импортированного профиля не выполняются без подтверждения |
-
-Запреты: никакого парсинга shell-вывода, никаких `sudo`, никакого HW I/O в GUI.
-
-### 3.2 orbis-sessiond
-
-| Угроза | Митигация |
-|---|---|
-| T: подделка D-Bus методов от другого процесса пользователя | bus policy: только владелец сессии; проверка sender uid; polkit не нужен для session bus |
-| I: утечка в диагностике | обезличивание (username, hostname, serial, MAC, UUID, домашние пути) |
-| D: DoS аппаратных сервисов частыми записями | cooldown, debounce, отсутствие фонового повторного применения без необходимости; никогда не писать в секунду |
-| E: исполнение произвольного кода через hotkey-команды | whitelist действий; пользовательская команда — с подтверждением, аргументный список |
-| (доп.) конфликт с другим владельцем platform_profile | детект ppd/tuned/asusd; подтверждение владельца; предупреждение в Diagnostics |
-| (доп.) двойной экземпляр демона | D-Bus name ownership; второй экземпляр завершается |
-| (доп.) запись в неверный sysfs после resume | сравнение с подтверждённым состоянием перед write; read-back |
-
-### 3.3 orbis-hardwared (root)
-
-Отдельная модель. Атакуемая поверхность — самый чувствительный компонент.
-
-| Угроза | Митигация |
-|---|---|
-| T: подделка вызова от неавторизованного пользователя | **Polkit** на каждый метод; проверка caller uid/gid |
-| S: symlink/path traversal к произвольному файлу | **никаких путей от клиента**; только allowlist атрибутов (id → фиксированный путь в коде); openat/O_NOFOLLOW; проверка inode |
-| E: произвольная команда (shell) | API не принимает команды; только типизированные методы (SetChargeLimit(u8) и т.п.) |
-| E: запись вне диапазона | диапазоны/step на стороне демона (из sysfs min/max или константы allowlist); повторная валидация |
-| D: DoS аппаратных интерфейсов | rate-limit; журналирование; read-back |
-| I: раскрытие журнала | журнал только аппаратных операций, без секретов |
-| (доп.) компрометация через shared library | минимальный набор зависимостей, Rust safe code |
-| (доп.) запись в device через race | проверка и открытие файла в одной операции; запрет на следование symlink |
-
-systemd hardening для hardwared:
-
-```ini
-[Service]
-User=root
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-PrivateDevices=true
-NoNewPrivileges=true
-ProtectKernelTunables=true
-ProtectControlGroups=true
-RestrictAddressFamilies=AF_UNIX AF_NETLINK
-MemoryDenyWriteExecute=true
-SystemCallFilter=@system-service
-CapabilityBoundingSet=CAP_SYS_ADMIN   # минимальный набор, по факту часто не нужен
-AmbientCapabilities=
+TL0 original application caller
+  │ system D-Bus Hardware1
+  ▼
+TL4 orbis-hardwared (root, sandboxed)
+  │ per-capability polkit + bounded backend
+  ▼
+TL2/TL3 mutation owner / fixed kernel ABI
 ```
 
-> Capability-набор выбирается per-feature; `CAP_SYS_ADMIN` не выдаётся по умолчанию.
-> Возможен запуск от выделенного пользователя `orbis-hardware` с группой доступа к
-> конкретным sysfs-файлам вместо root — решение принимается при первом реальном
-> использовании hardwared.
->
-> **Текущий статус (2026-08-17):** hardwared реализован и live-validated для
-> Performance profile write и Battery charge-limit mutation (ADR 0006/0007).
-> Production deployment: system D-Bus name owned, UID root, CapEff=0, CapBnd=0,
-> sandbox live-validated. Polkit авторизует `system-bus-name` **original
-> Hardware1 caller**; `orbis-sessiond` не является mutation deputy (confused-
-> deputy защита, ADR 0006 amendment). Запуск от выделенного пользователя
-> остаётся открытым future option, не текущим состоянием.
+Critical rule: `orbis-sessiond` is never a privileged mutation deputy. A second
+D-Bus hop would lose the original application caller identity used by polkit.
 
-### 3.4 Внешние сервисы (asusd, UPower, supergfxd, cardwire, fwupd, logind)
+## 2. Assets
 
-| Угроза | Митигация |
+| Asset | Main risk |
 |---|---|
-| Отсутствие сервиса | провайдер даёт BackendMissing; UI показывает статус, а не падает |
-| Несовместимая версия сервиса | runtime introspection + проверка версии; versioned API |
-| Злонамеренный/вредоносный «asusd» на system bus | не доверяем данным сервиса как каналу команд; все команды типизированы; журналирование действий; read-back |
-| Cardwire: ложная блокировка dGPU | UI маркирует как экспериментальный, «block ≠ MUX»; проверка lsof/процессов до переключения |
-| fwupd: установка прошивки | BIOS — только вручную, с подтверждением; показ источника/версии/требований |
+| Hardware settings | unsafe/incorrect writes, thermal/stability impact |
+| GPU/display lifecycle | loss of display/session, reboot/logout requirements |
+| User preferences / desired state | unintended automatic application |
+| Capability evidence | false writable/supported state |
+| Diagnostics/export | privacy leakage |
+| D-Bus/system services | spoofed/malformed/stale backend data |
+| Root helper | privilege escalation / generic write primitive |
 
-## 4. Опасные операции и требования подтверждения
+## 3. Current attack surfaces and mitigations
 
-| Операция | Риск | Требование |
-|---|---|---|
-| MUX Ultimate | reboot; потеря видео | диалог: что, backend, reboot/logout, отменяемость, поведение при ошибке |
-| Undervolting | нестабильность, повреждение | Experimental; отдельное предупреждение; не применяется при первом запуске |
-| Нестандартные высокие power limits | перегрев | диалог подтверждения; read-back |
-| Опасная fan curve | перегрев | валидация + предупреждение |
-| Отключение CPU cores | отказ системы | диалог; reboot requirement |
-| Действия, отключающие внешний монитор | потеря изображения | проверка перед действием |
-| Установка системного helper | root-код на системе | polkit + подтверждение + документация удаления |
-| Изменение владельца power profile policy | конфликт сервисов | подтверждение |
+### 3.1 `orbis-ui`
 
-Диалог обязан отвечать: что будет изменено; какой backend; reboot/logout;
-отменяемость; что произойдёт при ошибке.
+Implemented expectations:
 
-## 5. Ошибки (UX-безопасность)
+- normal user process; no generic root execution path;
+- Slint callbacks route hardware work through application/worker/service boundaries rather than direct privileged sysfs writes;
+- backend-derived controls use explicit Loading/Ready/Unavailable and typed capability evidence;
+- unsupported/incomplete write paths can be disabled fail-closed;
+- current fan writes are disabled in UI because known write-contract issues are unresolved;
+- mock fixtures are not accepted as authoritative production hardware evidence.
 
-- Запрещены «Something went wrong / Unknown error / Operation failed» без деталей.
-- Формат ошибки: действие, причина, провайдер/backend, состояние системы, что делать.
-- Технические детали — через Details.
+Remaining risk:
 
-## 6. Диагностика и приватность
+- development/mock code still exists in the default UI feature graph (#115);
+- some product controls are visual/preview only and must remain clearly labelled until connected;
+- Run on Startup and Diagnostics lifecycle glue are incomplete (#110/#111) and therefore their controls stay disabled.
 
-- Экспорт по умолчанию удаляет: username, hostname (если не нужен), serial number,
-  MAC-адреса, UUID дисков, абсолютные пути домашнего каталога.
-- Секреты не попадают в отчёт.
-- Нет телеметрии, нет рекламы, нет сетевых проверок по умолчанию (сетевые проверки
-  обновлений — отключаемы).
+### 3.2 `orbis-sessiond`
 
-## 7. Обновления
+Implemented expectations:
 
-- Пакетное обновление — через пакетный менеджер (проверка подписи/checksum).
-- AppImage — отдельно, только после проверки источника и контрольной суммы.
-- Никакого собственного криптопротокола обновления; никакого «curl | sudo bash».
+- unprivileged user daemon;
+- getter/read boundary only for privileged concepts;
+- no Hardware1 mutation delegation;
+- fresh/no-cache D-Bus reads where authoritative state matters;
+- Battery/UPower discovery is lazy and capability-local;
+- malformed wire/backend state is returned as typed failure rather than a fake successful value;
+- D-Bus name ownership prevents two services owning the same Session1 name.
 
-## 8. Установка/удаление
+Security consequence: compromise of `sessiond` is limited to the user/session boundary and read access granted to that user; it must not grant root mutation through Orbis.
 
-Установка не должна:
+### 3.3 `orbis-hardwared`
 
-- отключать чужие сервисы без согласия;
-- менять grub; устанавливать kernel module; менять Secure Boot;
-- добавлять пользователя в широкие группы;
-- перезаписывать policy power-profiles-daemon;
-- создавать world-writable sysfs permissions.
+This is the most sensitive component.
 
-Удаление штатным способом не оставляет: unit-файлов, D-Bus конфигов, polkit
-политик, кэшей/состояний (кроме сохраняемого пользователем конфига по XDG).
+Implemented mitigations:
 
-## 9. Предполагаемые доверенные стороны (assumptions)
+- system service runs as root but exposes a narrow typed Hardware1 API;
+- no caller-supplied filesystem path, shell command or generic D-Bus proxy API;
+- D-Bus input is decoded/validated before mutation;
+- each mutation method uses a dedicated polkit action;
+- polkit subject is the original Hardware1 sender's `system-bus-name`;
+- package policy defaults use `allow_any=no` and `allow_inactive=no`;
+- systemd sandbox includes `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `PrivateDevices`, `ProtectControlGroups`, `MemoryDenyWriteExecute`, `RestrictAddressFamilies=AF_UNIX`, read-only `/sys` and a minimal explicit writable path list;
+- `CapabilityBoundingSet` is empty in the current NixOS service;
+- fixed-path Performance and keyboard writes use authoritative read-back;
+- Battery mutation uses typed asusd ownership plus configured/effective confirmation;
+- production raw GPU mutation is disabled.
 
-- Ядро и системные D-Bus сервисы (asusd, UPower, fwupd, logind) корректны.
-- Злоумышленник НЕ имеет прав root и НЕ контролирует system bus.
-- Злоумышленник МОЖЕТ запускать процессы от имени пользователя и вызывать
-  session bus (соответственно — любые методы sessiond без polkit).
-- Wayland считается безопасной изоляцией окон (layer-shell окна не перехватывают ввод).
+Known security/correctness blockers:
 
-## 10. Открытые вопросы (требуют решения)
+- fan custom write does not currently preserve upstream `CurveData.enabled` (#104);
+- upstream Factory Defaults may fail before restoring the previous performance profile (#105);
+- fan capability/read evidence is over-aggregated across CPU/GPU (#109);
+- fan `enabled` evidence is lost before UI presentation (#116).
 
-1. Нужен ли polkit на session bus для операций с reboot-требованием (например,
-   повторное подтверждение MUX через polkit поверх sessiond)? Предложение: нет,
-   подтверждение в GUI достаточно; polkit только для hardwared.
-2. Допустим ли запуск hardwared от выделенного пользователя (не root)? — принять
-   при первом использовании.
-3. Политика для `charge_control_end_threshold` при отсутствии asusd: read-only
-   показ или write через hardwared? — решение после пилотных систем.
+Mitigation currently deployed: fan mutation/default-reset is disabled in the Fans UI and the packaged fan polkit action has `allow_active=no`. Do not remove this block until those contracts are fixed, executable tests pass and required live evidence is recorded.
+
+### 3.4 External services and kernel interfaces
+
+Orbis treats D-Bus/backend data as untrusted protocol input even when the service itself is system-trusted.
+
+Threats:
+
+- service missing or restarting;
+- version/interface drift;
+- malformed/new enum values;
+- permission changes;
+- stale assumptions about write support;
+- competing ownership of a hardware setting.
+
+Mitigations:
+
+- typed adapters and strict decode;
+- no implicit property cache for authoritative reads;
+- capability-local errors;
+- read/write evidence separated;
+- read-back after confirmed mutations where possible;
+- no model-name inference as runtime support evidence.
+
+Open evidence hardening:
+
+- Battery/Panel/Aura write status must prove the actual owner/interface is reachable (#107);
+- Battery discovery must not collapse permission/transient errors into structural Unsupported (#108);
+- explicit capability refresh must re-query write evidence (#112).
+
+## 4. Confused-deputy model
+
+Forbidden production flow:
+
+```text
+GUI → Session1/sessiond → Hardware1
+```
+
+Reason: Hardware1 would see `sessiond` as the caller instead of the originating application process. A same-UID background/SSH/linger process must not gain a privileged mutation merely because another active session exists.
+
+Required flow:
+
+```text
+original application caller
+→ Hardware1
+→ polkit(system-bus-name)
+→ bounded mutation
+```
+
+Caller-provided UID/PID/session metadata, executable paths and user-unit names are not trust anchors.
+
+## 5. Capability/evidence spoofing
+
+A major product-security risk is not only unauthorized write, but a false `Supported`/`Applied` claim that causes the user or later automation to take an unsafe action.
+
+Rules:
+
+- file/object presence alone is not write support;
+- validation success alone is not write support;
+- overall capability status must not substitute for `operations.write.status`;
+- `Accepted` is not `Applied`;
+- persisted Desired state is not Observed state;
+- an empty/partial telemetry attempt is not automatically proof of useful fresh data (#117);
+- stored fan curve points are not proof that the custom curve is enabled or currently active (#116).
+
+## 6. Persistence and automation
+
+New production stores are separated by concern: preferences, window state, autostart and desired-state foundation.
+
+Security rules:
+
+- loading a config/default never performs a hardware write by itself;
+- missing/corrupt config never becomes a synthetic desired hardware action;
+- Desired/Observed/Pending remain separate;
+- reconciliation is not implemented until its policy and evidence are explicit;
+- legacy AppConfig/path helpers must not become reconciliation or new state/cache foundations until hardened (#113).
+
+## 7. Diagnostics/privacy
+
+Current diagnostics design is allowlist-based and read-only.
+
+Allowed categories include package/build metadata, non-unique system/session metadata, privacy-safe hardware summary, service presence, capability evidence, GPU primitives, telemetry state and display observations.
+
+Explicitly avoid collecting/exporting by default:
+
+- serial numbers, machine UUIDs, asset tags;
+- arbitrary environment dumps;
+- arbitrary files/logs/journals;
+- shell command output;
+- credentials/secrets;
+- full home paths.
+
+Diagnostics does not activate stopped services. The UI remains fail-closed until its lifecycle/refresh glue is complete (#111).
+
+## 8. Dangerous operations
+
+Operations with high user/system impact require concept-specific safety policy before exposure, for example:
+
+- GPU/MUX changes with reboot/logout or display-loss requirements;
+- power limits / undervolting;
+- fan writes/default resets;
+- CPU core disablement;
+- firmware operations;
+- service ownership/policy changes.
+
+A future confirmation flow must explain what changes, which owner/backend is used, whether a reboot/logout is required, what confirmation/read-back exists and what happens on failure. A dialog is not a substitute for backend validation or authorization.
+
+## 9. Packaging/system boundary
+
+Nix packaging installs the Hardware1 D-Bus policy and per-capability polkit policy used by the service. Standalone/policy-only packaging uses the same policy source, so a blocked action must remain blocked consistently across deployment paths.
+
+Current release blockers:
+
+- GitHub Actions jobs fail before first step (#106), so executable repository verification is unavailable;
+- `main` is not protected until CI can become a real required check (#114);
+- obsolete remote agent branches require later pruning with branch-delete access (#118).
+
+## 10. Security acceptance rules
+
+Before enabling a new privileged capability:
+
+1. define the exact user-visible concept;
+2. prove the real write owner and non-mutating support evidence;
+3. define a bounded typed API and validate untrusted input;
+4. preserve original caller authorization;
+5. define confirmation/read-back or explicit Accepted/Pending semantics;
+6. test failure, denial, unavailable and malformed cases;
+7. validate packaging/policy on the exact revision;
+8. perform controlled live hardware validation when the claim depends on real device semantics.
+
+Known-unsafe functionality must be disabled rather than left enabled because a partial implementation exists.
+
+## 11. Assumptions
+
+- attacker does not already control root or the system bus;
+- kernel and installed system services are part of the trusted computing base, but their data/API versions may be malformed, unavailable or incompatible from Orbis' point of view;
+- attacker may run arbitrary processes as the same user and may call user/session D-Bus APIs available to that user;
+- package/repository integrity and host NixOS/polkit configuration are trusted at installation time.
+
+Changes to these assumptions require a new security review/ADR.
