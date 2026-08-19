@@ -21,7 +21,8 @@ export component DiagnosticsWindow inherits Window {
     in property <string> telemetry-text: "Unknown";
     in property <string> display-text: "Unknown";
     in property <string> snapshot-meta: "";
-    in-out property <string> local-status: "Diagnostics not loaded";
+    in-out property <bool> refresh-enabled: false;
+    in-out property <string> local-status: "Diagnostics unavailable · lifecycle wiring pending";
     callback refresh-requested;
 
     VerticalLayout {
@@ -85,7 +86,7 @@ export component DiagnosticsWindow inherits Window {
             }
         }
         HorizontalLayout { height: 28px; spacing: 6px;
-            ActionButton { label: "Refresh"; accent: true; clicked => { root.refresh-requested(); } }
+            ActionButton { label: "Refresh"; accent: true; disabled: !root.refresh-enabled; clicked => { root.refresh-requested(); } }
             ActionButton { label: "Copy Summary"; disabled: true; }
             ActionButton { label: "Open Logs"; disabled: true; }
             Rectangle { horizontal-stretch: 1; background: transparent; }
