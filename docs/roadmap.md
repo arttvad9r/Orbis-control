@@ -6,11 +6,12 @@
 
 ## Principles
 
-1. Сначала green build/CI и одна понятная интеграционная линия.
+1. Сначала safety blockers и green build/CI, затем новые функции.
 2. Фактическая поддержка определяется typed probes и evidence, а не названием модели.
 3. Read/write evidence хранится раздельно.
 4. `Accepted` не считается подтверждённым текущим состоянием.
 5. Live claims всегда revision-scoped и требуют отдельной проверки.
+6. Неполный или конфликтующий control остаётся fail-closed в UI и policy до исправления контракта.
 
 ## Milestone 0 — Repository baseline
 
@@ -31,12 +32,14 @@
 
 Остаётся:
 
-- GitHub Actions должен реально выполнить и успешно завершить `nix flake check`;
+- GitHub Actions должен реально выполнить и успешно завершить `nix flake check` (#106);
 - старые remote validation refs можно физически удалить только через доступный branch-delete/git интерфейс.
 
 ## Milestone 1 — Stable production capabilities
 
-**Status: COMPLETED with revision-scoped live evidence**
+**Status: CORE READ PATHS STABLE; WRITE EVIDENCE HARDENING ACTIVE**
+
+Revision-scoped validated areas:
 
 - Battery read path.
 - Battery controlled setting path with confirmation.
@@ -44,6 +47,11 @@
 - Performance controlled setting path with confirmation.
 - Independent GPU power / MUX / access observations.
 - Narrow typed system boundary.
+
+Hardening still required:
+
+- Battery/Panel/Aura mutation status must prove the actual write owner is reachable (#107), not merely that a backend object was constructed.
+- Battery discovery must preserve permission/transient failures instead of collapsing them to structural Unsupported (#108).
 
 Эти результаты не являются универсальной таблицей поддержки всех ASUS моделей.
 
@@ -68,7 +76,7 @@ Next:
 
 ## Milestone 3 — Preferences and desktop integration
 
-**Status: PARTIAL**
+**Status: PARTIAL / FAIL-CLOSED WHERE UNWIRED**
 
 Completed:
 
@@ -79,25 +87,34 @@ Completed:
 - redacted config warnings;
 - independent XDG window-state store;
 - XDG autostart backend and Slint user-only toggle contract;
+- main-window fake startup toggle removed;
 - desktop/AppStream metadata and Nix installation wiring.
 
 Next:
 
-- finish the remaining Rust lifecycle glue for Run on Startup (#57);
+- finish the remaining Rust lifecycle glue for Run on Startup (#57); until then the Preferences toggle stays disabled;
 - keep automation policy and desired hardware state separate from UI preferences;
 - repeat packaged metadata validation on the final release revision.
 
 ## Milestone 4 — Fans and telemetry
 
-**Status: IMPLEMENTED/TESTED; acceptance incomplete**
+**Status: READS IMPLEMENTED/TESTED; WRITES BLOCKED**
 
 Telemetry provider and worker-owned polling are present in `main`.
 
-Fan support in `main` includes active/profile-specific reads, lossless profile identity, the visual editor and typed control/reset paths. Before promoting additional mutation/reset claims on the current revision, perform dated live validation and confirm final state against the authoritative backend.
+Fan reads in `main` include active/profile-specific curves and lossless profile identity. Fan mutation/reset code exists but is **not currently an accepted write path**. The FansWindow mutation controls and packaged default fan polkit authorization are fail-closed.
+
+Mandatory before any fan write is re-enabled:
+
+1. Fix custom curve `CurveData.enabled` preservation and verify post-write enabled state (#104).
+2. Make Factory Defaults profile restoration failure-safe (#105).
+3. Fix FanCurves capability granularity so CPU support cannot imply GPU support (#109).
+4. Obtain executable green tests/CI for the exact revision.
+5. Perform dated controlled hardware validation and confirm final fan/profile state against authoritative backends.
 
 ## Milestone 5 — Diagnostics and supportability
 
-**Status: TESTED foundations; lifecycle wiring PARTIAL**
+**Status: TESTED FOUNDATIONS; LIFECYCLE WIRING PARTIAL / FAIL-CLOSED**
 
 Integrated in `main`:
 
@@ -114,14 +131,14 @@ Integrated in `main`:
 
 Next:
 
-- finish Diagnostics window open/refresh lifecycle glue in current `main.rs` (#101);
+- finish Diagnostics window open/refresh lifecycle glue in current `main.rs` (#101); until then Refresh stays disabled and the window reports unavailable;
 - keep export collection strictly allowlisted and privacy-bounded.
 
 ## Milestone 6 — GPU product policy
 
 **Status: BLOCKED**
 
-Eco / Standard / Ultimate / Optimized remain product-level policy rather than aliases for one low-level observation. Keep them unsupported/disabled until mapping, pending requirements, ownership and confirmation semantics are proven and tested.
+Eco / Standard / Ultimate / Optimized remain product-level policy rather than aliases for one low-level observation. Production raw GPU mutation remains disabled. Keep product controls unsupported/disabled until mapping, pending requirements, ownership and confirmation semantics are proven and tested.
 
 ## Milestone 7 — Power limits and extended ASUS controls
 
@@ -150,9 +167,10 @@ Remaining:
 A beta/release candidate requires:
 
 - intended baseline in `main`;
+- no known unsafe write path enabled by default;
 - relevant Cargo integration checks green;
 - `nix flake check` executed and green;
 - package/metadata acceptance complete;
 - Draft branches not counted as integrated behavior;
 - dated evidence for device-specific claims;
-- unsupported controls shown honestly as unavailable/unknown.
+- unsupported or incomplete controls shown honestly as unavailable/unknown.
