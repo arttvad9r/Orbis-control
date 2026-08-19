@@ -174,7 +174,7 @@ pub enum PreferencesError {
 }
 
 /// Non-fatal load conditions that fall back to safe runtime defaults.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum PreferencesWarningKind {
     /// The file was not syntactically valid TOML.
     MalformedToml(String),
@@ -188,6 +188,29 @@ pub enum PreferencesWarningKind {
     InvalidSchema(String),
     /// Legacy `config.toml` could not be safely imported.
     LegacyImport(String),
+}
+
+impl PreferencesWarningKind {
+    /// Fixed category safe for logs and support diagnostics.
+    ///
+    /// Embedded parser/schema messages may contain excerpts from user-owned
+    /// configuration and must never be emitted through production logging.
+    pub const fn log_category(&self) -> &'static str {
+        match self {
+            Self::MalformedToml(_) => "malformed_toml",
+            Self::MissingSchemaVersion => "missing_schema_version",
+            Self::InvalidSchemaVersion => "invalid_schema_version",
+            Self::UnsupportedOlderVersion(_) => "unsupported_older_version",
+            Self::InvalidSchema(_) => "invalid_schema",
+            Self::LegacyImport(_) => "legacy_import",
+        }
+    }
+}
+
+impl std::fmt::Debug for PreferencesWarningKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.log_category())
+    }
 }
 
 /// A typed non-fatal preferences load warning.
@@ -787,5 +810,26 @@ raw_wmi = true
             Some(PreferencesWarningKind::InvalidSchema(_))
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
+    }
+
+    #[test]
+    fn warning_debug_redacts_embedded_diagnostics() {
+        const SECRET: &str = "ORBIS_SYNTHETIC_SECRET_MARKER_7f3b";
+
+        for kind in [
+            PreferencesWarningKind::MalformedToml(SECRET.into()),
+            PreferencesWarningKind::InvalidSchema(SECRET.into()),
+            PreferencesWarningKind::LegacyImport(SECRET.into()),
+        ] {
+            let rendered = format!("{kind:?}");
+            assert_eq!(rendered, kind.log_category());
+            assert!(!rendered.contains(SECRET));
+        }
+
+        let warning = PreferencesWarning {
+            path: PathBuf::from("/tmp/preferences.toml"),
+            kind: PreferencesWarningKind::MalformedToml(SECRET.into()),
+        };
+        assert!(!format!("{warning:?}").contains(SECRET));
     }
 }
