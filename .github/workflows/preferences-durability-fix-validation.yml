@@ -1,0 +1,234 @@
+name: Preferences durability fix validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  targeted:
+    if: github.head_ref == 'agent/preferences-durability-fix-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact preferences foundation
+        uses: actions/checkout@v5
+        with:
+          ref: agent/preferences-storage-foundation
+          fetch-depth: 0
+
+      - name: Verify exact base and clean target
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "3896b1add732f9af62a07ad7d7a146d6e5e4ebb2"
+          if git ls-remote --exit-code --heads origin refs/heads/agent/preferences-durability-fix >/dev/null 2>&1; then
+            echo "agent/preferences-durability-fix already exists; refusing to overwrite"
+            exit 1
+          fi
+
+      - name: Apply durability and permission fix
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/orbis-config/src/preferences.rs')
+          text = path.read_text()
+
+          old = '''use std::io::{self, Write};
+          use std::path::{Path, PathBuf};
+          use std::sync::atomic::{AtomicU64, Ordering};'''
+          new = '''use std::io::{self, Write};
+          #[cfg(unix)]
+          use std::os::unix::fs::OpenOptionsExt;
+          use std::path::{Path, PathBuf};
+          use std::sync::atomic::{AtomicU64, Ordering};'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''    fs::create_dir_all(dir)
+              .map_err(|source| io_failure("create preferences directory", dir.to_path_buf(), source))?;
+
+              let (mut temp, temp_path) = create_unique_temp(dir)?;
+          '''
+          new = '''    fs::create_dir_all(dir)
+              .map_err(|source| io_failure("create preferences directory", dir.to_path_buf(), source))?;
+
+              let final_path = dir.join(PREFERENCES_FILE);
+              let existing_permissions = match fs::symlink_metadata(&final_path) {
+                  Ok(metadata) if metadata.file_type().is_file() => Some(metadata.permissions()),
+                  Ok(_) => None,
+                  Err(source) if source.kind() == io::ErrorKind::NotFound => None,
+                  Err(source) => {
+                      return Err(io_failure(
+                          "inspect existing preferences permissions",
+                          final_path.clone(),
+                          source,
+                      ));
+                  }
+              };
+
+              let (mut temp, temp_path) = create_unique_temp(dir)?;
+              if let Some(permissions) = existing_permissions {
+                  if let Err(source) = temp.set_permissions(permissions) {
+                      drop(temp);
+                      let _ = fs::remove_file(&temp_path);
+                      return Err(io_failure(
+                          "set preferences temporary file permissions",
+                          temp_path,
+                          source,
+                      ));
+                  }
+              }
+          '''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''    let final_path = dir.join(PREFERENCES_FILE);
+              if let Err(source) = fs::rename(&temp_path, &final_path) {
+          '''
+          new = '''    if let Err(source) = fs::rename(&temp_path, &final_path) {
+          '''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''    if let Err(source) = fs::rename(&temp_path, &final_path) {
+                  let _ = fs::remove_file(&temp_path);
+                  return Err(io_failure(
+                      "rename preferences temporary file",
+                      final_path,
+                      source,
+                  ));
+              }
+
+              Ok(final_path)
+          }
+
+          fn default_load'''
+          new = '''    if let Err(source) = fs::rename(&temp_path, &final_path) {
+                  let _ = fs::remove_file(&temp_path);
+                  return Err(io_failure(
+                      "rename preferences temporary file",
+                      final_path,
+                      source,
+                  ));
+              }
+
+              sync_parent_directory(dir)?;
+              Ok(final_path)
+          }
+
+          fn sync_parent_directory(dir: &Path) -> Result<(), PreferencesError> {
+              let directory = File::open(dir).map_err(|source| {
+                  io_failure(
+                      "open preferences directory for sync",
+                      dir.to_path_buf(),
+                      source,
+                  )
+              })?;
+              directory.sync_all().map_err(|source| {
+                  io_failure(
+                      "sync preferences directory",
+                      dir.to_path_buf(),
+                      source,
+                  )
+              })
+          }
+
+          fn default_load'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''        let path = unique_temp_path(dir);
+                  match OpenOptions::new().write(true).create_new(true).open(&path) {
+          '''
+          new = '''        let path = unique_temp_path(dir);
+                  let mut options = OpenOptions::new();
+                  options.write(true).create_new(true);
+                  #[cfg(unix)]
+                  options.mode(0o600);
+                  match options.open(&path) {
+          '''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''        assert!(leftovers.is_empty());
+              }
+
+              #[test]
+              fn legacy_safe_fields_import_with_close_mapping()'''
+          new = '''        assert!(leftovers.is_empty());
+              }
+
+              #[cfg(unix)]
+              #[test]
+              fn new_preferences_file_is_owner_only() {
+                  use std::os::unix::fs::PermissionsExt;
+
+                  let td = temp_dir();
+                  let dir = td.path().join("cfg");
+                  let path = save_preferences_to_dir(&PreferencesConfig::default(), &dir).unwrap();
+
+                  let mode = fs::metadata(path).unwrap().permissions().mode() & 0o777;
+                  assert_eq!(mode, 0o600);
+              }
+
+              #[cfg(unix)]
+              #[test]
+              fn atomic_replace_preserves_existing_file_permissions() {
+                  use std::os::unix::fs::PermissionsExt;
+
+                  let td = temp_dir();
+                  let dir = td.path().join("cfg");
+                  fs::create_dir_all(&dir).unwrap();
+                  let path = dir.join(PREFERENCES_FILE);
+                  fs::write(&path, "placeholder").unwrap();
+                  fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+                  save_preferences_to_dir(&PreferencesConfig::default(), &dir).unwrap();
+
+                  let mode = fs::metadata(path).unwrap().permissions().mode() & 0o777;
+                  assert_eq!(mode, 0o640);
+              }
+
+              #[test]
+              fn legacy_safe_fields_import_with_close_mapping()'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Format and targeted validation
+        run: |
+          set -euo pipefail
+          nix develop --command bash -lc '
+            set -euo pipefail
+            cargo fmt --all
+            cargo fmt --all -- --check
+            cargo check -p orbis-config --all-targets
+            cargo test -p orbis-config preferences
+            cargo clippy -p orbis-config --all-targets -- -D warnings
+          '
+
+      - name: Verify exact scope
+        run: |
+          set -euo pipefail
+          git diff --check
+          test "$(git diff --name-only | sort)" = "crates/orbis-config/src/preferences.rs"
+
+      - name: Publish one implementation commit
+        run: |
+          set -euo pipefail
+          git config user.name "arttvad9r"
+          git config user.email "arttvad9r@gmail.com"
+          git add crates/orbis-config/src/preferences.rs
+          git commit -m "config: harden preferences atomic durability [skip ci]"
+          test "$(git rev-list --count 3896b1add732f9af62a07ad7d7a146d6e5e4ebb2..HEAD)" = "1"
+          git push origin HEAD:refs/heads/agent/preferences-durability-fix
