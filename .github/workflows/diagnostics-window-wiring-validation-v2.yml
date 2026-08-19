@@ -24,7 +24,6 @@ jobs:
           git fetch origin agent/diagnostics-window-wiring-validate-trigger
           python3 - <<'PY'
           import base64
-          import re
           import subprocess
           from pathlib import Path
 
@@ -32,10 +31,14 @@ jobs:
               'git', 'show',
               'origin/agent/diagnostics-window-wiring-validate-trigger:.github/workflows/diagnostics-window-wiring-validation.yml'
           ], text=True)
-          match = re.search(r"echo '([A-Za-z0-9+/=]+)' \\| base64 -d > /tmp/apply-diagnostics.py", workflow)
-          if not match:
+          line = next(
+              (line for line in workflow.splitlines() if 'base64 -d > /tmp/apply-diagnostics.py' in line),
+              None,
+          )
+          if line is None or "echo '" not in line:
               raise SystemExit('registered diagnostics transform payload not found')
-          Path('/tmp/apply-diagnostics.py').write_bytes(base64.b64decode(match.group(1)))
+          payload = line.split("echo '", 1)[1].split("'", 1)[0]
+          Path('/tmp/apply-diagnostics.py').write_bytes(base64.b64decode(payload))
           PY
           python3 /tmp/apply-diagnostics.py
 
