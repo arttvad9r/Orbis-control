@@ -80,7 +80,6 @@ export component AppWindow inherits Window {
     property <int> keyboard-mode-preview: 0;
     property <int> keyboard-color-preview: 0;
     property <bool> fn-lock-preview: false;
-    property <bool> startup-preview: true;
     property <bool> more-open: false;
     property <bool> support-note: false;
 
@@ -217,7 +216,7 @@ export component AppWindow inherits Window {
                         ActionButton { width: 62px; label: "100%"; disabled: root.ui-state.charge-limit-state != ChargeLimitState.Ready || !root.ui-state.charge-limit-writable; clicked => { root.charge-changed(100); } }
                     }
                     HorizontalLayout { height: 20px;
-                        DarkCheckBox { text: "Run on Startup"; checked <=> root.startup-preview; }
+                        Text { text: "Run on Startup: configure in Preferences"; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                         Text { text: root.ui-state.battery-percent + " · " + root.ui-state.battery-health; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; }
                     }
