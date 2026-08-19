@@ -41,8 +41,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn names() {
-        assert_eq!(ProviderStatus::Healthy.as_str(), "healthy");
-        assert_eq!(ProviderStatus::Unavailable.as_str(), "unavailable");
+    fn names_cover_all_variants() {
+        for (status, expected) in [
+            (ProviderStatus::Healthy, "healthy"),
+            (ProviderStatus::Degraded, "degraded"),
+            (ProviderStatus::Unavailable, "unavailable"),
+        ] {
+            assert_eq!(status.as_str(), expected);
+        }
+    }
+
+    #[test]
+    fn serde_roundtrip_preserves_all_variants() {
+        for status in [
+            ProviderStatus::Healthy,
+            ProviderStatus::Degraded,
+            ProviderStatus::Unavailable,
+        ] {
+            let json = serde_json::to_string(&status).expect("serialize provider status");
+            assert_eq!(json, format!("\"{}\"", status.as_str()));
+            let decoded: ProviderStatus =
+                serde_json::from_str(&json).expect("deserialize provider status");
+            assert_eq!(decoded, status);
+        }
     }
 }
