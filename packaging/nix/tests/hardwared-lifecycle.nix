@@ -6,16 +6,11 @@
 # - system bus name `io.github.orbiscontrol.Hardware` owned процессом hardwared
 #   (uid 0), Hardware1 introspection содержит обязательный typed
 #   `SetPerformanceProfile` контракт;
-# - CapEff/CapBnd == 0 (generated `CapabilityBoundingSet=` реально работает);
-# - invalid-wire smoke: SetPerformanceProfile(255) -> InvalidArgs, daemon жив,
-#   writer не вызывается (strict decode раньше authorizer);
+# - CapEff/CapBnd == 0;
+# - invalid-wire smoke не доходит до authorizer/writer;
 # - effective systemd sandbox properties;
-# - direct sysfs write surface содержит только production-enabled
-#   `platform_profile`; blocked keyboard paths не writable.
-#
-# Hardware1 может содержать другие отдельно типизированные capability methods /
-# status properties; этот lifecycle smoke не утверждает, что Performance —
-# единственный член интерфейса.
+# - direct sysfs write surface содержит только production-enabled platform_profile;
+# - packaged polkit allow_active=yes остаётся только у Performance/Battery.
 #
 # НИКАКИХ valid mutation / sysfs writes.
 
@@ -33,6 +28,8 @@
     };
 
   testScript = ''
+    import xml.etree.ElementTree as ET
+
     start_all()
 
     machine.wait_for_unit("orbis-hardwared.service")
@@ -40,10 +37,8 @@
         "busctl --system list | grep -F io.github.orbiscontrol.Hardware"
     )
 
-    # --- service readiness ---
     machine.succeed("systemctl is-active orbis-hardwared.service")
 
-    # --- bus ownership: pid совпадает; процесс uid 0 ---
     pid = machine.succeed(
         "systemctl show -p MainPID --value orbis-hardwared.service"
     ).strip()
@@ -56,21 +51,17 @@
     status = machine.succeed(f"cat /proc/{pid}/status")
     assert "Uid:\t0" in status, "hardwared not uid 0"
 
-    # --- introspection: interface Hardware1 содержит обязательный Performance method ---
     intr = machine.succeed(
         "busctl --system introspect io.github.orbiscontrol.Hardware "
         "/io/github/orbiscontrol/Hardware io.github.orbiscontrol.Hardware1"
     )
     assert "SetPerformanceProfile" in intr, f"missing SetPerformanceProfile: {intr}"
 
-    # --- capabilities: CapEff/CapBnd == 0 ---
     capeff = machine.succeed(f"grep '^CapEff' /proc/{pid}/status").strip()
     capbnd = machine.succeed(f"grep '^CapBnd' /proc/{pid}/status").strip()
     assert capeff.endswith("0000000000000000"), f"CapEff not empty: {capeff}"
     assert capbnd.endswith("0000000000000000"), f"CapBnd not empty: {capbnd}"
 
-    # --- invalid-wire smoke: SetPerformanceProfile(255) -> InvalidArgs;
-    #     daemon остаётся alive; writer не вызывается (decode раньше polkit) ---
     out = machine.succeed(
         "bash -c 'busctl --system call io.github.orbiscontrol.Hardware "
         "/io/github/orbiscontrol/Hardware io.github.orbiscontrol.Hardware1 "
@@ -82,7 +73,6 @@
     assert "EXIT:1" in out, f"busctl expected failure exit, got: {out}"
     machine.succeed("systemctl is-active orbis-hardwared.service")
 
-    # --- effective sandbox properties ---
     props = {
       "NoNewPrivileges": "yes",
       "ProtectSystem": "strict",
@@ -111,5 +101,26 @@
     assert "-/sys/class/leds/asus::kbd_backlight/brightness" not in read_write_paths
     assert "-/sys/class/leds/asus::kbd_backlight/max_brightness" not in read_write_paths
     assert "-/sys/class/leds" not in read_write_paths
+
+    policy_text = machine.succeed(
+        "cat /etc/polkit-1/actions/io.github.orbiscontrol.hardware.policy"
+    )
+    policy = ET.fromstring(policy_text)
+    active_defaults = {
+        action.attrib["id"]: action.findtext("./defaults/allow_active")
+        for action in policy.findall("action")
+    }
+    expected_active = {
+        "io.github.orbiscontrol.hardware.set-performance-profile": "yes",
+        "io.github.orbiscontrol.hardware.set-charge-limit": "yes",
+        "io.github.orbiscontrol.hardware.set-gpu-mode": "no",
+        "io.github.orbiscontrol.hardware.set-fan-curve": "no",
+        "io.github.orbiscontrol.hardware.set-panel-overdrive": "no",
+        "io.github.orbiscontrol.hardware.set-keyboard-backlight": "no",
+        "io.github.orbiscontrol.hardware.set-aura-static-rgb": "no",
+    }
+    assert active_defaults == expected_active, (
+        f"unexpected Hardware1 polkit defaults: {active_defaults!r}"
+    )
   '';
 }
