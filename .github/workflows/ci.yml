@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,12 +16,13 @@ concurrency:
 
 jobs:
   flake-check:
-    if: github.base_ref != 'agent/keyboard-backlight-capability-probe-validate'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
@@ -31,16 +33,16 @@ jobs:
         run: nix flake check --no-build --print-build-logs
 
       - name: Build Rust workspace check
-        run: nix build .#checks.x86_64-linux.default --print-build-logs
+        run: nix build .#checks.x86_64-linux.default --no-link --print-build-logs
 
       - name: Build hardwared lifecycle VM check
-        run: nix build .#checks.x86_64-linux.hardwared-lifecycle --print-build-logs
+        run: nix build .#checks.x86_64-linux.hardwared-lifecycle --no-link --print-build-logs
 
       - name: Build Performance mutation VM check
-        run: nix build .#checks.x86_64-linux.performance-mutation-vm --print-build-logs
+        run: nix build .#checks.x86_64-linux.performance-mutation-vm --no-link --print-build-logs
 
       - name: Build Battery mutation VM check
-        run: nix build .#checks.x86_64-linux.battery-mutation-vm --print-build-logs
+        run: nix build .#checks.x86_64-linux.battery-mutation-vm --no-link --print-build-logs
 
       - name: Check full flake
         run: nix flake check --print-build-logs
