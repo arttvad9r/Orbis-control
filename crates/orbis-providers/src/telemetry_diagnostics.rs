@@ -150,7 +150,9 @@ mod tests {
 
         let diagnostics = telemetry_diagnostics_after_attempt(
             Some(&last_good),
-            Err(ProviderError::BackendUnavailable("telemetry unavailable".into())),
+            Err(ProviderError::BackendUnavailable(
+                "telemetry unavailable".into(),
+            )),
             failed_at,
             Duration::from_secs(5),
         );
