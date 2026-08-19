@@ -212,7 +212,7 @@ fn main() -> anyhow::Result<()> {
             } else {
                 ThemeMode::Dark
             });
-            component.set_version("0.1.0-audit".into());
+            component.set_version_value("0.1.0-audit".into());
             component
                 .window()
                 .set_size(LogicalSize::new(width as f32, height as f32));
