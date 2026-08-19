@@ -15,6 +15,7 @@
 
 pub mod asus_armoury;
 pub mod aura;
+pub mod display_diagnostics;
 pub mod error;
 pub mod fan_defaults;
 pub mod gpu_diagnostics;
@@ -35,6 +36,7 @@ pub mod mock;
 
 pub use asus_armoury::*;
 pub use aura::*;
+pub use display_diagnostics::display_diagnostics_snapshot;
 pub use error::{OperationId, ProviderError, ValidationResult};
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 pub use gpu_diagnostics::gpu_diagnostics_snapshot;
