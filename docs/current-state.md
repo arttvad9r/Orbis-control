@@ -1,132 +1,113 @@
 # Current State
 
-> Роль: **CURRENT STATUS**. Краткий operational baseline фактической production-линии.
-> Обновлено: **2026-08-19**. `main` является текущей интеграционной базой после
-> объединения production hardening.
+> Роль: **CURRENT STATUS**. Operational baseline текущей production-линии.
+> Обновлено: **2026-08-19**. Интеграционная база — `main`.
 >
-> Для release-claims используйте [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md):
+> Release claims используют [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md):
 > `IMPLEMENTED / TESTED / PACKAGED / LIVE-VALIDATED / BLOCKED / UNKNOWN`.
 
 ## Executive summary
 
-Orbis уже имеет рабочие production vertical slices для Battery, Performance и независимых GPU primitives. Узкие privileged mutations проходят только через typed `Hardware1` → polkit → bounded backend; `sessiond` остаётся read/session boundary и не является mutation deputy.
+Orbis имеет production vertical slices для Battery, Performance и независимых GPU read primitives. Privileged mutations идут только через typed `Hardware1` → original-caller polkit → bounded backend; `sessiond` остаётся user-session/read boundary и не является privileged deputy.
 
-`main` также содержит production telemetry polling, profile-specific fan reads, безопасное preferences persistence, XDG window state, generic desired-state persistence, Desired/Observed/Pending + lifecycle domain foundations, typed diagnostics snapshot/export/runtime/window-model layers, desktop/AppStream packaging integration и support-matrix tooling. Fan mutation implementation присутствует, но временно **заблокирована fail-closed** после подтверждённых write-contract рисков (#104/#105/#109/#116/#120).
+`main` также содержит production telemetry polling, profile-specific fan reads, hardened user preferences/state stores, desired-state/lifecycle foundations, diagnostics foundations, desktop/AppStream/Nix packaging и support-matrix tooling.
 
-Главный текущий release blocker: GitHub Actions не выполняет repository checks. Ранние jobs падали до первого step (`steps=[]`), свежие push-коммиты `main` могут не получать workflow run, а ручной rerun воспроизвёл тот же pre-step failure (#106). Это не является доказанным `cargo`/`nix` regression, но release gate закрыт до реально выполненного green `nix flake check`.
+**Fan writes остаются fail-closed.** Подтверждены contract risks вокруг сохранения `CurveData.enabled`, Factory Defaults restoration и fan evidence granularity (#104/#105/#109/#116/#120). FansWindow mutation controls отключены, packaged fan polkit action default-deny.
 
-## Major areas
+**Главный release blocker — #106:** GitHub Actions не доходит до первого workflow step. Fresh pushes могут не получать run, rerun старого job снова завершился failure с `steps=[]`. Это не доказанный Cargo/Nix failure; executable validation текущего `main` отсутствует.
+
+## Current areas
 
 | Area | Status | Current fact |
 |---|---|---|
-| Repository baseline | IMPLEMENTED | Production hardening merged into `main`; open PR count is zero. Old non-mergeable work was normalized into current-main issues. |
-| Remote branches | CLEANUP PENDING — #118 | 139 obsolete/validation `agent/*` refs remain because the available connector cannot delete refs. |
-| Rust/build contract | IMPLEMENTED | Workspace/toolchain pinned to Rust **1.87**, matching the locked UI dependency graph. |
-| Core/domain | IMPLEMENTED | Typed domain/invariants, explicit capability evidence states, Desired/Observed/Pending values and inert lifecycle events. |
-| Config/preferences | TESTED / PARTIAL RUNTIME | Versioned XDG `preferences.toml`, atomic/durable writes, Dark/Light persistence and Start Minimized runtime apply exist. Window position/close behavior and UI editing for Start Minimized remain incomplete (#121). |
-| Desired-state storage | TESTED FOUNDATION | Generic versioned `desired-state.toml` storage is integrated and inert; it does not apply settings automatically. Legacy AppConfig/path helpers require hardening before reconciliation (#113). |
-| Window state | TESTED FOUNDATION / NOT WIRED | Independent versioned XDG window-state store exists; runtime load/save/restore is not connected (#121). |
-| XDG Run on Startup | PARTIAL / FAIL-CLOSED UI | Safe owned-entry backend, exports and Slint callback contract are integrated. Until #110 is completed, the Preferences toggle is disabled and the main-window fake local toggle is removed. |
-| Sessiond dev modes | BLOCKED / FAIL-CLOSED — #122 | Historical `mockDevice`/`readOnlyEmpty` Nix options were silently ignored because sessiond parses no argv. Module now fails evaluation if either is set instead of silently running production discovery. |
-| Capabilities | IMPLEMENTED WITH OPEN HARDENING | Runtime registry/probes exist, but write-owner evidence, explicit-refresh freshness and fan per-operation/effective-policy truth still have correctness issues (#107/#109/#112/#120). |
-| Battery read | LIVE-VALIDATED | UPower/asusd/kernel semantics through Session1; no mock fallback in production. |
-| Battery mutation | LIVE-VALIDATED HISTORICAL / EVIDENCE HARDENING OPEN | Controlled `100 → 80 → 100` evidence exists, but current mutation-status liveness and discovery classification need #107/#108. |
-| Battery UI evidence | FAIL-CLOSED | Numeric threshold is shown only while `ChargeLimitState::Ready`; Loading/Unavailable no longer expose the mock fixture value as authoritative threshold. |
-| Performance read | LIVE-VALIDATED | Kernel `platform_profile` via Session1 with authoritative fresh reads. |
-| Performance mutation | LIVE-VALIDATED | Typed Hardware1/polkit/kernel path with read-back; controlled `Balanced → Silent → Balanced` evidence. Performance VM now explicitly runs with UPower disabled to verify Session1 capability isolation. |
-| GPU primitives | LIVE-VALIDATED (read) | Runtime power, physical MUX and access policy are separate production read concepts. |
-| GPU product mode | BLOCKED | Eco/Standard/Ultimate/Optimized production mapping/mutation is not proven; production raw GPU mutation remains disabled. |
-| Telemetry | IMPLEMENTED / TESTED WITH EVIDENCE GAP — #117 | Production sysfs telemetry provider and polling exist, but empty/partial successful attempts are currently too easily labelled fresh/available. |
-| Fan curve reads | IMPLEMENTED / TESTED WITH EVIDENCE GAPS | Profile-specific read is Session1 → sessiond → asusd; active curve remains sysfs. CPU/GPU support is over-aggregated (#109), and stored `enabled` state is lost before UI (#116). |
-| Fan curve mutation/reset | **BLOCKED — #104/#105/#109/#116/#120** | Custom writes can alter `CurveData.enabled`; upstream Factory Defaults has a failure-restoration risk; capability/evidence model is incomplete; effective policy block is not yet represented in write status. Packaged default polkit authorization and FansWindow mutation UI are disabled. |
-| Panel/Aura write evidence | HARDENING OPEN | Setter semantics are typed, but mutation status can claim Supported without proving the actual asusd owner/interface is reachable (#107). |
-| Provider execution | RELIABILITY GAP — #123 | `Provider::timeout()` exists but the sequential application/worker path does not generically enforce it; a hung backend can stall unrelated work. |
-| `sessiond` resilience | TESTED | Battery/UPower discovery is lazy/capability-local; UPower absence no longer blocks independent Performance/GPU/Fan Session1 startup. |
-| NixOS UPower integration | TESTED | Orbis enables UPower with `lib.mkDefault true`; explicit host override remains stronger; no hard service lifecycle coupling. |
-| Privileged helper | IMPLEMENTED / historically LIVE-VALIDATED | Typed Hardware1 helper; no generic sysfs/filesystem/shell/D-Bus proxy. |
-| GUI root boundary | NOT ENFORCED — #125 | Normal package launches as user, but `orbis-control` itself does not yet reject effective UID 0. |
-| Diagnostics core/export | TESTED | Typed diagnostics domain/providers/collector/DTO and privacy-bounded text/JSON exporters are integrated; end-to-end pure-data regression is included. |
-| Diagnostics runtime/window model | TESTED FOUNDATION / FAIL-CLOSED UI | Read-only production source orchestration, presentation model and typed Slint surface are integrated. Until #111 is completed, the window reports unavailable and Refresh is disabled. |
-| Desktop/AppStream packaging | TESTED | Canonical metadata sources and Nix package installation wiring are integrated; workspace/Nix repository metadata points to the actual repository. Current desktop entry intentionally has no `Icon=` until a real asset is packaged. |
-| Application identity | RELEASE DECISION — #124 | `io.github.orbiscontrol.Orbis` is already used across desktop/D-Bus/polkit/autostart identity; ownership/stability must be explicitly confirmed before stable release. |
-| Support matrix tooling | TESTED | Schema, evidence rules, fixtures and locked-nixpkgs validator are integrated; runtime capability detection remains probe-driven. |
-| Reconciliation engine | NOT IMPLEMENTED | Foundations are present, but no startup/resume planner/executor automatically applies desired state. |
-| CLI | NOT IMPLEMENTED — #119 | `orbisctl` no longer silently succeeds; until implemented it prints an explicit message and exits 2. |
-| Release dependency hygiene | OPEN — #115 | UI/sessiond default feature graph still carries mock/test-support code; production runtime does not use it as authoritative fallback. Production UI version also originates from a mock fixture literal until #115 is resolved. |
-| CI/release gate | BLOCKED — #106 | Actions is not executing current-main checks; green executable repository validation is required. |
-| Main protection | DEFERRED — #114 | `main` is currently unprotected; enable required checks only after CI is executable. |
+| Repository baseline | IMPLEMENTED | Production hardening integrated in `main`; open PR count = 0. |
+| Rust/build contract | IMPLEMENTED | Workspace/toolchain MSRV pinned to Rust 1.87. |
+| Remote branches | CLEANUP PENDING — #118 | Obsolete `agent/*` refs remain; available connector has no delete-ref operation. |
+| Core/domain | IMPLEMENTED | Typed state/invariants, capability evidence, Desired/Observed/Pending and lifecycle values. |
+| Preferences/config | TESTED / PARTIAL RUNTIME | Hardened XDG preferences/window/desired-state stores exist. Legacy AppConfig/path APIs still require retirement/hardening before reconciliation (#113). |
+| Run on Startup | PARTIAL / FAIL-CLOSED — #110 | Safe XDG backend exists; fake main-window toggle removed; Preferences control stays disabled until current-main lifecycle glue is finished. |
+| Sessiond dev modes | **REMOVED — #122 resolved** | Historical `mockDevice`/`readOnlyEmpty` options were deleted from the NixOS module because sessiond never implemented their argv contract. Future dev modes require a new explicit design. |
+| Capabilities | IMPLEMENTED WITH HARDENING OPEN | Runtime registry exists; owner liveness, fan granularity/effective policy truth and explicit-refresh freshness remain open (#107/#109/#112/#120). |
+| Battery read | LIVE-VALIDATED historical | Session1/UPower/asusd/kernel path; startup is capability-local. |
+| Battery mutation | LIVE-VALIDATED historical / HARDENING OPEN | Controlled threshold evidence exists; status liveness/discovery classification still need #107/#108. |
+| Performance read/write | LIVE-VALIDATED historical | Typed Session1 read + Hardware1/polkit write with read-back. VM now intentionally disables UPower to verify capability isolation. |
+| GPU primitives | LIVE-VALIDATED historical (read) | Power, physical MUX and access policy are distinct read concepts. |
+| GPU product mode | BLOCKED | Product Eco/Standard/Ultimate/Optimized mutation mapping is not proven; raw production GPU mutation remains disabled. |
+| Telemetry | IMPLEMENTED / TESTED WITH EVIDENCE GAP — #117 | Empty/partial successful calls can still be labelled fresh/available too easily. |
+| Fan reads | IMPLEMENTED / TESTED WITH EVIDENCE GAPS | CPU/GPU evidence is over-aggregated (#109) and stored `enabled` state is lost before UI (#116). |
+| Fan writes/reset | **BLOCKED** | #104/#105/#109/#116/#120 must be resolved before re-enabling writes. |
+| Panel/Aura write evidence | HARDENING OPEN — #107 | Typed setters exist, but `Supported` can be reported without proving actual owner/interface reachability. |
+| Provider execution | RELIABILITY GAP — #123 | `Provider::timeout()` exists but is not generically enforced in the sequential worker/application path. |
+| GUI root boundary | NOT ENFORCED — #125 | Packaged desktop flow is user-level, but raw GUI binary does not yet reject euid 0. |
+| Diagnostics | TESTED FOUNDATION / FAIL-CLOSED UI — #111 | Runtime/model/export layers exist; current window Refresh stays disabled until lifecycle glue is connected. |
+| Window lifecycle | PARTIAL — #121 | Start Minimized is applied; position/close/tray semantics remain incomplete. |
+| CLI | **IMPLEMENTED READ-ONLY / NEEDS EXECUTABLE VALIDATION — #119** | `orbisctl --help`, `--version` and `status` exist. `status` performs only Session1 Battery/Performance/GPU reads, prints explicit evidence/error states and performs no Hardware1 mutation. |
+| Release dependency hygiene | OPEN — #115 | Default release graph still carries mock/test-support surface and production initial UI state/version originates from fixture code. |
+| Standalone hardwared | STRUCTURALLY ALIGNED / VALIDATION OPEN — #126 | Standalone systemd sandbox now uses the same exact direct-sysfs write allowlist as the full module (Performance + keyboard brightness); deploy script verifies effective `ReadWritePaths`. Runtime validation is still required. |
+| Application identity | RELEASE DECISION — #124 | `io.github.orbiscontrol.*` is already ABI/desktop identity; permanence/ownership must be decided before stable release. |
+| Main protection | DEFERRED — #114 | `main` remains unprotected until real CI can be made required safely. |
+| CI/release gate | **BLOCKED — #106** | No trustworthy executable current-main repository validation yet. |
 
 ## Production boundaries
 
-### Read path
+### Reads
 
 ```text
 UPower / kernel / supergfxd / ASUS firmware attributes / asusd
 → orbis-sessiond → Session1
-→ orbis-session-client / providers
-→ application worker → GUI
+→ session client/providers
+→ application worker → GUI / read-only CLI
 ```
 
-Read failures are capability-local. `Unsupported`, `Unavailable`, `PermissionDenied` and `Unknown` are not interchangeable and must not be normalized into fake values.
+Read failures remain capability-local. `Unsupported`, `Unavailable`, `PermissionDenied` and `Unknown` are not interchangeable and must never become fake defaults.
 
-### Mutation path
+### Mutations
 
 ```text
-GUI/application original caller
+GUI original caller
 → Hardware1 system bus
 → per-capability polkit authorization
 → typed bounded backend
-→ authoritative read-back when the operation can be confirmed
+→ authoritative read-back when confirmable
 ```
 
-The GUI is intended to run as a normal user; direct enforcement of this invariant is still open under #125. `sessiond` does not proxy privileged mutations. Caller-provided paths, shell commands and generic privileged writers are outside the architecture.
+`sessiond` does not proxy privileged mutations. Caller-provided paths, arbitrary shell commands and generic privileged D-Bus/filesystem forwarding are outside the architecture. `ApplyResult::Accepted` is not `Applied`.
 
-`ApplyResult::Accepted` is explicitly **not** `Applied`; accepted/unconfirmed state must not become authoritative observed state without confirmation. See ADR 0012.
-
-## Confirmed live evidence retained from earlier baseline
-
-The following claims remain revision-scoped historical evidence and must be revalidated after relevant behavior changes:
-
-- Battery read path and Battery mutation `100 → 80 → 100` with final state restored.
-- Performance read path and controlled GUI mutation `Balanced → Silent → Balanced` with final state restored.
-- GPU primitive reads for power/MUX/access matched their authoritative backends on the validated FA707NV system.
-- Hardware1 service/sandbox and caller authorization were live-validated on the documented NixOS generation used by those tests.
-
-These observations are not universal ASUS specifications and must not be converted into model tables or guessed support.
+`orbisctl` currently has **no mutation command**.
 
 ## Current blockers / unfinished work
 
-1. **Fan write safety:** fix enabled-state preservation (#104), Factory Defaults profile restoration (#105), CPU/GPU granularity (#109), enabled-state read evidence (#116) and effective policy/write-status truth (#120) before re-enabling fan writes.
-2. **Release CI:** restore executable GitHub Actions and obtain a green current-`main` `nix flake check` (#106).
-3. **Write/capability evidence:** prove actual Battery/Panel/Aura mutation owners are reachable (#107), preserve Battery discovery failures accurately (#108), and refresh write evidence on explicit capability refresh (#112).
-4. **Runtime reliability/security:** enforce provider timeouts (#123) and reject interactive GUI root execution (#125).
-5. Finish XDG Run on Startup lifecycle wiring against current `main.rs` (#110); backend exists and UI is disabled until connected.
-6. Finish Diagnostics lifecycle/refresh wiring against current `main.rs` (#111); foundations exist and UI is disabled until connected.
-7. Harden/remove legacy config/path APIs before reconciliation (#113), then design reconciliation semantics without auto-applying defaults.
-8. Finish window-state/close behavior and Start Minimized UI wiring (#121).
-9. Resolve or remove broken sessiond development modes (#122); current Nix options fail explicitly rather than being silently ignored.
-10. Refine empty/partial telemetry freshness/evidence semantics (#117).
-11. Keep GPU product mode, power limits and extended ASUS controls disabled/unknown until concept-specific evidence exists.
-12. Implement minimal read-only `orbisctl` (#119); current binary fails explicitly rather than pretending success.
-13. Remove mock/test-support from the default release graph and replace fixture-derived production initial state/version (#115).
-14. Confirm permanent application identity/namespace before stable release (#124).
-15. Protect `main` with required real checks after CI recovery (#114).
-16. Prune obsolete remote `agent/*` refs when branch-delete access is available (#118).
-17. Obtain final packaged acceptance evidence on the exact release revision.
+1. **Fan safety:** #104, #105, #109, #116, #120.
+2. **Executable CI/release validation:** #106; then protect `main` under #114.
+3. **Write/capability evidence:** #107, #108, #112, plus standalone validation #126.
+4. **Runtime reliability/security:** #123 and #125.
+5. **Current-main lifecycle wiring:** Autostart #110, Diagnostics #111, window lifecycle #121.
+6. **Persistence/reconciliation prerequisites:** legacy config/path hardening #113; reconciliation itself remains intentionally unimplemented.
+7. **Telemetry evidence semantics:** #117.
+8. **Release graph/product honesty:** #115, application identity #124.
+9. **CLI validation/polish:** #119; status is implemented read-only but still needs executable workspace/integration validation.
+10. **Repository cleanup:** #118.
+11. Keep GPU product mutation, power limits and extended ASUS controls disabled/unknown until concept-specific evidence exists.
+12. Obtain final packaged acceptance evidence on the exact release revision.
 
-## Evidence and design references
+## Historical live evidence retained
+
+Revision-scoped earlier evidence exists for:
+
+- Battery read and controlled `100 → 80 → 100` mutation with restoration;
+- Performance read and controlled `Balanced → Silent → Balanced` mutation with restoration;
+- GPU primitive reads (power/MUX/access) on the validated FA707NV system;
+- Hardware1 service/sandbox/caller authorization on the documented NixOS generation.
+
+These are not universal ASUS support claims and must be revalidated after relevant behavior changes.
+
+## References
 
 - [`architecture.md`](architecture.md)
 - [`verification.md`](verification.md)
 - [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md)
-- [`security-boundary-audit-2026-08-19.md`](security-boundary-audit-2026-08-19.md)
 - [`threat-model.md`](threat-model.md)
-- [`support-matrix-schema.md`](support-matrix-schema.md)
-- [`multi-model-discovery-research.md`](multi-model-discovery-research.md)
-- [`power-limit-readiness-audit.md`](power-limit-readiness-audit.md)
-- [`extended-asus-controls-readiness.md`](extended-asus-controls-readiness.md)
+- [`roadmap.md`](roadmap.md)
 - ADRs under [`adr/`](adr/)
 
-## Rule for updating this file
-
-Update this document whenever production behavior, capability evidence, deployment state or a release gate changes. Tests establish `TESTED`; they do not establish `LIVE-VALIDATED` hardware behavior.
+Update this file whenever production behavior, capability evidence, deployment state or a release gate changes. Source inspection can establish `IMPLEMENTED`; it does not establish `TESTED`, `PACKAGED` or `LIVE-VALIDATED` without the corresponding executed evidence.
