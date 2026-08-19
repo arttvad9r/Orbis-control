@@ -1,14 +1,15 @@
 //! # Orbis Providers
 //!
-//! Trait-ы провайдеров аппаратных функций и mock-реализации (Этап 2).
+//! Typed provider interfaces and production/test implementations for Orbis
+//! hardware and platform capabilities.
 //!
-//! Правила:
-//! - провайдер не считает наличие файла доказательством поддержки записи;
-//! - каждый провайдер обязан: probe, capabilities, read_state, write-методы с
-//!   validate_request, health, diagnostics, timeout, объяснение отсутствия поддержки,
-//!   идентификатор/версию backend, классификацию риска.
-//! - на Этапе 2 реализованы только интерфейсы и mock-провайдеры; настоящие
-//!   sysfs/asusd-провайдеры — Этап 3+; внешние процессы не вызываются.
+//! Rules:
+//! - file/service presence alone is not proof of write support;
+//! - read and write evidence remain independent;
+//! - provider errors preserve Unsupported / Unavailable / PermissionDenied /
+//!   Unknown semantics instead of fabricating values;
+//! - privileged mutation is exposed only through bounded typed owners;
+//! - `mock` exists for tests/development and is not the production composition.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
