@@ -1,0 +1,132 @@
+name: Lifecycle event domain validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  targeted:
+    if: github.head_ref == 'agent/lifecycle-event-domain-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/desired-observed-domain
+          fetch-depth: 0
+      - name: Verify exact stacked base
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "97f88386396380361afbfc26530d2a23f560dd07"
+          ! git ls-remote --exit-code --heads origin refs/heads/agent/lifecycle-event-domain >/dev/null 2>&1
+      - name: Apply lifecycle event domain
+        run: |
+          set -euo pipefail
+          cat > crates/orbis-core/src/lifecycle.rs <<'EOF'
+          //! Pure lifecycle events used as reconciliation inputs.
+          //!
+          //! These values do not install suspend hooks, schedule work, call
+          //! providers, or execute reconciliation.
+
+          use serde::{Deserialize, Serialize};
+
+          use crate::{BackendIdentity, FeatureId};
+
+          /// Typed application/backend lifecycle event.
+          #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+          #[serde(tag = "kind", rename_all = "snake_case")]
+          pub enum LifecycleEvent {
+              /// Application startup boundary.
+              Startup,
+              /// System/session resume was reported by a higher layer.
+              Resume,
+              /// A previously unavailable backend became available again.
+              BackendRecovered {
+                  /// Recovered backend identity.
+                  backend: BackendIdentity,
+              },
+              /// Capability evidence changed and may require re-evaluation.
+              CapabilityChanged {
+                  /// Capability whose evidence changed.
+                  feature: FeatureId,
+              },
+          }
+
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn lifecycle_variants_are_typed_and_inert_values() {
+                  assert_eq!(LifecycleEvent::Startup, LifecycleEvent::Startup);
+                  assert_eq!(LifecycleEvent::Resume, LifecycleEvent::Resume);
+                  assert_eq!(
+                      LifecycleEvent::BackendRecovered {
+                          backend: BackendIdentity::simple("asusd")
+                      },
+                      LifecycleEvent::BackendRecovered {
+                          backend: BackendIdentity::simple("asusd")
+                      }
+                  );
+                  assert_eq!(
+                      LifecycleEvent::CapabilityChanged {
+                          feature: FeatureId::ChargeLimit
+                      },
+                      LifecycleEvent::CapabilityChanged {
+                          feature: FeatureId::ChargeLimit
+                      }
+                  );
+              }
+
+              #[test]
+              fn lifecycle_event_serde_preserves_payload_identity() {
+                  let events = [
+                      LifecycleEvent::Startup,
+                      LifecycleEvent::Resume,
+                      LifecycleEvent::BackendRecovered {
+                          backend: BackendIdentity::simple("supergfxd"),
+                      },
+                      LifecycleEvent::CapabilityChanged {
+                          feature: FeatureId::GpuMux,
+                      },
+                  ];
+                  for event in events {
+                      let json = serde_json::to_string(&event).unwrap();
+                      let back: LifecycleEvent = serde_json::from_str(&json).unwrap();
+                      assert_eq!(back, event);
+                  }
+              }
+          }
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/orbis-core/src/lib.rs')
+          s=p.read_text()
+          s=s.replace('pub mod lighting;\n','pub mod lifecycle;\npub mod lighting;\n',1)
+          marker='pub use keyboard_backlight::{KeyboardBacklightState, KeyboardBrightnessLevel};\n'
+          s=s.replace(marker, marker+'pub use lifecycle::LifecycleEvent;\n',1)
+          p.write_text(s)
+          PY
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Targeted validation
+        run: |
+          nix develop --command bash -lc 'set -euo pipefail; cargo fmt --all; cargo fmt --all -- --check; cargo check -p orbis-core --all-targets; cargo test -p orbis-core lifecycle; cargo clippy -p orbis-core --all-targets -- -D warnings'
+      - name: Verify scope
+        run: |
+          set -euo pipefail
+          git add -N crates/orbis-core/src/lifecycle.rs
+          git diff --check
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = "crates/orbis-core/src/lib.rs crates/orbis-core/src/lifecycle.rs "
+      - name: Publish implementation
+        run: |
+          set -euo pipefail
+          git config user.name arttvad9r
+          git config user.email arttvad9r@gmail.com
+          git add crates/orbis-core/src/lib.rs crates/orbis-core/src/lifecycle.rs
+          git commit -m 'core: add lifecycle event domain model [skip ci]'
+          test "$(git rev-list --count 97f88386396380361afbfc26530d2a23f560dd07..HEAD)" = 1
+          git push origin HEAD:refs/heads/agent/lifecycle-event-domain
