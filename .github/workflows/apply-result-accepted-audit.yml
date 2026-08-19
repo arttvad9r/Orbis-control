@@ -1,0 +1,69 @@
+name: ApplyResult Accepted source audit
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.head_ref == 'agent/apply-result-accepted-audit-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact hardening base
+        uses: actions/checkout@v5
+        with:
+          ref: chatgpt/production-hardening-20260818
+          fetch-depth: 0
+
+      - name: Verify exact base
+        run: test "$(git rev-parse HEAD)" = "f0d610a04a8ff16501a02389568c7a4aee62aac8"
+
+      - name: Enumerate all Accepted and applied consumers with context
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          needles = ('ApplyResult::Accepted', 'Self::Accepted', '.is_applied()', 'ApplyResult::Applied')
+          roots = [Path('crates'), Path('ui')]
+          matches = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for path in sorted(root.rglob('*')):
+                  if not path.is_file() or path.suffix not in {'.rs', '.slint'}:
+                      continue
+                  try:
+                      lines = path.read_text().splitlines()
+                  except UnicodeDecodeError:
+                      continue
+                  hit_lines = [i for i, line in enumerate(lines) if any(n in line for n in needles)]
+                  if not hit_lines:
+                      continue
+                  matches.append((path, hit_lines, lines))
+          print(f'FILES_WITH_MATCHES={len(matches)}')
+          total = 0
+          for path, hit_lines, lines in matches:
+              print(f'\n===== {path} =====')
+              shown = set()
+              for i in hit_lines:
+                  total += 1
+                  lo=max(0,i-6); hi=min(len(lines),i+7)
+                  for j in range(lo,hi):
+                      if j in shown: continue
+                      shown.add(j)
+                      mark='>>' if j==i else '  '
+                      print(f'{mark}{j+1:5}: {lines[j]}')
+          print(f'\nTOTAL_MATCH_LINES={total}')
+          if total == 0:
+              raise SystemExit('no ApplyResult usage found; audit invalid')
+          PY
+
+      - name: Mechanical anti-collapse checks
+        run: |
+          set -euo pipefail
+          ! rg -n -U 'ApplyResult::Accepted\s*\|\s*ApplyResult::Applied|ApplyResult::Applied\s*\|\s*ApplyResult::Accepted' crates ui
+          ! rg -n -U 'Accepted[^\n]{0,120}(Applied|applied)|Applied[^\n]{0,120}Accepted' crates ui --glob '!orbis-core/src/action.rs' --glob '!**/*test*'
+          echo 'mechanical anti-collapse checks passed'
