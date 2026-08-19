@@ -20,8 +20,6 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      # Самодостаточный default: собираем пакет через consumer nixpkgs,
-      # без требования overlay/pkgs.orbis-control.
       default = pkgs.callPackage ./package.nix { };
       defaultText = lib.literalExpression "pkgs.callPackage ./package.nix { }";
       description = "Orbis Control package to use.";
@@ -37,20 +35,18 @@ in
       wantedBy = [ "graphical-session.target" ];
       partOf = [ "graphical-session.target" ];
       serviceConfig = {
-        # Daemon сам захватывает имя: Type=dbus + BusName — корректный
-        # readiness condition для systemd.
         Type = "dbus";
         BusName = "io.github.orbiscontrol.Session";
         ExecStart = "${cfg.package}/bin/orbis-sessiond";
-        # Не агрессивный restart loop; systemd шлёт SIGTERM, runtime его обрабатывает.
         Restart = "on-failure";
         RestartSec = "2s";
       };
     };
 
     # orbis-hardwared: system (root) service with a closed typed Hardware1 API.
-    # Каждая mutation capability имеет отдельный backend/polkit action; helper
-    # не принимает произвольные пути, методы или generic filesystem writes.
+    # Only the currently enabled direct-sysfs production mutation is writable in
+    # the sandbox. Other typed backends may exist in code but remain policy-
+    # blocked until their release evidence is complete.
     systemd.services.orbis-hardwared = {
       description = "Orbis Control hardware helper";
       wantedBy = [ "multi-user.target" ];
@@ -62,10 +58,6 @@ in
         ExecStart = "${cfg.package}/bin/orbis-hardwared";
         Restart = "on-failure";
         RestartSec = "2s";
-        # Sandbox (threat-model §3.3). В этой nixpkgs нет structured
-        # sandboxing options — задаём raw systemd settings.
-        # ProtectKernelTunables НЕ используется: /sys открывается на write
-        # точечно через ReadWritePaths внутри ReadOnlyPaths (man systemd.exec).
         NoNewPrivileges = true;
         ProtectSystem = "strict";
         ProtectHome = true;
@@ -75,34 +67,23 @@ in
         RestrictAddressFamilies = [ "AF_UNIX" ];
         MemoryDenyWriteExecute = true;
         AmbientCapabilities = [ ];
-        # Пустая строка (НЕ пустой список): NixOS отбрасывает пустые списки,
-        # а systemd интерпретирует `CapabilityBoundingSet=` (без значения) как
-        # сброс bounding set в пустое множество.
         CapabilityBoundingSet = "";
-        # /sys остаётся read-only; writable только два точных атрибута.
-        # platform_profile_choices и keyboard max_brightness остаются read-only.
-        # Префикс "-": путь игнорируется, если файл отсутствует, но НЕ расширяет
-        # writable surface при его наличии.
+
+        # `/sys` remains read-only. Performance platform_profile is the only
+        # direct-sysfs mutation currently enabled by product policy. Keyboard
+        # brightness remains read-only until its write path is release-validated
+        # and intentionally re-enabled together with policy/capability evidence.
         ReadOnlyPaths = [ "/sys" ];
         ReadWritePaths = [
           "-/sys/firmware/acpi/platform_profile"
-          "-/sys/class/leds/asus::kbd_backlight/brightness"
         ];
       };
     };
 
-    # Пакет попадает в system.path (environment.systemPackages): dbus-daemon
-    # читает includedir system-path/share/dbus-1/system.d (см. system.conf).
-    # systemd.packages НЕ подходит: он добавляет пакеты только в
-    # /etc/systemd hooks, не в system.path.
     environment.systemPackages = [ cfg.package ];
 
-    # D-Bus system policy только разрешает владение destination/calls;
-    # mutation authorization выполняется внутри hardwared через polkit.
-
-    # Per-capability polkit actions for Hardware1 mutations.
-    # Individual defaults can be fail-closed while a write contract is blocked.
-    # /etc/polkit-1 — обычный каталог (не symlink), environment.etc работает.
+    # D-Bus system policy permits addressing Hardware1; each mutation is still
+    # authorized inside hardwared via a per-capability polkit action.
     environment.etc."polkit-1/actions/io.github.orbiscontrol.hardware.policy".source =
       "${cfg.package}/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy";
   };
