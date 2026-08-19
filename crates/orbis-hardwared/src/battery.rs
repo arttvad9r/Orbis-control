@@ -1,7 +1,7 @@
-//! Internal ASUS battery mutation backend.
+//! Internal ASUS battery mutation backend used by the typed Hardware1 service.
 //!
-//! This module deliberately has no Hardware1 exposure yet. The only mutation
-//! backend is the typed `asusd` D-Bus API; the kernel source is read-only.
+//! The only mutation backend is the typed `asusd` D-Bus API; the kernel source
+//! is read-only and is used for authoritative effective-threshold evidence.
 
 use std::path::{Path, PathBuf};
 
@@ -14,6 +14,7 @@ pub const ASUSD_BUS_NAME: &str = "xyz.ljones.Asusd";
 pub const ASUSD_OBJECT_PATH: &str = "/xyz/ljones";
 pub const ASUSD_INTERFACE: &str = "xyz.ljones.Platform";
 pub const EFFECTIVE_THRESHOLD_FILE: &str = "charge_control_end_threshold";
+const POWER_SUPPLY_ROOT: &str = "/sys/class/power_supply";
 const MIN_CHARGE_LIMIT: u8 = 20;
 const MAX_CHARGE_LIMIT: u8 = 100;
 
@@ -45,24 +46,109 @@ pub struct SysfsBatteryEffectiveReader {
     path: PathBuf,
 }
 
-/// Discover a power-supply battery exposing the effective threshold attribute.
-pub fn discover_effective_reader() -> Result<SysfsBatteryEffectiveReader, ProviderError> {
-    let entries = std::fs::read_dir("/sys/class/power_supply").map_err(ProviderError::Io)?;
+fn discovery_read_error(path: &Path, error: std::io::Error) -> ProviderError {
+    if error.kind() == std::io::ErrorKind::PermissionDenied {
+        ProviderError::PermissionDenied(format!(
+            "battery discovery cannot read {}",
+            path.display()
+        ))
+    } else {
+        ProviderError::Io(error)
+    }
+}
+
+fn remember_discovery_error(
+    error: ProviderError,
+    permission_error: &mut Option<String>,
+    io_error: &mut Option<std::io::Error>,
+) {
+    match error {
+        ProviderError::PermissionDenied(detail) => {
+            if permission_error.is_none() {
+                *permission_error = Some(detail);
+            }
+        }
+        ProviderError::Io(error) => {
+            if io_error.is_none() {
+                *io_error = Some(error);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn discover_effective_reader_in(root: &Path) -> Result<SysfsBatteryEffectiveReader, ProviderError> {
+    let entries = std::fs::read_dir(root).map_err(ProviderError::Io)?;
+    let mut permission_error = None;
+    let mut io_error = None;
+
     for entry in entries {
-        let entry = entry.map_err(ProviderError::Io)?;
-        let name = entry.file_name().to_string_lossy().into_owned();
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                if io_error.is_none() {
+                    io_error = Some(error);
+                }
+                continue;
+            }
+        };
+
         let type_path = entry.path().join("type");
         let threshold_path = entry.path().join(EFFECTIVE_THRESHOLD_FILE);
-        let is_battery = std::fs::read_to_string(type_path)
-            .map(|value| value.trim().eq_ignore_ascii_case("battery"))
-            .unwrap_or(false);
-        if is_battery && threshold_path.is_file() {
-            return SysfsBatteryEffectiveReader::from_native_path(&name);
+        let type_value = match std::fs::read_to_string(&type_path) {
+            Ok(value) => value,
+            Err(error) => {
+                remember_discovery_error(
+                    discovery_read_error(&type_path, error),
+                    &mut permission_error,
+                    &mut io_error,
+                );
+                continue;
+            }
+        };
+
+        if !type_value.trim().eq_ignore_ascii_case("battery") {
+            continue;
+        }
+
+        match std::fs::metadata(&threshold_path) {
+            Ok(metadata) if metadata.is_file() => {
+                return Ok(SysfsBatteryEffectiveReader {
+                    path: threshold_path,
+                });
+            }
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                remember_discovery_error(
+                    discovery_read_error(&threshold_path, error),
+                    &mut permission_error,
+                    &mut io_error,
+                );
+            }
         }
     }
+
+    if let Some(detail) = permission_error {
+        return Err(ProviderError::PermissionDenied(detail));
+    }
+    if let Some(error) = io_error {
+        return Err(ProviderError::Io(error));
+    }
+
     Err(ProviderError::Unsupported(
         "no battery effective threshold source discovered".into(),
     ))
+}
+
+/// Discover a power-supply battery exposing the effective threshold attribute.
+///
+/// Discovery is evidence-preserving: a valid candidate wins even if another
+/// entry disappeared or was unreadable during the scan. If no candidate is
+/// found, permission/I/O failures remain typed failures and only a fully
+/// inspected structural absence becomes `Unsupported`.
+pub fn discover_effective_reader() -> Result<SysfsBatteryEffectiveReader, ProviderError> {
+    discover_effective_reader_in(Path::new(POWER_SUPPLY_ROOT))
 }
 
 impl SysfsBatteryEffectiveReader {
@@ -79,7 +165,7 @@ impl SysfsBatteryEffectiveReader {
         }
 
         Ok(Self {
-            path: PathBuf::from("/sys/class/power_supply")
+            path: PathBuf::from(POWER_SUPPLY_ROOT)
                 .join(native_path)
                 .join(EFFECTIVE_THRESHOLD_FILE),
         })
@@ -235,8 +321,10 @@ pub mod battery_mutation_wire {
 
 #[async_trait]
 pub trait BatteryMutationBackend: Send + Sync {
-    async fn set_charge_limit(&self, percent: u8)
-    -> Result<BatteryMutationReadback, ProviderError>;
+    async fn set_charge_limit(
+        &self,
+        percent: u8,
+    ) -> Result<BatteryMutationReadback, ProviderError>;
 
     /// Report the typed runtime availability of this mutation backend.
     ///
@@ -400,6 +488,78 @@ mod tests {
         AsusdBatteryMutationBackend::new(asusd, effective)
     }
 
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "orbis-hardwared-battery-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn discovery_permission_error_is_preserved() {
+        let error = discovery_read_error(
+            Path::new("/sys/class/power_supply/BAT0/type"),
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        );
+        assert!(matches!(error, ProviderError::PermissionDenied(_)));
+    }
+
+    #[test]
+    fn discovery_io_error_is_preserved() {
+        let error = discovery_read_error(
+            Path::new("/sys/class/power_supply/BAT0/type"),
+            std::io::Error::from(std::io::ErrorKind::WouldBlock),
+        );
+        assert!(matches!(error, ProviderError::Io(_)));
+    }
+
+    #[test]
+    fn discovery_broken_entry_does_not_hide_later_valid_battery() {
+        let root = unique_test_dir("mixed");
+        let broken = root.join("AC0");
+        let valid = root.join("BAT9");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::create_dir_all(&valid).unwrap();
+        std::fs::write(valid.join("type"), "Battery\n").unwrap();
+        std::fs::write(valid.join(EFFECTIVE_THRESHOLD_FILE), "80\n").unwrap();
+
+        let reader = discover_effective_reader_in(&root).unwrap();
+        assert_eq!(reader.path, valid.join(EFFECTIVE_THRESHOLD_FILE));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn discovery_broken_entry_without_candidate_is_not_unsupported() {
+        let root = unique_test_dir("broken-only");
+        std::fs::create_dir_all(root.join("BAT0")).unwrap();
+
+        let result = discover_effective_reader_in(&root);
+        assert!(matches!(result, Err(ProviderError::Io(_))));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn discovery_structural_absence_is_unsupported() {
+        let root = unique_test_dir("unsupported");
+        let ac = root.join("AC0");
+        let battery_without_threshold = root.join("BAT0");
+        std::fs::create_dir_all(&ac).unwrap();
+        std::fs::create_dir_all(&battery_without_threshold).unwrap();
+        std::fs::write(ac.join("type"), "Mains\n").unwrap();
+        std::fs::write(battery_without_threshold.join("type"), "Battery\n").unwrap();
+
+        let result = discover_effective_reader_in(&root);
+        assert!(matches!(result, Err(ProviderError::Unsupported(_))));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn rejects_19_before_setter() {
         let asusd = FakeAsusd::new(80);
@@ -505,8 +665,7 @@ mod tests {
 
     #[tokio::test]
     async fn sysfs_effective_reader_is_read_only_and_fresh() {
-        let directory =
-            std::env::temp_dir().join(format!("orbis-hardwared-battery-{}", std::process::id()));
+        let directory = unique_test_dir("fresh");
         std::fs::create_dir(&directory).unwrap();
         let path = directory.join(EFFECTIVE_THRESHOLD_FILE);
         std::fs::write(&path, "80\n").unwrap();
