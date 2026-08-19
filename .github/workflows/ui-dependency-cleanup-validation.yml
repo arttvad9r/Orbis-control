@@ -1,0 +1,34 @@
+name: UI dependency cleanup validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/ui-dependency-cleanup-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact implementation
+        uses: actions/checkout@v5
+        with:
+          ref: e6bb2b4320526842f3479c66214f6edd2786a502
+          fetch-depth: 0
+
+      - name: Verify exact implementation and scope
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "e6bb2b4320526842f3479c66214f6edd2786a502"
+          test "$(git diff --name-only f0d610a04a8ff16501a02389568c7a4aee62aac8..HEAD)" = "crates/orbis-ui/Cargo.toml"
+          git diff --check f0d610a04a8ff16501a02389568c7a4aee62aac8..HEAD
+
+      - name: Targeted Rust validation
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo check -p orbis-ui --all-targets
+          cargo test -p orbis-ui
+          cargo clippy -p orbis-ui --all-targets -- -D warnings
