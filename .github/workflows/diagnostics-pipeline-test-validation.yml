@@ -1,0 +1,56 @@
+name: Diagnostics pipeline test validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/diagnostics-pipeline-test-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact implementation
+        uses: actions/checkout@v5
+        with:
+          ref: agent/diagnostics-pipeline-integration-test
+          fetch-depth: 0
+
+      - name: Install Rust 1.87
+        run: rustup toolchain install 1.87 --profile minimal --component rustfmt --component clippy
+
+      - name: Normalize known manifest syntax in checkout only
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/orbis-ui/Cargo.toml')
+          s = p.read_text()
+          old = '\n'.join([
+              'orbis-providers = {',
+              '    path = "../orbis-providers",',
+              '    version = "0.1.0",',
+              '    default-features = false,',
+              '    features = ["mock"],',
+              '}',
+          ])
+          new = 'orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }'
+          if s.count(old) != 1:
+              raise SystemExit('known manifest block did not match exactly once')
+          p.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Validate snapshot-to-export pipeline
+        run: |
+          set -euo pipefail
+          cargo +1.87 fmt --all -- --check
+          cargo +1.87 test --locked -p orbis-ui --test diagnostics_pipeline
+          cargo +1.87 clippy --locked -p orbis-ui --test diagnostics_pipeline -- -D warnings
+
+      - name: Verify exact one-file delta
+        run: |
+          set -euo pipefail
+          git checkout -- crates/orbis-ui/Cargo.toml
+          test "$(git diff --name-only agent/diagnostics-exporters..HEAD)" = "crates/orbis-ui/tests/diagnostics_pipeline.rs"
+          git diff --check agent/diagnostics-exporters..HEAD
