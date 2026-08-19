@@ -24,36 +24,38 @@ jobs:
           from pathlib import Path
           p = Path('crates/orbis-hardwared/src/lib.rs')
           s = p.read_text()
-          old = '''//! # orbis-hardwared — foundation привилегированного hardware helper.
-//!
-//! Единственная capability на этом этапе (ADR 0006):
-//! `SetPerformanceProfile` через kernel `/sys/firmware/acpi/platform_profile`.
-//!
-//! - closed API: принимает только semantic [`PerformanceProfile`]; клиент не
-//!   передаёт пути, строки или sysfs-символы;
-//! - mapping внутри hardwared: `Silent → quiet`, `Balanced → balanced`,
-//!   `Turbo → performance`;
-//! - никакого generic filesystem writer API;
-//! - никакого кэша/optimistic success: каждый вызов читает choices и делает
-//!   fresh read-back;
-//! - D-Bus/polkit/activation/identity contract — следующий шаг (ADR 0006);
-//!   этот crate не выполняет I/O к реальному sysfs в тестах (fake backend).
-'''
-          new = '''//! # orbis-hardwared — privileged typed Hardware1 helper.
-//!
-//! The system service exposes only closed capability-specific operations. It
-//! never accepts arbitrary filesystem paths, sysfs symbols, D-Bus destinations,
-//! or generic mutation payloads from clients.
-//!
-//! - each production mutation owns its typed validation/read-back contract;
-//! - each privileged method authorizes the original system-bus sender through
-//!   its dedicated polkit action before mutation;
-//! - writable kernel ABI is constrained independently by the NixOS service
-//!   sandbox; service presence alone never proves a capability is supported;
-//! - no optimistic success: mutation paths use authoritative read-back where
-//!   their backend contract provides it;
-//! - tests use injected/fake backends and perform no live hardware writes.
-'''
+          old = '\n'.join([
+              '//! # orbis-hardwared — foundation привилегированного hardware helper.',
+              '//!',
+              '//! Единственная capability на этом этапе (ADR 0006):',
+              '//! `SetPerformanceProfile` через kernel `/sys/firmware/acpi/platform_profile`.',
+              '//!',
+              '//! - closed API: принимает только semantic [`PerformanceProfile`]; клиент не',
+              '//!   передаёт пути, строки или sysfs-символы;',
+              '//! - mapping внутри hardwared: `Silent → quiet`, `Balanced → balanced`,',
+              '//!   `Turbo → performance`;',
+              '//! - никакого generic filesystem writer API;',
+              '//! - никакого кэша/optimistic success: каждый вызов читает choices и делает',
+              '//!   fresh read-back;',
+              '//! - D-Bus/polkit/activation/identity contract — следующий шаг (ADR 0006);',
+              '//!   этот crate не выполняет I/O к реальному sysfs в тестах (fake backend).',
+          ]) + '\n'
+          new = '\n'.join([
+              '//! # orbis-hardwared — privileged typed Hardware1 helper.',
+              '//!',
+              '//! The system service exposes only closed capability-specific operations. It',
+              '//! never accepts arbitrary filesystem paths, sysfs symbols, D-Bus destinations,',
+              '//! or generic mutation payloads from clients.',
+              '//!',
+              '//! - each production mutation owns its typed validation/read-back contract;',
+              '//! - each privileged method authorizes the original system-bus sender through',
+              '//!   its dedicated polkit action before mutation;',
+              '//! - writable kernel ABI is constrained independently by the NixOS service',
+              '//!   sandbox; service presence alone never proves a capability is supported;',
+              '//! - no optimistic success: mutation paths use authoritative read-back where',
+              '//!   their backend contract provides it;',
+              '//! - tests use injected/fake backends and perform no live hardware writes.',
+          ]) + '\n'
           if s.count(old) != 1:
               raise SystemExit('stale hardwared rustdoc block did not match exactly once')
           p.write_text(s.replace(old, new, 1))
@@ -63,12 +65,8 @@ jobs:
       - name: Validate documentation-only scope
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import xml.etree.ElementTree as ET
-          ET.parse('packaging/nix/dbus/io.github.orbiscontrol.Hardware.conf')
-          PY
+          python3 -c "import xml.etree.ElementTree as ET; ET.parse('packaging/nix/dbus/io.github.orbiscontrol.Hardware.conf')"
           git diff --check
-          git diff --word-diff=porcelain chatgpt/production-hardening-20260818..HEAD -- packaging/nix/module.nix packaging/nix/dbus/io.github.orbiscontrol.Hardware.conf >/tmp/doc.diff
           git diff --name-only chatgpt/production-hardening-20260818..HEAD | sort > /tmp/changed.txt
           printf '%s\n' crates/orbis-hardwared/src/lib.rs packaging/nix/dbus/io.github.orbiscontrol.Hardware.conf packaging/nix/module.nix | sort > /tmp/allowed.txt
           diff -u /tmp/allowed.txt /tmp/changed.txt
@@ -82,5 +80,3 @@ jobs:
           git diff --cached --check
           git commit -m "docs(hardwared): refresh privileged boundary rustdoc [skip ci]"
           git push origin HEAD:agent/hardwared-doc-drift-cleanup
-
-# retrigger workflow registration
