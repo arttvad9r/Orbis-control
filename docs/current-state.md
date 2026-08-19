@@ -11,7 +11,7 @@
 
 Orbis уже имеет рабочие production vertical slices для Battery, Performance и независимых GPU primitives. Узкие privileged mutations проходят только через typed `Hardware1` → polkit → bounded backend; `sessiond` остаётся read/session boundary и не является mutation deputy.
 
-`main` также содержит production telemetry polling, profile-specific fan reads, fan-curve mutation wiring, безопасное preferences persistence, XDG window state, generic desired-state persistence, Desired/Observed/Pending + lifecycle domain foundations, typed diagnostics snapshot/export/runtime/window-model layers, desktop/AppStream packaging integration и support-matrix tooling.
+`main` также содержит production telemetry polling, profile-specific fan reads, безопасное preferences persistence, XDG window state, generic desired-state persistence, Desired/Observed/Pending + lifecycle domain foundations, typed diagnostics snapshot/export/runtime/window-model layers, desktop/AppStream packaging integration и support-matrix tooling. Fan mutation implementation присутствует, но временно **заблокирована fail-closed** после подтверждённого enabled-state contract bug (#104).
 
 Главный текущий release blocker: GitHub Actions job завершается `failure` **до выполнения workflow steps** (`steps=[]`, log blob недоступен). Это не является доказанным `cargo`/`nix` regression, но release gate остаётся закрытым до реально выполненного green `nix flake check`.
 
@@ -35,7 +35,8 @@ Orbis уже имеет рабочие production vertical slices для Battery
 | GPU primitives | LIVE-VALIDATED (read) | Runtime power, physical MUX and access policy are separate production read concepts. |
 | GPU product mode | BLOCKED | Eco/Standard/Ultimate/Optimized production mapping/mutation is not proven; controls remain unsupported/disabled. |
 | Telemetry | IMPLEMENTED / TESTED | Production sysfs telemetry provider and worker-owned polling exist; this is not automatically live hardware acceptance evidence. |
-| Fan curves | IMPLEMENTED / TESTED | Profile-specific read is Session1 → sessiond → asusd; active curve remains sysfs; typed Hardware1 mutation/reset paths and visual editor are in `main`. Live mutation/reset acceptance remains revision-scoped and must not be inferred from UI presence. |
+| Fan curve reads | IMPLEMENTED / TESTED | Profile-specific read is Session1 → sessiond → asusd; active curve remains sysfs. |
+| Fan curve mutation/reset | **BLOCKED — #104** | Current custom setter sends `CurveData.enabled=false`; current upstream asusd replaces the entire matching curve, so a points update can disable the curve. Packaged default polkit authorization and FansWindow mutation UI are disabled until enabled-state preservation + read-back is fixed and tested. |
 | `sessiond` resilience | TESTED | Battery/UPower discovery is lazy/capability-local; UPower absence no longer blocks independent Performance/GPU/Fan Session1 startup. |
 | NixOS UPower integration | TESTED | Orbis enables UPower with `lib.mkDefault true`; explicit host override remains stronger; no hard service lifecycle coupling. |
 | Privileged helper | IMPLEMENTED / historically LIVE-VALIDATED | Typed Hardware1 helper; no generic sysfs/filesystem/shell/D-Bus proxy. |
@@ -87,11 +88,11 @@ These observations are not universal ASUS specifications and must not be convert
 
 ## Current blockers / unfinished work
 
-1. Restore executable GitHub Actions runs and obtain a green `nix flake check` on current `main`.
-2. Finish XDG Run on Startup Rust lifecycle wiring (#57); backend exists and the UI remains disabled until it is genuinely connected.
-3. Finish Diagnostics window Rust lifecycle/refresh wiring (#101); backend/runtime/model/Slint layers exist and the UI remains disabled until connected.
-4. Design reconciliation semantics on top of the now-integrated Desired/Observed/Pending, lifecycle and desired-state foundations; do not auto-apply merely because persisted intent exists.
-5. Perform dated live validation before promoting additional fan mutation/reset claims on the current revision.
+1. **Fix fan enabled-state preservation (#104)** before re-enabling any fan writes; pre-read authoritative `enabled`, preserve it in the single setter, and verify it remains unchanged in post-write read-back.
+2. Restore executable GitHub Actions runs and obtain a green `nix flake check` on current `main`.
+3. Finish XDG Run on Startup Rust lifecycle wiring (#57); backend exists and the UI remains disabled until it is genuinely connected.
+4. Finish Diagnostics window Rust lifecycle/refresh wiring (#101); backend/runtime/model/Slint layers exist and the UI remains disabled until connected.
+5. Design reconciliation semantics on top of the now-integrated Desired/Observed/Pending, lifecycle and desired-state foundations; do not auto-apply merely because persisted intent exists.
 6. Keep GPU product mode, power limits and extended ASUS controls disabled/unknown until concept-specific evidence exists.
 7. Implement a real CLI; current `orbisctl` is a stub.
 8. Obtain final packaged acceptance evidence on the exact release revision.
