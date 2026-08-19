@@ -8,8 +8,15 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod autostart;
 pub mod paths;
 pub mod store;
+
+pub use autostart::{
+    AUTOSTART_ENTRY, AUTOSTART_FILE_NAME, AutostartError, AutostartPathError, AutostartStatus,
+    autostart_dir, autostart_dir_with, autostart_file, autostart_status, autostart_status_from_dir,
+    disable_autostart, disable_autostart_from_dir, enable_autostart, enable_autostart_from_dir,
+};
 
 pub use store::{
     AppConfig, AutomationConfig, BatteryConfig, ExperimentalConfig, UiConfig, load_or_default,
