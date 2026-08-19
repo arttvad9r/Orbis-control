@@ -7,14 +7,15 @@
 //! SIGINT/SIGTERM.
 //!
 //! - при startup НИКАКИХ hardware writes;
-//! - Performance и fan backends независимы от Battery discovery;
 //! - Battery mutation включается только при наличии effective threshold reader;
 //! - raw GPU SetMode намеренно отключён до доказанной product-level semantics;
+//! - fan mutation намеренно hard-disabled до исправления известных write/reset contracts;
 //! - reconnect/restart policy принадлежит внешнему supervisor/systemd.
 
 use std::error::Error;
 
 use async_trait::async_trait;
+use orbis_core::{fan::FanId, profile::AsusdFanProfile};
 use orbis_hardwared::{
     AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION,
     GPU_POLKIT_ACTION, HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
@@ -24,7 +25,10 @@ use orbis_hardwared::{
         AsusdBatteryMutationBackend, BatteryMutationBackend, BatteryMutationReadback,
         BatteryMutationStatus, ZbusAsusdBatteryClient, discover_effective_reader,
     },
-    fans::{AsusdFanCurveMutationBackend, ZbusAsusdFanCurveClient},
+    fans::{
+        FanCurveDefaultsReadback, FanCurveMutationOperation, FanCurveMutationReadback,
+        FanCurvePoints, FanMutationStatus,
+    },
     panel::{
         AsusdPanelOverdriveMutationBackend, PanelOverdriveMutationBackend,
         PanelOverdriveMutationReadback, PanelOverdriveMutationStatus,
@@ -48,6 +52,40 @@ impl SupergfxdMutationOperation for DisabledGpuMutationBackend {
         Err(ProviderError::Unsupported(
             "GPU mutation is disabled until Orbis product-level GPU semantics are proven".into(),
         ))
+    }
+}
+
+/// Production hard stop for fan mutations.
+///
+/// The asusd compatibility setter currently cannot safely preserve the stored
+/// `CurveData.enabled` field, and upstream factory-default reset can fail before
+/// restoring the previous performance profile. Polkit is also default-deny,
+/// but a local policy override must not be enough to reach those unsafe writes.
+struct DisabledFanMutationBackend;
+
+const FAN_MUTATION_DISABLED: &str =
+    "fan mutation is disabled until enabled-state preservation and factory-reset restoration are fixed";
+
+#[async_trait]
+impl FanCurveMutationOperation for DisabledFanMutationBackend {
+    async fn set_fan_curve(
+        &self,
+        _profile: AsusdFanProfile,
+        _fan: &FanId,
+        _curve: &FanCurvePoints,
+    ) -> Result<FanCurveMutationReadback, ProviderError> {
+        Err(ProviderError::Unsupported(FAN_MUTATION_DISABLED.into()))
+    }
+
+    async fn mutation_status(&self) -> FanMutationStatus {
+        FanMutationStatus::Unsupported
+    }
+
+    async fn reset_curves_to_defaults(
+        &self,
+        _profile: AsusdFanProfile,
+    ) -> Result<FanCurveDefaultsReadback, ProviderError> {
+        Err(ProviderError::Unsupported(FAN_MUTATION_DISABLED.into()))
     }
 }
 
@@ -202,7 +240,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let connection = zbus::connection::Builder::system()?.build().await?;
 
     // Battery support is capability-local. Failure to discover its effective
-    // kernel read-back must not prevent Performance/Fan Hardware1 startup.
+    // kernel read-back must not prevent unrelated Hardware1 capabilities.
     let battery_backend: Box<dyn BatteryMutationBackend> = match discover_effective_reader() {
         Ok(effective_reader) => Box::new(AsusdBatteryMutationBackend::new(
             ZbusAsusdBatteryClient::new(connection.clone()),
@@ -217,12 +255,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let fan_backend =
-        AsusdFanCurveMutationBackend::new(ZbusAsusdFanCurveClient::new(connection.clone()));
+    // Known fan write/reset correctness bugs are stronger than a policy-level
+    // warning: production Hardware1 never constructs the live asusd fan writer.
+    let fan_backend = DisabledFanMutationBackend;
 
     // Panel Overdrive support is capability-local. Failure to discover its
-    // authoritative kernel read-back must not prevent Performance/Battery/Fan
-    // Hardware1 startup.
+    // authoritative kernel read-back must not prevent unrelated Hardware1
+    // capabilities. Product policy remains default-deny pending owner evidence.
     let panel_backend: Box<dyn PanelOverdriveMutationBackend> =
         match discover_panel_overdrive_reader() {
             Ok(reader) => Box::new(AsusdPanelOverdriveMutationBackend::new(
@@ -309,6 +348,17 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn disabled_fan_is_hard_stopped_in_production_composition() {
+        let backend = DisabledFanMutationBackend;
+        assert_eq!(backend.mutation_status().await, FanMutationStatus::Unsupported);
+        let error = backend
+            .reset_curves_to_defaults(AsusdFanProfile::Balanced)
+            .await
+            .expect_err("disabled fan reset must never reach asusd");
+        assert!(matches!(error, ProviderError::Unsupported(_)));
+    }
+
+    #[tokio::test]
     async fn disabled_battery_preserves_unsupported_discovery() {
         let backend = DisabledBatteryMutationBackend::from_discovery_error(
             ProviderError::Unsupported("no effective threshold source".into()),
@@ -346,9 +396,6 @@ mod tests {
 
     #[test]
     fn disabled_battery_mutation_status_preserves_typed_reason() {
-        // The typed mutation status must mirror the discovery classification:
-        // Unsupported stays Unsupported, permission stays PermissionDenied,
-        // temporary discovery failure stays TemporarilyUnavailable.
         let unsupported = DisabledBatteryMutationBackend::from_discovery_error(
             ProviderError::Unsupported("no effective threshold source".into()),
         );
