@@ -89,19 +89,14 @@ pub struct AutomationConfig {
 
 impl Default for AutomationConfig {
     fn default() -> Self {
+        // Legacy/default configuration must be inert. Missing or malformed
+        // compatibility config is never permission to synthesize hardware
+        // intent or start reconciliation.
         Self {
-            enabled: true,
+            enabled: false,
             power_event_delay_ms: 1500,
-            ac: PowerAutomationConfig {
-                profile: Some(PerformanceProfile::Balanced),
-                gpu_policy: Some(GpuMode::Standard),
-                refresh_policy: Some("maximum".into()),
-            },
-            battery: PowerAutomationConfig {
-                profile: Some(PerformanceProfile::Silent),
-                gpu_policy: Some(GpuMode::Eco),
-                refresh_policy: Some("minimum".into()),
-            },
+            ac: PowerAutomationConfig::default(),
+            battery: PowerAutomationConfig::default(),
         }
     }
 }
@@ -118,9 +113,8 @@ pub struct BatteryConfig {
 
 impl Default for BatteryConfig {
     fn default() -> Self {
-        Self {
-            charge_limit: Some(80),
-        }
+        // No implicit hardware intent in a missing legacy config.
+        Self { charge_limit: None }
     }
 }
 
@@ -256,12 +250,15 @@ mod tests {
     }
 
     #[test]
-    fn default_is_valid() {
+    fn default_is_valid_and_hardware_inert() {
         let cfg = AppConfig::default();
         cfg.validate().unwrap();
         assert_eq!(cfg.config_version, CONFIG_VERSION);
         assert_eq!(cfg.ui.theme, "dark");
-        assert_eq!(cfg.battery.charge_limit, Some(80));
+        assert!(!cfg.automation.enabled);
+        assert_eq!(cfg.automation.ac, PowerAutomationConfig::default());
+        assert_eq!(cfg.automation.battery, PowerAutomationConfig::default());
+        assert_eq!(cfg.battery.charge_limit, None);
     }
 
     #[test]
@@ -285,10 +282,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_file_returns_default() {
+    fn missing_file_returns_inert_default() {
         let td = temp_test_env();
         let cfg = load_from_dir(&td.path().join("nope")).unwrap();
         assert_eq!(cfg, AppConfig::default());
+        assert!(!cfg.automation.enabled);
+        assert_eq!(cfg.battery.charge_limit, None);
     }
 
     #[test]
