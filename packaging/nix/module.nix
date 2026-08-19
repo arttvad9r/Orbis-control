@@ -2,10 +2,10 @@
 
 # Orbis Control — NixOS-модуль.
 #
-# ВНИМАНИЕ (Этап 2): модуль НЕ включает реальных аппаратных операций.
-# Он только регистрирует опции, которые будут использованы на поздних этапах,
-# и (по желанию) позволяет запускать демон в mock-режиме.
-# Никаких записей в sysfs, никаких манипуляций с asusd/ppd из этого модуля.
+# Модуль запускает sessiond и узкий privileged Hardware1 helper. Hardware
+# mutations остаются typed/capability-specific: никаких generic sysfs/path
+# writers, а фактическая авторизация mutation выполняется внутри hardwared
+# через отдельные polkit actions для исходного system-bus caller.
 
 let
   cfg = config.services.orbis-control;
@@ -67,10 +67,11 @@ in
       };
     };
 
-    # orbis-hardwared: system (root) service. НЕ универсальный hardware helper:
-    # единственная capability — Performance profile write (ADR 0006).
+    # orbis-hardwared: system (root) service with a closed typed Hardware1 API.
+    # Каждая mutation capability имеет отдельный backend/polkit action; helper
+    # не принимает произвольные пути, методы или generic filesystem writes.
     systemd.services.orbis-hardwared = {
-      description = "Orbis Control hardware helper (performance profile)";
+      description = "Orbis Control hardware helper";
       wantedBy = [ "multi-user.target" ];
       after = [ "dbus.service" ];
       requires = [ "dbus.service" ];
@@ -115,10 +116,10 @@ in
     # /etc/systemd hooks, не в system.path.
     environment.systemPackages = [ cfg.package ];
 
-    # D-Bus system policy (root own + send_destination; авторизация — polkit)
-    # устанавливается из share/dbus-1/system.d пакета через system.path.
+    # D-Bus system policy только разрешает владение destination/calls;
+    # mutation authorization выполняется внутри hardwared через polkit.
 
-    # Polkit actions (Performance, Battery и GPU; active local user).
+    # Per-capability polkit actions for Hardware1 mutations (active local user).
     # /etc/polkit-1 — обычный каталог (не symlink), environment.etc работает.
     environment.etc."polkit-1/actions/io.github.orbiscontrol.hardware.policy".source =
       "${cfg.package}/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy";
