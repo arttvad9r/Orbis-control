@@ -70,7 +70,7 @@ def profile_checks(profile: str) -> list[dict[str, Any]]:
         check(
             "cargo-check",
             "static",
-            ["cargo", "check", "--workspace", "--all-targets"],
+            ["cargo", "check", "--locked", "--workspace", "--all-targets"],
             static_claim,
         ),
         check("git-diff-check", "hygiene", ["git", "diff", "--check"], []),
@@ -82,7 +82,7 @@ def profile_checks(profile: str) -> list[dict[str, Any]]:
                 check(
                     "cargo-test",
                     "test",
-                    ["cargo", "test", "--workspace"],
+                    ["cargo", "test", "--locked", "--workspace"],
                     ["TESTED"],
                 ),
                 check(
@@ -91,6 +91,7 @@ def profile_checks(profile: str) -> list[dict[str, Any]]:
                     [
                         "cargo",
                         "clippy",
+                        "--locked",
                         "--workspace",
                         "--all-targets",
                         "--",
@@ -108,7 +109,16 @@ def profile_checks(profile: str) -> list[dict[str, Any]]:
                 check(
                     "nix-build",
                     "build",
-                    ["nix", "build", ".#orbis-control", "--max-jobs", "1", "--cores", "4"],
+                    [
+                        "nix",
+                        "build",
+                        ".#orbis-control",
+                        "--no-link",
+                        "--max-jobs",
+                        "1",
+                        "--cores",
+                        "4",
+                    ],
                     static_claim,
                 ),
                 check(
@@ -363,7 +373,7 @@ def run_in_dev_shell(profile: str) -> int:
         sys.stderr.write(completed.stderr)
     if completed.stdout.strip():
         return completed.returncode
-    emit(invocation_error(profile, "nix develop did not produce verifier JSON output" )[0])
+    emit(invocation_error(profile, "nix develop did not produce verifier JSON output")[0])
     return 2
 
 
