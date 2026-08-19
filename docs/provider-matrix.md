@@ -1,381 +1,182 @@
 # Provider Matrix — Orbis Control
 
-> Роль: **CURRENT PROVIDER STRATEGY + DATED HARDWARE EVIDENCE**, не список
-> реализованных providers. Фактическая готовность — в
-> [`current-state.md`](current-state.md). Статусы FA707NV ниже относятся к probe
-> 2026-08-06 и не доказывают безопасные writes.
+> Роль: **CURRENT PROVIDER STRATEGY**. Фактическая готовность и blockers — в
+> [`current-state.md`](current-state.md). Dated hardware observations живут в
+> `tests/fixtures/hardware/`, research/audit documents и revision-scoped evidence;
+> они не превращаются автоматически в runtime support.
 >
-> Дата: 2026-08-06 (обновлено после ревью Этапа 0). Связывает функции
-> (`docs/feature-matrix.md`) с провайдерами, backend-интерфейсами и статусами.
-> Полный контракт trait-ов — в `docs/architecture.md`.
-> Целевые дистрибутивы: **NixOS** (официальная платформа разработки), Fedora,
-> Arch, Ubuntu LTS, Debian, openSUSE.
+> Обновлено: 2026-08-19.
 
-## Принципы
+## Principles
 
-1. Бизнес-логика не привязывается к конкретному проекту — используется ранжируемый
-   список провайдеров на каждую функцию.
-2. Target production provider должен иметь capability evidence, typed reads,
-   domain-specific write/validation только при доказанной поддержке, `health()`,
-   `diagnostics()`, timeout, человекочитаемую причину недоступности и backend
-   identity. В текущем коде эти обязанности разделены между `Provider`,
-   domain-specific traits и capability pipeline; общий `probe()/read_state()`
-   contract из Stage 0 как единый trait не реализован.
-3. Наличие файла/объекта ≠ поддержка записи. Проверяется: существование, тип,
-   чтение, запись, диапазон, read-back, стабильность, соответствие DMI,
-   отсутствие конфликтующего владельца.
-4. Приоритет backend: asusd(D-Bus) → asus-armoury(kernel) → стандартный kernel ABI →
-   узкий helper → экспериментальный интерфейс (feature flag).
+1. Provider support определяется runtime evidence/probes, не DMI model name.
+2. Read/write evidence независимы.
+3. File/object presence или successful constructor не доказывают write support.
+4. Unknown/Unsupported/TemporarilyUnavailable/PermissionDenied/ReadOnly не
+   взаимозаменяемы.
+5. Standard kernel ABI предпочтителен, когда ownership/semantics доказаны;
+   asusd/supergfxd используются как typed compatibility/owner backends для тех
+   concepts, которыми они реально владеют.
+6. Привилегированный write получает отдельный bounded Hardware1 method; generic
+   sysfs/filesystem/shell writer запрещён.
+7. `Applied` требует defined confirmation/read-back. `Accepted` остаётся
+   unconfirmed state.
+8. Неполный/unsafe write path остаётся fail-closed.
 
-### Семантика capability-статусов (уточнена после ревью)
+## Current matrix
 
-Для каждого неработающего атрибута провайдер обязан сохранять: путь; тип операции;
-точный `errno`; текст ошибки; права; владельца; режим файла; `uevent` (если применимо);
-драйвер; kernel version; результат повторной проверки; результат проверки через asusd;
-результат D-Bus introspection; предположительную стабильность ошибки.
-
-| Статус | Условие |
-|---|---|
-| `PermissionDenied` | ядро или D-Bus отклоняет операцию из-за прав (EACCES/EPERM/polkit) |
-| `Unsupported` | драйвер/firmware устойчиво возвращает `ENODEV`/`ENOTSUP`/`EOPNOTSUPP`, реализация отсутствует для модели, поддержка достоверно опровергнута |
-| `TemporarilyUnavailable` | функция может стать доступна без изменения программы/оборудования (смена профиля, подключение питания, загрузка драйвера, выход GPU из переходного состояния, перезапуск backend) |
-| `ReadOnly` | значение достоверно читается, запись отсутствует или запрещена архитектурой backend |
-| `Unknown` | информации недостаточно |
-
-**Пример FA707NV (см. фикстуру `tests/fixtures/hardware/fa707nv/`):**
-
-- `ppt_*`, `nv_dynamic_boost`, `nv_temp_target`: via asusd — `Unsupported` (ENODEV,
-  errno 19, устойчиво; `SupportedProperties` без PPT-группы); via kernel — read
-  `Supported`, write `PermissionDenied` (файлы `-rw-r--r-- root:root`).
-  Эффективный статус UI без hardwared: `ReadOnly`. Семантика значений
-  (`ppt_pl1_spl=5`) — верифицируется на Этапе 3.
-- `cpufv`: `PermissionDenied` (файл `0200 root:root`, чтение EACCES).
-- `gpu_mux_mode`: `SupportedWithRequirement (Reboot)` — MUX защёлкивается firmware;
-  наблюдаемое расхождение «requested=0, DRM eDP активен на dGPU».
-- `charge_mode`: `ReadOnly` (sysfs `0444`, режим задаётся через asusd/WMI).
-
----
-
-## 1. PerformanceProvider
-
-| Приоритет | Backend | Интерфейс | Действия |
+| Concept | Production read owner/path | Production write owner/path | Current write status |
 |---|---|---|---|
-| 1 | kernel ABI | `/sys/firmware/acpi/platform_profile`, `_choices` | get/set |
-| 2 | asusd | `xyz.ljones.Platform.PlatformProfile` (+ Choices) | get/set |
-| 3 | power-profiles-daemon | `org.freedesktop.UPower.PowerProfiles` | get/set (только при отсутствии конфликта) |
+| Performance profile | kernel `platform_profile` → Session1 | Hardware1 → polkit → fixed kernel writer → read-back | LIVE-VALIDATED historical evidence |
+| Battery charge limit | UPower policy + asusd configured + kernel effective → Session1 | Hardware1 → polkit → typed asusd setter → configured/effective confirmation | LIVE-VALIDATED historical evidence; liveness/discovery hardening #107/#108 |
+| GPU runtime power | supergfxd `Power()` → Session1 | none at product level | read only |
+| Physical GPU MUX | ASUS Armoury/kernel evidence → Session1 | product mutation disabled | blocked |
+| dGPU access policy | ASUS Armoury/kernel evidence → Session1 | product mutation disabled | blocked |
+| Product GPU mode | composed concept only | no accepted production mapping | BLOCKED |
+| Fan active curve | `asus_custom_fan_curve` sysfs read | none | read only |
+| Fan stored profile curve | asusd `FanCurveData(profile)` → Session1 | typed asusd owner through Hardware1 exists but is disabled | **BLOCKED** #104/#105/#109/#116 |
+| Telemetry | dynamic read-only sysfs/hwmon/power_supply | none | read only; coverage/freshness semantics #117 |
+| Panel Overdrive | typed ASUS provider/probe | Hardware1 → typed asusd setter → local read-back | backend-ready; liveness evidence #107 |
+| MiniLED | typed read provider/probe | none | read only |
+| Screen Auto Brightness | typed read provider/probe | none | read only |
+| Keyboard backlight | typed read state/probe | Hardware1 → fixed brightness write → fresh read-back | backend-ready |
+| Aura Static RGB | typed Aura read/config state | Hardware1 → asusd Static config; honest `Accepted` semantics | PARTIAL; liveness evidence #107 |
+| Wayland outputs | read-only compositor output provider | none | read only |
+| Diagnostics service presence | D-Bus `NameHasOwner`/activatable checks without activation | none | read only |
 
-Current implemented backend: kernel `platform_profile` →
-`KernelPerformanceProvider` (read LIVE-VALIDATED) и узкий direct Hardware1 →
-`orbis-hardwared` write path (controlled mutation LIVE-VALIDATED). Причина:
-symbolic ABI, canonical domain mapping, без raw numeric inference.
+## Performance
 
-Production Performance evidence:
-
-- read: kernel `platform_profile` → sessiond → Session1 → session client;
-- write: application caller → Hardware1 → polkit → fixed kernel writer →
-  read-back;
-- post-write: fresh Session1 read-back, без optimistic state;
-- live GUI cycle `Balanced → Silent → Balanced` подтвердил ровно два valid
-  Hardware1 calls/writes (`wire 0`, затем `wire 1`);
-- Battery mutation — **COMPLETED / LIVE-VALIDATED** (см. §4); GPU mutation
-  остаётся отдельным незавершённым направлением.
+Read contract:
 
-Дополнительно (asusd): `PlatformProfileOnAc`, `PlatformProfileOnBattery`,
-`Profile{Quiet,Balanced,Performance}Epp`, `PlatformProfileLinkedEpp`.
+```text
+/sys/firmware/acpi/platform_profile
+/sys/firmware/acpi/platform_profile_choices
+→ sessiond → Session1 → session client
+```
 
-asusd `PlatformProfile` остаётся доступным ASUS evidence/API, но его numeric
-mapping не verified independently локально: observations
-`kernel quiet ↔ PlatformProfile=2` и раннее `kernel balanced ↔ PlatformProfile=0`
-согласуются с historical mapping (`2=Quiet`, `0=Balanced`), однако authoritative
-local asusd/rog-platform numeric enum definition не найден.
+Write contract:
 
-Статус на эталоне (FA707NV, asusd 6.3.8): **Supported**, профили `[LowPower, Quiet, Balanced, Performance]`.
+```text
+original application caller
+→ Hardware1
+→ performance polkit action
+→ fixed `platform_profile` writer
+→ local fresh read-back
+→ fresh Session1 observation
+```
 
----
+Unknown wire values are rejected. The Performance VM explicitly disables UPower
+so the test also proves Session1 does not couple independent Performance to
+Battery availability.
 
-## 2. FanProvider
+## Battery
 
-| Приоритет | Backend | Интерфейс | Действия |
-|---|---|---|---|
-| 1 | asusd | `xyz.ljones.FanCurves` (FanCurveData, SetFanCurve, SetFanCurvesEnabled, SetCurvesToDefaults) | кривые по профилям |
-| 2 | kernel ABI | hwmon `asus_custom_fan_curve` (`pwm*_auto_point{1..8}`) | read + write (через hardwared, если нужно) |
-| 3 | hwmon (read-only) | hwmon `fan*_input`, `fan*_label` | RPM/телеметрия |
+Keep sources distinct:
 
-Формат кривой D-Bus (asusd): `(s(yyyyyyyy)(yyyyyyyy)b)` = профиль, 8×(temp,pwm)
-CPU, 8×(temp,pwm) GPU, enabled.
-
-Статус на эталоне: **Supported** (hwmon9: cpu_fan/gpu_fan; hwmon10: 8 точек × 2 вентилятора).
-
----
-
-## 3. PowerLimitProvider
-
-| Приоритет | Backend | Интерфейс | Параметры |
-|---|---|---|---|
-| 1 | asusd | `xyz.ljones.AsusArmoury` объекты `/ppt_pl1_spl`, `/ppt_pl2_sppt`, `/ppt_pl3_fppt`, `/nv_dynamic_boost`, `/nv_temp_target` | SPL/SPPT/FPPT, Dynamic Boost, GPU temp target |
-| 2 | kernel ABI | asus-nb-wmi `ppt_pl1_spl` и т.д. | то же |
-| 3 | — | CPU temperature limit (по моделям) | asusd/asus-armoury |
+- UPower: policy enabled/state and general battery telemetry;
+- asusd: configured charge threshold owner;
+- kernel power_supply: effective threshold observation.
 
-Важно (FA707NV): via asusd объекты существуют, но `CurrentValue` падает с ENODEV
-(errno 19) — статус через asusd **Unsupported**; прямое чтение kernel работает
-(read **Supported**), запись требует root (write **PermissionDenied**). Эффективный
-статус без hardwared: **ReadOnly**. UI обязан это отражать; семантика значений
-`ppt_*=5` верифицируется на Этапе 3.
-
----
-
-## 4. BatteryProvider
-
-| Приоритет | Backend | Интерфейс | Действия |
-|---|---|---|---|
-| 1 | UPower | `org.freedesktop.UPower` + `.Device` | state, %, energy-rate, capacity, cycles, source type |
-| 2 | asusd compatibility mutation backend | system D-Bus `xyz.ljones.Asusd`, `/xyz/ljones`, `xyz.ljones.Platform`, typed `ChargeControlEndThreshold(u8)` | mutation `20..=100`, step 1; asusd остаётся owner; **LIVE-VALIDATED** |
-| 3 | kernel ABI | `/sys/class/power_supply/BAT*/charge_control_end_threshold` | effective read; direct mutation запрещена при active asusd |
-| 4 | kernel ABI | power_supply sysfs | raw-показания (fallback) |
-
-Статус dated evidence на эталоне: current threshold 80 читался через UPower,
-asusd Platform и sysfs. Hardware min/max/step probe не доказал; текущий
-production UPower provider возвращает `bounds=None`. Исторический range 40–100
-в `expected-capabilities.json` не является production hardware constraint.
-
-Battery backend, application routing и production GUI mutation: **COMPLETED /
-LIVE-VALIDATED**. Controlled `Hardware1.SetChargeLimit` cycle `100 → 80 → 100`
-подтвердил asusd configured и kernel effective read-back; exact Hardware1
-sequence `[80, 100]`, total `2`, без других values или retries. Orbis не вызывает
-shell `asusctl`, не пишет sysfs напрямую и не смешивает `100` с disable. См.
-[ADR 0007](adr/0007-battery-mutation-backend.md).
-
-Read semantics: `enabled` берётся из UPower `ChargeThresholdEnabled`,
-`configured_percent` — из asusd `ChargeControlEndThreshold`, а
-`effective_percent` — из kernel `charge_control_end_threshold`. UPower
-`ChargeEndThreshold=80` — независимая policy/reporting semantics, не
-authoritative configured value.
-
----
-
-## 5. GPU capability providers
-
-Три независимых сущности (физический MUX / доступ приложений / power state).
-Провайдер разбит на под-провайдеры:
-
-### 5.1 MuxProvider (физический MUX)
-
-| Приоритет | Backend | Интерфейс | Действия |
-|---|---|---|---|
-| 1 | kernel ASUS Armoury | firmware-attributes `gpu_mux_mode/current_value` | read — **current implemented** |
-| 2 | asusd | `AsusArmoury/gpu_mux_mode` (CurrentValue, PossibleValues, QueuedGpuValue, ApplyQueuedGpuValue) | read/queue/apply |
-| 3 | supergfxd | `org.supergfxctl.Daemon` Mode/SetMode | legacy fallback |
-
-Current implemented production read concept: kernel ASUS Armoury
-firmware-attributes → `GpuMuxProvider` → `ArmouryGpuProvider` →
-`GpuMuxState` → **LIVE-VALIDATED** (via `AppService::gpu_mux_state()`).
-Mapping PROVEN из kernel 7.1.7 `asus-armoury.c`: 0→Discrete, 1→Integrated.
-
-Статус на эталоне: **SupportedWithRequirement (Reboot)** — `possible_values=[0,1]`, current=1 (live).
-
-### 5.2 GpuAccessProvider (доступ приложений)
-
-| Приоритет | Backend | Интерфейс | Действия |
-|---|---|---|---|
-| 1 | kernel ASUS Armoury | firmware-attributes `dgpu_disable/current_value` | read — **current implemented** |
-| 2 | Cardwire (экспериментальный) | `org.opengamingcollective.cardwire.Gpu` set_block/block, `Mode` | block/unblock; Wayland-only |
-| 3 | asusd | `AsusArmoury/dgpu_disable` | аппаратное отключение (Eco) |
-| 4 | supergfxd | `SetMode(integrated)` | legacy |
-
-Current implemented production read concept: kernel ASUS Armoury
-firmware-attributes → `GpuAccessProvider` → `ArmouryGpuProvider` →
-`GpuAccessPolicy` → **LIVE-VALIDATED** (via `AppService::gpu_access_policy()`).
-Mapping PROVEN из kernel 7.1.7 `asus-armoury.c`: 0→Unblocked, 1→Blocked.
-
-Статус на эталоне: Cardwire отсутствует (BackendMissing); `dgpu_disable` available `[0,1]`, current=0 (live).
-
-### 5.3 GpuPowerStateProvider (фактический power state)
-
-| Приоритет | Backend | Интерфейс | Действия |
-|---|---|---|---|
-| 1 | supergfxd | `Power()` (PROVEN enum) | read — **current implemented** |
-| 2 | sysfs/DRM | `/sys/bus/pci/devices/*/power/runtime_status`, hwmon | read-only (supporting evidence) |
-| 3 | NVML/nvidia-smi (read-only, timeout) | температуры/мощность | read |
-| 4 | Cardwire | `Gpu.power_state`, signal `power_state_changed` | read |
-
-Current implemented production read concept: supergfxd `Power()` →
-`GpuPowerProvider` → `SupergfxdGpuPowerProvider` → `GpuPowerState` →
-**LIVE-VALIDATED** (via `AppService::gpu_power_state()`). Mapping:
-0→Active, 1→Suspended, 2→Off, 3=AsusDisabled→Unknown (conservative, не Off),
-4=Unknown→Unknown, future unknown→Unknown. PCI runtime_status — только
-independent consistency evidence, не provider contract.
-
-Provider ownership (ADR 0005): `SupergfxdGpuPowerProvider` owns ONLY runtime
-power capability; он НЕ является GPU mode / MUX / access provider. One
-backend/provider need not own all GPU concepts.
-
-Не будить dGPU ради телеметрии; устаревшее значение помечать как `Sleeping`/stale.
-
-### 5.4 Session1 read-only transport для GPU capabilities
-
-**IMPLEMENTED / LIVE-VALIDATED**
-
-- Session1 exposes независимые read-only properties: `GpuPower`, `GpuMux`,
-  `GpuAccess` (wire signature `y`);
-- transport path:
-  - power → `SupergfxdGpuPowerProvider` → `GpuPowerState`;
-  - mux → `ArmouryGpuProvider` → `GpuMuxState`;
-  - access → `ArmouryGpuProvider` → `GpuAccessPolicy`;
-- client-side providers: `SessionGpuPowerProvider`, `SessionGpuMuxProvider`,
-  `SessionGpuAccessProvider` (НЕ legacy `GpuProvider`);
-- semantics: domain `Unknown` → semantic wire value; missing capability →
-  D-Bus `NotSupported`; provider/read error → D-Bus error; unknown wire value на
-  client → `Internal`.
-
-Полный read path до GUI — **IMPLEMENTED / LIVE-VALIDATED**: production GUI
-отображает Power/MUX/Access через session-client capability providers
-(`SessionGpuPowerProvider` / `SessionGpuMuxProvider` / `SessionGpuAccessProvider`
-из одной session connection/runtime); без mock fallback; initial refresh only.
-Product `GpuMode` (Eco/Standard/Ultimate/Optimized) не является production
-capability: backend/policy mapping не доказаны, поэтому production semantics
-`Unsupported`/`Unavailable`. `MockProvider` для product mode существует только
-в tests, deterministic fixtures и offscreen scenarios.
-
-### 5.5 Остальные GPU concepts (отдельно, не объединять)
-
-- physical MUX: **PROVEN mapping + provider LIVE-VALIDATED** (kernel ASUS
-  Armoury, `ArmouryGpuProvider`);
-- dGPU access/disable (`dgpu_disable`): **PROVEN mapping + provider
-  LIVE-VALIDATED** (kernel ASUS Armoury, `ArmouryGpuProvider`);
-- product `GpuMode` (Eco/Standard/Ultimate/Optimized): no proven backend
-  mapping;
-- supergfxd pending/user-action enums и staged mutation contract proven;
-  [ADR 0008](adr/0008-supergfxd-staged-gpu-mutation.md) принят, но provider
-  READ/CONTRACT layer и private P2P fake tests ещё не реализованы.
+Production domain does not invent min/max/step when the backend did not prove
+them. Historical fixture ranges are not runtime constraints.
 
-Provider ownership (ADR 0005): `ArmouryGpuProvider` owns MUX + access
-capabilities только; `SupergfxdGpuPowerProvider` owns runtime power только;
-product mode policy — отдельный future provider. One backend/provider need not
-own all GPU concepts.
-
-### 5.5 Product GPU policy (future)
-
-| Capability | Production status | Required evidence before implementation |
-|---|---|---|
-| `GpuProductPolicy` | **NOT IMPLEMENTED / UNSUPPORTED** | отдельный proven backend и product semantics |
-| Eco/Standard/Ultimate/Optimized mapping | **NOT PROVEN** | versioned mapping tests, hardware evidence и policy decision |
-| Product GPU mutation | **NOT IMPLEMENTED** | validated transition contract, authorization, backend ownership и read-back |
-| Transition/pending contract | **FUTURE / STAGED ONLY** | отдельный contract/provider после product policy; live mutation не следует автоматически |
-
-Primitive support не является product support: `GpuPowerProvider`,
-`GpuMuxProvider` и `GpuAccessProvider` доказывают только соответствующие
-independent reads и не создают `GpuProductPolicy`.
-
----
-
-## 6. DisplayProvider
-
-| Приоритет | Backend | Интерфейс | Действия |
-|---|---|---|---|
-| 1 | KScreen (Plasma) | KDE KScreen D-Bus | режимы/частота |
-| 2 | Mutter (GNOME) | стабильные интерфейсы | режимы/частота |
-| 3 | wlr-randr | внешняя команда через типизированный adapter + timeout + строгий парсинг | режимы/частота |
-| 4 | RandR (X11) | RandR API | режимы/частота |
-| 5 | DRM (read-only) | connector properties (поиск внутреннего дисплея) | discovery |
-
-Отдельный под-провайдер PanelOverdrive: asusd `AsusArmoury/panel_overdrive`
-(на эталоне Supported, current=1).
-
----
-
-## 7. LightingProvider
-
-| Приоритет | Backend | Интерфейс | Действия |
-|---|---|---|---|
-| 1 | asusd | `xyz.ljones.Aura` (led_mode, led_mode_data, brightness, led_power, supported_*) | RGB/эффекты/яркость |
-| 2 | kernel LED | `/sys/class/leds/asus::kbd_backlight` | brightness-only |
-| 3 | — | без hidraw reverse engineering в стабильной версии | — |
-
-Статус на эталоне: Aura доступна (`/xyz/ljones/aura/tuf`); kbd LED присутствует.
-
----
-
-## 8. AnimeProvider / SlashProvider
-
-| Приоритет | Backend | Интерфейс | Действия |
-|---|---|---|---|
-| 1 | asusd | `xyz.ljones.Anime` (write, brightness, builtin_animations, off_*) | AniMe Matrix |
-| 1 | asusd | `xyz.ljones.Slash` | Slash Lighting |
-| 2 | kernel LED | (по моделям) | brightness fallback |
-
-Модули появляются только при фактическом наличии устройства (probe).
-
----
-
-## 9. HotkeyProvider
-
-| Приоритет | Backend | Интерфейс | Действия |
-|---|---|---|---|
-| 1 | XDG Global Shortcuts portal | ashpd `global_shortcuts` (session bus) | bind/list/trigger |
-| 2 | KDE/GNOME адаптеры | специфичные D-Bus | fallback |
-| 3 | X11 | X11 grabs | legacy |
-
-Пользовательская команда: список аргументов, подтверждение, без `/bin/sh -c`.
-
----
-
-## 10. TelemetryProvider
-
-| Приоритет | Backend | Интерфейс | Данные |
-|---|---|---|---|
-| 1 | hwmon | sysfs | температуры, вентиляторы |
-| 2 | powercap | `/sys/class/powercap/*` | мощности (CPU/GPU при наличии) |
-| 3 | thermal zones | `/sys/class/thermal/thermal_zone*` | температуры |
-| 4 | UPower | D-Bus | батарея |
-| 5 | DRM/sysfs | PCI runtime status | GPU power state |
-| 6 | NVML (nvidia) | библиотека | dGPU метрики (read-only) |
-| 7 | nvidia-smi | внешняя команда, timeout | fallback (read-only) |
-
-Правило: fast telemetry 1 s; не читать десятки файлов каждые 100–250 ms; не будить dGPU.
-
----
-
-## 11. FirmwareUpdateProvider
-
-| Приоритет | Backend | Интерфейс | Действия |
-|---|---|---|---|
-| 1 | fwupd | `org.freedesktop.fwupd` D-Bus | поиск/установка firmware (BIOS — только вручную) |
-| 2 | пакетный менеджер | системный | обновление приложения |
-| 3 | ссылки ASUS | https | страницы поддержки |
-
----
-
-## 12. Сводная таблица по backend-ам
-
-| Backend | Транспорт | Функции | Статус на эталоне |
-|---|---|---|---|
-| asusd | system D-Bus | профили, лимит, вентиляторы, Aura, Anime, Slash, armoury | активен 6.3.8 |
-| asus-armoury (kernel) | sysfs + D-Bus | MUX, dgpu_disable, PPT, boost, temp, panel_od | активен (ядро 7.1.6) |
-| kernel ABI | sysfs | platform_profile, charge limit, hwmon, leds, backlight | активен |
-| UPower | system D-Bus | батарея/AC | активен |
-| power-profiles-daemon | system D-Bus | профили (альтернатива) | не установлен |
-| supergfxd | system D-Bus | GPU режимы (legacy) | активен |
-| Cardwire | system D-Bus | GPU block (эксперимент) | не установлен |
-| KScreen/Mutter/wlr-randr/RandR | D-Bus/процессы | дисплей | Plasma активен |
-| fwupd | system D-Bus | firmware | не проверялся |
-| logind | system D-Bus | sleep/lid | активен |
-
----
-
-## 13. Требования к провайдерам (чеклист качества)
-
-Перед признанием production provider зрелым требуются (это target checklist, а
-не утверждение о текущей реализации):
-
-- [ ] `probe()` — безопасный read-only discovery
-- [ ] `capabilities()` — полный capability-статус (§7 задания)
-- [ ] `read_state()` — актуальное состояние
-- [ ] write-методы с `validate_request()` до записи
-- [ ] timeout на все внешние операции (D-Bus/sysfs/процессы)
-- [ ] `health()` — жив ли backend
-- [ ] `diagnostics()` — данные для раздела Diagnostics
-- [ ] человекочитаемое объяснение отсутствия поддержки
-- [ ] `backend_id` + `backend_version`
-- [ ] классификация риска операции (safe / confirmation / dangerous / experimental)
-- [ ] read-back после записи
-- [ ] проверка конфликтующего владельца (кто ещё пишет в интерфейс)
+Current hardening gaps:
+
+- mutation status must prove the asusd write owner/interface is actually
+  reachable (#107);
+- discovery errors must not collapse permission/transient failure into
+  structural Unsupported (#108).
+
+## GPU
+
+Never collapse:
+
+```text
+runtime dGPU power
+physical MUX
+dGPU access policy
+requested product mode
+pending reboot/logout requirement
+```
+
+Independent read providers may use different owners. Product mode remains
+blocked until a policy is proven across these concepts. A raw supergfxd enum is
+not the Orbis product mode API.
+
+## Fans
+
+Read concepts are separate:
+
+- **active curve** — current sysfs `asus_custom_fan_curve` view;
+- **stored profile-specific curve** — asusd `FanCurveData(profile)`.
+
+No direct sysfs fan write is permitted by Orbis architecture. The only accepted
+future mutation owner is the typed asusd fan API through Hardware1, but that path
+is currently disabled.
+
+Mandatory blockers before re-enabling fan writes:
+
+- preserve asusd `CurveData.enabled` on custom update (#104);
+- make Factory Defaults restoration failure-safe (#105);
+- represent CPU/GPU support without cross-inference and allow asymmetric read
+  support where valid (#109);
+- preserve profile-specific `enabled` evidence through Session1/UI (#116);
+- executable tests/CI and controlled live validation on the exact revision.
+
+Packaged polkit currently denies the fan write action even for active users, and
+FansWindow mutation controls are disabled. Reads remain available.
+
+## Telemetry
+
+`SysfsTelemetryProvider` discovers sources dynamically and reads independent
+metrics without inventing unsupported totals/percentages. Partial observations
+are allowed.
+
+Current evidence refinement #117 must distinguish a useful recent observation
+from an empty/partial successful call. One optional sensor failure must not poison
+all telemetry, but denial/malformed absence also must not silently become proof
+of fresh useful data.
+
+## Extended ASUS controls
+
+Use [`extended-asus-controls-readiness.md`](extended-asus-controls-readiness.md)
+for concept-specific readiness.
+
+Rules:
+
+- Panel Overdrive is not Panel HD;
+- keyboard brightness is not generic Aura brightness;
+- MiniLED/Screen Auto Brightness read support does not imply write support;
+- AniMe/Slash/Boot sound/MCU powersave/eGPU remain separate concepts requiring
+  their own evidence;
+- generic firmware integer writers are forbidden.
+
+## Capability aggregation
+
+Registry snapshots are immutable and contain independent operation evidence.
+UI/clients gate mutation from `operations.write.status`, never overall status
+alone.
+
+Periodic refresh re-queries mutation status before rebuilding. Explicit refresh
+currently needs the same canonical sequence (#112).
+
+Write-owner liveness should be probed non-mutatingly. Battery/Panel/Aura status
+still needs this hardening (#107).
+
+## Dated hardware evidence
+
+FA707NV evidence from 2026-08-06 remains useful for:
+
+- proving that specific paths/objects existed on that system;
+- comparing known enum/value observations;
+- regression fixtures and support-matrix evidence.
+
+It does **not** prove:
+
+- universal ASUS support;
+- current revision write safety;
+- cross-model ranges/defaults;
+- that a write is supported merely because a file/object was present.
+
+For a release claim, use [`verification.md`](verification.md) and
+[`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
