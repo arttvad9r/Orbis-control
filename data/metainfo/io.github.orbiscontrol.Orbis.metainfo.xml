@@ -5,7 +5,10 @@
   <project_license>GPL-3.0-or-later</project_license>
   <name>Orbis Control</name>
   <summary>Control and monitor supported ASUS laptop features on Linux</summary>
-  <developer_name>Orbis Control contributors</developer_name>
+  <developer id="io.github.orbiscontrol">
+    <name>Orbis Control contributors</name>
+  </developer>
+  <url type="homepage">https://github.com/arttvad9r/Orbis-control</url>
   <description>
     <p>Orbis Control is a native Linux application for monitoring and controlling supported ASUS laptop capabilities.</p>
     <p>Available controls depend on runtime capability probes and hardware evidence. Unsupported features are not presented as universally available.</p>
