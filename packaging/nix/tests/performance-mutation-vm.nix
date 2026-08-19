@@ -5,86 +5,6 @@ let
   fakeChoices = "/var/lib/orbis-control-test/platform_profile_choices";
   profilePath = "/sys/firmware/acpi/platform_profile";
   choicesPath = "/sys/firmware/acpi/platform_profile_choices";
-  fakeUpower = pkgs.writeText "orbis-control-test-fake-upower.py" ''
-    import dbus
-    import dbus.service
-    from dbus.mainloop.glib import DBusGMainLoop
-    from gi.repository import GLib
-
-
-    UPOWER = "org.freedesktop.UPower"
-    DEVICE = "org.freedesktop.UPower.Device"
-    BATTERY = "/org/freedesktop/UPower/devices/DisplayDevice"
-
-
-    class Root(dbus.service.Object):
-        @dbus.service.method(UPOWER, in_signature="", out_signature="ao")
-        def EnumerateDevices(self):
-            return [dbus.ObjectPath(BATTERY)]
-
-
-    class Battery(dbus.service.Object):
-        @dbus.service.method(
-            "org.freedesktop.DBus.Properties",
-            in_signature="ss",
-            out_signature="v",
-        )
-        def Get(self, interface, name):
-            if interface != DEVICE:
-                raise dbus.exceptions.DBusException(
-                    "unknown interface", name="org.freedesktop.DBus.Error.InvalidArgs"
-                )
-            values = {
-                "Type": dbus.UInt32(2),
-                "PowerSupply": dbus.Boolean(True),
-                "ChargeThresholdSupported": dbus.Boolean(True),
-                "ChargeThresholdEnabled": dbus.Boolean(True),
-                "ChargeEndThreshold": dbus.UInt32(80),
-            }
-            if name not in values:
-                raise dbus.exceptions.DBusException(
-                    "unknown property", name="org.freedesktop.DBus.Error.InvalidArgs"
-                )
-            return values[name]
-
-        @dbus.service.method(
-            "org.freedesktop.DBus.Properties",
-            in_signature="s",
-            out_signature="a{sv}",
-        )
-        def GetAll(self, interface):
-            if interface != DEVICE:
-                return {}
-            return {
-                "Type": dbus.UInt32(2),
-                "PowerSupply": dbus.Boolean(True),
-                "ChargeThresholdSupported": dbus.Boolean(True),
-                "ChargeThresholdEnabled": dbus.Boolean(True),
-                "ChargeEndThreshold": dbus.UInt32(80),
-            }
-
-
-    DBusGMainLoop(set_as_default=True)
-    bus = dbus.SystemBus()
-    bus.request_name(UPOWER)
-    Root(bus, "/org/freedesktop/UPower")
-    Battery(bus, BATTERY)
-    GLib.MainLoop().run()
-  '';
-  python = pkgs.python3.withPackages (ps: [ ps.dbus-python ps.pygobject3 ]);
-  fakeUpowerPolicy = pkgs.writeTextDir "share/dbus-1/system.d/orbis-control-test-upower.conf" ''
-    <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
-      "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
-    <busconfig>
-      <policy user="root">
-        <allow own="org.freedesktop.UPower"/>
-        <allow send_destination="org.freedesktop.UPower"/>
-      </policy>
-      <policy context="default">
-        <allow send_destination="org.freedesktop.UPower"/>
-      </policy>
-    </busconfig>
-  '';
   testRunner = pkgs.writeShellScriptBin "orbis-control-performance-mutation-test" ''
     set -eu
     result=/run/orbis-control-test/result
@@ -109,6 +29,10 @@ let
     test "$(loginctl show-session "$XDG_SESSION_ID" -p Active --value)" = yes
     test "$(loginctl show-session "$XDG_SESSION_ID" -p Remote --value)" = no
     test "$(loginctl show-session "$XDG_SESSION_ID" -p Seat --value)" = seat0
+
+    # Performance must work with UPower intentionally absent. Battery discovery
+    # is lazy/capability-local and must not block Session1 startup.
+    ! busctl --system list | grep -F org.freedesktop.UPower
 
     systemctl --user start orbis-sessiond.service
     busctl --user status io.github.orbiscontrol.Session >/dev/null
@@ -162,8 +86,8 @@ in
       imports = [ ../module.nix ];
 
       services.orbis-control.enable = true;
+      services.upower.enable = false;
       services.dbus.enable = true;
-      services.dbus.packages = [ fakeUpowerPolicy ];
       security.polkit.enable = true;
 
       # Непривилегированный пользователь получает настоящую PAM/logind
@@ -190,11 +114,7 @@ in
         ];
       };
 
-      environment.etc."orbis-control-test/fake-upower.py" = {
-        source = fakeUpower;
-        mode = "0755";
-      };
-      environment.systemPackages = [ pkgs.glib pkgs.gnugrep pkgs.procps pkgs.systemd ];
+      environment.systemPackages = [ pkgs.gnugrep pkgs.procps pkgs.systemd ];
 
       # Подготовить source files до создания hardwared namespace. Это только
       # VM fixture; production writer и его fixed paths не изменяются.
@@ -214,18 +134,6 @@ in
         '';
       };
 
-      systemd.services.orbis-control-test-fake-upower = {
-        description = "Orbis Control test fake UPower battery";
-        wantedBy = [ "multi-user.target" ];
-        after = [ "dbus.service" ];
-        requires = [ "dbus.service" ];
-        serviceConfig = {
-          Type = "simple";
-          ExecStart = "${python}/bin/python ${config.environment.etc."orbis-control-test/fake-upower.py".source}";
-          Restart = "on-failure";
-        };
-      };
-
       # Test-only bind namespace. hardwared получает exact production paths;
       # choices монтируется только read-only. Sessiond получает те же fake
       # inodes read-only, чтобы его обычный Performance getter видел fresh
@@ -240,7 +148,6 @@ in
           BindReadOnlyPaths = [ "${fakeChoices}:${choicesPath}" ];
         };
       };
-
     };
 
   testScript = ''
@@ -250,10 +157,7 @@ in
 
     start_all()
 
-    machine.wait_for_unit("orbis-control-test-fake-upower.service")
-    machine.wait_until_succeeds(
-        "busctl --system list | grep -F org.freedesktop.UPower"
-    )
+    machine.fail("busctl --system list | grep -F org.freedesktop.UPower")
     machine.wait_for_unit("orbis-hardwared.service")
     machine.succeed("systemctl is-active orbis-hardwared.service")
 
