@@ -52,23 +52,27 @@ pub async fn connect_upower_session_server(
     .await
 }
 
-/// Открыть connections, обнаружить системную батарею и собрать session server.
+/// Открыть connections и собрать session server без обязательного startup
+/// discovery батареи (UPower resilience).
 ///
-/// - открывается одна system bus Connection для UPower;
+/// - открывается одна system bus Connection для UPower (и asusd),
+///   discovery выполняется **лениво** при первом battery read;
 /// - через ту же Connection выполняется read-only discovery батареи
-///   (`discover_battery`), ровно один раз при startup;
-/// - найденный object path/native path и та же UPower Connection передаются в
-///   существующий composition layer;
+///   (`discover_battery`) ровно при каждом battery read; если UPower/battery
+///   недоступен при startup — Session1 всё равно стартует, Performance/GPU/
+///   Fan read работают, Battery возвращает честную ошибку;
+/// - если UPower/battery появляется позже или UPower перезапускается —
+///   следующий Battery read повторит discovery без restart sessiond;
+/// - transient failure не кэшируется; никаких synthetic/default charge limits;
 /// - открывается session bus для Orbis service;
-/// - D-Bus startup failure и discovery failure сохраняются раздельно
-///   (`BootstrapError::Dbus` / `BootstrapError::Discovery`);
-/// - возвращённую session Connection необходимо удерживать живой; UPower
+/// - D-Bus startup failure сохраняется отдельно (`BootstrapError::Dbus`);
+///   discovery failure НЕ является фатальной для старта;
+/// - возвращённую session Connection необходимо удерживать живой; system
 ///   Connection переиспользуется provider'ом внутри service graph;
 /// - helper не управляет lifecycle, reconnect и signal handling.
 pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connection, BootstrapError>
 {
     let upower_connection = zbus::Connection::system().await?;
-    let battery = crate::discovery::discover_battery(&upower_connection).await?;
     let session_builder = zbus::connection::Builder::session()?;
 
     // Read-only GPU capabilities:
@@ -98,11 +102,9 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
     let fan_curves: Arc<dyn AsusdFanCurveSource> =
         Arc::new(ZbusAsusdFanCurveSource::new(upower_connection.clone()));
 
-    Ok(build_upower_session_server(
+    Ok(crate::composition::build_lazy_upower_session_server(
         session_builder,
         upower_connection,
-        battery.object_path,
-        battery.native_path,
         gpu,
         Some(performance),
         Some(fan_curves),
