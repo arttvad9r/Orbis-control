@@ -1,0 +1,53 @@
+name: Test gap audit validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/test-gap-audit-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact implementation
+        uses: actions/checkout@v5
+        with:
+          ref: e35bf0084c13f149506432ad3874386cd6c90e00
+          fetch-depth: 0
+
+      - name: Verify exact stacked scope
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "e35bf0084c13f149506432ad3874386cd6c90e00"
+          test "$(git diff --name-only a442772684edd248d15ea41f86a6e6f7f0a16cbb..HEAD)" = $'crates/orbis-core/src/provider.rs\ndocs/test-gap-audit-2026-08-19.md'
+          git diff --check a442772684edd248d15ea41f86a6e6f7f0a16cbb..HEAD
+
+      - name: Normalize pre-existing Cargo 1.85 manifest syntax in checkout only
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/orbis-ui/Cargo.toml')
+          text = path.read_text()
+          old = '''orbis-providers = {
+              path = "../orbis-providers",
+              version = "0.1.0",
+              default-features = false,
+              features = ["mock"],
+          }'''
+          new = 'orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }'
+          if old not in text:
+              raise SystemExit('expected pre-existing UI manifest block not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git diff -- crates/orbis-ui/Cargo.toml
+
+      - name: Run hermetic core regressions
+        run: |
+          set -euo pipefail
+          rustfmt --check crates/orbis-core/src/provider.rs
+          cargo test -p orbis-core provider::tests
+          cargo clippy -p orbis-core --all-targets -- -D warnings
