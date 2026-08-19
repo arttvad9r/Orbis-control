@@ -20,6 +20,7 @@ pub mod aura;
 pub mod automation;
 pub mod battery;
 pub mod capability;
+pub mod desired_observed;
 pub mod diagnostics;
 pub mod display;
 pub mod display_output;
@@ -46,6 +47,7 @@ pub use battery::ChargeLimit;
 pub use capability::{
     Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId,
 };
+pub use desired_observed::{DesiredObservedState, DesiredValue, ObservedValue, PendingValue};
 pub use diagnostics::{DiagnosticEntry, DiagnosticReport};
 pub use display::{
     DisplayMode, HdrState, MiniLedModeKind, MiniLedModeState, MiniLedModeValue,
