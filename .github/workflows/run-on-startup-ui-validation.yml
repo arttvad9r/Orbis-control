@@ -1,0 +1,277 @@
+name: Run on startup UI validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  targeted:
+    if: github.head_ref == 'agent/run-on-startup-ui-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/xdg-autostart-backend
+          fetch-depth: 0
+      - name: Verify exact stacked base
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "53fb403c735e8d9cd8cc0b377cb64139cca75ee7"
+          ! git ls-remote --exit-code --heads origin refs/heads/agent/run-on-startup-ui >/dev/null 2>&1
+      - name: Apply UI wiring
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p=Path('ui/components/visual-controls.slint')
+          s=p.read_text()
+          old='''export component ToggleRow inherits Rectangle {
+              in property <string> label;
+              in property <string> description: "";
+              in-out property <bool> checked: false;
+              in property <bool> disabled: false;
+          '''
+          new='''export component ToggleRow inherits Rectangle {
+              in property <string> label;
+              in property <string> description: "";
+              in-out property <bool> checked: false;
+              in property <bool> disabled: false;
+              callback toggled(bool);
+          '''
+          assert old in s
+          s=s.replace(old,new,1)
+          old='''    touch := TouchArea {
+                  enabled: !root.disabled;
+                  clicked => { root.checked = !root.checked; }
+              }
+          }
+          
+          export component StaticSlider'''
+          new='''    touch := TouchArea {
+                  enabled: !root.disabled;
+                  clicked => {
+                      root.checked = !root.checked;
+                      root.toggled(root.checked);
+                  }
+              }
+          }
+          
+          export component StaticSlider'''
+          assert old in s
+          s=s.replace(old,new,1)
+          p.write_text(s)
+
+          p=Path('ui/audited/preferences-window.slint')
+          s=p.read_text()
+          s=s.replace('    callback theme-changed(bool);\n','    callback theme-changed(bool);\n    callback startup-changed(bool);\n',1)
+          s=s.replace('property <bool> startup: true;','property <bool> startup: false;',1)
+          s=s.replace('root.startup = true; root.notifications = true;','root.notifications = true;',1)
+          old='''                    ToggleRow { label: "Run on startup"; checked <=> root.startup; }'''
+          new='''                    ToggleRow {
+                              label: "Run on startup";
+                              checked <=> root.startup;
+                              toggled(value) => { root.startup-changed(value); }
+                          }'''
+          assert old in s
+          s=s.replace(old,new,1)
+          p.write_text(s)
+
+          p=Path('crates/orbis-ui/Cargo.toml')
+          s=p.read_text()
+          marker='orbis-core = { workspace = true }\n'
+          assert marker in s and 'orbis-config = { workspace = true }' not in s
+          s=s.replace(marker, marker+'orbis-config = { workspace = true }\n',1)
+          p.write_text(s)
+
+          p=Path('crates/orbis-ui/src/main.rs')
+          s=p.read_text()
+          marker='''use orbis_core::action::{ActionRequirement, ApplyResult};
+          '''
+          assert marker in s
+          s=s.replace(marker, 'use orbis_config::{AutostartError, AutostartStatus, autostart_status, disable_autostart, enable_autostart};\n'+marker,1)
+
+          insert_at=s.index('\nfn show_preferences_window(')
+          helper=r'''
+          fn autostart_checked(status: AutostartStatus) -> bool {
+              matches!(status, AutostartStatus::Enabled)
+          }
+
+          fn autostart_status_text(status: AutostartStatus) -> &'static str {
+              match status {
+                  AutostartStatus::Enabled => "Run on startup enabled · user XDG autostart entry valid",
+                  AutostartStatus::Missing => "Run on startup disabled · user XDG autostart entry absent",
+                  AutostartStatus::Invalid => "Run on startup disabled · owned autostart entry is invalid",
+              }
+          }
+
+          fn apply_autostart_toggle_with<E, D>(
+              enabled: bool,
+              enable: E,
+              disable: D,
+          ) -> Result<AutostartStatus, AutostartError>
+          where
+              E: FnOnce() -> Result<std::path::PathBuf, AutostartError>,
+              D: FnOnce() -> Result<bool, AutostartError>,
+          {
+              if enabled {
+                  enable()?;
+                  Ok(AutostartStatus::Enabled)
+              } else {
+                  disable()?;
+                  Ok(AutostartStatus::Missing)
+              }
+          }
+
+          fn apply_autostart_toggle(enabled: bool) -> Result<AutostartStatus, AutostartError> {
+              apply_autostart_toggle_with(enabled, enable_autostart, disable_autostart)
+          }
+
+          fn refresh_preferences_autostart(window: &PreferencesWindow) {
+              match autostart_status() {
+                  Ok(status) => {
+                      window.set_startup(autostart_checked(status));
+                      window.set_local_status(autostart_status_text(status).into());
+                  }
+                  Err(error) => {
+                      window.set_startup(false);
+                      window.set_local_status("Run on startup unavailable · could not read user XDG entry".into());
+                      tracing::warn!(error = %error, "failed to read user autostart entry");
+                  }
+              }
+          }
+          '''
+          s=s[:insert_at]+helper+s[insert_at:]
+
+          old='''            window.on_theme_changed(move |light| {
+                          if let Some(app) = app_weak.upgrade() {
+                              apply_theme_to_all(&app, light);
+                          }
+                      });
+                      *slot = Some(window);
+          '''
+          new='''            window.on_theme_changed(move |light| {
+                          if let Some(app) = app_weak.upgrade() {
+                              apply_theme_to_all(&app, light);
+                          }
+                      });
+                      let window_weak = window.as_weak();
+                      window.on_startup_changed(move |enabled| {
+                          let result = apply_autostart_toggle(enabled);
+                          if let Some(window) = window_weak.upgrade() {
+                              match result {
+                                  Ok(status) => {
+                                      window.set_startup(autostart_checked(status));
+                                      window.set_local_status(autostart_status_text(status).into());
+                                  }
+                                  Err(error) => {
+                                      tracing::warn!(error = %error, "failed to update user autostart entry");
+                                      refresh_preferences_autostart(&window);
+                                  }
+                              }
+                          }
+                      });
+                      *slot = Some(window);
+          '''
+          assert old in s
+          s=s.replace(old,new,1)
+          old='''        let window = slot.as_ref().expect("PreferencesWindow initialized");
+                  window
+                      .global::<ThemeState>()
+                      .set_mode(theme_mode(current_theme_light()));
+                  window.show()
+          '''
+          new='''        let window = slot.as_ref().expect("PreferencesWindow initialized");
+                  window
+                      .global::<ThemeState>()
+                      .set_mode(theme_mode(current_theme_light()));
+                  refresh_preferences_autostart(window);
+                  window.show()
+          '''
+          assert old in s
+          s=s.replace(old,new,1)
+          p.write_text(s)
+
+          p=Path('crates/orbis-ui/src/main_tests.rs')
+          s=p.read_text()
+          addition=r'''
+          #[test]
+          fn autostart_status_maps_only_canonical_entry_to_checked() {
+              assert!(autostart_checked(AutostartStatus::Enabled));
+              assert!(!autostart_checked(AutostartStatus::Missing));
+              assert!(!autostart_checked(AutostartStatus::Invalid));
+          }
+
+          #[test]
+          fn autostart_toggle_calls_only_requested_backend_operation() {
+              let enable_calls = Cell::new(0usize);
+              let disable_calls = Cell::new(0usize);
+              let enabled = apply_autostart_toggle_with(
+                  true,
+                  || {
+                      enable_calls.set(enable_calls.get() + 1);
+                      Ok(std::path::PathBuf::from("owned.desktop"))
+                  },
+                  || {
+                      disable_calls.set(disable_calls.get() + 1);
+                      Ok(true)
+                  },
+              )
+              .unwrap();
+              assert_eq!(enabled, AutostartStatus::Enabled);
+              assert_eq!(enable_calls.get(), 1);
+              assert_eq!(disable_calls.get(), 0);
+
+              let disabled = apply_autostart_toggle_with(
+                  false,
+                  || {
+                      enable_calls.set(enable_calls.get() + 1);
+                      Ok(std::path::PathBuf::from("owned.desktop"))
+                  },
+                  || {
+                      disable_calls.set(disable_calls.get() + 1);
+                      Ok(true)
+                  },
+              )
+              .unwrap();
+              assert_eq!(disabled, AutostartStatus::Missing);
+              assert_eq!(enable_calls.get(), 1);
+              assert_eq!(disable_calls.get(), 1);
+          }
+          '''
+          s += addition
+          p.write_text(s)
+          PY
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Targeted validation
+        run: |
+          nix develop --command bash -lc 'set -euo pipefail; cargo fmt --all; cargo fmt --all -- --check; cargo check -p orbis-config --all-targets; cargo test -p orbis-config autostart; cargo check -p orbis-ui --all-targets; cargo test -p orbis-ui autostart; cargo clippy -p orbis-ui --all-targets -- -D warnings'
+      - name: Verify scope
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff --name-only | sort > /tmp/changed
+          cat >/tmp/allowed <<'EOF'
+          Cargo.lock
+          crates/orbis-ui/Cargo.toml
+          crates/orbis-ui/src/main.rs
+          crates/orbis-ui/src/main_tests.rs
+          ui/audited/preferences-window.slint
+          ui/components/visual-controls.slint
+          EOF
+          sort -o /tmp/allowed /tmp/allowed
+          diff -u /tmp/allowed /tmp/changed
+      - name: Publish implementation
+        run: |
+          set -euo pipefail
+          git config user.name arttvad9r
+          git config user.email arttvad9r@gmail.com
+          git add Cargo.lock crates/orbis-ui/Cargo.toml crates/orbis-ui/src/main.rs crates/orbis-ui/src/main_tests.rs ui/audited/preferences-window.slint ui/components/visual-controls.slint
+          git commit -m 'ui: wire Run on Startup to XDG autostart [skip ci]'
+          test "$(git rev-list --count 53fb403c735e8d9cd8cc0b377cb64139cca75ee7..HEAD)" = 1
+          git push origin HEAD:refs/heads/agent/run-on-startup-ui
