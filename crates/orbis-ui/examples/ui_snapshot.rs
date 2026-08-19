@@ -108,7 +108,7 @@ fn main() -> anyhow::Result<()> {
         "extra" => (560, 760),
         "automation" => (700, 600),
         "preferences" => (580, 550),
-        "diagnostics" => (640, 540),
+        "diagnostics" => (700, 610),
         "updates" => (470, 350),
         "dialog" => (430, 220),
         other => anyhow::bail!("unknown window: {other}"),
