@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE policyconfig PUBLIC
  "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
- "http://www.freedesktop.org/standards/PolicyKit Policy Configuration 1.0//EN">
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
  <!-- Mutation actions orbis-hardwared: только активный локальный пользователь. -->
 <policyconfig>
   <action id="io.github.orbiscontrol.hardware.set-performance-profile">
@@ -74,7 +74,7 @@
     <description>Change the Orbis Control Aura Static RGB colour</description>
     <description xml:lang="ru">Изменить цвет Aura Static RGB Orbis Control</description>
     <message>Permission is required to change the Aura Static RGB colour</message>
-    <message xml:lang="ru">Для изменения цвета Aura Static RGB Orbis Control требуется разрешение</message>
+    <message xml:lang="ru">Для изменения цвета Aura Static RGB требуется разрешение</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
