@@ -9,11 +9,12 @@ export component PreferencesWindow inherits Window {
     background: Palette.window-background;
 
     callback theme-changed(bool);
+    callback startup-changed(bool);
 
     property <int> language: 0; property <int> update-channel: 0; property <int> close-action: 0;
-    property <bool> startup: true; property <bool> notifications: true; property <bool> update-check: true; property <bool> tray: true; property <bool> restore-window: true;
+    in-out property <bool> startup: false; property <bool> notifications: true; property <bool> update-check: true; property <bool> tray: true; property <bool> restore-window: true;
     property <float> telemetry-rate: 1; property <float> ui-scale: 100;
-    property <string> local-status: "Theme changes apply immediately · persistence not connected";
+    in-out property <string> local-status: "Theme changes apply immediately · persistence not connected";
 
     function set-theme(light: bool) {
         ThemeState.mode = light ? ThemeMode.Light : ThemeMode.Dark;
@@ -23,7 +24,7 @@ export component PreferencesWindow inherits Window {
 
     function reset-values() {
         root.language = 0; root.update-channel = 0; root.close-action = 0;
-        root.startup = true; root.notifications = true; root.update-check = true; root.tray = true; root.restore-window = true;
+        root.notifications = true; root.update-check = true; root.tray = true; root.restore-window = true;
         root.telemetry-rate = 1; root.ui-scale = 100;
         root.set-theme(false);
         root.local-status = "Preferences reset locally · dark theme restored";
@@ -55,7 +56,11 @@ export component PreferencesWindow inherits Window {
                 horizontal-stretch: 1;
                 VerticalLayout { padding: 9px; spacing: 1px;
                     SectionTitle { title: "Startup / notifications"; }
-                    ToggleRow { label: "Run on startup"; checked <=> root.startup; }
+                    ToggleRow {
+                    label: "Run on startup";
+                    checked <=> root.startup;
+                    toggled(value) => { root.startup-changed(value); }
+                }
                     ToggleRow { label: "Desktop notifications"; checked <=> root.notifications; }
                     ToggleRow { label: "Tray indicator"; checked <=> root.tray; }
                     ToggleRow { label: "Automatic update checks"; checked <=> root.update-check; }

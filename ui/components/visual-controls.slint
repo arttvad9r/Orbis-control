@@ -88,6 +88,7 @@ export component ToggleRow inherits Rectangle {
     in property <string> description: "";
     in-out property <bool> checked: false;
     in property <bool> disabled: false;
+    callback toggled(bool);
 
     height: root.description == "" ? 32px : 42px;
     border-radius: 4px;
@@ -138,7 +139,10 @@ export component ToggleRow inherits Rectangle {
 
     touch := TouchArea {
         enabled: !root.disabled;
-        clicked => { root.checked = !root.checked; }
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
     }
 }
 
