@@ -27,15 +27,16 @@ orbis-core = { workspace = true }
 orbis-config = { workspace = true }
 orbis-capabilities = { workspace = true }
 orbis-providers = { workspace = true }
-orbis-test-support = { workspace = true }
 orbis-session-protocol = { path = "../orbis-session-protocol", version = "0.1.0" }
 
 [features]
-# Kept for test/development compatibility; production bootstrap composes real
-# UPower/kernel/supergfxd/asusd providers and does not instantiate MockProvider.
+# Mock is opt-in for dedicated tests/development only. Production bootstrap
+# always composes real UPower/kernel/supergfxd/asusd providers.
 mock = ["orbis-providers/mock"]
-default = ["mock"]
+default = []
 
 [dev-dependencies]
 tempfile = { workspace = true }
 zbus = { workspace = true, features = ["p2p"] }
+orbis-test-support = { workspace = true }
+orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }
