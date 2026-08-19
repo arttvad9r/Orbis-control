@@ -1,0 +1,60 @@
+name: Diagnostics exporters validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/diagnostics-exporters-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact implementation
+        uses: actions/checkout@v5
+        with:
+          ref: agent/diagnostics-exporters
+          fetch-depth: 0
+
+      - name: Install Rust 1.87
+        run: |
+          rustup toolchain install 1.87 --profile minimal --component rustfmt --component clippy
+
+      - name: Normalize known manifest syntax in checkout only
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/orbis-ui/Cargo.toml')
+          s = p.read_text()
+          old = '\n'.join([
+              'orbis-providers = {',
+              '    path = "../orbis-providers",',
+              '    version = "0.1.0",',
+              '    default-features = false,',
+              '    features = ["mock"],',
+              '}',
+          ])
+          new = 'orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }'
+          if s.count(old) != 1:
+              raise SystemExit('known manifest block did not match exactly once')
+          p.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Validate exporter module
+        run: |
+          set -euo pipefail
+          cargo +1.87 fmt --all -- --check
+          cargo +1.87 test --locked -p orbis-ui diagnostics_export
+          cargo +1.87 clippy --locked -p orbis-ui --lib --tests -- -D warnings
+          git diff --check -- crates/orbis-ui/src/diagnostics_export.rs crates/orbis-ui/src/lib.rs
+
+      - name: Verify exact implementation scope
+        run: |
+          set -euo pipefail
+          git checkout -- crates/orbis-ui/Cargo.toml
+          git diff --name-only agent/diagnostics-ui-dto-final..HEAD | sort > /tmp/changed.txt
+          printf '%s\n' crates/orbis-ui/src/diagnostics_export.rs crates/orbis-ui/src/lib.rs | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/changed.txt
+          git diff --check agent/diagnostics-ui-dto-final..HEAD
