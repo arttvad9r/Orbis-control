@@ -8,8 +8,16 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod desired_state;
 pub mod paths;
 pub mod store;
+
+pub use desired_state::{
+    DESIRED_STATE_FILE, DESIRED_STATE_SCHEMA_VERSION, DesiredStateDocument, DesiredStateError,
+    DesiredStateLoad, DesiredStateLoadSource, DesiredStatePathError, DesiredStateWarning,
+    DesiredStateWarningKind, desired_state_dir, desired_state_dir_with, desired_state_file,
+    load_desired_state, load_desired_state_from_dir, save_desired_state, save_desired_state_to_dir,
+};
 
 pub use store::{
     AppConfig, AutomationConfig, BatteryConfig, ExperimentalConfig, UiConfig, load_or_default,
