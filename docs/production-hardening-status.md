@@ -1,30 +1,40 @@
 # Production Hardening Status
 
-## Scope
+> Historical hardening summary. For current operational status use [`current-state.md`](current-state.md).
 
-This document records the status of the production-hardening pass in PR #1.
+## Integrated hardening
 
-## Completed in this pass
+The production-hardening line is now part of `main`.
 
-- Hardware1 startup keeps capability failures isolated instead of failing unrelated capabilities.
-- Raw GPU mutation remains disabled until Orbis product-level GPU semantics are proven.
-- Battery charge-limit configuration validation matches the Hardware1 contract: `20..=100`, with `None` meaning unmanaged.
-- Sysfs telemetry and fan parsing reject narrowing conversions instead of wrapping values.
-- Fan editor input validation rejects values that cannot be represented by wire/domain types.
-- Deployment parsing keeps machine-readable Nix output separated from progress stderr.
+Completed areas include:
+
+- capability-local Hardware1/Session1 startup behavior;
+- disabled/unproven product GPU mutation;
+- typed Battery and Performance contracts with authoritative confirmation semantics;
+- bounded numeric conversions for hardware-adjacent data;
+- production telemetry provider and worker-owned polling;
+- profile-specific fan reads and typed fan control/reset paths;
+- Rust 1.87 locked-build compatibility;
+- safe preferences/window/desired-state storage foundations;
+- diagnostics domain/provider/collector/export/runtime foundations;
+- desktop/AppStream packaging and support-matrix tooling;
+- refreshed privilege/evidence/multi-model documentation.
+
+## Current hardening gaps
+
+1. GitHub Actions currently fails before executing/exposing workflow steps; release still requires an actually executed green `nix flake check`.
+2. XDG Run on Startup needs the final Rust Preferences lifecycle glue; backend and Slint contract are already integrated.
+3. Diagnostics window needs the final Rust open/refresh lifecycle glue; runtime/model/Slint layers are already integrated.
+4. Desired/Observed/Pending and lifecycle persistence foundations are integrated, but reconciliation/execution policy is intentionally not implemented yet.
+5. Product GPU policy, power limits and extended ASUS controls remain evidence-gated.
+6. `orbisctl` remains a stub.
 
 ## Safety constraints preserved
 
-- No production hardware writes are performed by development validation.
+- Development validation does not perform live hardware mutation by default.
 - No generic privileged proxy is introduced.
 - GUI remains unprivileged.
-- Hardware mutation requires typed contracts, authorization, and read-back semantics.
+- Capability support is probe/evidence-driven rather than inferred from model names.
+- `Accepted` is not treated as authoritative `Applied` state.
 
-## Remaining next steps
-
-1. Documentation normalization against current runtime behavior.
-2. Runtime capability registry expansion.
-3. Real telemetry vertical slice.
-4. Fan RPM/read model expansion.
-
-This file is status documentation only and does not claim new hardware support.
+This file does not claim new device-specific live support; such claims remain revision-scoped and belong in explicit evidence records.
