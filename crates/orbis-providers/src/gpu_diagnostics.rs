@@ -12,11 +12,7 @@ use crate::{
 /// This function never reads or synthesizes a product `GpuMode`. Each primitive
 /// keeps its own observation result, so failure of one source does not erase a
 /// successfully observed value from either of the other sources.
-pub async fn gpu_diagnostics_snapshot<M, A, P>(
-    mux: &M,
-    access: &A,
-    power: &P,
-) -> GpuDiagnostics
+pub async fn gpu_diagnostics_snapshot<M, A, P>(mux: &M, access: &A, power: &P) -> GpuDiagnostics
 where
     M: GpuMuxProvider + ?Sized,
     A: GpuAccessProvider + ?Sized,
