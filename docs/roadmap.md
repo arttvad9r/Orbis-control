@@ -15,26 +15,24 @@
 
 ## Milestone 0 — Repository baseline
 
-**Status: COMPLETED for consolidation; release CI remains BLOCKED**
+**Status: CONSOLIDATED; release CI BLOCKED**
 
-Выполнено:
+Completed:
 
-- production hardening объединён с `main`;
-- Rust toolchain приведён к 1.87;
-- startup resilience для Battery/UPower интегрирован;
-- preferences, window-state и desired-state foundations интегрированы;
-- Desired/Observed/Pending и lifecycle domain foundations интегрированы;
-- diagnostics backend/export/runtime/window-model layers интегрированы;
-- desktop/AppStream packaging и support-matrix tooling интегрированы;
-- historical visual/theme PRs подтверждены как ancestors `main` и закрыты;
-- старые non-mergeable autostart/diagnostics PR закрыты, оставшийся scope перенесён в #110/#111;
-- source-of-truth документация обновлена;
-- одноразовые validation/audit PR закрыты как integrated/superseded.
+- production hardening merged into `main`;
+- Rust toolchain moved to 1.87;
+- Battery/UPower startup resilience integrated;
+- preferences, window-state, desired-state and lifecycle foundations integrated;
+- diagnostics backend/export/runtime/window-model foundations integrated;
+- desktop/AppStream packaging and support-matrix tooling integrated;
+- obsolete PR stack normalized; open PR count is zero;
+- current README/product/architecture/provider/security/current-state documentation normalized.
 
-Остаётся:
+Remaining:
 
-- GitHub Actions должен реально выполнить и успешно завершить `nix flake check` (#106);
-- старые remote validation refs можно физически удалить только через доступный branch-delete/git интерфейс.
+- restore executable GitHub Actions and obtain green current-main checks (#106);
+- prune 139 obsolete/validation `agent/*` refs when branch-delete access exists (#118);
+- after CI recovery, protect `main` with real required checks (#114).
 
 ## Milestone 1 — Stable production capabilities
 
@@ -42,19 +40,20 @@
 
 Revision-scoped validated areas:
 
-- Battery read path.
-- Battery controlled setting path with confirmation.
-- Performance read path.
-- Performance controlled setting path with confirmation.
-- Independent GPU power / MUX / access observations.
-- Narrow typed system boundary.
+- Battery read path;
+- controlled Battery setting path with confirmation;
+- Performance read path;
+- controlled Performance setting path with confirmation;
+- independent GPU power / MUX / access observations;
+- narrow typed Hardware1 system boundary.
 
 Hardening still required:
 
-- Battery/Panel/Aura mutation status must prove the actual write owner is reachable (#107), not merely that a backend object was constructed.
-- Battery discovery must preserve permission/transient failures instead of collapsing them to structural Unsupported (#108).
+- prove Battery/Panel/Aura actual mutation owners/interfaces are reachable before reporting write Supported (#107);
+- preserve Battery discovery permission/transient failures instead of collapsing them to Unsupported (#108);
+- explicit capability refresh must re-query mutation status before rebuilding the registry (#112).
 
-Эти результаты не являются универсальной таблицей поддержки всех ASUS моделей.
+These claims are not a universal support table for all ASUS models.
 
 ## Milestone 2 — Lifecycle and desired state
 
@@ -62,18 +61,18 @@ Hardening still required:
 
 Completed:
 
-- Session1 no longer depends on Battery availability at startup.
-- Independent capabilities remain available when UPower is absent/unready.
-- Desired / Observed / Pending typed state is in `main`.
-- Inert Startup / Resume / BackendRecovered / CapabilityChanged events are in `main`.
-- Generic versioned `desired-state.toml` persistence is in `main` and does not automatically apply anything.
+- Session1 no longer depends on Battery availability at startup;
+- Desired / Observed / Pending typed state is in `main`;
+- inert Startup / Resume / BackendRecovered / CapabilityChanged values are in `main`;
+- generic versioned `desired-state.toml` persistence is in `main` and applies nothing automatically.
 
-Next:
+Before reconciliation:
 
-- define reconciliation policy separately;
-- compare authoritative observed state before proposing any action;
-- preserve `Accepted != Applied` and explicit pending semantics;
-- add integration tests before connecting lifecycle events to execution.
+- retire or harden legacy AppConfig/path APIs and remove current-directory fallbacks (#113);
+- define policy that compares authoritative Observed state before proposing action;
+- preserve `Accepted != Applied` and explicit Pending semantics;
+- add integration tests before connecting lifecycle events to execution;
+- loading missing/default/corrupt configuration must never synthesize a hardware action.
 
 ## Milestone 3 — Preferences and desktop integration
 
@@ -88,36 +87,42 @@ Completed:
 - redacted config warnings;
 - independent XDG window-state store;
 - XDG autostart backend and Slint user-only toggle contract;
-- main-window fake startup toggle removed;
+- fake main-window Run on Startup toggle removed;
 - desktop/AppStream metadata and Nix installation wiring.
 
 Next:
 
-- finish the remaining Rust lifecycle glue for Run on Startup (#110); until then the Preferences toggle stays disabled;
+- finish current-main Rust lifecycle glue for Run on Startup (#110); until then Preferences toggle stays disabled;
 - keep automation policy and desired hardware state separate from UI preferences;
 - repeat packaged metadata validation on the final release revision.
 
 ## Milestone 4 — Fans and telemetry
 
-**Status: READS IMPLEMENTED/TESTED; WRITES BLOCKED**
+**Status: FAN READS AVAILABLE; FAN WRITES BLOCKED; TELEMETRY EVIDENCE HARDENING OPEN**
 
 Telemetry provider and worker-owned polling are present in `main`.
 
-Fan reads in `main` include active/profile-specific curves and lossless profile identity. Fan mutation/reset code exists but is **not currently an accepted write path**. The FansWindow mutation controls and packaged default fan polkit authorization are fail-closed.
+Telemetry next step:
+
+- distinguish useful fresh telemetry from empty/partial successful provider calls while preserving independent metrics and field-local failures (#117).
+
+Fan reads include active and profile-specific curves, but the current fan evidence model is incomplete. Fan mutation/reset implementation exists but is **not an accepted production write path**. FansWindow mutation controls and packaged fan polkit authorization are fail-closed.
 
 Mandatory before any fan write is re-enabled:
 
-1. Fix custom curve `CurveData.enabled` preservation and verify post-write enabled state (#104).
-2. Make Factory Defaults profile restoration failure-safe (#105).
-3. Fix FanCurves capability granularity so CPU support cannot imply GPU support (#109).
-4. Obtain executable green tests/CI for the exact revision.
-5. Perform dated controlled hardware validation and confirm final fan/profile state against authoritative backends.
+1. preserve authoritative `CurveData.enabled` on custom writes and verify it in post-write read-back (#104);
+2. make Factory Defaults restore the previous performance profile even when reset fails (#105);
+3. remove CPU/GPU cross-inference and support asymmetric fan evidence where valid (#109);
+4. carry stored profile curve `enabled` state through Session1/UI (#116);
+5. require `FanCurveHwState::Ready` in the application mutation guard (#104);
+6. obtain executable green tests/CI on the exact revision;
+7. perform controlled dated hardware validation and confirm final fan/profile state.
 
 ## Milestone 5 — Diagnostics and supportability
 
 **Status: TESTED FOUNDATIONS; LIFECYCLE WIRING PARTIAL / FAIL-CLOSED**
 
-Integrated in `main`:
+Integrated:
 
 - typed diagnostics domain;
 - privacy-safe metadata sources;
@@ -128,24 +133,26 @@ Integrated in `main`:
 - end-to-end pure-data regression;
 - read-only production DiagnosticsRuntime;
 - pure DiagnosticsWindowModel;
-- typed read-only DiagnosticsWindow Slint surface.
+- typed DiagnosticsWindow surface.
 
 Next:
 
-- finish Diagnostics window open/refresh lifecycle glue in current `main.rs` (#111); until then Refresh stays disabled and the window reports unavailable;
+- finish current-main Diagnostics open/refresh lifecycle wiring (#111); until then Refresh stays disabled and the window reports unavailable;
 - keep export collection strictly allowlisted and privacy-bounded.
 
 ## Milestone 6 — GPU product policy
 
 **Status: BLOCKED**
 
-Eco / Standard / Ultimate / Optimized remain product-level policy rather than aliases for one low-level observation. Production raw GPU mutation remains disabled. Keep product controls unsupported/disabled until mapping, pending requirements, ownership and confirmation semantics are proven and tested.
+Eco / Standard / Ultimate / Optimized are product-level policy, not aliases for one backend enum. Production raw GPU mutation remains disabled. Do not enable product controls until mapping, ownership, pending reboot/logout requirements and confirmation semantics are proven and tested.
 
 ## Milestone 7 — Power limits and extended ASUS controls
 
-**Status: BLOCKED / UNKNOWN by concept**
+**Status: BLOCKED / UNKNOWN BY CONCEPT**
 
-Typed scaffolding exists for some areas, but production evidence remains incomplete. Follow the dedicated readiness documents and add support concept-by-concept; do not infer support from DMI model names.
+Typed scaffolding exists for selected concepts. Main-window Screen/Visual/Slash/Keyboard preview controls are now disabled and explicitly labelled Preview until a production capability/backend is connected.
+
+Follow concept-specific readiness evidence. Do not infer support from DMI model names, generic firmware attributes or another ASUS feature with a similar label.
 
 ## Milestone 8 — CLI and release packaging
 
@@ -155,12 +162,15 @@ Completed:
 
 - desktop/AppStream metadata and Nix installation wiring;
 - release evidence taxonomy;
-- support-matrix schema and validation tooling.
+- support-matrix schema and validation tooling;
+- repository/homepage metadata normalized to the actual repository;
+- unimplemented `orbisctl` now fails explicitly with exit code 2 instead of silently reporting success.
 
 Remaining:
 
-- replace the `orbisctl` stub with a real read/diagnostic CLI;
-- obtain a green executable CI run on final `main`;
+- implement minimal read-only `orbisctl` first (#119);
+- remove mock/test-support from the default release UI feature graph after executable CI returns (#115);
+- obtain green executable CI on final `main` (#106);
 - perform final package/metadata acceptance on the release revision.
 
 ## Release gate
@@ -172,6 +182,7 @@ A beta/release candidate requires:
 - relevant Cargo integration checks green;
 - `nix flake check` executed and green;
 - package/metadata acceptance complete;
-- Draft branches not counted as integrated behavior;
+- current issues/PR state accurately represents unfinished work;
 - dated evidence for device-specific claims;
-- unsupported or incomplete controls shown honestly as unavailable/unknown.
+- unsupported or incomplete controls shown honestly as unavailable/unknown;
+- after CI recovery, `main` protected by required real checks (#114).
