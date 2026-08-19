@@ -5,6 +5,8 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -328,7 +330,32 @@ pub fn save_preferences_to_dir(
     fs::create_dir_all(dir)
         .map_err(|source| io_failure("create preferences directory", dir.to_path_buf(), source))?;
 
+    let final_path = dir.join(PREFERENCES_FILE);
+    let existing_permissions = match fs::symlink_metadata(&final_path) {
+        Ok(metadata) if metadata.file_type().is_file() => Some(metadata.permissions()),
+        Ok(_) => None,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => None,
+        Err(source) => {
+            return Err(io_failure(
+                "inspect existing preferences permissions",
+                final_path.clone(),
+                source,
+            ));
+        }
+    };
+
     let (mut temp, temp_path) = create_unique_temp(dir)?;
+    if let Some(permissions) = existing_permissions {
+        if let Err(source) = temp.set_permissions(permissions) {
+            drop(temp);
+            let _ = fs::remove_file(&temp_path);
+            return Err(io_failure(
+                "set preferences temporary file permissions",
+                temp_path,
+                source,
+            ));
+        }
+    }
 
     if let Err(source) = temp.write_all(text.as_bytes()) {
         drop(temp);
@@ -359,7 +386,6 @@ pub fn save_preferences_to_dir(
     }
     drop(temp);
 
-    let final_path = dir.join(PREFERENCES_FILE);
     if let Err(source) = fs::rename(&temp_path, &final_path) {
         let _ = fs::remove_file(&temp_path);
         return Err(io_failure(
@@ -369,7 +395,21 @@ pub fn save_preferences_to_dir(
         ));
     }
 
+    sync_parent_directory(dir)?;
     Ok(final_path)
+}
+
+fn sync_parent_directory(dir: &Path) -> Result<(), PreferencesError> {
+    let directory = File::open(dir).map_err(|source| {
+        io_failure(
+            "open preferences directory for sync",
+            dir.to_path_buf(),
+            source,
+        )
+    })?;
+    directory
+        .sync_all()
+        .map_err(|source| io_failure("sync preferences directory", dir.to_path_buf(), source))
 }
 
 fn default_load(warning: Option<PreferencesWarning>) -> PreferencesLoad {
@@ -513,7 +553,11 @@ fn import_legacy_preferences(text: &str) -> Result<PreferencesConfig, Preference
 fn create_unique_temp(dir: &Path) -> Result<(File, PathBuf), PreferencesError> {
     for _ in 0..64 {
         let path = unique_temp_path(dir);
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        match options.open(&path) {
             Ok(file) => return Ok((file, path)),
             Err(source) if source.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(source) => {
@@ -689,6 +733,37 @@ mod tests {
             .filter(|name| name.to_string_lossy().starts_with(".preferences.toml.tmp."))
             .collect();
         assert!(leftovers.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_preferences_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let td = temp_dir();
+        let dir = td.path().join("cfg");
+        let path = save_preferences_to_dir(&PreferencesConfig::default(), &dir).unwrap();
+
+        let mode = fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_replace_preserves_existing_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let td = temp_dir();
+        let dir = td.path().join("cfg");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(PREFERENCES_FILE);
+        fs::write(&path, "placeholder").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+        save_preferences_to_dir(&PreferencesConfig::default(), &dir).unwrap();
+
+        let mode = fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o640);
     }
 
     #[test]
