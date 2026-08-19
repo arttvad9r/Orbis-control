@@ -1,0 +1,44 @@
+import { SelectRow, StatusBadge } from "../components/visual-controls.slint";
+import { WindowHeader, SectionCard, ActionButton, LocalStatus } from "common.slint";
+import { Palette } from "../themes/dark.slint";
+
+export component UpdatesWindow inherits Window {
+    width: 470px;
+    height: 350px;
+    title: "Orbis Control — Updates";
+    background: Palette.window-background;
+    in property <string> version: "0.1.0";
+    property <int> channel: 0;
+    property <bool> checked: false;
+    property <bool> notes-visible: false;
+    property <bool> install-previewed: false;
+    property <string> local-status: "Network update checks are not connected";
+
+    VerticalLayout {
+        padding: 10px; spacing: 7px;
+        WindowHeader { title: "Updates"; subtitle: "Release and package status"; }
+        LocalStatus { text: root.local-status; accent: Palette.warning; }
+        SectionCard {
+            height: 108px;
+            VerticalLayout { padding: 9px; spacing: 4px;
+                HorizontalLayout { Text { text: "Installed version"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } Text { text: "v" + root.version; font-size: 11px; font-weight: 600; color: Palette.text-primary; } }
+                SelectRow { label: "Channel"; model: ["Stable", "Preview", "Development"]; current-index <=> root.channel; }
+                HorizontalLayout { Text { text: "Latest release"; font-size: 10px; color: Palette.text-primary; } Rectangle { horizontal-stretch: 1; background: transparent; } StatusBadge { text: root.install-previewed ? "Install staged" : root.checked ? "Preview checked" : "Not checked"; accent: root.install-previewed ? Palette.success : root.checked ? Palette.accent-default : Palette.text-disabled; } }
+            }
+        }
+        SectionCard {
+            vertical-stretch: 1;
+            Text {
+                x: 10px; y: 9px; width: parent.width - 20px; height: parent.height - 18px;
+                text: root.notes-visible ? "Release notes preview\n\nThe real updater will use package-aware NixOS / distro metadata. No network request or installation is performed by this visual shell." : "Check and Install Update exercise local UI states only. No network request, package operation or system modification is performed.";
+                font-size: 9px; color: Palette.text-secondary; wrap: word-wrap;
+            }
+        }
+        HorizontalLayout { height: 28px; spacing: 6px;
+            ActionButton { label: "Check"; accent: true; clicked => { root.checked = true; root.install-previewed = false; root.local-status = "Update check simulated locally · no network request"; } }
+            ActionButton { label: root.notes-visible ? "Hide Notes" : "Release Notes"; clicked => { root.notes-visible = !root.notes-visible; } }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            ActionButton { label: root.install-previewed ? "Install Staged" : "Install Update"; disabled: !root.checked; clicked => { root.install-previewed = true; root.local-status = "Install action staged locally · no package operation"; } }
+        }
+    }
+}

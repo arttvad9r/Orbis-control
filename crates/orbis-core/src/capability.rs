@@ -38,6 +38,10 @@ pub enum FeatureId {
     DgpuDisable,
     /// Panel Overdrive.
     PanelOverdrive,
+    /// MiniLED backlight mode (device-specific firmware enumeration).
+    MiniLed,
+    /// Screen auto-brightness toggle (kernel asus-armoury).
+    ScreenAutoBrightness,
     /// PPT PL1 (SPL).
     PptPl1Spl,
     /// PPT PL2 (SPPT).
@@ -66,6 +70,8 @@ pub enum FeatureId {
     Slash,
     /// Смена частоты дисплея.
     DisplayRefresh,
+    /// Текущее состояние outputs (Wayland/compositor read-only).
+    DisplayOutput,
     /// Яркость дисплея.
     DisplayBacklight,
     /// Глобальные горячие клавиши.
@@ -90,6 +96,8 @@ impl FeatureId {
         FeatureId::GpuProductPolicy,
         FeatureId::DgpuDisable,
         FeatureId::PanelOverdrive,
+        FeatureId::MiniLed,
+        FeatureId::ScreenAutoBrightness,
         FeatureId::PptPl1Spl,
         FeatureId::PptPl2Sppt,
         FeatureId::PptFppt,
@@ -104,6 +112,7 @@ impl FeatureId {
         FeatureId::Anime,
         FeatureId::Slash,
         FeatureId::DisplayRefresh,
+        FeatureId::DisplayOutput,
         FeatureId::DisplayBacklight,
         FeatureId::Hotkeys,
         FeatureId::Automation,
@@ -124,6 +133,8 @@ impl FeatureId {
             FeatureId::GpuProductPolicy => "gpu_product_policy",
             FeatureId::DgpuDisable => "dgpu_disable",
             FeatureId::PanelOverdrive => "panel_overdrive",
+            FeatureId::MiniLed => "mini_led",
+            FeatureId::ScreenAutoBrightness => "screen_auto_brightness",
             FeatureId::PptPl1Spl => "ppt_pl1_spl",
             FeatureId::PptPl2Sppt => "ppt_pl2_sppt",
             FeatureId::PptFppt => "ppt_fppt",
@@ -138,6 +149,7 @@ impl FeatureId {
             FeatureId::Anime => "anime",
             FeatureId::Slash => "slash",
             FeatureId::DisplayRefresh => "display_refresh",
+            FeatureId::DisplayOutput => "display_output",
             FeatureId::DisplayBacklight => "display_backlight",
             FeatureId::Hotkeys => "hotkeys",
             FeatureId::Automation => "automation",
@@ -440,6 +452,24 @@ mod tests {
             serde_json::to_string(&FeatureId::GpuProductPolicy).unwrap(),
             "\"gpu_product_policy\""
         );
+        assert_eq!(
+            serde_json::to_string(&FeatureId::MiniLed).unwrap(),
+            "\"mini_led\""
+        );
+        assert_eq!(FeatureId::MiniLed.as_str(), "mini_led");
+        assert_eq!(
+            serde_json::to_string(&FeatureId::ScreenAutoBrightness).unwrap(),
+            "\"screen_auto_brightness\""
+        );
+        assert_eq!(
+            FeatureId::ScreenAutoBrightness.as_str(),
+            "screen_auto_brightness"
+        );
+        assert_eq!(
+            serde_json::to_string(&FeatureId::DisplayOutput).unwrap(),
+            "\"display_output\""
+        );
+        assert_eq!(FeatureId::DisplayOutput.as_str(), "display_output");
     }
 
     #[test]

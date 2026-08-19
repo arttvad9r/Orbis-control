@@ -9,4 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod composition;
+pub mod diagnostics_dto;
+pub mod diagnostics_export;
+pub mod diagnostics_metadata;
 pub mod worker;

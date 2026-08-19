@@ -81,6 +81,16 @@ range_newtype!(
     RefreshHz, u32, 1, 1000, " Hz");
 
 range_newtype!(
+    /// Вертикальная частота обновления экрана в миллигерцах (mHz).
+    ///
+    /// Lossless целочисленное представление Wayland `wl_output.mode.refresh`
+    /// (единица — mHz). Позволяет точно представить 60000 (60.000 Hz),
+    /// 59940 (59.94 Hz), 120000 (120.000 Hz) без округления. `0` допустим:
+    /// upstream определяет его как «refresh rate не имеет смысла для этого
+    /// output» (например, virtual outputs), а не как реальный 0 Hz.
+    RefreshMilliHz, u32, 0, 1_000_000_000, " mHz");
+
+range_newtype!(
     /// Значение ШИМ вентилятора в шкале hwmon 0..=255.
     FanPwm, u8, 0, 255, "");
 
@@ -118,9 +128,28 @@ mod tests {
     }
 
     #[test]
-    fn display_hz() {
-        assert_eq!(RefreshHz::new(120).unwrap().to_string(), "120 Hz");
+    fn refresh_hz_roundtrip() {
+        assert_eq!(RefreshHz::new(120).unwrap().get(), 120);
         assert!(RefreshHz::new(0).is_err());
+    }
+
+    #[test]
+    fn refresh_milli_hz_preserves_fractional_precision_losslessly() {
+        // 59.94 Hz = 59940 mHz; 60 Hz = 60000 mHz; 120 Hz = 120000 mHz.
+        assert_eq!(RefreshMilliHz::new(60000).unwrap().get(), 60000);
+        assert_eq!(RefreshMilliHz::new(59940).unwrap().get(), 59940);
+        assert_eq!(RefreshMilliHz::new(120000).unwrap().get(), 120000);
+        assert_ne!(
+            RefreshMilliHz::new(59940).unwrap(),
+            RefreshMilliHz::new(60000).unwrap()
+        );
+    }
+
+    #[test]
+    fn refresh_milli_hz_zero_is_valid_not_meaningful() {
+        // 0 допустим: upstream определяет его как «не имеет смысла», не как
+        // реальный 0 Hz. Не округляется и не становится 60 Hz.
+        assert_eq!(RefreshMilliHz::new(0).unwrap().get(), 0);
     }
 
     #[test]

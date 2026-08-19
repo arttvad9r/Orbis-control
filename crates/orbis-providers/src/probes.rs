@@ -18,10 +18,11 @@ use orbis_core::capability::{
     Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, OperationCapability,
 };
 
-use crate::error::{ProviderError, ValidationResult};
+use crate::error::ProviderError;
 use crate::traits::{
-    BatteryProvider, FanProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider,
-    PerformanceProvider,
+    BatteryProvider, DisplayOutputProvider, FanProvider, GpuAccessProvider, GpuMuxProvider,
+    GpuPowerProvider, MiniLedModeProvider, PanelOverdriveProvider, PerformanceProvider,
+    ScreenAutoBrightnessProvider,
 };
 
 fn operation_from_error(
@@ -39,20 +40,6 @@ fn unsupported_write() -> OperationCapability {
         "read-only capability probe does not establish mutation support",
     )
     .into_operation()
-}
-
-/// Derive write capability from the provider's declarative validation result.
-///
-/// `Valid` proves the production mutation path exists and is available.
-/// `Invalid` (e.g. the read-only session contract) reports `Unsupported`; we
-/// never invent `PermissionDenied` without real authorization evidence.
-fn write_from_validation(validation: ValidationResult) -> OperationCapability {
-    match validation {
-        ValidationResult::Valid => {
-            ProbeOperationResult::classified(ProbeClassification::Supported).into_operation()
-        }
-        ValidationResult::Invalid(_) => unsupported_write(),
-    }
 }
 
 /// Conservative write operation for a failed read probe.
@@ -96,9 +83,16 @@ fn capability_from_read(
 /// Probe Performance support from current and available profile reads.
 ///
 /// The current profile is read only to establish that the read contract is
-/// usable; it is not stored in the returned capability metadata. Write support
-/// is derived from `validate_set_profile` with the first available profile.
-pub async fn probe_performance<P>(provider: &P) -> Result<Capability, ProbeError>
+/// usable; it is not stored in the returned capability metadata.
+///
+/// Write capability comes from typed runtime evidence about the mutation
+/// backend (`mutation_status`), NOT from `validate_set_profile`: validation
+/// only answers whether a profile is a valid input if mutation were
+/// available; it never proves the mutation path exists or is operational.
+pub async fn probe_performance<P>(
+    provider: &P,
+    mutation_status: CapabilityStatus,
+) -> Result<Capability, ProbeError>
 where
     P: PerformanceProvider + ?Sized,
 {
@@ -140,7 +134,7 @@ where
     }
 
     let read = ProbeOperationResult::classified(ProbeClassification::Supported).into_operation();
-    let write = write_from_validation(provider.validate_set_profile(profiles[0]));
+    let write = write_from_mutation_status(mutation_status);
     Ok(capability_from_read(
         read,
         write,
@@ -152,9 +146,15 @@ where
 ///
 /// The returned `ChargeLimit` is used only for support/bounds metadata. Its
 /// enabled/configured/effective values never enter the capability result.
-/// Write support is derived from `validate_charge_limit` with a representative
-/// value inside the reported bounds (or 80 when bounds are unknown).
-pub async fn probe_charge_limit<P>(provider: &P) -> Result<Capability, ProbeError>
+///
+/// Write capability comes from typed runtime evidence about the mutation
+/// backend (`mutation_status`), NOT from `validate_charge_limit`: validation
+/// only answers whether an input could be sent if mutation were available; it
+/// never proves the mutation path exists or is currently available.
+pub async fn probe_charge_limit<P>(
+    provider: &P,
+    mutation_status: CapabilityStatus,
+) -> Result<Capability, ProbeError>
 where
     P: BatteryProvider + ?Sized,
 {
@@ -175,13 +175,30 @@ where
         .bounds
         .map(CapabilityConstraints::ChargeLimit)
         .unwrap_or(CapabilityConstraints::Unknown);
-    let representative = charge_limit
-        .bounds
-        .map(|bounds| bounds.min.get())
-        .unwrap_or(80);
     let read = ProbeOperationResult::classified(ProbeClassification::Supported).into_operation();
-    let write = write_from_validation(provider.validate_charge_limit(representative));
+    let write = write_from_mutation_status(mutation_status);
     Ok(capability_from_read(read, write, constraints))
+}
+
+/// Derive write operation capability from typed runtime mutation-backend
+/// evidence.
+///
+/// The evidence status is preserved exactly — `Supported`, `Unsupported`,
+/// `TemporarilyUnavailable`/`BackendMissing`, `PermissionDenied` and
+/// `Unknown` stay distinguishable. Validation results are never used here.
+fn write_from_mutation_status(status: CapabilityStatus) -> OperationCapability {
+    OperationCapability {
+        status,
+        reason: Some(orbis_core::capability::CapabilityReason {
+            reason: "Hardware1 mutation backend runtime evidence".into(),
+            suggestion: String::new(),
+            backend: None,
+            endpoint: None,
+            requirement: None,
+            risk: orbis_core::capability::RiskLevel::Safe,
+            checked_at: None,
+        }),
+    }
 }
 
 /// Probe fan curve read capability for a specific fan.
@@ -189,28 +206,24 @@ where
 /// Reads the active curve (read-only) to establish the read contract; the
 /// curve points are discarded and never enter the capability metadata.
 ///
-/// Write capability: `Supported` только если доказан production Hardware1
-/// mutation contract (`write_available = true`). Никаких пробных writes —
-/// write status определяется декларативно по наличию mutation backend.
+/// Write capability comes from typed runtime evidence about the mutation
+/// backend (`mutation_status`), NOT from `validate_curve` or readable curve
+/// points: those prove reads, not the mutation path. Никаких пробных writes —
+/// write status определяется по runtime evidence.
 pub async fn probe_fan_curve<P>(
     provider: &P,
     fan: &orbis_core::fan::FanId,
-    write_available: bool,
+    mutation_status: CapabilityStatus,
 ) -> Result<Capability, ProbeError>
 where
     P: FanProvider + ?Sized,
 {
-    let write = if write_available {
-        ProbeOperationResult::classified(ProbeClassification::Supported).into_operation()
-    } else {
-        unsupported_write()
-    };
     match provider.active_curve(fan).await {
         Ok(_) => Ok(capability_from_operations(
             CapabilityOperations {
                 read: ProbeOperationResult::classified(ProbeClassification::Supported)
                     .into_operation(),
-                write,
+                write: write_from_mutation_status(mutation_status),
             },
             CapabilityConstraints::Unknown,
         )),
@@ -297,6 +310,164 @@ where
     }
 }
 
+/// Probe Panel Overdrive read capability from an authoritative read.
+///
+/// The observed state is read only to confirm the read contract; the
+/// `Disabled`/`Enabled`/`Unknown` value never enters the capability metadata.
+///
+/// Write capability comes from typed runtime evidence about the mutation
+/// backend (`mutation_status`), NOT from validation: validation only answers
+/// whether an input could be sent if mutation were available.
+pub async fn probe_panel_overdrive<P>(
+    provider: &P,
+    mutation_status: CapabilityStatus,
+) -> Result<Capability, ProbeError>
+where
+    P: PanelOverdriveProvider + ?Sized,
+{
+    match provider.panel_overdrive_state().await {
+        Ok(_) => Ok(capability_from_operations(
+            CapabilityOperations {
+                read: ProbeOperationResult::classified(ProbeClassification::Supported)
+                    .into_operation(),
+                write: write_from_mutation_status(mutation_status),
+            },
+            CapabilityConstraints::Unknown,
+        )),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            let write = write_from_read_failure(&read);
+            Ok(capability_from_read(
+                read,
+                write,
+                CapabilityConstraints::Unknown,
+            ))
+        }
+    }
+}
+
+/// Fixed `ReadOnly` write operation for capabilities whose mutation backend is
+/// intentionally absent in this slice.
+///
+/// `CapabilityStatus::ReadOnly` — read exists, write absent; this is honest
+/// even though the sysfs attribute is root-writable: Orbis has no production
+/// MiniLED mutation backend yet.
+fn read_only_write() -> OperationCapability {
+    OperationCapability {
+        status: CapabilityStatus::ReadOnly,
+        reason: Some(orbis_core::capability::CapabilityReason {
+            reason:
+                "MiniLED mutation intentionally not implemented; no production mutation backend"
+                    .into(),
+            suggestion: String::new(),
+            backend: None,
+            endpoint: None,
+            requirement: None,
+            risk: orbis_core::capability::RiskLevel::Safe,
+            checked_at: None,
+        }),
+    }
+}
+
+/// Probe MiniLED mode read capability from an authoritative snapshot.
+///
+/// The observed state is read only to confirm the read contract; the raw
+/// current/allowed values never enter the capability metadata.
+///
+/// Write capability is fixed at `ReadOnly`: this slice has no production
+/// MiniLED mutation backend, so write must never be presented as Supported
+/// just because the sysfs attribute is root-writable.
+pub async fn probe_mini_led_mode<P>(provider: &P) -> Result<Capability, ProbeError>
+where
+    P: MiniLedModeProvider + ?Sized,
+{
+    match provider.mini_led_mode_state().await {
+        Ok(_) => Ok(capability_from_operations(
+            CapabilityOperations {
+                read: ProbeOperationResult::classified(ProbeClassification::Supported)
+                    .into_operation(),
+                write: read_only_write(),
+            },
+            CapabilityConstraints::Unknown,
+        )),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            let write = write_from_read_failure(&read);
+            Ok(capability_from_read(
+                read,
+                write,
+                CapabilityConstraints::Unknown,
+            ))
+        }
+    }
+}
+
+/// Probe Screen Auto Brightness read capability from an authoritative read.
+///
+/// The observed state is read only to confirm the read contract; the
+/// `Disabled`/`Enabled`/`Unknown` value never enters the capability metadata.
+///
+/// Write capability is fixed at `ReadOnly`: this slice has no production
+/// Screen Auto Brightness mutation backend, so write must never be presented
+/// as Supported just because the sysfs attribute is root-writable.
+pub async fn probe_screen_auto_brightness<P>(provider: &P) -> Result<Capability, ProbeError>
+where
+    P: ScreenAutoBrightnessProvider + ?Sized,
+{
+    match provider.screen_auto_brightness_state().await {
+        Ok(_) => Ok(capability_from_operations(
+            CapabilityOperations {
+                read: ProbeOperationResult::classified(ProbeClassification::Supported)
+                    .into_operation(),
+                write: read_only_write(),
+            },
+            CapabilityConstraints::Unknown,
+        )),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            let write = write_from_read_failure(&read);
+            Ok(capability_from_read(
+                read,
+                write,
+                CapabilityConstraints::Unknown,
+            ))
+        }
+    }
+}
+
+/// Probe Display Output read capability from an authoritative read.
+///
+/// The observed state is read only to confirm the read contract; the
+/// `DisplayOutputSnapshot` value never enters the capability metadata.
+///
+/// Write capability is fixed at `ReadOnly`: this slice has no production
+/// Display Output mutation backend, so write must never be presented
+/// as Supported.
+pub async fn probe_display_output<P>(provider: &P) -> Result<Capability, ProbeError>
+where
+    P: DisplayOutputProvider + ?Sized,
+{
+    match provider.display_output_snapshot().await {
+        Ok(_) => Ok(capability_from_operations(
+            CapabilityOperations {
+                read: ProbeOperationResult::classified(ProbeClassification::Supported)
+                    .into_operation(),
+                write: read_only_write(),
+            },
+            CapabilityConstraints::Unknown,
+        )),
+        Err(error) => {
+            let read = operation_from_error(&error, ProbeContext::BackendDiscovery)?;
+            let write = write_from_read_failure(&read);
+            Ok(capability_from_read(
+                read,
+                write,
+                CapabilityConstraints::Unknown,
+            ))
+        }
+    }
+}
+
 fn supported_read_only() -> Capability {
     let read = ProbeOperationResult::classified(ProbeClassification::Supported).into_operation();
     let write = ProbeOperationResult::with_detail(
@@ -335,6 +506,7 @@ mod tests {
         BackendMissing,
         Unsupported,
         PermissionDenied,
+        Internal,
     }
 
     impl ScriptedError {
@@ -343,6 +515,7 @@ mod tests {
                 Self::BackendMissing => ProviderError::BackendUnavailable("missing".into()),
                 Self::Unsupported => ProviderError::Unsupported("unsupported".into()),
                 Self::PermissionDenied => ProviderError::PermissionDenied("denied".into()),
+                Self::Internal => ProviderError::Internal("malformed".into()),
             }
         }
     }
@@ -536,7 +709,10 @@ mod tests {
             PerformanceProfile::Balanced,
             PerformanceProfile::Turbo,
         ]));
-        let capability = probe_performance(&provider).await.unwrap();
+        // Mutation evidence = Unsupported (no proven backend).
+        let capability = probe_performance(&provider, CapabilityStatus::Unsupported)
+            .await
+            .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::Supported
@@ -565,10 +741,14 @@ mod tests {
             ),
             (ScriptedError::Unsupported, CapabilityStatus::Unsupported),
         ] {
-            let capability =
-                probe_performance(&ScriptedProvider::performance(Scripted::Error(error)))
-                    .await
-                    .unwrap();
+            let capability = probe_performance(
+                &ScriptedProvider::performance(Scripted::Error(error)),
+                // Even positive mutation evidence must not override a read
+                // failure: write mirrors the read classification.
+                CapabilityStatus::Supported,
+            )
+            .await
+            .unwrap();
             assert_eq!(capability.operations.read.status, expected);
         }
     }
@@ -578,9 +758,10 @@ mod tests {
         let bounds =
             ChargeLimitBounds::new(Percent::new(40).unwrap(), Percent::new(100).unwrap(), 1)
                 .unwrap();
-        let known = probe_charge_limit(&ScriptedProvider::battery(Scripted::Value(charge_limit(
-            Some(bounds),
-        ))))
+        let known = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds)))),
+            CapabilityStatus::Unsupported,
+        )
         .await
         .unwrap();
         assert_eq!(known.operations.read.status, CapabilityStatus::Supported);
@@ -589,9 +770,10 @@ mod tests {
             CapabilityConstraints::ChargeLimit(bounds)
         );
 
-        let unknown = probe_charge_limit(&ScriptedProvider::battery(Scripted::Value(
-            charge_limit(None),
-        )))
+        let unknown = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Value(charge_limit(None))),
+            CapabilityStatus::Unsupported,
+        )
         .await
         .unwrap();
         assert_eq!(unknown.constraints, CapabilityConstraints::Unknown);
@@ -599,9 +781,10 @@ mod tests {
 
     #[tokio::test]
     async fn battery_probe_preserves_backend_and_permission_errors() {
-        let missing = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
-            ScriptedError::BackendMissing,
-        )))
+        let missing = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::BackendMissing)),
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -609,9 +792,10 @@ mod tests {
             CapabilityStatus::BackendMissing
         );
 
-        let denied = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
-            ScriptedError::PermissionDenied,
-        )))
+        let denied = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::PermissionDenied)),
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -622,13 +806,16 @@ mod tests {
 
     #[tokio::test]
     async fn performance_probe_reports_write_supported_when_mutation_path_proven() {
-        let mut provider = ScriptedProvider::performance(Scripted::Value(vec![
+        let provider = ScriptedProvider::performance(Scripted::Value(vec![
             PerformanceProfile::Silent,
             PerformanceProfile::Balanced,
             PerformanceProfile::Turbo,
         ]));
-        provider.write_supported = true;
-        let capability = probe_performance(&provider).await.unwrap();
+        // Mutation backend evidence = Supported (Hardware1 reports a proven
+        // performance mutation backend).
+        let capability = probe_performance(&provider, CapabilityStatus::Supported)
+            .await
+            .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::Supported
@@ -641,13 +828,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn performance_probe_write_status_matches_runtime_evidence() {
+        // Read is Supported and profiles are known in all cases; only the
+        // mutation evidence varies. Each evidence class must be preserved
+        // exactly — never collapsed to a bool or a generic error.
+        for (evidence, expected_write) in [
+            (CapabilityStatus::Supported, CapabilityStatus::Supported),
+            (CapabilityStatus::Unsupported, CapabilityStatus::Unsupported),
+            (
+                CapabilityStatus::TemporarilyUnavailable,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+            (
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::PermissionDenied,
+            ),
+            (CapabilityStatus::Unknown, CapabilityStatus::Unknown),
+        ] {
+            let provider = ScriptedProvider::performance(Scripted::Value(vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+            ]));
+            let capability = probe_performance(&provider, evidence).await.unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported,
+                "read must stay Supported for evidence {evidence:?}"
+            );
+            assert_eq!(
+                capability.operations.write.status, expected_write,
+                "write must mirror evidence {evidence:?}"
+            );
+            // Constraints (known profiles) are data, not write proof.
+            assert!(matches!(
+                capability.constraints,
+                CapabilityConstraints::PerformanceProfiles(_)
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn performance_probe_validation_alone_does_not_make_write_supported() {
+        // validate_set_profile accepts the profile (write_supported=true),
+        // but the runtime mutation evidence says Unsupported. Validation alone
+        // must never make write Supported.
+        let mut provider = ScriptedProvider::performance(Scripted::Value(vec![
+            PerformanceProfile::Silent,
+            PerformanceProfile::Balanced,
+        ]));
+        provider.write_supported = true;
+        let capability = probe_performance(&provider, CapabilityStatus::Unsupported)
+            .await
+            .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported,
+            "validate_set_profile must not prove mutation availability"
+        );
+    }
+
+    #[tokio::test]
     async fn charge_limit_probe_reports_write_supported_when_mutation_path_proven() {
         let bounds =
             ChargeLimitBounds::new(Percent::new(40).unwrap(), Percent::new(100).unwrap(), 1)
                 .unwrap();
-        let mut provider = ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds))));
-        provider.write_supported = true;
-        let capability = probe_charge_limit(&provider).await.unwrap();
+        let provider = ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds))));
+        // Mutation backend evidence = Supported (Hardware1 reports a proven
+        // production battery mutation backend).
+        let capability = probe_charge_limit(&provider, CapabilityStatus::Supported)
+            .await
+            .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::Supported
@@ -663,9 +921,12 @@ mod tests {
     async fn write_operation_mirrors_backend_missing_when_read_fails() {
         // Structural read failure: write must be reported as BackendMissing,
         // not Unsupported-as-if-proven or invented PermissionDenied.
-        let performance = probe_performance(&ScriptedProvider::performance(Scripted::Error(
-            ScriptedError::BackendMissing,
-        )))
+        let performance = probe_performance(
+            &ScriptedProvider::performance(Scripted::Error(ScriptedError::BackendMissing)),
+            // Even positive mutation evidence must not override a structural
+            // read failure: write mirrors the read classification.
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -677,9 +938,12 @@ mod tests {
             CapabilityStatus::BackendMissing
         );
 
-        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
-            ScriptedError::BackendMissing,
-        )))
+        let battery = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::BackendMissing)),
+            // Even positive mutation evidence must not override a structural
+            // read failure: write mirrors the read classification.
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -696,9 +960,12 @@ mod tests {
     async fn write_operation_does_not_invent_permission_denied() {
         // Read PermissionDenied is evidence about reads only. Write must stay
         // Unsupported instead of claiming a denied write without evidence.
-        let performance = probe_performance(&ScriptedProvider::performance(Scripted::Error(
-            ScriptedError::PermissionDenied,
-        )))
+        let performance = probe_performance(
+            &ScriptedProvider::performance(Scripted::Error(ScriptedError::PermissionDenied)),
+            // Read PermissionDenied is evidence about reads only. Even positive
+            // mutation evidence must not invent a denied write.
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -710,9 +977,12 @@ mod tests {
             CapabilityStatus::Unsupported
         );
 
-        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Error(
-            ScriptedError::PermissionDenied,
-        )))
+        let battery = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::PermissionDenied)),
+            // Read PermissionDenied is evidence about reads only. Even positive
+            // mutation evidence must not invent a denied write.
+            CapabilityStatus::Supported,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -729,32 +999,42 @@ mod tests {
     async fn probes_never_call_mutation_methods() {
         // ScriptedProvider::set_profile / set_charge_limit return a distinct
         // error; the probes must not reach them even when write_supported.
-        let mut provider =
+        let provider =
             ScriptedProvider::performance(Scripted::Value(vec![PerformanceProfile::Silent]));
-        provider.write_supported = true;
-        let performance = probe_performance(&provider).await.unwrap();
+        // Mutation evidence = Supported; the probe must derive write from the
+        // evidence without ever calling set_profile.
+        let performance = probe_performance(&provider, CapabilityStatus::Supported)
+            .await
+            .unwrap();
         assert_eq!(
             performance.operations.write.status,
             CapabilityStatus::Supported
         );
 
-        let mut battery = ScriptedProvider::battery(Scripted::Value(charge_limit(None)));
-        battery.write_supported = true;
-        let charge = probe_charge_limit(&battery).await.unwrap();
+        let battery = ScriptedProvider::battery(Scripted::Value(charge_limit(None)));
+        // Mutation evidence = Supported; the probe must derive write from the
+        // evidence without ever calling set_charge_limit.
+        let charge = probe_charge_limit(&battery, CapabilityStatus::Supported)
+            .await
+            .unwrap();
         assert_eq!(charge.operations.write.status, CapabilityStatus::Supported);
     }
 
     #[tokio::test]
     async fn probes_assemble_through_registry_builder() {
-        let performance = probe_performance(&ScriptedProvider::performance(Scripted::Value(vec![
-            PerformanceProfile::Silent,
-            PerformanceProfile::Balanced,
-        ])))
+        let performance = probe_performance(
+            &ScriptedProvider::performance(Scripted::Value(vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+            ])),
+            CapabilityStatus::Unsupported,
+        )
         .await
         .unwrap();
-        let battery = probe_charge_limit(&ScriptedProvider::battery(Scripted::Value(
-            charge_limit(None),
-        )))
+        let battery = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Value(charge_limit(None))),
+            CapabilityStatus::Unsupported,
+        )
         .await
         .unwrap();
 
@@ -1063,9 +1343,14 @@ mod tests {
     #[tokio::test]
     async fn fan_curve_probe_reports_write_unsupported_without_hardware_backend() {
         let provider = ScriptedFanProvider::ok();
-        let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, false)
-            .await
-            .unwrap();
+        // Mutation evidence = Unsupported (no proven backend).
+        let capability = probe_fan_curve(
+            &provider,
+            &orbis_core::fan::FanId::Cpu,
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::Supported
@@ -1079,9 +1364,15 @@ mod tests {
     #[tokio::test]
     async fn fan_curve_probe_reports_write_supported_when_hardware_backend_proven() {
         let provider = ScriptedFanProvider::ok();
-        let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, true)
-            .await
-            .unwrap();
+        // Mutation backend evidence = Supported (Hardware1 reports a proven
+        // fan curve mutation backend).
+        let capability = probe_fan_curve(
+            &provider,
+            &orbis_core::fan::FanId::Cpu,
+            CapabilityStatus::Supported,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::Supported
@@ -1094,11 +1385,270 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fan_curve_probe_write_mirrors_backend_missing_when_read_fails() {
-        let provider = ScriptedFanProvider::backend_missing();
-        let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, true)
+    async fn fan_curve_probe_write_status_matches_runtime_evidence() {
+        // Read is Supported in all cases; only the mutation evidence varies.
+        // Each evidence class must be preserved exactly — never collapsed to
+        // a bool or a generic error.
+        for (evidence, expected_write) in [
+            (CapabilityStatus::Supported, CapabilityStatus::Supported),
+            (CapabilityStatus::Unsupported, CapabilityStatus::Unsupported),
+            (
+                CapabilityStatus::TemporarilyUnavailable,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+            (
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::PermissionDenied,
+            ),
+            (CapabilityStatus::Unknown, CapabilityStatus::Unknown),
+        ] {
+            let provider = ScriptedFanProvider::ok();
+            let capability = probe_fan_curve(&provider, &orbis_core::fan::FanId::Cpu, evidence)
+                .await
+                .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported,
+                "read must stay Supported for evidence {evidence:?}"
+            );
+            assert_eq!(
+                capability.operations.write.status, expected_write,
+                "write must mirror evidence {evidence:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn fan_curve_probe_validation_alone_does_not_make_write_supported() {
+        // validate_curve accepts the curve (returns Valid), but the runtime
+        // mutation evidence says Unknown. Validation alone must never make
+        // write Supported.
+        let provider = ScriptedFanProvider::ok();
+        let capability = probe_fan_curve(
+            &provider,
+            &orbis_core::fan::FanId::Cpu,
+            CapabilityStatus::Unknown,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unknown,
+            "validate_curve must not prove mutation availability"
+        );
+    }
+
+    #[tokio::test]
+    async fn charge_limit_probe_reports_write_unsupported_when_mutation_path_not_proven() {
+        let bounds =
+            ChargeLimitBounds::new(Percent::new(40).unwrap(), Percent::new(100).unwrap(), 1)
+                .unwrap();
+        // validate_charge_limit would accept the value (write_supported=true),
+        // but the runtime mutation evidence says Unsupported. Validation alone
+        // must never make write Supported.
+        let mut provider = ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds))));
+        provider.write_supported = true;
+        let capability = probe_charge_limit(&provider, CapabilityStatus::Unsupported)
             .await
             .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+        // Overall status is Supported (read is Supported), but write is
+        // Unsupported. The controller uses operations.write.status for gating.
+        assert_eq!(capability.status, CapabilityStatus::Supported);
+    }
+
+    #[tokio::test]
+    async fn charge_limit_probe_write_status_matches_runtime_evidence() {
+        // Read is Supported in all cases; only the mutation evidence varies.
+        // Each evidence class must be preserved exactly — never collapsed to
+        // a bool or a generic error.
+        let bounds =
+            ChargeLimitBounds::new(Percent::new(40).unwrap(), Percent::new(100).unwrap(), 1)
+                .unwrap();
+        for (evidence, expected_write) in [
+            (CapabilityStatus::Supported, CapabilityStatus::Supported),
+            (CapabilityStatus::Unsupported, CapabilityStatus::Unsupported),
+            (
+                CapabilityStatus::TemporarilyUnavailable,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+            (
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::PermissionDenied,
+            ),
+            (CapabilityStatus::Unknown, CapabilityStatus::Unknown),
+        ] {
+            let provider = ScriptedProvider::battery(Scripted::Value(charge_limit(Some(bounds))));
+            let capability = probe_charge_limit(&provider, evidence).await.unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported,
+                "read must stay Supported for evidence {evidence:?}"
+            );
+            assert_eq!(
+                capability.operations.write.status, expected_write,
+                "write must mirror evidence {evidence:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn battery_backend_missing_does_not_corrupt_performance_in_registry() {
+        // Multi-domain independence: Battery BackendMissing must not prevent
+        // Performance from being Supported in the same registry snapshot.
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let performance = probe_performance(
+            &ScriptedProvider::performance(Scripted::Value(vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ])),
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::Performance, performance)
+            .unwrap();
+
+        let battery = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::BackendMissing)),
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::ChargeLimit, battery)
+            .unwrap();
+
+        let snapshot = builder.build().unwrap();
+        // Performance is fully Supported.
+        let perf = snapshot
+            .capability(orbis_core::FeatureId::Performance)
+            .unwrap();
+        assert_eq!(perf.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(perf.operations.write.status, CapabilityStatus::Unsupported);
+        assert_eq!(perf.status, CapabilityStatus::Supported);
+
+        // Battery is BackendMissing — independently classified.
+        let bat = snapshot
+            .capability(orbis_core::FeatureId::ChargeLimit)
+            .unwrap();
+        assert_eq!(bat.operations.read.status, CapabilityStatus::BackendMissing);
+        assert_eq!(
+            bat.operations.write.status,
+            CapabilityStatus::BackendMissing
+        );
+        assert_eq!(bat.status, CapabilityStatus::BackendMissing);
+    }
+
+    #[tokio::test]
+    async fn battery_permission_denied_does_not_affect_gpu_in_registry() {
+        // PermissionDenied on Battery read is evidence about reads only.
+        // GPU primitives in the same registry remain independently classified.
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let battery = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::PermissionDenied)),
+            CapabilityStatus::PermissionDenied,
+        )
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::ChargeLimit, battery)
+            .unwrap();
+
+        let gpu_power = probe_gpu_power(&ScriptedProvider::gpu(
+            Scripted::Value(GpuPowerState::Active),
+            Scripted::Error(ScriptedError::Unsupported),
+            Scripted::Error(ScriptedError::Unsupported),
+        ))
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::GpuPower, gpu_power)
+            .unwrap();
+
+        let snapshot = builder.build().unwrap();
+        let bat = snapshot
+            .capability(orbis_core::FeatureId::ChargeLimit)
+            .unwrap();
+        assert_eq!(
+            bat.operations.read.status,
+            CapabilityStatus::PermissionDenied
+        );
+        // Write stays Unsupported: PermissionDenied on read does NOT invent
+        // a denied write — we have no evidence about write authorization.
+        assert_eq!(bat.operations.write.status, CapabilityStatus::Unsupported);
+
+        let gpu = snapshot
+            .capability(orbis_core::FeatureId::GpuPower)
+            .unwrap();
+        assert_eq!(gpu.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(gpu.operations.write.status, CapabilityStatus::Unsupported);
+    }
+
+    #[tokio::test]
+    async fn no_optimistic_available_without_evidence() {
+        // An empty registry must not claim any capability is Supported.
+        let builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let snapshot = builder.build().unwrap();
+        assert!(snapshot.is_empty());
+        // Unknown is the default for absent capabilities (via DeviceCapabilities).
+        let device_caps = snapshot.device_capabilities();
+        assert_eq!(
+            device_caps.status(orbis_core::FeatureId::Performance),
+            CapabilityStatus::Unknown
+        );
+        assert_eq!(
+            device_caps.status(orbis_core::FeatureId::ChargeLimit),
+            CapabilityStatus::Unknown
+        );
+        assert_eq!(
+            device_caps.status(orbis_core::FeatureId::GpuPower),
+            CapabilityStatus::Unknown
+        );
+    }
+
+    #[tokio::test]
+    async fn fan_curve_probe_write_mirrors_backend_missing_when_read_fails() {
+        let provider = ScriptedFanProvider::backend_missing();
+        // Even positive mutation evidence must not override a structural read
+        // failure: write mirrors the read classification.
+        let capability = probe_fan_curve(
+            &provider,
+            &orbis_core::fan::FanId::Cpu,
+            CapabilityStatus::Supported,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             capability.operations.read.status,
             CapabilityStatus::BackendMissing
@@ -1109,5 +1659,530 @@ mod tests {
             capability.operations.write.status,
             CapabilityStatus::BackendMissing
         );
+    }
+
+    /// Scripted Panel Overdrive provider.
+    struct ScriptedPanelProvider {
+        state: Scripted<orbis_core::display::PanelOverdriveState>,
+    }
+
+    impl ScriptedPanelProvider {
+        fn new(state: Scripted<orbis_core::display::PanelOverdriveState>) -> Self {
+            Self { state }
+        }
+    }
+
+    impl Provider for ScriptedPanelProvider {
+        fn id(&self) -> &'static str {
+            "scripted-panel"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-panel")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted panel: функция '{feature}' недоступна")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl PanelOverdriveProvider for ScriptedPanelProvider {
+        async fn panel_overdrive_state(
+            &self,
+        ) -> Result<orbis_core::display::PanelOverdriveState, ProviderError> {
+            self.state.result()
+        }
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_probe_reports_supported_without_storing_state() {
+        for state in [
+            orbis_core::display::PanelOverdriveState::Disabled,
+            orbis_core::display::PanelOverdriveState::Enabled,
+            orbis_core::display::PanelOverdriveState::Unknown,
+        ] {
+            let capability = probe_panel_overdrive(
+                &ScriptedPanelProvider::new(Scripted::Value(state)),
+                CapabilityStatus::Unsupported,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported
+            );
+            assert_eq!(
+                capability.operations.write.status,
+                CapabilityStatus::Unsupported
+            );
+            assert_eq!(capability.constraints, CapabilityConstraints::Unknown);
+            assert!(capability.reason.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_probe_preserves_backend_missing_and_unsupported() {
+        for (error, expected) in [
+            (
+                ScriptedError::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (ScriptedError::Unsupported, CapabilityStatus::Unsupported),
+        ] {
+            let capability = probe_panel_overdrive(
+                &ScriptedPanelProvider::new(Scripted::Error(error)),
+                CapabilityStatus::Supported,
+            )
+            .await
+            .unwrap();
+            assert_eq!(capability.operations.read.status, expected);
+            // Write mirrors the read classification on structural failure,
+            // even with positive mutation evidence.
+            assert_eq!(capability.operations.write.status, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_probe_write_status_matches_runtime_evidence() {
+        for (evidence, expected_write) in [
+            (CapabilityStatus::Supported, CapabilityStatus::Supported),
+            (CapabilityStatus::Unsupported, CapabilityStatus::Unsupported),
+            (
+                CapabilityStatus::TemporarilyUnavailable,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+            (
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::PermissionDenied,
+            ),
+            (CapabilityStatus::Unknown, CapabilityStatus::Unknown),
+        ] {
+            let capability = probe_panel_overdrive(
+                &ScriptedPanelProvider::new(Scripted::Value(
+                    orbis_core::display::PanelOverdriveState::Enabled,
+                )),
+                evidence,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported,
+                "read must stay Supported for evidence {evidence:?}"
+            );
+            assert_eq!(
+                capability.operations.write.status, expected_write,
+                "write must mirror evidence {evidence:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_probe_read_permission_denied_does_not_invent_denied_write() {
+        let capability = probe_panel_overdrive(
+            &ScriptedPanelProvider::new(Scripted::Error(ScriptedError::PermissionDenied)),
+            CapabilityStatus::Supported,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::PermissionDenied
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_probe_malformed_backend_error_is_not_unsupported() {
+        let capability = probe_panel_overdrive(
+            &ScriptedPanelProvider::new(Scripted::Error(ScriptedError::Internal)),
+            CapabilityStatus::Unsupported,
+        )
+        .await;
+        // An unknown/malformed backend failure must surface as a probe error,
+        // never as a fake Unsupported (or a fake default).
+        assert!(matches!(capability, Err(ProbeError::Internal(_))));
+    }
+
+    #[tokio::test]
+    async fn panel_overdrive_failure_does_not_corrupt_performance_in_registry() {
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let performance = probe_performance(
+            &ScriptedProvider::performance(Scripted::Value(vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ])),
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::Performance, performance)
+            .unwrap();
+
+        let panel = probe_panel_overdrive(
+            &ScriptedPanelProvider::new(Scripted::Error(ScriptedError::BackendMissing)),
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::PanelOverdrive, panel)
+            .unwrap();
+
+        let snapshot = builder.build().unwrap();
+        let perf = snapshot
+            .capability(orbis_core::FeatureId::Performance)
+            .unwrap();
+        assert_eq!(perf.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(perf.status, CapabilityStatus::Supported);
+
+        let panel = snapshot
+            .capability(orbis_core::FeatureId::PanelOverdrive)
+            .unwrap();
+        assert_eq!(
+            panel.operations.read.status,
+            CapabilityStatus::BackendMissing
+        );
+    }
+
+    /// Scripted MiniLED mode provider.
+    struct ScriptedMiniLedProvider {
+        state: Scripted<orbis_core::display::MiniLedModeState>,
+    }
+
+    impl ScriptedMiniLedProvider {
+        fn new(state: Scripted<orbis_core::display::MiniLedModeState>) -> Self {
+            Self { state }
+        }
+    }
+
+    impl Provider for ScriptedMiniLedProvider {
+        fn id(&self) -> &'static str {
+            "scripted-mini-led"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-mini-led")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted mini-led: функция '{feature}' недоступна")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl MiniLedModeProvider for ScriptedMiniLedProvider {
+        async fn mini_led_mode_state(
+            &self,
+        ) -> Result<orbis_core::display::MiniLedModeState, ProviderError> {
+            self.state.result()
+        }
+    }
+
+    fn mini_led_state(current: u32) -> orbis_core::display::MiniLedModeState {
+        use orbis_core::display::MiniLedModeValue;
+        orbis_core::display::MiniLedModeState {
+            allowed: vec![MiniLedModeValue::new(0), MiniLedModeValue::new(1)],
+            current: MiniLedModeValue::new(current),
+            semantics: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn mini_led_probe_reports_supported_with_readonly_write() {
+        for current in [0u32, 1] {
+            let capability = probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Value(
+                mini_led_state(current),
+            )))
+            .await
+            .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported
+            );
+            // Write никогда не Supported: mutation backend отсутствует.
+            assert_eq!(
+                capability.operations.write.status,
+                CapabilityStatus::ReadOnly
+            );
+            assert_eq!(capability.status, CapabilityStatus::Supported);
+            assert_eq!(capability.constraints, CapabilityConstraints::Unknown);
+        }
+    }
+
+    #[tokio::test]
+    async fn mini_led_probe_preserves_backend_missing_and_unsupported() {
+        for (error, expected) in [
+            (
+                ScriptedError::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (ScriptedError::Unsupported, CapabilityStatus::Unsupported),
+        ] {
+            let capability =
+                probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Error(error)))
+                    .await
+                    .unwrap();
+            assert_eq!(capability.operations.read.status, expected);
+            // Write зеркалит read при структурном отказе (не фальсифицируется).
+            assert_eq!(capability.operations.write.status, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn mini_led_probe_read_permission_denied_does_not_invent_denied_write() {
+        let capability = probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Error(
+            ScriptedError::PermissionDenied,
+        )))
+        .await
+        .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::PermissionDenied
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
+
+    #[tokio::test]
+    async fn mini_led_probe_malformed_backend_error_is_not_unsupported() {
+        let capability = probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Error(
+            ScriptedError::Internal,
+        )))
+        .await;
+        assert!(matches!(capability, Err(ProbeError::Internal(_))));
+    }
+
+    #[tokio::test]
+    async fn mini_led_failure_does_not_corrupt_panel_overdrive_in_registry() {
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let panel = probe_panel_overdrive(
+            &ScriptedPanelProvider::new(Scripted::Value(
+                orbis_core::display::PanelOverdriveState::Enabled,
+            )),
+            CapabilityStatus::Supported,
+        )
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::PanelOverdrive, panel)
+            .unwrap();
+
+        let mini_led = probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Error(
+            ScriptedError::BackendMissing,
+        )))
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::MiniLed, mini_led)
+            .unwrap();
+
+        let snapshot = builder.build().unwrap();
+        let panel = snapshot
+            .capability(orbis_core::FeatureId::PanelOverdrive)
+            .unwrap();
+        assert_eq!(panel.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(panel.status, CapabilityStatus::Supported);
+
+        let mini_led = snapshot.capability(orbis_core::FeatureId::MiniLed).unwrap();
+        assert_eq!(
+            mini_led.operations.read.status,
+            CapabilityStatus::BackendMissing
+        );
+    }
+
+    /// Scripted Screen Auto Brightness provider.
+    struct ScriptedSabProvider {
+        state: Scripted<orbis_core::display::ScreenAutoBrightnessState>,
+    }
+
+    impl ScriptedSabProvider {
+        fn new(state: Scripted<orbis_core::display::ScreenAutoBrightnessState>) -> Self {
+            Self { state }
+        }
+    }
+
+    impl Provider for ScriptedSabProvider {
+        fn id(&self) -> &'static str {
+            "scripted-sab"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-sab")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted sab: функция '{feature}' недоступна")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl ScreenAutoBrightnessProvider for ScriptedSabProvider {
+        async fn screen_auto_brightness_state(
+            &self,
+        ) -> Result<orbis_core::display::ScreenAutoBrightnessState, ProviderError> {
+            self.state.result()
+        }
+    }
+
+    #[tokio::test]
+    async fn sab_probe_reports_supported_with_readonly_write() {
+        for state in [
+            orbis_core::display::ScreenAutoBrightnessState::Disabled,
+            orbis_core::display::ScreenAutoBrightnessState::Enabled,
+            orbis_core::display::ScreenAutoBrightnessState::Unknown,
+        ] {
+            let capability =
+                probe_screen_auto_brightness(&ScriptedSabProvider::new(Scripted::Value(state)))
+                    .await
+                    .unwrap();
+            assert_eq!(
+                capability.operations.read.status,
+                CapabilityStatus::Supported
+            );
+            // Write никогда не Supported: mutation backend отсутствует.
+            assert_eq!(
+                capability.operations.write.status,
+                CapabilityStatus::ReadOnly
+            );
+            assert_eq!(capability.status, CapabilityStatus::Supported);
+            assert_eq!(capability.constraints, CapabilityConstraints::Unknown);
+        }
+    }
+
+    #[tokio::test]
+    async fn sab_probe_preserves_backend_missing_and_unsupported() {
+        for (error, expected) in [
+            (
+                ScriptedError::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+            (ScriptedError::Unsupported, CapabilityStatus::Unsupported),
+        ] {
+            let capability =
+                probe_screen_auto_brightness(&ScriptedSabProvider::new(Scripted::Error(error)))
+                    .await
+                    .unwrap();
+            assert_eq!(capability.operations.read.status, expected);
+            // Write зеркалит read при структурном отказе (не фальсифицируется).
+            assert_eq!(capability.operations.write.status, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn sab_probe_read_permission_denied_does_not_make_write_denied() {
+        // Read PermissionDenied — evidence только о read. Write остаётся
+        // ReadOnly (intentionally), а не PermissionDenied.
+        let capability = probe_screen_auto_brightness(&ScriptedSabProvider::new(Scripted::Error(
+            ScriptedError::PermissionDenied,
+        )))
+        .await
+        .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::PermissionDenied
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
+
+    #[tokio::test]
+    async fn sab_probe_malformed_backend_error_is_not_unsupported() {
+        let capability = probe_screen_auto_brightness(&ScriptedSabProvider::new(Scripted::Error(
+            ScriptedError::Internal,
+        )))
+        .await;
+        assert!(matches!(capability, Err(ProbeError::Internal(_))));
+    }
+
+    #[tokio::test]
+    async fn sab_failure_does_not_corrupt_mini_led_in_registry() {
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let mini_led = probe_mini_led_mode(&ScriptedMiniLedProvider::new(Scripted::Value(
+            mini_led_state(1),
+        )))
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::MiniLed, mini_led)
+            .unwrap();
+
+        let sab = probe_screen_auto_brightness(&ScriptedSabProvider::new(Scripted::Error(
+            ScriptedError::BackendMissing,
+        )))
+        .await
+        .unwrap();
+        builder
+            .add(orbis_core::FeatureId::ScreenAutoBrightness, sab)
+            .unwrap();
+
+        let snapshot = builder.build().unwrap();
+        let mini_led = snapshot.capability(orbis_core::FeatureId::MiniLed).unwrap();
+        assert_eq!(mini_led.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(mini_led.status, CapabilityStatus::Supported);
+
+        let sab = snapshot
+            .capability(orbis_core::FeatureId::ScreenAutoBrightness)
+            .unwrap();
+        assert_eq!(sab.operations.read.status, CapabilityStatus::BackendMissing);
     }
 }

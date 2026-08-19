@@ -147,7 +147,7 @@ fn parse_curve_entry(
     let mut temps_arr = [TemperatureC::new(0).expect("const"); CURVE_POINT_COUNT];
     let mut pwms_arr = [FanPwm::new(0).expect("const"); CURVE_POINT_COUNT];
     for (i, (t, p)) in temps.iter().zip(pwms.iter()).enumerate() {
-        temps_arr[i] = TemperatureC::new(*t as i16).map_err(|_| {
+        temps_arr[i] = TemperatureC::new(i16::from(*t)).map_err(|_| {
             ProviderError::Internal(format!(
                 "asusd FanCurves: температура вне диапазона '{t}' для {name}"
             ))
@@ -308,15 +308,27 @@ impl SysfsFanCurveSource {
                 }
             };
 
-            let temp = TemperatureC::new(temp_raw as i16).map_err(|_| {
+            let temp_value = i16::try_from(temp_raw).map_err(|_| {
                 ProviderError::Internal(format!(
-                    "asus_custom_fan_curve: температура вне диапазона '{temp_raw}' в '{}'",
+                    "asus_custom_fan_curve: температура вне представимого диапазона '{temp_raw}' в '{}'",
                     temp_path.display()
                 ))
             })?;
-            let pwm = FanPwm::new(pwm_raw as u8).map_err(|_| {
+            let temp = TemperatureC::new(temp_value).map_err(|_| {
                 ProviderError::Internal(format!(
-                    "asus_custom_fan_curve: PWM вне диапазона '{pwm_raw}' в '{}'",
+                    "asus_custom_fan_curve: температура вне domain диапазона '{temp_raw}' в '{}'",
+                    temp_path.display()
+                ))
+            })?;
+            let pwm_value = u8::try_from(pwm_raw).map_err(|_| {
+                ProviderError::Internal(format!(
+                    "asus_custom_fan_curve: PWM вне представимого диапазона '{pwm_raw}' в '{}'",
+                    pwm_path.display()
+                ))
+            })?;
+            let pwm = FanPwm::new(pwm_value).map_err(|_| {
+                ProviderError::Internal(format!(
+                    "asus_custom_fan_curve: PWM вне domain диапазона '{pwm_raw}' в '{}'",
                     pwm_path.display()
                 ))
             })?;
@@ -694,6 +706,30 @@ mod tests {
             .read_active_curve(&FanId::Cpu)
             .await
             .expect_err("malformed");
+        assert!(matches!(err, ProviderError::Internal(_)));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn oversized_sysfs_values_do_not_wrap() {
+        let root = fixture_root();
+        full_fixture(&root);
+        let source = SysfsFanCurveSource::new(root.clone());
+
+        write_fixture(&root, "class/hwmon/hwmon5/pwm1_auto_point1_temp", "65536\n");
+        let err = source
+            .read_active_curve(&FanId::Cpu)
+            .await
+            .expect_err("temperature narrowing must fail");
+        assert!(matches!(err, ProviderError::Internal(_)));
+
+        write_fixture(&root, "class/hwmon/hwmon5/pwm1_auto_point1_temp", "45\n");
+        write_fixture(&root, "class/hwmon/hwmon5/pwm1_auto_point1_pwm", "256\n");
+        let err = source
+            .read_active_curve(&FanId::Cpu)
+            .await
+            .expect_err("PWM narrowing must fail");
         assert!(matches!(err, ProviderError::Internal(_)));
 
         let _ = std::fs::remove_dir_all(root);

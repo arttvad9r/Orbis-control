@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use orbis_core::display::{DisplayMode, HdrState, RefreshMode};
+use orbis_core::display::{DisplayMode, HdrState, PanelOverdriveState, RefreshMode};
 use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
@@ -220,7 +220,7 @@ fn zephyrus_full() -> MockState {
             RefreshMode::new(RefreshHz::new(120).expect("hz")),
             RefreshMode::new(RefreshHz::new(165).expect("hz")),
         ],
-        overdrive: Some(true),
+        overdrive: PanelOverdriveState::Enabled,
         hdr: HdrState::Supported,
     };
     s.mux = GpuMuxState::Integrated;
@@ -237,7 +237,7 @@ fn tuf_fa707nv_realistic() -> MockState {
     // charge_mode = ReadOnly в фикстуре (не представлен здесь как отдельная
     // capability; фиксируется в capability-матрице UI)
     s.mux = GpuMuxState::Integrated;
-    s.display.overdrive = Some(true);
+    s.display.overdrive = PanelOverdriveState::Enabled;
     s.power_limits = PowerLimits {
         fields: BTreeMap::from([
             // Значения из probe: ppt_pl1_spl=5 и т.д., но семантика требует
@@ -271,7 +271,7 @@ fn tuf_fa707nv_realistic() -> MockState {
 
 fn tuf_no_anime() -> MockState {
     let mut s = base_full();
-    s.display.overdrive = Some(false);
+    s.display.overdrive = PanelOverdriveState::Disabled;
     s.lighting = orbis_core::lighting::LightingMode::Breathing;
     s
 }
@@ -325,7 +325,7 @@ fn non_asus() -> MockState {
     s.display = DisplayMode {
         current_hz: Some(RefreshHz::new(60).expect("hz")),
         modes: vec![RefreshMode::new(RefreshHz::new(60).expect("hz"))],
-        overdrive: None,
+        overdrive: PanelOverdriveState::Unknown,
         hdr: HdrState::Disabled,
     };
     s.telemetry = telemetry(

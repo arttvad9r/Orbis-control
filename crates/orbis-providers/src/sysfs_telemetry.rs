@@ -9,8 +9,10 @@
 //! - каждый вызов `snapshot()` выполняет новый authoritative read (кэш
 //!   отсутствует);
 //! - отсутствующие необязательные файлы → `None` (не ломают snapshot);
-//! - malformed/пустые значения → `ProviderError::Internal`;
-//! - I/O ошибки (кроме `NotFound`) → `ProviderError::Io`;
+//! - ошибки candidate metadata (`hwmon/name`, `power_supply/type`) пропускают
+//!   только этот discovery entry; ошибки после выбора источника не скрываются;
+//! - malformed/пустые значения выбранного источника → `ProviderError::Internal`;
+//! - I/O ошибки выбранного источника (кроме `NotFound`) → `ProviderError::Io`;
 //! - не вычисляются недоказанные значения: `energy_now/full`, `total` power,
 //!   battery power; `FanTelemetry.percent` всегда `None`;
 //! - telemetry НЕ смешивается с `GpuPower/GpuMux/GpuAccess` capability state:
@@ -89,36 +91,59 @@ impl TelemetryProvider for SysfsTelemetryProvider {
         let hwmon_dir = self.sysfs_root.join("class").join("hwmon");
         let power_dir = self.sysfs_root.join("class").join("power_supply");
 
+        // hwmon discovery failure is snapshot-global: we cannot proceed
+        // without knowing which hwmon entries exist. But individual sensor
+        // read failures are field-local — they set the metric to None
+        // without destroying independent metrics.
+        let hwmon_dirs = read_dir_optional(&hwmon_dir)?;
+
         let mut cpu_temp = None;
         let mut gpu_temp = None;
         let mut gpu_power = None;
         let mut fans = Vec::new();
 
-        for dir in read_dir_optional(&hwmon_dir)? {
-            let name = read_string(&dir.join("name"))?;
-            match name.as_deref() {
-                Some("k10temp") => {
-                    cpu_temp = read_temp_c(&dir.join("temp1_input"))?;
+        for dir in &hwmon_dirs {
+            let Some(name) = read_discovery_string(&dir.join("name")) else {
+                continue;
+            };
+            match name.as_str() {
+                "k10temp" => {
+                    cpu_temp = read_temp_c(&dir.join("temp1_input")).ok().flatten();
                 }
-                Some("amdgpu") => {
-                    gpu_temp = read_amdgpu_edge_temp(&dir)?;
-                    gpu_power = read_milli_watt(&dir.join("power1_input"))?;
+                "amdgpu" => {
+                    gpu_temp = read_amdgpu_edge_temp(dir).ok().flatten();
+                    gpu_power = read_milli_watt(&dir.join("power1_input")).ok().flatten();
                 }
-                Some("asus") => {
-                    fans = read_asus_fans(&dir)?;
+                "asus" => {
+                    fans = read_asus_fans(dir);
                 }
                 _ => {}
             }
         }
 
+        // power_supply discovery failure is also snapshot-global.
+        let power_dirs = read_dir_optional(&power_dir)?;
+
         let mut battery = None;
         let mut ac_online = None;
-        for dir in read_dir_optional(&power_dir)? {
-            if battery.is_none() && dir.join("capacity").exists() {
-                battery = read_battery(&dir)?;
-            }
-            if ac_online.is_none() && dir.join("online").exists() {
-                ac_online = read_online(&dir)?;
+        for dir in &power_dirs {
+            let Some(supply_type) = read_discovery_string(&dir.join("type")) else {
+                continue;
+            };
+            match supply_type.as_str() {
+                "Battery" => {
+                    if battery.is_none() {
+                        battery = read_battery(dir).ok().flatten();
+                    }
+                }
+                // External supplies use several kernel type names (Mains,
+                // USB*, Wireless, ...). Require an explicit non-Battery type
+                // plus the standard `online` attribute instead of selecting
+                // the first arbitrary power_supply that happens to have it.
+                _ if ac_online.is_none() && dir.join("online").exists() => {
+                    ac_online = read_online(dir).ok().flatten();
+                }
+                _ => {}
             }
         }
 
@@ -181,6 +206,13 @@ fn read_string(path: &Path) -> Result<Option<String>, ProviderError> {
     Ok(Some(trimmed.to_string()))
 }
 
+/// Прочитать metadata, используемый только для классификации discovery entry.
+/// Любая ошибка здесь означает «этот кандидат нельзя надёжно классифицировать»;
+/// она не должна ломать уже доступную telemetry из независимых источников.
+fn read_discovery_string(path: &Path) -> Option<String> {
+    read_string(path).ok().flatten()
+}
+
 /// Прочитать один файл как `u64`.
 fn read_u64(path: &Path) -> Result<Option<u64>, ProviderError> {
     let Some(trimmed) = read_string(path)? else {
@@ -194,15 +226,23 @@ fn read_u64(path: &Path) -> Result<Option<u64>, ProviderError> {
     })
 }
 
+fn narrowing_error(kind: &str, raw: u64, path: &Path) -> ProviderError {
+    ProviderError::Internal(format!(
+        "sysfs telemetry: {kind} вне представимого диапазона '{raw}' в '{}'",
+        path.display()
+    ))
+}
+
 /// Прочитать температуру: sysfs м°C → domain °C.
 fn read_temp_c(path: &Path) -> Result<Option<TemperatureC>, ProviderError> {
     let Some(raw) = read_u64(path)? else {
         return Ok(None);
     };
-    let celsius = (raw / 1000) as i16;
+    let celsius =
+        i16::try_from(raw / 1000).map_err(|_| narrowing_error("температура", raw, path))?;
     TemperatureC::new(celsius).map(Some).map_err(|_| {
         ProviderError::Internal(format!(
-            "sysfs telemetry: температура вне диапазона '{raw}' в '{}'",
+            "sysfs telemetry: температура вне domain диапазона '{raw}' в '{}'",
             path.display()
         ))
     })
@@ -213,9 +253,10 @@ fn read_rpm(path: &Path) -> Result<Option<Rpm>, ProviderError> {
     let Some(raw) = read_u64(path)? else {
         return Ok(None);
     };
-    Rpm::new(raw as u16).map(Some).map_err(|_| {
+    let rpm = u16::try_from(raw).map_err(|_| narrowing_error("RPM", raw, path))?;
+    Rpm::new(rpm).map(Some).map_err(|_| {
         ProviderError::Internal(format!(
-            "sysfs telemetry: RPM вне диапазона '{raw}' в '{}'",
+            "sysfs telemetry: RPM вне domain диапазона '{raw}' в '{}'",
             path.display()
         ))
     })
@@ -226,10 +267,11 @@ fn read_milli_watt(path: &Path) -> Result<Option<MilliWatt>, ProviderError> {
     let Some(raw) = read_u64(path)? else {
         return Ok(None);
     };
-    let milliwatt = (raw / 1000) as u32;
+    let milliwatt =
+        u32::try_from(raw / 1000).map_err(|_| narrowing_error("мощность", raw, path))?;
     MilliWatt::new(milliwatt).map(Some).map_err(|_| {
         ProviderError::Internal(format!(
-            "sysfs telemetry: мощность вне диапазона '{raw}' в '{}'",
+            "sysfs telemetry: мощность вне domain диапазона '{raw}' в '{}'",
             path.display()
         ))
     })
@@ -240,9 +282,10 @@ fn read_percent(path: &Path) -> Result<Option<Percent>, ProviderError> {
     let Some(raw) = read_u64(path)? else {
         return Ok(None);
     };
-    Percent::new(raw as u8).map(Some).map_err(|_| {
+    let percent = u8::try_from(raw).map_err(|_| narrowing_error("процент", raw, path))?;
+    Percent::new(percent).map(Some).map_err(|_| {
         ProviderError::Internal(format!(
-            "sysfs telemetry: процент вне диапазона '{raw}' в '{}'",
+            "sysfs telemetry: процент вне domain диапазона '{raw}' в '{}'",
             path.display()
         ))
     })
@@ -264,21 +307,30 @@ fn read_amdgpu_edge_temp(dir: &Path) -> Result<Option<TemperatureC>, ProviderErr
 /// Прочитать CPU/GPU (и другие) вентиляторы ASUS hwmon по labels.
 ///
 /// `FanTelemetry.percent` всегда `None` (нет доказанного источника max RPM).
-fn read_asus_fans(dir: &Path) -> Result<Vec<FanTelemetry>, ProviderError> {
+///
+/// Каждый fan обрабатывается независимо: ошибка одного fan (malformed
+/// label/RPM) пропускает только этот entry, сохраняя остальные.
+fn read_asus_fans(dir: &Path) -> Vec<FanTelemetry> {
     let mut fans = Vec::new();
     for i in 1..=4 {
-        let label = read_string(&dir.join(format!("fan{i}_label")))?;
-        let Some(rpm) = read_rpm(&dir.join(format!("fan{i}_input")))? else {
+        // Skip fans with missing or malformed labels (read_string returns
+        // None for NotFound, Err for malformed — both are skip-safe).
+        let Some(label) = read_string(&dir.join(format!("fan{i}_label")))
+            .ok()
+            .flatten()
+        else {
             continue;
         };
-        let fan = match label.as_deref() {
-            Some("cpu_fan") => FanId::Cpu,
-            Some("gpu_fan") => FanId::Gpu,
-            Some("mid_fan") => FanId::Mid,
-            Some("system_fan") => FanId::System,
-            Some(other) => FanId::Other(other.to_string()),
-            // Без label не знаем, какой это вентилятор — пропускаем.
-            None => continue,
+        let fan = match label.as_str() {
+            "cpu_fan" => FanId::Cpu,
+            "gpu_fan" => FanId::Gpu,
+            "mid_fan" => FanId::Mid,
+            "system_fan" => FanId::System,
+            other => FanId::Other(other.to_string()),
+        };
+        // RPM read failure skips this fan without killing others.
+        let Some(rpm) = read_rpm(&dir.join(format!("fan{i}_input"))).ok().flatten() else {
+            continue;
         };
         fans.push(FanTelemetry {
             fan,
@@ -286,7 +338,7 @@ fn read_asus_fans(dir: &Path) -> Result<Vec<FanTelemetry>, ProviderError> {
             percent: None,
         });
     }
-    Ok(fans)
+    fans
 }
 
 /// Прочитать battery telemetry из power_supply директории.
@@ -294,18 +346,38 @@ fn read_asus_fans(dir: &Path) -> Result<Vec<FanTelemetry>, ProviderError> {
 /// `energy_now`/`energy_full` не вычисляются (на многих машинах отсутствуют);
 /// health вычисляется из `charge_full`/`charge_full_design` (доказанное
 /// стандартное отношение), при `design == 0` → `None`.
+///
+/// Optional metadata (health, cycle_count) that fails to parse degrades to
+/// `None` without killing the entire battery metric — percent and state are
+/// the required fields.
 fn read_battery(dir: &Path) -> Result<Option<BatteryTelemetry>, ProviderError> {
     let Some(percent) = read_percent(&dir.join("capacity"))? else {
         return Ok(None);
     };
     let status = read_string(&dir.join("status"))?.unwrap_or_default();
-    let charge_cycles = read_u64(&dir.join("cycle_count"))?.map(|v| v as u32);
+    // cycle_count is optional metadata: malformed file → None, not error.
+    let charge_cycles = read_u64(&dir.join("cycle_count"))
+        .ok()
+        .flatten()
+        .and_then(|raw| u32::try_from(raw).ok());
     let charge_full = read_u64(&dir.join("charge_full"))?;
     let charge_full_design = read_u64(&dir.join("charge_full_design"))?;
     let capacity = match (charge_full, charge_full_design) {
         (Some(full), Some(design)) if design > 0 => {
-            let pct = (full * 100) / design;
-            Percent::new(pct.min(100) as u8).ok()
+            let scaled = full.checked_mul(100).ok_or_else(|| {
+                ProviderError::Internal(format!(
+                    "sysfs telemetry: battery health overflow для '{}'",
+                    dir.join("charge_full").display()
+                ))
+            })?;
+            let pct = scaled / design;
+            let clamped = u8::try_from(pct.min(100))
+                .map_err(|_| narrowing_error("battery health", pct, &dir.join("charge_full")))?;
+            Some(Percent::new(clamped).map_err(|_| {
+                ProviderError::Internal(format!(
+                    "sysfs telemetry: battery health вне domain диапазона '{pct}'"
+                ))
+            })?)
         }
         _ => None,
     };
@@ -362,6 +434,18 @@ mod tests {
         std::fs::write(path, content).expect("write fixture");
     }
 
+    fn battery_type(root: &Path, name: &str) {
+        write_fixture(
+            root,
+            &format!("class/power_supply/{name}/type"),
+            "Battery\n",
+        );
+    }
+
+    fn external_type(root: &Path, name: &str) {
+        write_fixture(root, &format!("class/power_supply/{name}/type"), "Mains\n");
+    }
+
     /// Полное fixture-дерево: k10temp, amdgpu, asus, BAT1, ACAD.
     fn full_fixture(root: &Path) {
         write_fixture(root, "class/hwmon/hwmon0/name", "k10temp\n");
@@ -379,6 +463,7 @@ mod tests {
         write_fixture(root, "class/hwmon/hwmon2/fan2_input", "2100\n");
         write_fixture(root, "class/hwmon/hwmon2/fan2_label", "gpu_fan\n");
 
+        battery_type(root, "BAT1");
         write_fixture(root, "class/power_supply/BAT1/capacity", "100\n");
         write_fixture(root, "class/power_supply/BAT1/status", "Full\n");
         write_fixture(root, "class/power_supply/BAT1/cycle_count", "0\n");
@@ -389,6 +474,7 @@ mod tests {
             "5675000\n",
         );
 
+        external_type(root, "ACAD");
         write_fixture(root, "class/power_supply/ACAD/online", "1\n");
     }
 
@@ -470,6 +556,7 @@ mod tests {
         // Только k10temp + BAT1 без необязательных файлов.
         write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
         write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "46375\n");
+        battery_type(&root, "BAT1");
         write_fixture(&root, "class/power_supply/BAT1/capacity", "80\n");
         // status/cycle_count/charge_full/charge_full_design отсутствуют.
         // amdgpu/asus/ACAD отсутствуют.
@@ -508,44 +595,118 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn malformed_value_is_internal_error() {
+    async fn malformed_cpu_temp_degrades_to_none() {
         let root = fixture_root();
         write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
         write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "not-a-number\n");
 
         let provider = SysfsTelemetryProvider::new(root.clone());
-        let err = provider.snapshot().await.expect_err("malformed must fail");
-        assert!(matches!(err, ProviderError::Internal(_)));
+        let t = provider
+            .snapshot()
+            .await
+            .expect("snapshot must succeed despite malformed CPU temp");
+        assert_eq!(t.cpu_temp, None);
 
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
-    async fn empty_file_is_internal_error() {
+    async fn empty_cpu_temp_file_degrades_to_none() {
         let root = fixture_root();
         write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
         write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "\n");
 
         let provider = SysfsTelemetryProvider::new(root.clone());
-        let err = provider.snapshot().await.expect_err("empty must fail");
-        assert!(matches!(err, ProviderError::Internal(_)));
+        let t = provider
+            .snapshot()
+            .await
+            .expect("snapshot must succeed despite empty CPU temp file");
+        assert_eq!(t.cpu_temp, None);
 
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
-    async fn out_of_range_values_are_internal_error() {
+    async fn out_of_range_cpu_temp_degrades_to_none() {
         let root = fixture_root();
         write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
         // 999999 м°C = 999 °C — вне диапазона TemperatureC.
         write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "999999\n");
 
         let provider = SysfsTelemetryProvider::new(root.clone());
-        let err = provider
+        let t = provider
             .snapshot()
             .await
-            .expect_err("out of range must fail");
-        assert!(matches!(err, ProviderError::Internal(_)));
+            .expect("snapshot must succeed despite out-of-range CPU temp");
+        assert_eq!(t.cpu_temp, None);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn malformed_fan_rpm_degrades_to_empty() {
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon2/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon2/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon2/fan1_input", "65536\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider
+            .snapshot()
+            .await
+            .expect("snapshot must succeed despite malformed fan RPM");
+        assert!(t.fans.is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn discovery_skips_unclassifiable_entries() {
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/decoy/name", "\n");
+        write_fixture(&root, "class/power_supply/decoy/type", "\n");
+
+        write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
+        write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "47000\n");
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "77\n");
+        external_type(&root, "ACAD");
+        write_fixture(&root, "class/power_supply/ACAD/online", "1\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot");
+
+        assert_eq!(t.cpu_temp, Some(TemperatureC::new(47).expect("c")));
+        assert_eq!(
+            t.battery.expect("battery").percent,
+            Percent::new(77).expect("pct")
+        );
+        assert_eq!(t.ac_online, Some(true));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn power_supply_discovery_requires_explicit_type() {
+        let root = fixture_root();
+        // Decoys deliberately expose familiar attributes under the wrong type.
+        external_type(&root, "NOT_A_BATTERY");
+        write_fixture(&root, "class/power_supply/NOT_A_BATTERY/capacity", "1\n");
+        battery_type(&root, "BAT_WITH_ONLINE");
+        write_fixture(&root, "class/power_supply/BAT_WITH_ONLINE/online", "0\n");
+
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "77\n");
+        external_type(&root, "ACAD");
+        write_fixture(&root, "class/power_supply/ACAD/online", "1\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot");
+        assert_eq!(
+            t.battery.expect("battery").percent,
+            Percent::new(77).unwrap()
+        );
+        assert_eq!(t.ac_online, Some(true));
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -577,6 +738,7 @@ mod tests {
     #[tokio::test]
     async fn ac_online_parses_zero_and_one() {
         let root = fixture_root();
+        external_type(&root, "ACAD");
         write_fixture(&root, "class/power_supply/ACAD/online", "0\n");
         let provider = SysfsTelemetryProvider::new(root.clone());
         let t = provider.snapshot().await.expect("snapshot");
@@ -592,6 +754,7 @@ mod tests {
     #[tokio::test]
     async fn battery_health_clamps_to_100() {
         let root = fixture_root();
+        battery_type(&root, "BAT1");
         write_fixture(&root, "class/power_supply/BAT1/capacity", "50\n");
         write_fixture(&root, "class/power_supply/BAT1/charge_full", "6000000\n");
         write_fixture(
@@ -611,6 +774,7 @@ mod tests {
     #[tokio::test]
     async fn battery_health_zero_design_is_none() {
         let root = fixture_root();
+        battery_type(&root, "BAT1");
         write_fixture(&root, "class/power_supply/BAT1/capacity", "50\n");
         write_fixture(&root, "class/power_supply/BAT1/charge_full", "6000000\n");
         write_fixture(&root, "class/power_supply/BAT1/charge_full_design", "0\n");
@@ -639,6 +803,366 @@ mod tests {
         assert_ne!(t.cpu_temp, Some(TemperatureC::new(72).expect("mock")));
         assert_ne!(t.gpu_temp, Some(TemperatureC::new(65).expect("mock")));
         assert_eq!(t.power.ac, None); // mock 28000 мВт не используется
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // Partial-failure regression tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn malformed_cpu_temp_does_not_break_battery_ac_fans() {
+        // Malformed CPU temp should degrade cpu_temp to None without destroying
+        // independent metrics: battery, AC, fans, GPU.
+        let root = fixture_root();
+        full_fixture(&root);
+        // Corrupt CPU temp with malformed value.
+        write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "not-a-number\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        // CPU temp degraded to None.
+        assert_eq!(t.cpu_temp, None);
+        // All other metrics remain intact.
+        assert_eq!(t.gpu_temp, Some(TemperatureC::new(43).expect("c")));
+        assert_eq!(t.power.gpu, Some(MilliWatt::new(13_073).expect("mw")));
+        assert_eq!(t.fans.len(), 2);
+        assert!(t.battery.is_some());
+        assert_eq!(t.ac_online, Some(true));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn malformed_gpu_power_does_not_break_cpu() {
+        // Malformed GPU power1_input should degrade gpu_power to None without
+        // destroying CPU temp or other metrics.
+        let root = fixture_root();
+        full_fixture(&root);
+        // Corrupt GPU power with non-numeric value.
+        write_fixture(&root, "class/hwmon/hwmon1/power1_input", "not-a-number\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        // GPU power degraded to None.
+        assert_eq!(t.power.gpu, None);
+        // CPU temp, GPU temp, fans, battery, AC remain intact.
+        assert_eq!(t.cpu_temp, Some(TemperatureC::new(46).expect("c")));
+        assert_eq!(t.gpu_temp, Some(TemperatureC::new(43).expect("c")));
+        assert_eq!(t.fans.len(), 2);
+        assert!(t.battery.is_some());
+        assert_eq!(t.ac_online, Some(true));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn malformed_battery_cycle_count_does_not_kill_percent() {
+        // Malformed cycle_count should degrade charge_cycles to None without
+        // destroying percent, health, or state.
+        let root = fixture_root();
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "80\n");
+        write_fixture(&root, "class/power_supply/BAT1/status", "Discharging\n");
+        write_fixture(
+            &root,
+            "class/power_supply/BAT1/cycle_count",
+            "not-a-number\n",
+        );
+        write_fixture(&root, "class/power_supply/BAT1/charge_full", "4962000\n");
+        write_fixture(
+            &root,
+            "class/power_supply/BAT1/charge_full_design",
+            "5675000\n",
+        );
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+        let battery = t.battery.expect("battery must exist");
+
+        // Percent and state are intact.
+        assert_eq!(battery.percent, Percent::new(80).expect("pct"));
+        assert_eq!(battery.state, "Discharging");
+        // cycle_count degraded to None.
+        assert_eq!(battery.charge_cycles, None);
+        // Health calculation still works.
+        assert_eq!(battery.capacity, Some(Percent::new(87).expect("pct")));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn ac_online_zero_is_some_false() {
+        // AC online=0 → Some(false) (device exists, offline).
+        // Not None (unavailable) — the source exists.
+        let root = fixture_root();
+        external_type(&root, "ACAD");
+        write_fixture(&root, "class/power_supply/ACAD/online", "0\n");
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot");
+        assert_eq!(t.ac_online, Some(false));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn missing_ac_is_none() {
+        // No power_supply with online attribute → ac_online = None.
+        let root = fixture_root();
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "80\n");
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot");
+        assert_eq!(t.ac_online, None);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fan_rpm_zero_is_some_not_none() {
+        // RPM 0 is a valid physical value (fan stopped), distinct from "no data".
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "0\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot");
+        assert_eq!(t.fans.len(), 1);
+        assert_eq!(t.fans[0].rpm, Rpm::new(0).expect("rpm"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn malformed_fan_rpm_is_not_zero() {
+        // Malformed RPM → fan excluded (empty fans list), not RPM=0.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "not-a-number\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot");
+        // Malformed fan excluded, not RPM=0.
+        assert!(t.fans.is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn disappearing_selected_source_does_not_kill_snapshot() {
+        // Source found during discovery but file disappears before read.
+        // read_temp_c returns Ok(None) for NotFound → cpu_temp = None.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
+        // temp1_input does NOT exist → read_temp_c returns Ok(None).
+        // Battery and AC should still work.
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "85\n");
+        external_type(&root, "ACAD");
+        write_fixture(&root, "class/power_supply/ACAD/online", "1\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+        assert_eq!(t.cpu_temp, None);
+        assert!(t.battery.is_some());
+        assert_eq!(t.ac_online, Some(true));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn overflow_metric_does_not_wrap_truncate() {
+        // Oversized values (e.g., RPM > u16::MAX) degrade to None via
+        // narrowing_error, not wrap to 0 or truncate.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "amdgpu\n");
+        write_fixture(&root, "class/hwmon/hwmon0/power1_input", "9999999999999\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+        // GPU power degraded to None, not truncated.
+        assert_eq!(t.power.gpu, None);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn malformed_unrelated_discovery_entry_still_skipped() {
+        // A malformed entry (non-numeric name file) should be skipped
+        // without affecting other valid entries.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "not-a-number\n");
+        write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "50000\n");
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "90\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+        // k10temp not matched (name is "not-a-number"), so cpu_temp = None.
+        assert_eq!(t.cpu_temp, None);
+        // Battery still works.
+        assert_eq!(
+            t.battery.expect("battery").percent,
+            Percent::new(90).expect("pct")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-fan partial-failure regression tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn malformed_fan0_label_preserves_fan1() {
+        // fan0 has malformed label → should be skipped, fan1 preserved.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        // fan0: label is empty (malformed), input exists but irrelevant.
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "9999\n");
+        // fan1: valid.
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "3200\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        // fan1 (gpu_fan) preserved with correct identity.
+        assert_eq!(t.fans.len(), 1);
+        assert_eq!(t.fans[0].fan, FanId::Gpu);
+        assert_eq!(t.fans[0].rpm, Rpm::new(3200).expect("rpm"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn malformed_fan1_preserves_fan0() {
+        // fan0 valid, fan1 malformed → fan0 preserved.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        // fan0: valid.
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "2600\n");
+        // fan1: malformed input.
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "not-a-number\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        assert_eq!(t.fans.len(), 1);
+        assert_eq!(t.fans[0].fan, FanId::Cpu);
+        assert_eq!(t.fans[0].rpm, Rpm::new(2600).expect("rpm"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fan_rpm_zero_with_malformed_neighbor() {
+        // fan0 = 0 RPM (valid), fan1 malformed → fan0 preserved as 0.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "0\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "not-a-number\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        assert_eq!(t.fans.len(), 1);
+        assert_eq!(t.fans[0].fan, FanId::Cpu);
+        assert_eq!(t.fans[0].rpm, Rpm::new(0).expect("rpm"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fan_overflow_preserves_valid_neighbor() {
+        // fan0 overflow (> u16::MAX), fan1 valid → fan1 preserved.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "999999\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "3200\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        // fan0 overflow → skipped, fan1 preserved.
+        assert_eq!(t.fans.len(), 1);
+        assert_eq!(t.fans[0].fan, FanId::Gpu);
+        assert_eq!(t.fans[0].rpm, Rpm::new(3200).expect("rpm"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn missing_fan_input_preserves_valid_neighbor() {
+        // fan0 missing input, fan1 valid → fan1 preserved with identity.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        // fan0: label exists but input missing.
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        // fan1: both present.
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "3200\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        assert_eq!(t.fans.len(), 1);
+        assert_eq!(t.fans[0].fan, FanId::Gpu);
+        assert_eq!(t.fans[0].rpm, Rpm::new(3200).expect("rpm"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn malformed_fan_does_not_break_cpu_battery_ac() {
+        // Malformed fan input should not destroy independent telemetry.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
+        write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "46375\n");
+        write_fixture(&root, "class/hwmon/hwmon1/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon1/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon1/fan1_input", "not-a-number\n");
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "80\n");
+        external_type(&root, "ACAD");
+        write_fixture(&root, "class/power_supply/ACAD/online", "1\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+
+        assert_eq!(t.cpu_temp, Some(TemperatureC::new(46).expect("c")));
+        assert!(t.fans.is_empty());
+        assert!(t.battery.is_some());
+        assert_eq!(t.ac_online, Some(true));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn all_fans_malformed_snapshot_succeeds() {
+        // All fan inputs malformed → fans empty, snapshot succeeds.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "asus\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_label", "cpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan1_input", "not-a-number\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_label", "gpu_fan\n");
+        write_fixture(&root, "class/hwmon/hwmon0/fan2_input", "overflow\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot must succeed");
+        assert!(t.fans.is_empty());
 
         let _ = std::fs::remove_dir_all(root);
     }

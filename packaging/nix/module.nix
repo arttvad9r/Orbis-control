@@ -2,10 +2,10 @@
 
 # Orbis Control — NixOS-модуль.
 #
-# ВНИМАНИЕ (Этап 2): модуль НЕ включает реальных аппаратных операций.
-# Он только регистрирует опции, которые будут использованы на поздних этапах,
-# и (по желанию) позволяет запускать демон в mock-режиме.
-# Никаких записей в sysfs, никаких манипуляций с asusd/ppd из этого модуля.
+# Модуль запускает sessiond и узкий privileged Hardware1 helper. Hardware
+# mutations остаются typed/capability-specific: никаких generic sysfs/path
+# writers, а фактическая авторизация mutation выполняется внутри hardwared
+# через отдельные polkit actions для исходного system-bus caller.
 
 let
   cfg = config.services.orbis-control;
@@ -45,6 +45,9 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    security.polkit.enable = lib.mkDefault true;
+    services.upower.enable = lib.mkDefault true;
+
     systemd.user.services.orbis-sessiond = {
       description = "Orbis Control session daemon";
       wantedBy = [ "graphical-session.target" ];
@@ -65,10 +68,11 @@ in
       };
     };
 
-    # orbis-hardwared: system (root) service. НЕ универсальный hardware helper:
-    # единственная capability — Performance profile write (ADR 0006).
+    # orbis-hardwared: system (root) service with a closed typed Hardware1 API.
+    # Каждая mutation capability имеет отдельный backend/polkit action; helper
+    # не принимает произвольные пути, методы или generic filesystem writes.
     systemd.services.orbis-hardwared = {
-      description = "Orbis Control hardware helper (performance profile)";
+      description = "Orbis Control hardware helper";
       wantedBy = [ "multi-user.target" ];
       after = [ "dbus.service" ];
       requires = [ "dbus.service" ];
@@ -95,13 +99,15 @@ in
         # а systemd интерпретирует `CapabilityBoundingSet=` (без значения) как
         # сброс bounding set в пустое множество.
         CapabilityBoundingSet = "";
-        # /sys read-only, на write открыт ТОЛЬКО platform_profile;
-        # platform_profile_choices остаётся read-only.
-        # Префикс "-": путь игнорируется, если файл отсутствует (например,
-        # VM/машина без ACPI platform_profile), но НЕ расширяет writable
-        # surface при его наличии.
+        # /sys остаётся read-only; writable только два точных атрибута.
+        # platform_profile_choices и keyboard max_brightness остаются read-only.
+        # Префикс "-": путь игнорируется, если файл отсутствует, но НЕ расширяет
+        # writable surface при его наличии.
         ReadOnlyPaths = [ "/sys" ];
-        ReadWritePaths = [ "-/sys/firmware/acpi/platform_profile" ];
+        ReadWritePaths = [
+          "-/sys/firmware/acpi/platform_profile"
+          "-/sys/class/leds/asus::kbd_backlight/brightness"
+        ];
       };
     };
 
@@ -111,10 +117,10 @@ in
     # /etc/systemd hooks, не в system.path.
     environment.systemPackages = [ cfg.package ];
 
-    # D-Bus system policy (root own + send_destination; авторизация — polkit)
-    # устанавливается из share/dbus-1/system.d пакета через system.path.
+    # D-Bus system policy только разрешает владение destination/calls;
+    # mutation authorization выполняется внутри hardwared через polkit.
 
-    # Polkit actions (Performance, Battery и GPU; active local user).
+    # Per-capability polkit actions for Hardware1 mutations (active local user).
     # /etc/polkit-1 — обычный каталог (не symlink), environment.etc работает.
     environment.etc."polkit-1/actions/io.github.orbiscontrol.hardware.policy".source =
       "${cfg.package}/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy";

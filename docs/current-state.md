@@ -1,552 +1,104 @@
 # Current State
 
-> Роль: **CURRENT STATUS**. Operational baseline для текущей реализации после
-> завершения первого read-only MVP.
+> Роль: **CURRENT STATUS**. Краткий operational baseline фактической production-линии.
+> Обновлено: **2026-08-19**. До завершения интеграции этот документ описывает
+> `chatgpt/production-hardening-20260818`; `main` может отставать.
+>
+> Для release-claims используйте [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md):
+> `IMPLEMENTED / TESTED / PACKAGED / LIVE-VALIDATED / BLOCKED / UNKNOWN`.
 
-Статусы:
+## Executive summary
 
-- **IMPLEMENTED** — существует в production code и покрыто tests;
-- **LIVE-VALIDATED** — дополнительно проверено на живой системе;
-- **MOCK-ONLY** — работает только через mock/test backend;
-- **PARTIAL** — часть boundary реализована, end-to-end path неполон;
-- **NOT IMPLEMENTED** — production implementation отсутствует;
-- **BLOCKED** — есть конкретный внешний blocker;
-- **UNKNOWN** — доказательств недостаточно.
+Orbis уже имеет рабочие production vertical slices для Battery, Performance и независимых GPU primitives. Узкие privileged mutations проходят только через typed `Hardware1` → polkit → bounded backend; `sessiond` остаётся read/session boundary и не является mutation deputy.
 
-## Summary
+Текущая интеграционная линия также содержит production telemetry polling, profile-specific fan reads, fan-curve mutation wiring, безопасное preferences persistence и XDG window state. При этом fan mutation не повышается до `LIVE-VALIDATED` без отдельного dated hardware evidence.
 
-Battery backend: **COMPLETED / LIVE-VALIDATED**. Read semantics are:
-
-- `enabled` ← UPower `ChargeThresholdEnabled`;
-- `configured_percent` ← asusd `ChargeControlEndThreshold`;
-- `effective_percent` ← kernel `charge_control_end_threshold`.
-
-Controlled production GUI cycle `100 → 80 → 100` through
-`Hardware1.SetChargeLimit` passed asusd/kernel/Session1 read-back and restored
-the initial state. UPower `ChargeEndThreshold=80` remains independent
-policy/reporting semantics and is not the authoritative configured value.
-
-Первый **read-only MVP** и первый узкий production mutation path завершены и
-live-validated: production GUI реально показывает Battery Charge Limit,
-Performance Mode, GPU Power, GPU MUX и GPU Access через session path:
-
-```text
-UPower / kernel platform_profile / supergfxd / ASUS Armoury sysfs
-→ orbis-sessiond → Session1 D-Bus → orbis-session-client → worker → GUI
-```
-
-Performance write path:
-
-```text
-GUI/application caller → Hardware1 → orbis-hardwared → polkit
-→ fixed kernel platform_profile writer → hardwared read-back
-→ fresh Session1 read-back → authoritative GUI state
-```
-
-- все real sections имеют честные `Loading` / `Ready` / `Unavailable`;
-- mock fallback отсутствует; sessiond absent → честный `Unavailable`;
-- GPU Eco/Standard/Ultimate/Optimized остаются read-only/disabled;
-- Performance mutation controls enabled только после успешного Hardware1 owner
-  probe; optimistic selection не используется;
-- production Performance mutation live-validated ровно двумя разрешёнными
-  Hardware1 calls: `Silent/wire 0` и `Balanced/wire 1`.
-
-## Production deployment and live evidence
-
-- NixOS generation 80: `orbis-hardwared` auto-starts через `multi-user.target`;
-  system D-Bus name owned, UID root, CapEff=0, CapBnd=0; sandbox live-validated;
-  `orbis-sessiond` active.
-- Final Performance GUI validation: initial `balanced` / Session1 Balanced;
-  GUI `Balanced → Silent → Balanced` подтвердил request/reply wires `0/0` и
-  `1/1`, raw kernel state `balanced → quiet → balanced`, Session1 и GUI state
-  совпали на каждом шаге.
-- Всего: ровно 2 valid Hardware1 calls и 2 hardware writes; Turbo, Battery и
-  GPU mutation не выполнялись; final hardware state совпал с initial.
-- Startup dGPU wake diagnostic: **NOT REPRODUCED**. NVIDIA
-  `runtime_status` оставался `suspended` при normal GUI startup; Orbis не
-  открывал NVIDIA/DRM device nodes.
-- Прямых KDE/KWin/Plasma runtime dependencies не найдено; известных blockers
-  для будущего Hyprland + Caelestia migration нет. Общие требования: Wayland,
-  session/system D-Bus, logind, systemd-user и polkit.
-
-## Read-only MVP
-
-**COMPLETED / LIVE-VALIDATED** (2026-08-09).
-
-Production GUI реально показывает (без mock fallback, initial refresh only):
-
-- **Battery Charge Limit** — UPower → sessiond → Session1
-  (`SessionChargeLimitProvider`);
-- **Performance current + available** — kernel `platform_profile` /
-  `platform_profile_choices` → sessiond → Session1
-  (`SessionPerformanceProvider`);
-- **GPU Power** — supergfxd `Power()` (`SessionGpuPowerProvider`);
-- **GPU MUX + Access** — kernel ASUS Armoury firmware-attributes
-  (`SessionGpuMuxProvider` / `SessionGpuAccessProvider`).
-
-UI semantics: `Loading` / `Ready(value)` / `Unavailable`; backend error → честный
-`Unavailable` (без симуляции успеха); sessiond absent → все real sections
-Unavailable, GUI остаётся usable.
-
-Mutation controls в production:
-
-- Battery slider enabled only when Battery is Ready, configured/effective values
-  are present, and the Hardware1 owner probe succeeds;
-- Performance cards enabled только при успешном Hardware1 owner probe
-  (`perf_writable=true`); при отсутствии owner остаются read-only/disabled;
-- GPU Eco/Standard/Ultimate/Optimized (`gpu_mode_writable=false`,
-  `gpu_mode_state=Unavailable`).
-
-GPU product mode:
-
-- production product-mode backend не доказан: `SetGpuMode` возвращает
-  `Unsupported`, а UI остаётся `Unavailable`/disabled;
-- `MockProvider` используется только legacy tests, deterministic fixtures и
-  offscreen/mock scenarios;
-- production controls disabled; fake selected state скрыт;
-- строка `GPU mode control unavailable`.
-
-Live MVP validation (packaged GUI + packaged sessiond):
-
-- Battery = `80%`; Performance = `Balanced`; GPU Power = `Active`;
-  MUX = `Integrated`; Access = `Unblocked`;
-- значения совпали с raw backends (UPower percent, kernel
-  `platform_profile=balanced`, supergfxd `Power()=0`, sysfs `gpu_mux_mode=1`,
-  `dgpu_disable=0`);
-- GUI/logs без неожиданных ошибок; read-only MVP writes отсутствовали.
+Главный текущий integration blocker: GitHub Actions `nix flake check` на актуальном hardening HEAD остаётся красным; до зелёного CI hardening не должен считаться release baseline.
 
 ## Major areas
 
-| Area | Status | Фактическое состояние |
+| Area | Status | Current fact |
 |---|---|---|
-| Domain/core | IMPLEMENTED | Typed models/invariants для основных областей; optional charge bounds |
-| Config | PARTIAL | TOML/XDG/versioned config и atomic store; нет production persistence workflow |
-| Capabilities | PARTIAL | Domain model, report assembly, fixture loading/tests; runtime general probe отсутствует |
-| Provider contracts | IMPLEMENTED | Traits и error model существуют |
-| Broad provider implementation | MOCK-ONLY | `MockProvider` покрывает UI/application scenarios |
-| Application layer | IMPLEMENTED | Performance/GPU/Battery commands + authoritative read-back |
-| UI | PARTIAL | Slint main window + sequential worker; Battery, Performance mutation, GPU hardware status (Power/MUX/Access) — real session paths (LIVE-VALIDATED); product GpuMode — Unsupported/Unavailable, production controls disabled |
-| Session protocol | IMPLEMENTED | Getter-only `Session1.ChargeLimit`, `(bbybyyy)` |
-| Session client | IMPLEMENTED | Fresh Session1 reads, validation и direct Hardware1 Performance client |
-| sessiond | LIVE-VALIDATED | Discovery, UPower read, server, runtime, signals, Nix user service |
-| CLI | NOT IMPLEMENTED | `orbisctl` binary — stub |
-| Production mutations | PARTIAL | Performance и Battery backend LIVE-VALIDATED; GPU mutation не реализована |
-| Privileged helper | LIVE-VALIDATED | Узкий `orbis-hardwared` для Performance и Battery; не generic writer |
-| Fan curves | READ-ONLY | Read-only `asus_custom_fan_curve` backend (active CPU/GPU curve, raw FanPwm 0..255); write ownership — asusd (ADR 0011), mutation не реализована |
+| Rust/build contract | IMPLEMENTED | Workspace/toolchain pinned to Rust **1.87**, matching the locked UI dependency graph. |
+| Core/domain | IMPLEMENTED | Typed domain/invariants and explicit capability evidence states. |
+| Config/preferences | TESTED | Versioned XDG `preferences.toml`, atomic/durable writes, permission preservation, Dark/Light persistence, Start Minimized, redacted warning diagnostics. |
+| Window state | TESTED | Independent versioned XDG state store for window position; not mixed with preferences. |
+| Capabilities | IMPLEMENTED | Runtime registry/probes for current production concepts; read/write evidence remains independent. |
+| Battery read | LIVE-VALIDATED | UPower/asusd/kernel semantics through Session1; no mock fallback in production. |
+| Battery mutation | LIVE-VALIDATED | Typed Hardware1/asusd path with authoritative read-back; historical controlled `100 → 80 → 100` evidence. |
+| Performance read | LIVE-VALIDATED | Kernel `platform_profile` via Session1 with authoritative fresh reads. |
+| Performance mutation | LIVE-VALIDATED | Typed Hardware1/polkit/kernel path with read-back; controlled `Balanced → Silent → Balanced` evidence. |
+| GPU primitives | LIVE-VALIDATED (read) | Runtime power, physical MUX and access policy are separate production read concepts. |
+| GPU product mode | BLOCKED | Eco/Standard/Ultimate/Optimized production mapping/mutation is not proven; controls remain unsupported/disabled. |
+| Telemetry | IMPLEMENTED / TESTED | Production sysfs telemetry provider and worker-owned polling exist; this is not automatically live hardware acceptance evidence. |
+| Fan curves | IMPLEMENTED / TESTED | Profile-specific read is Session1 → sessiond → asusd; active curve remains sysfs; typed Hardware1 mutation path exists. Live mutation acceptance remains UNKNOWN until dated hardware validation. |
+| `sessiond` resilience | TESTED | Battery/UPower discovery is lazy/capability-local; UPower absence no longer blocks independent Performance/GPU/Fan Session1 startup. |
+| NixOS UPower integration | TESTED | Orbis enables UPower with `lib.mkDefault true`; explicit host override remains stronger; no hard service lifecycle coupling. |
+| Privileged helper | IMPLEMENTED / historically LIVE-VALIDATED | Typed Hardware1 helper; no generic sysfs/filesystem/shell/D-Bus proxy. |
+| CLI | NOT IMPLEMENTED | `orbisctl` binary remains a stub. |
+| Automation/reconciliation | PARTIAL | Foundations exist in branches, but the production Desired/Observed/Pending + lifecycle/reconciliation stack is not fully integrated. |
+| XDG Run on Startup | PARTIAL | Backend + UI stack is implemented/tested in a branch but currently conflicts with the consolidated config/UI integration and is not yet in hardening. |
+| Diagnostics/export | PARTIAL | Typed/read-only stack exists in Draft branches; not yet consolidated into the production baseline. |
+| CI/release gate | BLOCKED | Current hardening `flake-check` is red; exact GitHub job log retrieval is currently unavailable from the connector. |
 
-## Battery Charge Limit
+## Production boundaries
 
-### IMPLEMENTED / LIVE-VALIDATED
-
-Production GUI composition (`ApplicationRuntime`, один sequential loop):
-
-- GPU primitive services → `GpuPrimitiveServices` (`GpuPowerProvider`,
-  `GpuMuxProvider`, `GpuAccessProvider`); product GPU mode backend отсутствует;
-- Battery → `SessionChargeLimitProvider` через
-  `ZbusSessionChargeLimitSource` (`battery_service`);
-- Performance read/write → real `SessionHardwarePerformanceProvider`
-  (`performance_service`): Session1 read + direct Hardware1 mutation;
-- GPU hardware status → три независимых session-client capability providers
-  (`gpu_power`/`gpu_mux`/`gpu_access` services);
-- `run_worker` принимает `ApplicationRuntime`; один provider не обязан
-  реализовывать все traits;
-- FIFO/barriers/Battery adjacent coalescing сохранены.
-
-UI Battery state semantics:
-
-- `ChargeLimitState { Loading, Ready, Unavailable }` — честное
-  availability/readiness состояние, отдельное от `charge_limit_enabled`;
-- initial interactive state = Loading; ровно один authoritative
-  `RefreshChargeLimit` при startup через `battery_service.charge_limit()`;
-- daemon absent → session-client error → Unavailable **без mock fallback**;
-- daemon present → Ready с фактическим значением из sessiond;
-- `charge_limit_writable` is capability-driven; `charge_limit_enabled` остаётся
-  hardware state и не используется как writability. UPower disabled policy не
-  блокирует Battery mutation control.
-
-Domain model:
+### Read path
 
 ```text
-ChargeLimit { enabled, percent: Option<Percent>, bounds: Option<ChargeLimitBounds> }
+UPower / kernel / supergfxd / ASUS firmware attributes / asusd
+→ orbis-sessiond → Session1
+→ orbis-session-client / providers
+→ application worker → GUI
 ```
 
-- `bounds=None` поддержан end-to-end и означает UNKNOWN hardware constraints;
-- Session wire signature: `(bbybyyy)` с canonical absent values;
-- Session client валидирует untrusted wire payload и не использует property cache;
-- sessiond UPower provider, battery discovery, composition и D-Bus server
-  реализованы;
-- UPower provider читает support/enabled/end-threshold через
-  `CacheProperties::No` и возвращает `bounds=None`;
-- P2P tests покрывают protocol, service/server, client и composed path без real
-  system/session bus.
+Read failures are capability-local. `Unsupported`, `Unavailable`, `PermissionDenied` and `Unknown` are not interchangeable and must not be normalized into fake values.
 
-### LIVE-VALIDATED (2026-08-13)
-
-Battery mutation path:
+### Mutation path
 
 ```text
-application caller → Hardware1.SetChargeLimit → Orbis polkit
-→ orbis-hardwared → typed asusd D-Bus API → asusd → kernel + persistence/restore
+GUI/application original caller
+→ Hardware1 system bus
+→ per-capability polkit authorization
+→ typed bounded backend
+→ authoritative read-back
 ```
 
-Direct sysfs, `asusctl`, UPower setters и sessiond mutation delegation не
-используются. Live evidence: `100 → 80 → 100`, configured/effective read-back
-`100/100 → 80/80 → 100/100`; final Session1 configured/effective также `100/100`.
+The GUI does not run as root. `sessiond` does not proxy privileged mutations. Caller-provided paths, shell commands and generic privileged writers are outside the architecture.
 
-Production GUI gesture contract: pointer down/move дают только transient
-preview, pointer up делает максимум один commit, cancel не делает commit.
-Battery slider range is `20..=100`, step `1`; one drag therefore produces at
-most one Battery mutation request. Final Hardware1 accounting was exactly
-`[80, 100]`, total `2`, with no other Battery values or retries.
+`ApplyResult::Accepted` is explicitly **not** `Applied`; accepted/unconfirmed state must not become authoritative observed state without confirmation. See ADR 0012.
 
-Mutation observability: GUI commit is logged at DEBUG with target
-`orbis_control` (`RUST_LOG=orbis_control=debug`), while the hardwared ingress
-event is logged at INFO after validation and before authorization/backend. The
-hardwared default filter is `warn,orbis_hardwared=info`.
+## Confirmed live evidence retained from earlier baseline
 
-### Earlier read-only LIVE-VALIDATED (2026-08-09)
+The following claims remain revision-scoped historical evidence and must be revalidated after relevant behavior changes:
 
-Packaged GUI + packaged sessiond (direct binaries, без systemd):
+- Battery read path and Battery mutation `100 → 80 → 100` with final state restored.
+- Performance read path and controlled GUI mutation `Balanced → Silent → Balanced` with final state restored.
+- GPU primitive reads for power/MUX/access matched their authoritative backends on the validated FA707NV system.
+- Hardware1 service/sandbox and caller authorization were live-validated on the documented NixOS generation used by those tests.
 
-- Scenario A (daemon absent): user D-Bus name отсутствовал, daemon process
-  отсутствовал; GUI остался жив; Vision MCP подтвердил `Battery backend
-  unavailable`, slider отсутствует, `80%` не отображается; mock Battery
-  fallback отсутствует; Performance/GPU карточки продолжают отображаться.
-- Scenario B (packaged sessiond работает): daemon занял
-  `io.github.orbiscontrol.Session`; RAW authoritative property:
-  `(bbybyyy) false true 80 false 0 0 0` (enabled=false, percent_present=true,
-  observed percent=80, bounds_present=false, min/max/step=0 canonical absent
-  bounds); Vision MCP подтвердил Battery section `80%`, labels `40`/`100`,
-  отсутствие `Battery backend unavailable` → Ready; GUI `80%` совпал с
-  authoritative D-Bus baseline `80`.
-- Read-only/disabled slider доказан **pixel analysis** Palette tokens: active
-  accent `#2DA8F2` отсутствует в Battery slider; track = surface-disabled
-  `#292929`; thumb/labels = text-disabled `#777777`. (Vision-модель ошибочно
-  интерпретировала disabled style как active — disabled/read-only state
-  доказан pixel analysis + production `charge_limit_writable=false`, не
-  интерпретацией Vision.)
-- Loading transition визуально не пойман из-за скорости; startup refresh
-  доказан code/tests и конечными Ready/Unavailable сценариями.
-- Hardware writes отсутствовали.
+These observations are not universal ASUS specifications and must not be converted into model tables or guessed support.
 
-Семантика observed value:
+## Current blockers / unfinished work
 
-- `80` — observed live value на момент validation, **НЕ hardware constant**;
-- `bounds_present=false`, canonical `min/max/step=0`; hardware bounds остаются
-  UNKNOWN;
-- `40`/`100` — presentation policy slider labels, не доказанные hardware bounds.
+1. Make `nix flake check` green on the integrated hardening HEAD and capture the failing check reason in-repo.
+2. Resolve and integrate the XDG autostart backend/UI conflict against the consolidated preferences stack.
+3. Reconcile the Desired/Observed/Pending + desired-state + lifecycle foundation against the updated config baseline, then add reconciliation semantics separately.
+4. Consolidate the read-only diagnostics stack and privacy-bounded exporters.
+5. Perform dated live validation before claiming production fan mutation support.
+6. Keep GPU product mode, power limits and extended ASUS controls disabled/unknown until concept-specific evidence exists.
+7. Implement a real CLI; current `orbisctl` is a stub.
 
-Ранее (контролируемый `nixos-rebuild test`) также подтверждены: systemd user
-unit с `Type=dbus`, ownership bus name, clean SIGTERM → exit status 0, bus name
-released, процесс отсутствует.
+## Evidence and design references
 
-### Gaps
+- [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md)
+- [`security-boundary-audit-2026-08-19.md`](security-boundary-audit-2026-08-19.md)
+- [`multi-model-discovery-research.md`](multi-model-discovery-research.md)
+- [`power-limit-readiness-audit.md`](power-limit-readiness-audit.md)
+- [`extended-asus-controls-readiness.md`](extended-asus-controls-readiness.md)
+- [`release-metadata-design.md`](release-metadata-design.md)
+- ADRs under [`adr/`](adr/)
 
-- GPU primitive production reads — real; product GPU mode backend остаётся
-  `Unsupported`/`Unavailable` (см. ниже).
-- Battery mutation backend — **COMPLETED / LIVE-VALIDATED**.
-- Battery GUI mutation control — **COMPLETED / LIVE-VALIDATED**.
-- sysfs fallback/write provider — **NOT IMPLEMENTED**.
-- Hardware charge min/max/step на FA707NV — **UNKNOWN**; unknown backend bounds
-  remain distinct from the production UI contract `20..=100`, step `1`.
+## Rule for updating this file
 
-## Performance
-
-### Performance production provider
-
-**IMPLEMENTED / LIVE-VALIDATED**
-
-- `KernelPerformanceProvider` + `SysfsKernelPlatformProfileSource`;
-- backend: symbolic Linux kernel ABI
-  `/sys/firmware/acpi/platform_profile` + `/sys/firmware/acpi/platform_profile_choices`;
-- authoritative fresh reads: каждый вызов делает новый source read (кэш
-  отсутствует); no-cache доказан deterministic scripted unit test;
-- `current` + `available` возвращаются через canonical domain mapping;
-- неизвестные значения отклоняются (`ProviderError::Unsupported`), без
-  fallback/clamp/подбора ближайшего;
-- mutation `set_profile` → `Unsupported`; write path отсутствует;
-- opt-in live ignored integration test PASS (обычный `cargo test --workspace`
-  live sysfs не читает).
-
-Live observation (FA707NV, 2026-08-09):
-
-- kernel current = `quiet` → `Silent`;
-- choices = `quiet balanced performance` → `{Silent, Balanced, Turbo}`;
-- provider current/available совпали с raw sysfs через domain mapping.
-
-Это dated/current observation, не универсальная ASUS specification. Domain
-также поддерживает `low-power → Silent`, но `low-power` НЕ наблюдался в live
-choices на этой машине во время validation и не выдаётся за live-supported
-профиль FA707NV.
-
-### Performance application/UI vertical slice
-
-**IMPLEMENTED / LIVE-VALIDATED**
-
-- Domain types, `PerformanceProvider`, application read/set/read-back path,
-  sequential worker и UI cards реализованы.
-- Mock scenarios и tests покрывают state transitions/errors.
-- General capability fixture содержит dated evidence наличия platform profiles
-  на FA707NV.
-- Production read path: `KernelPerformanceProvider` → Session1 → session client
-  (`SessionPerformanceProvider`) → worker → GUI; current + available совпадают
-  с raw kernel `platform_profile(_choices)`; без mock fallback.
-- Production write path: application caller → direct Hardware1 →
-  `orbis-hardwared` → polkit original system-bus-name caller → fixed
-  `platform_profile` writer → hardwared read-back.
-- После confirmed Hardware1 результата `AppService` выполняет fresh Session1
-  read-back; optimistic selected state отсутствует.
-- `perf_writable` становится true только после успешного read-only
-  `NameHasOwner` probe для Hardware1; absent owner сохраняет Performance read
-  path, но отключает controls.
-- Controlled live GUI validation PASS: ровно `Silent/wire 0` и
-  `Balanced/wire 1`, successful replies `0/0` и `1/1`, raw/Session1/GUI
-  совпали, final state равен initial.
-
-## GPU Mode
-
-### GPU runtime power production provider
-
-**IMPLEMENTED / LIVE-VALIDATED**
-
-- Production contract: `SupergfxdGpuPowerProvider` → `GpuPowerProvider` →
-  `AppService::gpu_power_state()`;
-- provider реализует `Provider` + `GpuPowerProvider` и НЕ реализует legacy
-  `GpuProvider` (нет fake/Unsupported методов requested/mux/access);
-- backend: ready `zbus::Connection` → `org.supergfxctl.Daemon` →
-  `/org/supergfxctl/Gfx` → read-only `Power()`;
-- PROVEN enum mapping: 0→Active, 1→Suspended, 2→Off, 3=AsusDisabled→Unknown,
-  4=Unknown→Unknown, future unknown raw→Unknown (без clamp/fallback);
-- каждый `power_state()` — authoritative fresh read; собственного cache нет;
-- live ignored test: raw `Power()=1` → provider `Suspended`; supporting
-  read-only PCI `runtime_status=suspended` (не provider contract, только
-  consistency evidence);
-- никаких GPU writes/state changes.
-
-### GPU capability architecture
-
-**IMPLEMENTED / ACCEPTED** (ADR 0005)
-
-- independent `GpuPowerProvider` trait существует;
-- `AppService<P>::gpu_power_state()` independent getter существует (вызывает
-  только `provider.power_state()`);
-- power-only provider regression-tested (PowerOnlyProvider без legacy
-  `GpuProvider`);
-- legacy `GpuProvider` не изменён;
-- production `ApplicationRuntime` использует `GpuPrimitiveServices` только для
-  независимых read-only Power/MUX/Access capabilities; `MockProvider` в него не
-  входит;
-- product GpuMode path возвращает `Unsupported` без доказанного backend; UI
-  сохраняет `gpu_mode_state=Unavailable` и не разрешает mutation;
-- legacy `GpuProvider`/`MockProvider` остаются только для unit tests,
-  deterministic fixtures и offscreen scenarios.
-
-### GPU hardware GUI slice (read-only)
-
-**IMPLEMENTED / LIVE-VALIDATED**
-
-- Production GUI отображает read-only GPU hardware states независимо через
-  Session1/session-client: Power, MUX, Access.
-- Production composition (одна существующая session connection/runtime):
-  - power → `SessionGpuPowerProvider`;
-  - mux → `SessionGpuMuxProvider`;
-  - access → `SessionGpuAccessProvider`;
-- без mock fallback; initial refresh only, без polling;
-- UI semantics: `Loading` / `Ready(value)` / `Unavailable`; domain `Unknown`
-  остаётся `Ready(Unknown)`, а не `Unavailable`;
-- backend error → `Unavailable` честно (без симуляции успеха);
-- каждый capability читается независимо: failure одного не блокирует остальные.
-
-Live validation (2026-08-09, packaged GUI + packaged sessiond):
-
-- Scenario A (sessiond absent): GUI жив; Power/MUX/Access = `Unavailable`;
-  остальной UI работает (Battery/Performance/GPU cards отображаются); WARN в
-  логе: `gpu-power/gpu-mux/gpu-access: refresh недоступен: ServiceUnknown`;
-- Scenario B (packaged sessiond): Power = `Active`, MUX = `Integrated`,
-  Access = `Unblocked`; совпало с raw backend: supergfxd `Power()=0`,
-  sysfs `gpu_mux_mode=1`, sysfs `dgpu_disable=0`;
-- никаких GPU writes/mutation.
-
-Technical note (worker composition): `run_worker` теперь принимает единый
-`ApplicationRuntime`; GPU primitive services сгруппированы в
-`GpuPrimitiveServices`. Дальнейшее расширение не должно смешивать primitive
-capability reads с product policy.
-
-### Product GpuMode GUI path
-
-**NOT IMPLEMENTED / UNSUPPORTED in production; controls DISABLED**
-
-- Product Eco/Standard/Ultimate/Optimized backend mapping — **NOT PROVEN**;
-  production GUI не показывает fake selected state и не разрешает mutation:
-  `gpu_mode_state=Unavailable`, `gpu_mode_writable=false`, строка
-  `GPU mode control unavailable`.
-- Production `GpuPrimitiveServices` не содержит product-mode provider;
-  `SetGpuMode` в этой composition возвращает `Unsupported` и не выполняет
-  hardware mutation. Mock-backed `GpuProvider` используется только тестами и
-  deterministic/offscreen scenarios.
-- Domain разделяет requested mode, physical MUX, access policy и power state.
-- Legacy `GpuProvider` application state/read-back path сохраняется для tests;
-  production product policy не считается реализованной.
-- Mock tests сохраняют applied state при pending Ultimate/Eco.
-- `AppService::gpu_state()` legacy aggregate остаётся fail-fast
-  (requested→mux→access→power). Это limitation legacy aggregate; он больше не
-  является единственным API для partially available concepts — real hardware
-  states доступны через независимые GPU capability сервисы.
-- Production GPU mutations отсутствуют.
-
-### Session1 GPU transport (read-only)
-
-**IMPLEMENTED / LIVE-VALIDATED**
-
-- Session1 exposes независимые read-only properties:
-  `GpuPower`, `GpuMux`, `GpuAccess` (wire signature `y`);
-- production composition:
-  - power → `SupergfxdGpuPowerProvider`;
-  - mux/access → `ArmouryGpuProvider`;
-  - никаких mega-GpuProvider / GpuMode mappings;
-- session client providers: `SessionGpuPowerProvider`,
-  `SessionGpuMuxProvider`, `SessionGpuAccessProvider` (НЕ legacy `GpuProvider`);
-- semantics: domain `Unknown` передаётся как semantic wire value; missing
-  capability → D-Bus `NotSupported`; provider/read error → D-Bus error; unknown
-  wire value на client → `Internal`;
-- live: `Power wire=1` → Suspended (supergfxd raw=1); `Mux wire=0` → Integrated
-  (backend raw=1); `Access wire=0` → Unblocked (backend raw=0);
-  `ChargeLimit` regression sanity PASS;
-- никаких writes.
-
-### MUX / access production providers
-
-**IMPLEMENTED / LIVE-VALIDATED**
-
-- `ArmouryGpuProvider` + `SysfsArmouryGpuSource`;
-- backend: read-only kernel ASUS Armoury firmware-attributes
-  `/sys/class/firmware-attributes/asus-armoury/attributes/{gpu_mux_mode,dgpu_disable}/current_value`;
-- implements `GpuMuxProvider` + `GpuAccessProvider` (+ `Provider`), НЕ legacy
-  `GpuProvider`;
-- independent AppService getters: `gpu_mux_state()`, `gpu_access_policy()`;
-- PROVEN mapping из kernel 7.1.7 `asus-armoury.c`:
-  `gpu_mux_mode`: 0→`Discrete`, 1→`Integrated`;
-  `dgpu_disable`: 0→`Unblocked`, 1→`Blocked`;
-- live: `mux raw=1` → `Integrated`; `dgpu_disable raw=0` → `Unblocked`;
-- каждый вызов — authoritative fresh read; собственного cache нет;
-- semantics: present future raw → domain `Unknown`; attribute NotFound →
-  `ProviderError::Unsupported`; malformed/empty → `Internal`; прочие I/O → `Io`;
-- никаких writes/queued/pending reads.
-
-### Product GpuMode
-
-Eco / Standard / Ultimate / Optimized backend mapping — **NOT PROVEN**.
-Не превращать supergfxd Hybrid/Integrated/AsusMuxDgpu в Orbis product
-GpuMode автоматически. Optimized остаётся product/session policy, не raw
-backend state.
-
-### GPU mutation architecture
-
-[ADR 0008](adr/0008-supergfxd-staged-gpu-mutation.md) принят: supergfxd 5.2.7
-является owner полного staged GPU lifecycle. Первый технический slice —
-`Hybrid ↔ Integrated`; product mapping `Eco/Standard` не принят, production
-GPU cards disabled, live GPU mutation не реализована. До live mutation
-обязательны private P2P `FakeSupergfxd` contract/read-back tests.
-
-## Fans, power limits, lighting and display
-
-| Area | Status | Notes |
-|---|---|---|
-| Fan RPM/curves | NOT IMPLEMENTED | Domain/traits и dated fixtures существуют; production provider/UI editor отсутствуют |
-| Power limits | NOT IMPLEMENTED | Domain/traits есть; units/ranges и safe write semantics не доказаны |
-| Keyboard/Aura lighting | NOT IMPLEMENTED | Domain/traits и historical backend evidence есть |
-| Display refresh/overdrive | NOT IMPLEMENTED | Domain/traits и historical DRM/asusd evidence есть |
-| AniMe/Slash | NOT IMPLEMENTED | Trait/research only; FA707NV fixture отмечает устройства отсутствующими |
-| Telemetry | MOCK-ONLY | UI отображает mock temperatures/fans/battery/power; real telemetry provider отсутствует |
-
-Planned capability или hardware object presence не считается implementation.
-
-## sessiond
-
-**IMPLEMENTED / LIVE-VALIDATED** для read-only ChargeLimit:
-
-- binary entry point вызывает production runtime;
-- system-bus UPower connection;
-- deterministic discovery ровно одной system battery;
-- source/provider/service composition;
-- Session1 name/path registration;
-- SIGINT/SIGTERM lifecycle;
-- supervisor restart policy делегирована systemd;
-- mutation methods отсутствуют/Unsupported.
-
-Не реализованы reconnect, multiple-battery selection, generic provider registry,
-automation engine и остальные feature APIs из исторической Stage 0
-спецификации.
-
-## Diagnostics
-
-**IMPLEMENTED / LIVE-VALIDATED**
-
-- production GUI инициализирует один global tracing subscriber в composition
-  root (interactive path; offscreen rendering path subscriber не устанавливает);
-- инициализация происходит до runtime/session connection/initial Battery
-  refresh/Slint event loop;
-- default filter без `RUST_LOG` = `warn` (видны WARN/ERROR);
-- `RUST_LOG` обрабатывается стандартным EnvFilter; `RUST_LOG=debug`
-  live-validated (реально исполняемые winit/sctk DEBUG события и Battery WARN
-  видны);
-- GUI Battery commit event target is `orbis_control`; use
-  `RUST_LOG=orbis_control=debug` to capture it. Hardwared Battery ingress is an
-  INFO event under the default `warn,orbis_hardwared=info` filter.
-- duplicate global initialization использует non-panicking `try_init()`;
-- существующие `tracing::*` callsites не переписывались;
-- отсутствие sessiond диагностируется через stderr: live packaged GUI показал
-  существующий WARN
-  `battery: refresh недоступен: Dbus("org.freedesktop.DBus.Error.ServiceUnknown:
-  The name is not activatable")`;
-- подтверждён stderr/fmt subscriber; file logging/journald integration
-  отсутствует и не заявляется.
-
-## Packaging
-
-**IMPLEMENTED / LIVE-VALIDATED** на NixOS:
-
-- `nix flake check` PASS offline;
-- `nix build .#orbis-control` PASS;
-- package устанавливает `orbis-control`, `orbisctl`, `orbis-sessiond`;
-- flake экспортирует `nixosModules.orbis-control`;
-- module default package self-contained через consumer `pkgs.callPackage`;
-- generated user service использует Nix-store binary, `Type=dbus`, BusName,
-  `Restart=on-failure`, `RestartSec=2s`;
-- controlled `nixos-rebuild test` PASS;
-- persistent host enablement не выполнялось в рамках validation.
-
-GUI runtime dependencies (dlopen) упакованы декларативно:
-
-- `orbis-control` обёрнут стандартным Nix `makeWrapper`;
-- wrapper добавляет минимальный declarative `LD_LIBRARY_PATH` для
-  runtime/dlopen библиотек: wayland, libxkbcommon, fontconfig, libglvnd;
-- эти библиотеки находятся в Nix closure пакета;
-- EGL предоставляется через vendor-neutral `libglvnd` (не hard-coded Mesa);
-- обёрнут только `orbis-control`; `orbis-sessiond` и `orbisctl` не обёрнуты;
-- direct packaged startup `env -u LD_LIBRARY_PATH result/bin/orbis-control`
-  PASS live: GUI отрисовался, loader errors отсутствуют, Battery без daemon
-  корректно показал Unavailable, Performance/GPU UI сохранён.
-
-Module options `mockDevice` и `readOnlyEmpty` сейчас формируют CLI arguments,
-которые production `orbis-sessiond` binary не разбирает. Они не должны
-использоваться как доказательство отдельного runtime mode; cleanup/implementation
-остаётся packaging gap.
-
-Другие distro packages, desktop/AppStream integration, D-Bus activation и
-release installation workflow — **NOT IMPLEMENTED**.
-
-## Hardware evidence and UNKNOWN
-
-Последний detailed in-repository hardware snapshot — read-only FA707NV probe от
-2026-08-06 (`research-report.md` + fixtures). Он доказывает presence и observed
-values того момента, включая `xyz.ljones.Platform`, `xyz.ljones.FanCurves`,
-asus-armoury objects, UPower и sysfs. Он не доказывает безопасные writes.
-
-Остаются UNKNOWN:
-
-- hardware charge min/max/step;
-- semantics/units/ranges части power-limit raw values;
-- versioned raw GPU enum semantics;
-- write permissions и safe behavior за пределами read-only evidence;
-- behavior на других ASUS models и нескольких батареях.
+Update this document whenever production behavior, capability evidence, deployment state or a release gate changes. Do not copy Draft PR claims here until the relevant implementation is integrated. Tests establish `TESTED`; they do not establish `LIVE-VALIDATED` hardware behavior.

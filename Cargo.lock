@@ -3565,6 +3565,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tracing",
+ "wayland-client",
  "zbus",
 ]
 
@@ -3638,6 +3639,7 @@ dependencies = [
  "image",
  "orbis-application",
  "orbis-capabilities",
+ "orbis-config",
  "orbis-core",
  "orbis-providers",
  "orbis-session-client",

@@ -16,15 +16,18 @@
 #![warn(missing_docs)]
 
 pub mod action;
+pub mod aura;
 pub mod automation;
 pub mod battery;
 pub mod capability;
 pub mod diagnostics;
 pub mod display;
+pub mod display_output;
 pub mod error;
 pub mod fan;
 pub mod gpu;
 pub mod identity;
+pub mod keyboard_backlight;
 pub mod lighting;
 pub mod limits;
 pub mod newtypes;
@@ -35,17 +38,35 @@ pub mod telemetry;
 pub mod warning;
 
 pub use action::{ActionRequirement, ApplyResult, PendingAction};
+pub use aura::{
+    AuraBrightness, AuraDirection, AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraState, AuraZone,
+};
 pub use automation::{AutomationAction, AutomationRule, AutomationTrigger};
 pub use battery::ChargeLimit;
 pub use capability::{
     Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId,
 };
-pub use diagnostics::{DiagnosticEntry, DiagnosticReport};
-pub use display::{DisplayMode, HdrState, RefreshMode};
+pub use diagnostics::{
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, DIAGNOSTICS_SNAPSHOT_SCHEMA_VERSION,
+    DiagnosticEntry, DiagnosticObservation, DiagnosticReport, DiagnosticsServiceId,
+    DiagnosticsSnapshot, DiagnosticsSnapshotSections, DisplayDiagnostics, DisplayProtocol,
+    GpuDiagnostics, HardwareDiagnostics, ServiceAvailability, ServiceBusScope, ServiceCriticality,
+    ServiceDiagnostics, SessionType, SystemDiagnostics, TelemetryCollectionStatus,
+    TelemetryDiagnostics, TelemetryFreshness,
+};
+pub use display::{
+    DisplayMode, HdrState, MiniLedModeKind, MiniLedModeState, MiniLedModeValue,
+    PanelOverdriveState, RefreshMode, ScreenAutoBrightnessState, interpret_mini_led_mode,
+};
+pub use display_output::{
+    CurrentDisplayMode, DisplayMode as OutputDisplayMode, DisplayOutputId, DisplayOutputSnapshot,
+    DisplayOutputState,
+};
 pub use error::CoreError;
 pub use fan::{FanCurve, FanCurvePoint, FanId};
 pub use gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 pub use identity::{BackendIdentity, DeviceIdentity};
+pub use keyboard_backlight::{KeyboardBacklightState, KeyboardBrightnessLevel};
 pub use lighting::LightingMode;
 pub use limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
 pub use newtypes::{EnergyMWh, FanPwm, MilliWatt, Percent, PowerW, RefreshHz, Rpm, TemperatureC};

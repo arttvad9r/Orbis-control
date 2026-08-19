@@ -23,19 +23,20 @@ rustPlatform.buildRustPackage {
   pname = "orbis-control";
   version = "0.1.0";
 
-  # Source filter: только реальные build/test inputs для Rust-пакета, чтобы
-  # docs/README и прочие файлы не инвалидировали derivation.
+  # Source filter: только реальные build/test/package inputs, чтобы docs/README
+  # и прочие файлы не инвалидировали derivation.
   #
   # Включены (проверено):
   # - Cargo.toml, Cargo.lock
   # - crates/** (Rust source + build.rs)
   # - ui/** (Slint sources; orbis-ui/build.rs компилирует ui/app-window.slint)
   # - tests/** (fixtures/dbus читаются тестами при doCheck)
+  # - data/** (.desktop + AppStream metadata installed by postInstall)
   # - clippy.toml, rustfmt.toml (конфиги проверок пакета)
   #
-  # Исключены: docs/**, README.md, data/**, packaging/**, tools/**,
+  # Исключены: docs/**, README.md, packaging/**, tools/**,
   # flake.nix, flake.lock, LICENSE, .github/**, .opencode/**, deny.toml
-  # и прочее, не используемое сборкой.
+  # и прочее, не используемое сборкой/установкой.
   src = lib.cleanSourceWith {
     src = lib.cleanSource ../..;
     filter = path: type:
@@ -48,7 +49,7 @@ rustPlatform.buildRustPackage {
         top = builtins.head (lib.splitString "/" rel);
       in
         rel == "" # корень
-        || builtins.elem top [ "crates" "ui" "tests" ]
+        || builtins.elem top [ "crates" "ui" "tests" "data" ]
         || builtins.elem rel [ "Cargo.toml" "Cargo.lock" "clippy.toml" "rustfmt.toml" ];
   };
 
@@ -95,6 +96,13 @@ rustPlatform.buildRustPackage {
           libglvnd
         ]
       }"
+
+    # Desktop/AppStream metadata is source-owned and installed only after the
+    # metadata slice has been reviewed. No custom icon is claimed here.
+    install -Dm644 data/applications/io.github.orbiscontrol.Orbis.desktop \
+      $out/share/applications/io.github.orbiscontrol.Orbis.desktop
+    install -Dm644 data/metainfo/io.github.orbiscontrol.Orbis.metainfo.xml \
+      $out/share/metainfo/io.github.orbiscontrol.Orbis.metainfo.xml
 
     # D-Bus system policy: только root own + send_destination к hardwared
     # (авторизация операции — polkit внутри hardwared). Кладём в

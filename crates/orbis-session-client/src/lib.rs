@@ -18,10 +18,10 @@ use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
 use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
 use orbis_core::diagnostics::DiagnosticEntry;
-use orbis_core::fan::FanId;
+use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
-use orbis_core::newtypes::Percent;
+use orbis_core::newtypes::{FanPwm, Percent, TemperatureC};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_hardwared::battery::validate_charge_limit;
 use orbis_hardwared::fans::{FanCurveWire, fan_profile_from_wire};
@@ -688,6 +688,140 @@ impl HardwareBatterySource for ZbusHardwareBatterySource {
     }
 }
 
+/// Decode the Hardware1 `BatteryMutationStatus` wire value into the canonical
+/// domain capability status.
+///
+/// Unknown wire values and the explicit `Unknown` evidence both map to
+/// `CapabilityStatus::Unknown` — never to a guessed known state.
+pub fn battery_mutation_status_from_wire(raw: u8) -> orbis_core::capability::CapabilityStatus {
+    use orbis_core::capability::CapabilityStatus;
+    use orbis_hardwared::battery::{BatteryMutationStatus, battery_mutation_wire};
+    match battery_mutation_wire::from_wire(raw) {
+        Some(BatteryMutationStatus::Supported) => CapabilityStatus::Supported,
+        Some(BatteryMutationStatus::Unsupported) => CapabilityStatus::Unsupported,
+        Some(BatteryMutationStatus::TemporarilyUnavailable) => {
+            CapabilityStatus::TemporarilyUnavailable
+        }
+        Some(BatteryMutationStatus::PermissionDenied) => CapabilityStatus::PermissionDenied,
+        Some(BatteryMutationStatus::Unknown) | None => CapabilityStatus::Unknown,
+    }
+}
+
+/// Read-only typed Battery mutation backend status from the production
+/// Hardware1 daemon.
+///
+/// This performs no mutation and requires no authorization. When the daemon is
+/// absent, the method is not exposed, or the reply is malformed, the result is
+/// `CapabilityStatus::Unknown` — the honest no-evidence state, never a guessed
+/// `Supported`.
+pub async fn hardware1_battery_mutation_status(
+    connection: &zbus::Connection,
+) -> orbis_core::capability::CapabilityStatus {
+    let proxy = match Hardware1Proxy::builder(connection)
+        .path(DBUS_OBJECT_PATH)
+        .expect("valid hardware object path")
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+    {
+        Ok(proxy) => proxy,
+        Err(_) => return orbis_core::capability::CapabilityStatus::Unknown,
+    };
+    match proxy.battery_mutation_status().await {
+        Ok(raw) => battery_mutation_status_from_wire(raw),
+        Err(_) => orbis_core::capability::CapabilityStatus::Unknown,
+    }
+}
+
+/// Decode the Hardware1 `PerformanceMutationStatus` wire value into the
+/// canonical domain capability status.
+///
+/// Unknown wire values and the explicit `Unknown` evidence both map to
+/// `CapabilityStatus::Unknown` — never to a guessed known state.
+pub fn performance_mutation_status_from_wire(raw: u8) -> orbis_core::capability::CapabilityStatus {
+    use orbis_core::capability::CapabilityStatus;
+    use orbis_hardwared::{PerformanceMutationStatus, performance_mutation_wire};
+    match performance_mutation_wire::from_wire(raw) {
+        Some(PerformanceMutationStatus::Supported) => CapabilityStatus::Supported,
+        Some(PerformanceMutationStatus::Unsupported) => CapabilityStatus::Unsupported,
+        Some(PerformanceMutationStatus::TemporarilyUnavailable) => {
+            CapabilityStatus::TemporarilyUnavailable
+        }
+        Some(PerformanceMutationStatus::PermissionDenied) => CapabilityStatus::PermissionDenied,
+        Some(PerformanceMutationStatus::Unknown) | None => CapabilityStatus::Unknown,
+    }
+}
+
+/// Read-only typed Performance mutation backend status from the production
+/// Hardware1 daemon.
+///
+/// This performs no mutation and requires no authorization. When the daemon is
+/// absent, the method is not exposed, or the reply is malformed, the result is
+/// `CapabilityStatus::Unknown` — the honest no-evidence state, never a guessed
+/// `Supported`.
+pub async fn hardware1_performance_mutation_status(
+    connection: &zbus::Connection,
+) -> orbis_core::capability::CapabilityStatus {
+    let proxy = match Hardware1Proxy::builder(connection)
+        .path(DBUS_OBJECT_PATH)
+        .expect("valid hardware object path")
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+    {
+        Ok(proxy) => proxy,
+        Err(_) => return orbis_core::capability::CapabilityStatus::Unknown,
+    };
+    match proxy.performance_mutation_status().await {
+        Ok(raw) => performance_mutation_status_from_wire(raw),
+        Err(_) => orbis_core::capability::CapabilityStatus::Unknown,
+    }
+}
+
+/// Decode the Hardware1 `FanMutationStatus` wire value into the canonical
+/// domain capability status.
+///
+/// Unknown wire values and the explicit `Unknown` evidence both map to
+/// `CapabilityStatus::Unknown` — never to a guessed known state.
+pub fn fan_mutation_status_from_wire(raw: u8) -> orbis_core::capability::CapabilityStatus {
+    use orbis_core::capability::CapabilityStatus;
+    use orbis_hardwared::fans::{FanMutationStatus, fan_mutation_wire};
+    match fan_mutation_wire::from_wire(raw) {
+        Some(FanMutationStatus::Supported) => CapabilityStatus::Supported,
+        Some(FanMutationStatus::Unsupported) => CapabilityStatus::Unsupported,
+        Some(FanMutationStatus::TemporarilyUnavailable) => CapabilityStatus::TemporarilyUnavailable,
+        Some(FanMutationStatus::PermissionDenied) => CapabilityStatus::PermissionDenied,
+        Some(FanMutationStatus::BackendMissing) => CapabilityStatus::BackendMissing,
+        Some(FanMutationStatus::Unknown) | None => CapabilityStatus::Unknown,
+    }
+}
+
+/// Read-only typed fan curve mutation backend status from the production
+/// Hardware1 daemon.
+///
+/// This performs no mutation and requires no authorization. When the daemon is
+/// absent, the method is not exposed, or the reply is malformed, the result is
+/// `CapabilityStatus::Unknown` — the honest no-evidence state, never a guessed
+/// `Supported`.
+pub async fn hardware1_fan_mutation_status(
+    connection: &zbus::Connection,
+) -> orbis_core::capability::CapabilityStatus {
+    let proxy = match Hardware1Proxy::builder(connection)
+        .path(DBUS_OBJECT_PATH)
+        .expect("valid hardware object path")
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+    {
+        Ok(proxy) => proxy,
+        Err(_) => return orbis_core::capability::CapabilityStatus::Unknown,
+    };
+    match proxy.fan_mutation_status().await {
+        Ok(raw) => fan_mutation_status_from_wire(raw),
+        Err(_) => orbis_core::capability::CapabilityStatus::Unknown,
+    }
+}
+
 /// Реальный zbus источник Performance через generated `Session1Proxy`.
 ///
 /// Хранит переданную извне готовую `Connection`; I/O начинается только в
@@ -1029,6 +1163,262 @@ where
     }
 }
 
+// ---------------------------------------------------------------------------
+// Read-only profile-specific fan curve read через Session1
+// ---------------------------------------------------------------------------
+
+/// Testable источник wire `FanCurveInfo` через session protocol.
+///
+/// Read-only: возвращает сохранённую кривую профиля (asusd), НЕ активную
+/// системную кривую. Ошибка не превращается в bool/None/default.
+#[async_trait]
+pub trait SessionFanCurveSource: Send + Sync {
+    /// Прочитать authoritative `FanCurveInfo` для профиля и вентилятора
+    /// (wire DTO, без domain conversion).
+    async fn read_fan_curve(
+        &self,
+        profile: u32,
+        fan: u8,
+    ) -> Result<orbis_session_protocol::FanCurveInfo, ProviderError>;
+}
+
+/// Реальный zbus источник через generated `Session1Proxy`.
+///
+/// Хранит переданную извне готовую `Connection`; I/O начинается только в
+/// `read_fan_curve().await`. Каждый вызов — новый authoritative method call
+/// (кэш отсутствует).
+pub struct ZbusSessionFanCurveSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusSessionFanCurveSource {
+    /// Создать источник с готовой Connection.
+    ///
+    /// Конструктор не выполняет I/O, не открывает session/system bus, не
+    /// проверяет service, не создаёт proxy и runtime; cache отсутствует.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl SessionFanCurveSource for ZbusSessionFanCurveSource {
+    async fn read_fan_curve(
+        &self,
+        profile: u32,
+        fan: u8,
+    ) -> Result<orbis_session_protocol::FanCurveInfo, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .fan_curve(profile, fan)
+            .await
+            .map_err(zbus_error_to_provider)
+    }
+}
+
+/// Преобразовать wire `u8` → `FanId` (0=CPU, 1=GPU).
+///
+/// Strict decode: неизвестный wire value → `Internal` (remote service нарушил
+/// contract).
+pub fn fan_id_from_wire_protocol(raw: u8) -> Result<FanId, ProviderError> {
+    use orbis_session_protocol::fan_id;
+    match raw {
+        fan_id::CPU => Ok(FanId::Cpu),
+        fan_id::GPU => Ok(FanId::Gpu),
+        other => Err(ProviderError::Internal(format!(
+            "session protocol: неизвестный fan wire value {other}"
+        ))),
+    }
+}
+
+/// Преобразовать wire `u32` → lossless `AsusdFanProfile` (0..3).
+///
+/// Strict decode: неизвестный profile wire → `Internal`; Silent не выводится
+/// автоматически в Quiet/LowPower (wire lossless 0..3).
+pub fn fan_profile_from_wire_protocol(raw: u32) -> Result<AsusdFanProfile, ProviderError> {
+    use orbis_session_protocol::fan_profile;
+    match raw {
+        fan_profile::BALANCED => Ok(AsusdFanProfile::Balanced),
+        fan_profile::PERFORMANCE => Ok(AsusdFanProfile::Performance),
+        fan_profile::QUIET => Ok(AsusdFanProfile::Quiet),
+        fan_profile::LOW_POWER => Ok(AsusdFanProfile::LowPower),
+        other => Err(ProviderError::Internal(format!(
+            "session protocol: неизвестный fan profile wire value {other}"
+        ))),
+    }
+}
+
+/// Wire→domain boundary между недоверенным D-Bus payload и доменной моделью.
+///
+/// - wire содержит ровно 8 точек (массивы одинаковой длины); malformed →
+///   `Internal` (не превращаются в синтетическую кривую);
+/// - температу/raw PWM переносятся lossless (raw PWM 0..255, НЕ процент);
+/// - returned `profile` из wire проверяется на соответствие запрошенному —
+///   расхождение → `Internal` (remote service нарушил contract);
+/// - возвращает доменную `FanCurve` с lossless `AsusdFanProfile` в `profile`
+///   (домом-бится через `PerformanceProfile::from`).
+pub fn fan_curve_from_wire(
+    wire: orbis_session_protocol::FanCurveInfo,
+    requested_profile: AsusdFanProfile,
+) -> Result<FanCurve, ProviderError> {
+    let wire_profile = fan_profile_from_wire_protocol(wire.profile)?;
+    if wire_profile != requested_profile {
+        return Err(ProviderError::Internal(format!(
+            "session protocol: ответ profile {} не совпадает с запрошенным {:?}",
+            wire.profile, requested_profile
+        )));
+    }
+    if wire.temps.len() != 8 || wire.pwms.len() != 8 {
+        return Err(ProviderError::Internal(format!(
+            "session protocol: кривая содержит {} temp / {} pwm, ожидается 8/8",
+            wire.temps.len(),
+            wire.pwms.len()
+        )));
+    }
+    let fan = fan_id_from_wire_protocol(wire.fan)?;
+    let mut points = Vec::with_capacity(8);
+    for (t, p) in wire.temps.iter().zip(wire.pwms.iter()) {
+        let temp = TemperatureC::new(i16::from(*t)).map_err(|e| {
+            ProviderError::Internal(format!("session protocol: температура вне диапазона: {e}"))
+        })?;
+        let pwm = FanPwm::new(*p).map_err(|e| {
+            ProviderError::Internal(format!("session protocol: PWM вне диапазона: {e}"))
+        })?;
+        points.push(FanCurvePoint::new(temp, pwm));
+    }
+    Ok(FanCurve {
+        profile: PerformanceProfile::from(wire_profile),
+        fan,
+        points,
+    })
+}
+
+/// Composed read-only FanProvider: profile-specific curves через Session1
+/// (sessiond → asusd), активная кривая — через existing sysfs source.
+///
+/// `S` — profile read через Session1 (`SessionFanCurveSource`), `A` — active
+/// curve источник (существующий sysfs `FanCurveSource`). Профиль-специничные
+/// чтения НЕ смешиваются с активной кривой; `fan_curve(PerformanceProfile)`
+/// (не порт профильной кривой) честно возвращает `Unsupported`.
+pub struct SessionProfileFanCurveProvider<S, A> {
+    session: S,
+    active: A,
+}
+
+impl<S, A> SessionProfileFanCurveProvider<S, A> {
+    /// Создать composed read provider без I/O на construction.
+    pub fn new(session: S, active: A) -> Self {
+        Self { session, active }
+    }
+}
+
+impl<S, A> Provider for SessionProfileFanCurveProvider<S, A>
+where
+    S: SessionFanCurveSource,
+    A: FanProvider,
+{
+    fn id(&self) -> &'static str {
+        "session-profile-fan-curve"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("session-profile-fan-curve")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("session + active fan curve backend: функция '{feature}' недоступна")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.session-profile-fan-curve",
+            "Session1 profile-specific fan curve read + active sysfs curve backend",
+        )]
+    }
+}
+
+#[async_trait]
+impl<S, A> FanProvider for SessionProfileFanCurveProvider<S, A>
+where
+    S: SessionFanCurveSource,
+    A: FanProvider,
+{
+    async fn fan_ids(&self) -> Result<Vec<FanId>, ProviderError> {
+        self.active.fan_ids().await
+    }
+
+    async fn fan_rpms(&self) -> Result<Vec<(FanId, orbis_core::newtypes::Rpm)>, ProviderError> {
+        self.active.fan_rpms().await
+    }
+
+    async fn fan_curve(
+        &self,
+        profile: PerformanceProfile,
+        fan: &FanId,
+    ) -> Result<FanCurve, ProviderError> {
+        // PerformanceProfile-based profile read не сохраняет lossless
+        // AsusdFanProfile (Quiet vs LowPower); используйте
+        // `fan_curve_for_profile` для profile-specific read.
+        self.active.fan_curve(profile, fan).await
+    }
+
+    async fn fan_curve_for_profile(
+        &self,
+        profile: AsusdFanProfile,
+        fan: &FanId,
+    ) -> Result<FanCurve, ProviderError> {
+        let info = self
+            .session
+            .read_fan_curve(profile.wire(), fan_wire_from_id(fan)?)
+            .await?;
+        fan_curve_from_wire(info, profile)
+    }
+
+    async fn active_curve(&self, fan: &FanId) -> Result<FanCurve, ProviderError> {
+        self.active.active_curve(fan).await
+    }
+
+    async fn set_fan_curve(&self, _curve: &FanCurve) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "session-profile-fan-curve: read-only, запись не поддерживается".into(),
+        ))
+    }
+
+    async fn set_curves_to_defaults(
+        &self,
+        _profile: PerformanceProfile,
+    ) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "session-profile-fan-curve: defaults/reset не поддерживается (Hardware1 mutation)"
+                .into(),
+        ))
+    }
+
+    fn curve_point_count(&self) -> usize {
+        self.active.curve_point_count()
+    }
+
+    fn allow_decreasing(&self) -> bool {
+        self.active.allow_decreasing()
+    }
+
+    fn validate_curve(&self, curve: &FanCurve) -> ValidationResult {
+        self.active.validate_curve(curve)
+    }
+}
+
 /// Composed fan curve mutation provider: read через `FanProvider`
 /// (sessiond read-only backend), mutation напрямую через Hardware1
 /// (`HardwareFanCurveSource`).
@@ -1205,7 +1595,12 @@ where
                 return Err(error);
             }
         };
-        let confirmed_profile = fan_profile_from_wire(confirmed)?;
+        let confirmed_profile = fan_profile_from_wire(confirmed).map_err(|err| match err {
+            ProviderError::InvalidRequest(msg) => ProviderError::Internal(format!(
+                "hardware protocol: malformed fan profile confirmation: {msg}"
+            )),
+            other => other,
+        })?;
         if confirmed_profile != profile {
             return Err(ProviderError::Internal(format!(
                 "hardware protocol: подтверждён другой fan profile: requested={profile:?}, confirmed={confirmed_profile:?}"
@@ -1463,6 +1858,108 @@ mod tests {
     fn generic_zbus_error_maps_to_dbus() {
         let err = zbus_error_to_provider(zbus::Error::Failure("transport".into()));
         assert!(matches!(err, ProviderError::Dbus(_)));
+    }
+
+    #[test]
+    fn battery_mutation_status_wire_maps_to_capability_status() {
+        use orbis_core::capability::CapabilityStatus;
+        use orbis_hardwared::battery::battery_mutation_wire;
+
+        assert_eq!(
+            battery_mutation_status_from_wire(battery_mutation_wire::SUPPORTED),
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            battery_mutation_status_from_wire(battery_mutation_wire::UNSUPPORTED),
+            CapabilityStatus::Unsupported
+        );
+        assert_eq!(
+            battery_mutation_status_from_wire(battery_mutation_wire::TEMPORARILY_UNAVAILABLE),
+            CapabilityStatus::TemporarilyUnavailable
+        );
+        assert_eq!(
+            battery_mutation_status_from_wire(battery_mutation_wire::PERMISSION_DENIED),
+            CapabilityStatus::PermissionDenied
+        );
+        // Explicit unknown evidence and malformed wire both map to Unknown —
+        // never to a guessed known state.
+        assert_eq!(
+            battery_mutation_status_from_wire(battery_mutation_wire::UNKNOWN),
+            CapabilityStatus::Unknown
+        );
+        assert_eq!(
+            battery_mutation_status_from_wire(99),
+            CapabilityStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn performance_mutation_status_wire_maps_to_capability_status() {
+        use orbis_core::capability::CapabilityStatus;
+        use orbis_hardwared::performance_mutation_wire;
+
+        assert_eq!(
+            performance_mutation_status_from_wire(performance_mutation_wire::SUPPORTED),
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            performance_mutation_status_from_wire(performance_mutation_wire::UNSUPPORTED),
+            CapabilityStatus::Unsupported
+        );
+        assert_eq!(
+            performance_mutation_status_from_wire(
+                performance_mutation_wire::TEMPORARILY_UNAVAILABLE
+            ),
+            CapabilityStatus::TemporarilyUnavailable
+        );
+        assert_eq!(
+            performance_mutation_status_from_wire(performance_mutation_wire::PERMISSION_DENIED),
+            CapabilityStatus::PermissionDenied
+        );
+        // Explicit unknown evidence and malformed wire both map to Unknown —
+        // never to a guessed known state.
+        assert_eq!(
+            performance_mutation_status_from_wire(performance_mutation_wire::UNKNOWN),
+            CapabilityStatus::Unknown
+        );
+        assert_eq!(
+            performance_mutation_status_from_wire(99),
+            CapabilityStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn fan_mutation_status_wire_maps_to_capability_status() {
+        use orbis_core::capability::CapabilityStatus;
+        use orbis_hardwared::fans::fan_mutation_wire;
+
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::SUPPORTED),
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::UNSUPPORTED),
+            CapabilityStatus::Unsupported
+        );
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::TEMPORARILY_UNAVAILABLE),
+            CapabilityStatus::TemporarilyUnavailable
+        );
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::PERMISSION_DENIED),
+            CapabilityStatus::PermissionDenied
+        );
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::BACKEND_MISSING),
+            CapabilityStatus::BackendMissing
+        );
+        // Explicit unknown evidence and malformed wire both map to Unknown —
+        // never to a guessed known state.
+        assert_eq!(
+            fan_mutation_status_from_wire(fan_mutation_wire::UNKNOWN),
+            CapabilityStatus::Unknown
+        );
+        assert_eq!(fan_mutation_status_from_wire(99), CapabilityStatus::Unknown);
     }
 
     #[test]
@@ -2051,6 +2548,8 @@ mod tests {
         let provider = SessionHardwareFanCurveProvider::new(session, hardware);
         let points = fan_curve_points();
 
+        // Unknown confirmation from backend is a protocol violation → Internal,
+        // not InvalidRequest (which is reserved for user input errors).
         assert!(matches!(
             orbis_providers::traits::FanCurveMutationProvider::set_fan_curve(
                 &provider,
@@ -2059,7 +2558,7 @@ mod tests {
                 &points
             )
             .await,
-            Err(ProviderError::InvalidRequest(_))
+            Err(ProviderError::Internal(_))
         ));
     }
 
@@ -2130,5 +2629,368 @@ mod tests {
             fan: FanId::Cpu,
             points,
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Wire→domain fan curve decoding (Session1 read side)
+    // -----------------------------------------------------------------------
+
+    fn sentinel_wire(
+        profile: u32,
+        fan: u8,
+        temps: [u8; 8],
+        pwms: [u8; 8],
+    ) -> orbis_session_protocol::FanCurveInfo {
+        use orbis_session_protocol::FanCurveInfo;
+        FanCurveInfo {
+            profile,
+            fan,
+            temps: temps.to_vec(),
+            pwms: pwms.to_vec(),
+        }
+    }
+
+    const CURVE_A_TEMPS: [u8; 8] = [45, 49, 54, 68, 74, 79, 84, 89];
+    const CURVE_A_PWMS: [u8; 8] = [5, 22, 38, 45, 56, 63, 81, 94];
+    const CURVE_B_TEMPS: [u8; 8] = [40, 44, 50, 60, 70, 76, 82, 90];
+    const CURVE_B_PWMS: [u8; 8] = [3, 18, 35, 42, 50, 58, 70, 99];
+    const CURVE_C_TEMPS: [u8; 8] = [42, 46, 55, 64, 73, 80, 86, 92];
+    const CURVE_C_PWMS: [u8; 8] = [2, 12, 28, 38, 46, 54, 66, 88];
+
+    #[test]
+    fn fan_curve_wire_is_lossless_roundtrip() {
+        let curve = fan_curve_from_wire(
+            sentinel_wire(
+                orbis_session_protocol::fan_profile::BALANCED,
+                orbis_session_protocol::fan_id::CPU,
+                CURVE_B_TEMPS,
+                CURVE_B_PWMS,
+            ),
+            AsusdFanProfile::Balanced,
+        )
+        .expect("decoded");
+        assert_eq!(curve.fan, FanId::Cpu);
+        assert_eq!(curve.points.len(), 8);
+        assert_eq!(curve.points[0].temp.get(), 40);
+        assert_eq!(curve.points[7].pwm.get(), 99);
+    }
+
+    #[test]
+    fn fan_curve_wire_preserves_lossless_profile() {
+        // Quiet (wire 2) и LowPower (wire 3) различимы — Silent не выводится
+        // автоматически ни в один из них.
+        let quiet = fan_curve_from_wire(
+            sentinel_wire(
+                orbis_session_protocol::fan_profile::QUIET,
+                orbis_session_protocol::fan_id::CPU,
+                CURVE_C_TEMPS,
+                CURVE_C_PWMS,
+            ),
+            AsusdFanProfile::Quiet,
+        )
+        .expect("quiet decoded");
+        assert_eq!(quiet.profile, PerformanceProfile::Silent);
+
+        let low_power = fan_curve_from_wire(
+            sentinel_wire(
+                orbis_session_protocol::fan_profile::LOW_POWER,
+                orbis_session_protocol::fan_id::CPU,
+                CURVE_B_TEMPS,
+                CURVE_B_PWMS,
+            ),
+            AsusdFanProfile::LowPower,
+        )
+        .expect("low power decoded");
+        assert_eq!(low_power.profile, PerformanceProfile::Silent);
+        // Профиль на wire lossless: запрошенный LowPower не превращается в Quiet.
+        assert_eq!(quiet.fan, FanId::Cpu);
+    }
+
+    #[test]
+    fn fan_curve_wire_rejects_unknown_profile() {
+        let err = fan_curve_from_wire(
+            sentinel_wire(
+                42,
+                orbis_session_protocol::fan_id::CPU,
+                CURVE_A_TEMPS,
+                CURVE_A_PWMS,
+            ),
+            AsusdFanProfile::Balanced,
+        )
+        .expect_err("unknown profile wire");
+        assert!(matches!(err, ProviderError::Internal(_)));
+    }
+
+    #[test]
+    fn fan_curve_wire_rejects_profile_mismatch() {
+        let err = fan_curve_from_wire(
+            sentinel_wire(
+                orbis_session_protocol::fan_profile::QUIET,
+                orbis_session_protocol::fan_id::CPU,
+                CURVE_A_TEMPS,
+                CURVE_A_PWMS,
+            ),
+            AsusdFanProfile::Balanced,
+        )
+        .expect_err("profile mismatch");
+        assert!(matches!(err, ProviderError::Internal(_)));
+    }
+
+    #[test]
+    fn fan_curve_wire_rejects_unknown_fan() {
+        let err = fan_curve_from_wire(
+            sentinel_wire(
+                orbis_session_protocol::fan_profile::BALANCED,
+                7,
+                CURVE_A_TEMPS,
+                CURVE_A_PWMS,
+            ),
+            AsusdFanProfile::Balanced,
+        )
+        .expect_err("unknown fan wire");
+        assert!(matches!(err, ProviderError::Internal(_)));
+    }
+
+    #[test]
+    fn fan_curve_wire_rejects_wrong_point_count() {
+        use orbis_session_protocol::FanCurveInfo;
+        let err = fan_curve_from_wire(
+            FanCurveInfo {
+                profile: orbis_session_protocol::fan_profile::BALANCED,
+                fan: orbis_session_protocol::fan_id::CPU,
+                temps: vec![45, 49],
+                pwms: vec![5, 22],
+            },
+            AsusdFanProfile::Balanced,
+        )
+        .expect_err("wrong point count");
+        assert!(matches!(err, ProviderError::Internal(_)));
+    }
+
+    #[test]
+    fn fan_curve_wire_rejects_unknown_profile_probe() {
+        let err = fan_profile_from_wire_protocol(9);
+        assert!(matches!(err, Err(ProviderError::Internal(_))));
+        let err = fan_id_from_wire_protocol(9);
+        assert!(matches!(err, Err(ProviderError::Internal(_))));
+    }
+
+    // -----------------------------------------------------------------------
+    // Profile-specific read через Session1-composed provider
+    // -----------------------------------------------------------------------
+
+    /// Scripted Session1 profile source: returns sentinel curves per profile.
+    struct ScriptedSessionFanSource {
+        cpu_by_profile:
+            std::collections::HashMap<AsusdFanProfile, orbis_session_protocol::FanCurveInfo>,
+        reads: AtomicUsize,
+    }
+
+    impl ScriptedSessionFanSource {
+        fn new(
+            cpu_by_profile: std::collections::HashMap<
+                AsusdFanProfile,
+                orbis_session_protocol::FanCurveInfo,
+            >,
+        ) -> Self {
+            Self {
+                cpu_by_profile,
+                reads: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl SessionFanCurveSource for ScriptedSessionFanSource {
+        async fn read_fan_curve(
+            &self,
+            profile: u32,
+            fan: u8,
+        ) -> Result<orbis_session_protocol::FanCurveInfo, ProviderError> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            let profile = super::fan_profile_from_wire_protocol(profile)?;
+            // CPU/GPU не смешиваются: для GPU возвращаем явно отличный sentinel.
+            if fan == orbis_session_protocol::fan_id::GPU {
+                return Ok(sentinel_wire(
+                    profile.wire(),
+                    orbis_session_protocol::fan_id::GPU,
+                    [30, 33, 36, 40, 45, 50, 55, 60],
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                ));
+            }
+            self.cpu_by_profile
+                .get(&profile)
+                .cloned()
+                .ok_or_else(|| ProviderError::Unsupported("sentinel profile недоступен".into()))
+        }
+    }
+
+    /// Scripted sysfs active provider: returns curve A for CPU.
+    struct ScriptedActiveFanProvider;
+
+    impl Provider for ScriptedActiveFanProvider {
+        fn id(&self) -> &'static str {
+            "scripted-active-fan"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted-active-fan")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted-active-fan: {feature} недоступен")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl FanProvider for ScriptedActiveFanProvider {
+        async fn fan_ids(&self) -> Result<Vec<FanId>, ProviderError> {
+            Ok(vec![FanId::Cpu, FanId::Gpu])
+        }
+        async fn fan_rpms(&self) -> Result<Vec<(FanId, orbis_core::newtypes::Rpm)>, ProviderError> {
+            Err(ProviderError::Unsupported("no rpms".into()))
+        }
+        async fn fan_curve(
+            &self,
+            _profile: PerformanceProfile,
+            _fan: &FanId,
+        ) -> Result<FanCurve, ProviderError> {
+            Err(ProviderError::Unsupported(
+                "profile via sysfs не предоставляется".into(),
+            ))
+        }
+        async fn fan_curve_for_profile(
+            &self,
+            _profile: AsusdFanProfile,
+            _fan: &FanId,
+        ) -> Result<FanCurve, ProviderError> {
+            Err(ProviderError::Unsupported(
+                "active source не предоставляет profile curves".into(),
+            ))
+        }
+        async fn active_curve(&self, fan: &FanId) -> Result<FanCurve, ProviderError> {
+            assert_eq!(fan, &FanId::Cpu);
+            let mut points = Vec::new();
+            for i in 0..8 {
+                points.push(FanCurvePoint::new(
+                    TemperatureC::new(CURVE_A_TEMPS[i] as i16).expect("temp"),
+                    FanPwm::new(CURVE_A_PWMS[i]).expect("pwm"),
+                ));
+            }
+            Ok(FanCurve {
+                profile: PerformanceProfile::Balanced,
+                fan: FanId::Cpu,
+                points,
+            })
+        }
+        async fn set_fan_curve(&self, _curve: &FanCurve) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("read-only".into()))
+        }
+        async fn set_curves_to_defaults(
+            &self,
+            _profile: PerformanceProfile,
+        ) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("read-only".into()))
+        }
+        fn curve_point_count(&self) -> usize {
+            8
+        }
+        fn allow_decreasing(&self) -> bool {
+            false
+        }
+        fn validate_curve(&self, _curve: &FanCurve) -> ValidationResult {
+            ValidationResult::ok()
+        }
+    }
+
+    fn sentinel_map()
+    -> std::collections::HashMap<AsusdFanProfile, orbis_session_protocol::FanCurveInfo> {
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            AsusdFanProfile::Balanced,
+            sentinel_wire(
+                orbis_session_protocol::fan_profile::BALANCED,
+                orbis_session_protocol::fan_id::CPU,
+                CURVE_B_TEMPS,
+                CURVE_B_PWMS,
+            ),
+        );
+        map.insert(
+            AsusdFanProfile::Quiet,
+            sentinel_wire(
+                orbis_session_protocol::fan_profile::QUIET,
+                orbis_session_protocol::fan_id::CPU,
+                CURVE_C_TEMPS,
+                CURVE_C_PWMS,
+            ),
+        );
+        map
+    }
+
+    #[tokio::test]
+    async fn listener_sentinel_regression_capability_probe_sees_active_curve_a() {
+        // 1. capability probe (active_curve) видит активную sysfs кривую A.
+        let session = ScriptedSessionFanSource::new(sentinel_map());
+        let composed = SessionProfileFanCurveProvider::new(session, ScriptedActiveFanProvider);
+
+        let probe = composed.active_curve(&FanId::Cpu).await.expect("active");
+        assert_eq!(probe.points[0].temp.get(), CURVE_A_TEMPS[0] as i16);
+        assert_eq!(probe.points[7].pwm.get(), CURVE_A_PWMS[7]);
+    }
+
+    #[tokio::test]
+    async fn listener_sentinel_regression_refresh_balanced_cpu_returns_b() {
+        // 2. RefreshFanCurve(Balanced, CPU) → кривая B (sessiond → asusd).
+        let session = ScriptedSessionFanSource::new(sentinel_map());
+        let composed = SessionProfileFanCurveProvider::new(session, ScriptedActiveFanProvider);
+
+        let curve = composed
+            .fan_curve_for_profile(AsusdFanProfile::Balanced, &FanId::Cpu)
+            .await
+            .expect("balanced");
+        assert_eq!(curve.points[0].temp.get(), CURVE_B_TEMPS[0] as i16);
+        assert_eq!(curve.points[7].pwm.get(), CURVE_B_PWMS[7]);
+    }
+
+    #[tokio::test]
+    async fn listener_sentinel_regression_refresh_quiet_cpu_returns_c() {
+        // 3. RefreshFanCurve(Quiet, CPU) → C.
+        let session = ScriptedSessionFanSource::new(sentinel_map());
+        let composed = SessionProfileFanCurveProvider::new(session, ScriptedActiveFanProvider);
+
+        let curve = composed
+            .fan_curve_for_profile(AsusdFanProfile::Quiet, &FanId::Cpu)
+            .await
+            .expect("quiet");
+        assert_eq!(curve.points[0].temp.get(), CURVE_C_TEMPS[0] as i16);
+        assert_eq!(curve.points[7].pwm.get(), CURVE_C_PWMS[7]);
+    }
+
+    #[tokio::test]
+    async fn listener_sentinel_regression_cpu_gpu_not_mixed() {
+        // 4. CPU/GPU не смешиваются: GPU read возвращает только GPU curve
+        // (distinct sentinel), не CPU-кривую.
+        let session = ScriptedSessionFanSource::new(sentinel_map());
+        let composed = SessionProfileFanCurveProvider::new(session, ScriptedActiveFanProvider);
+
+        let gpu = composed
+            .fan_curve_for_profile(AsusdFanProfile::Balanced, &FanId::Gpu)
+            .await
+            .expect("gpu");
+        assert_eq!(gpu.fan, FanId::Gpu);
+        assert_eq!(gpu.points[0].temp.get(), 30);
+        assert_eq!(gpu.points[7].pwm.get(), 0);
     }
 }

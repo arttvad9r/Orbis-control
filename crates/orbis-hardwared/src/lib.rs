@@ -17,12 +17,16 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
+use orbis_core::aura::AuraRgb;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 use orbis_providers::supergfxd::{SupergfxdMode, SupergfxdStagedState, SupergfxdUserAction};
 
+pub mod aura;
 pub mod battery;
 pub mod fans;
+pub mod keyboard_backlight;
+pub mod panel;
 pub mod supergfxd;
 
 use battery::{BatteryMutationBackend, BatteryMutationReadback};
@@ -137,7 +141,6 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
     ) -> Result<ApplyResult, ProviderError> {
         let symbol = profile_symbol(profile);
 
-        // 1. fresh choices read.
         let choices_raw = self.read_trimmed(&self.choices_path, "platform_profile_choices")?;
         let choices: Vec<&str> = choices_raw.split_whitespace().collect();
         if choices.is_empty() {
@@ -146,20 +149,15 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
             ));
         }
 
-        // 2. requested symbol должен присутствовать.
         if !choices.contains(&symbol) {
             return Err(ProviderError::Unsupported(format!(
                 "hardwared: profile symbol '{symbol}' отсутствует в platform_profile_choices"
             )));
         }
 
-        // 3. ровно один write.
         self.io.write(&self.profile_path, &format!("{symbol}\n"))?;
-
-        // 4. fresh read-back current.
         let current = self.read_trimmed(&self.profile_path, "platform_profile")?;
 
-        // 5. success только при совпадении.
         if current != symbol {
             return Err(ProviderError::BackendUnavailable(format!(
                 "hardwared: read-back не подтвердил requested profile: expected='{symbol}', got='{current}'"
@@ -167,6 +165,32 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
         }
 
         Ok(ApplyResult::Applied)
+    }
+
+    /// Read-only typed evidence about Performance mutation backend availability.
+    ///
+    /// Performs a single fresh read of `platform_profile_choices` — the same
+    /// read the mutation path performs — and classifies the result. Never
+    /// writes and never mutates hardware.
+    pub fn mutation_status(&self) -> PerformanceMutationStatus {
+        match self.read_trimmed(&self.choices_path, "platform_profile_choices") {
+            Ok(choices) if choices.split_whitespace().next().is_some() => {
+                PerformanceMutationStatus::Supported
+            }
+            // Empty choices file is malformed — no usable backend evidence.
+            Ok(_) => PerformanceMutationStatus::Unknown,
+            Err(ProviderError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                PerformanceMutationStatus::Unsupported
+            }
+            Err(ProviderError::Io(error))
+                if error.kind() == std::io::ErrorKind::PermissionDenied =>
+            {
+                PerformanceMutationStatus::PermissionDenied
+            }
+            Err(ProviderError::Io(_)) => PerformanceMutationStatus::TemporarilyUnavailable,
+            // Empty/malformed content is reported by read_trimmed as Internal.
+            Err(_) => PerformanceMutationStatus::Unknown,
+        }
     }
 }
 
@@ -186,8 +210,17 @@ pub const POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-performance
 pub const BATTERY_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-charge-limit";
 /// Polkit action id for the injectable GPU mutation boundary.
 pub const GPU_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-gpu-mode";
-/// Polkit action id for fan curve mutation.
+/// Polkit action id for fan curve mutation, including profile-wide factory reset.
 pub const FAN_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-fan-curve";
+/// Polkit action id for Panel Overdrive mutation (separate display-panel
+/// capability/security domain; mirrors per-capability action pattern).
+pub const PANEL_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-panel-overdrive";
+/// Polkit action id for keyboard backlight brightness mutation.
+pub const KEYBOARD_BACKLIGHT_POLKIT_ACTION: &str =
+    "io.github.orbiscontrol.hardware.set-keyboard-backlight";
+/// Polkit action id for Aura Static RGB mutation (separate RGB capability/
+/// security domain; mirrors per-capability action pattern).
+pub const AURA_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-aura-static-rgb";
 
 /// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
 pub mod wire {
@@ -220,6 +253,73 @@ pub fn profile_to_wire(profile: PerformanceProfile) -> u8 {
     }
 }
 
+/// Typed runtime evidence for Performance mutation backend availability.
+///
+/// Unlike the Battery backend, the Performance writer is always constructed;
+/// its real availability is proven by a read-only fresh read of
+/// `platform_profile_choices` (the same read the writer performs at mutation
+/// time). The classification preserves the distinction between a present ABI
+/// (`Supported`), an absent ABI (`Unsupported`), a transient read failure
+/// (`TemporarilyUnavailable`) and a permission failure (`PermissionDenied`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PerformanceMutationStatus {
+    /// The kernel `platform_profile` ABI is present and readable, so the
+    /// mutation path exists. Operational write failures are not predicted.
+    Supported,
+    /// The `platform_profile` ABI is structurally absent on this device.
+    Unsupported,
+    /// A known/expected ABI is temporarily unreadable.
+    TemporarilyUnavailable,
+    /// The ABI exists but current read authorization denies access.
+    PermissionDenied,
+    /// No provable evidence about mutation availability.
+    Unknown,
+}
+
+/// Stable wire values for `Hardware1.PerformanceMutationStatus`.
+///
+/// The numeric values intentionally match the Battery mutation status wire
+/// contract (identical semantic classes); each backend module still keeps its
+/// own named constants so the D-Bus contract stays self-contained.
+pub mod performance_mutation_wire {
+    use super::PerformanceMutationStatus;
+
+    /// Proven mutation backend / ABI present.
+    pub const SUPPORTED: u8 = 0;
+    /// Mutation capability structurally absent.
+    pub const UNSUPPORTED: u8 = 1;
+    /// Known backend temporarily unavailable.
+    pub const TEMPORARILY_UNAVAILABLE: u8 = 2;
+    /// Mutation denied by authorization evidence.
+    pub const PERMISSION_DENIED: u8 = 3;
+    /// No evidence.
+    pub const UNKNOWN: u8 = 4;
+
+    /// Encode typed status into the D-Bus wire value.
+    pub fn to_wire(status: PerformanceMutationStatus) -> u8 {
+        match status {
+            PerformanceMutationStatus::Supported => SUPPORTED,
+            PerformanceMutationStatus::Unsupported => UNSUPPORTED,
+            PerformanceMutationStatus::TemporarilyUnavailable => TEMPORARILY_UNAVAILABLE,
+            PerformanceMutationStatus::PermissionDenied => PERMISSION_DENIED,
+            PerformanceMutationStatus::Unknown => UNKNOWN,
+        }
+    }
+
+    /// Decode a wire value; unknown values produce `None` so callers classify
+    /// them as `Unknown` instead of inventing a known state.
+    pub fn from_wire(raw: u8) -> Option<PerformanceMutationStatus> {
+        match raw {
+            SUPPORTED => Some(PerformanceMutationStatus::Supported),
+            UNSUPPORTED => Some(PerformanceMutationStatus::Unsupported),
+            TEMPORARILY_UNAVAILABLE => Some(PerformanceMutationStatus::TemporarilyUnavailable),
+            PERMISSION_DENIED => Some(PerformanceMutationStatus::PermissionDenied),
+            UNKNOWN => Some(PerformanceMutationStatus::Unknown),
+            _ => None,
+        }
+    }
+}
+
 /// Ошибка авторизации.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthorizeError {
@@ -230,10 +330,6 @@ pub enum AuthorizeError {
 }
 
 /// Узкая абстракция авторизации.
-///
-/// Production реализация — [`PolkitAuthorizer`]; тесты — fake authorizer.
-/// Не доверяет UID/PID/profile из payload клиента: идентичность берётся из
-/// unique sender входящего D-Bus message.
 #[async_trait]
 pub trait Authorizer: Send + Sync {
     /// Разрешить ли caller (unique sender name на system bus) операцию.
@@ -241,11 +337,6 @@ pub trait Authorizer: Send + Sync {
 }
 
 /// Production polkit authorizer.
-///
-/// - Subject: `system-bus-name` с unique sender из входящего D-Bus message;
-/// - action: [`POLKIT_ACTION`];
-/// - `AllowUserInteraction=false` (пустые флаги);
-/// - разрешение только при `is_authorized=true`; challenge/deny/cancel → Denied.
 pub struct PolkitAuthorizer {
     connection: zbus::Connection,
     action: &'static str,
@@ -290,7 +381,6 @@ impl Authorizer for PolkitAuthorizer {
                 &subject,
                 self.action,
                 &std::collections::HashMap::new(),
-                // AllowUserInteraction=false: пустые флаги (Default = empty).
                 Default::default(),
                 "",
             )
@@ -307,7 +397,6 @@ impl Authorizer for PolkitAuthorizer {
     }
 }
 
-/// Преобразовать `ProviderError` в D-Bus `fdo::Error` (детерминированный mapping).
 fn provider_error_to_dbus(error: ProviderError) -> zbus::fdo::Error {
     match error {
         ProviderError::Unsupported(msg) => zbus::fdo::Error::NotSupported(msg),
@@ -321,14 +410,6 @@ fn provider_error_to_dbus(error: ProviderError) -> zbus::fdo::Error {
     }
 }
 
-/// Порядок обработки `SetPerformanceProfile` (не зависит от zbus macro;
-/// тестируемо с fake authorizer + fake writer):
-///
-/// 1. strict wire decode;
-/// 2. authorization (zero backend reads/writes при отказе);
-/// 3. writer `set_performance_profile` (ровно одна mutation + read-back);
-/// 4. success → подтверждённый profile wire;
-/// 5. error → соответствующий D-Bus error.
 pub async fn handle_set_performance_profile<A, S>(
     authorizer: &A,
     writer: &PlatformProfileWriter<S>,
@@ -339,21 +420,14 @@ where
     A: Authorizer + ?Sized,
     S: ProfileIo,
 {
-    // 1. strict wire decode — до любой авторизации/backend I/O.
     let profile = profile_from_wire(raw).map_err(provider_error_to_dbus)?;
-
-    // 2. authorization — writer НЕ вызывается при отказе.
     authorizer.authorize(sender).await.map_err(|e| match e {
         AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
         AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
     })?;
-
-    // 3. ровно одна backend mutation + authoritative read-back.
     let result = writer
         .set_performance_profile(profile)
         .map_err(provider_error_to_dbus)?;
-
-    // 4. success только при подтверждённом Applied.
     match result {
         ApplyResult::Applied => Ok(profile_to_wire(profile)),
         other => Err(zbus::fdo::Error::Failed(format!(
@@ -389,12 +463,6 @@ pub async fn handle_set_charge_limit(
 }
 
 /// Обработка fan curve mutation до публичного D-Bus boundary.
-///
-/// Порядок:
-/// 1. strict wire decode (profile 0..3, fan 0/1, curve ровно 8 точек);
-/// 2. authorization (zero backend reads/writes при отказе);
-/// 3. backend `set_fan_curve` (ровно один asusd setter + fresh read-back);
-/// 4. success только при подтверждённом Applied.
 pub async fn handle_set_fan_curve<A>(
     authorizer: &A,
     backend: &dyn fans::FanCurveMutationOperation,
@@ -406,29 +474,62 @@ pub async fn handle_set_fan_curve<A>(
 where
     A: Authorizer + ?Sized,
 {
-    // 1. strict wire decode — до любой авторизации/backend I/O.
     let profile = fans::fan_profile_from_wire(profile_raw).map_err(provider_error_to_dbus)?;
     let fan = fans::fan_from_wire(fan_raw).map_err(provider_error_to_dbus)?;
     let curve = fans::fan_curve_from_wire(curve_wire).map_err(provider_error_to_dbus)?;
     fans::validate_fan_curve(&curve).map_err(provider_error_to_dbus)?;
 
-    // 2. authorization — backend НЕ вызывается при отказе.
     authorizer.authorize(sender).await.map_err(|e| match e {
         AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
         AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
     })?;
 
-    // 3. ровно один asusd setter + authoritative read-back.
     let readback = backend
         .set_fan_curve(profile, &fan, &curve)
         .await
         .map_err(provider_error_to_dbus)?;
 
-    // 4. success только при подтверждённом Applied.
     match readback.result {
         ApplyResult::Applied => Ok(fans::fan_profile_to_wire(profile)),
         other => Err(zbus::fdo::Error::Failed(format!(
             "hardwared: fan curve operation not confirmed: {other:?}"
+        ))),
+    }
+}
+
+/// Handle profile-wide platform factory fan-curve reset.
+///
+/// Profile decode happens before authorization/backend I/O. The same fan
+/// mutation polkit action is reused because this is the same capability and
+/// risk class as custom fan-curve writes. Success requires the backend's fresh
+/// post-reset FanCurveData observation.
+pub async fn handle_reset_fan_curves_to_defaults<A>(
+    authorizer: &A,
+    backend: &dyn fans::FanCurveMutationOperation,
+    profile_raw: u32,
+    sender: &str,
+) -> zbus::fdo::Result<u32>
+where
+    A: Authorizer + ?Sized,
+{
+    let profile = fans::fan_profile_from_wire(profile_raw).map_err(provider_error_to_dbus)?;
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+    let readback = backend
+        .reset_curves_to_defaults(profile)
+        .await
+        .map_err(provider_error_to_dbus)?;
+    match readback.result {
+        ApplyResult::Applied
+            if readback.requested_profile == profile && readback.observed_curves > 0 =>
+        {
+            Ok(fans::fan_profile_to_wire(profile))
+        }
+        other => Err(zbus::fdo::Error::Failed(format!(
+            "hardwared: fan factory reset not confirmed: result={other:?}, observed_curves={}",
+            readback.observed_curves
         ))),
     }
 }
@@ -446,17 +547,11 @@ where
     zbus::zvariant::OwnedValue,
 )]
 pub struct GpuMutationResult {
-    /// Requested supergfxd backend mode.
     pub requested_mode: u32,
-    /// Action returned directly by SetMode.
     pub returned_user_action: u32,
-    /// Fresh current supergfxd backend mode.
     pub current_mode: u32,
-    /// Fresh pending supergfxd backend mode.
     pub pending_mode: u32,
-    /// Fresh pending user action.
     pub pending_user_action: u32,
-    /// Classified outcome: 0 Applied, 1 Pending, 2 RequiresUserAction, 3 Inconsistent.
     pub outcome: u32,
 }
 
@@ -512,7 +607,6 @@ fn staged_state_to_wire(state: SupergfxdStagedState) -> u32 {
     }
 }
 
-/// Обработка GPU mutation до публичного D-Bus boundary.
 pub async fn handle_set_gpu_mode(
     authorizer: &dyn Authorizer,
     backend: Option<&dyn supergfxd::SupergfxdMutationOperation>,
@@ -544,9 +638,6 @@ pub async fn handle_set_gpu_mode(
 }
 
 /// Service object интерфейса `io.github.orbiscontrol.Hardware1`.
-///
-/// Не generic: writer — production с фиксированными kernel paths; authorizer —
-/// trait object (production — polkit, тесты — fake).
 pub struct HardwareService {
     authorizer: Box<dyn Authorizer>,
     writer: PlatformProfileWriter<StdProfileIo>,
@@ -557,10 +648,15 @@ pub struct HardwareService {
     gpu_sender_fallback: Option<String>,
     fan_authorizer: Box<dyn Authorizer>,
     fan_backend: Option<Box<dyn fans::FanCurveMutationOperation>>,
+    panel_authorizer: Box<dyn Authorizer>,
+    panel_backend: Option<Box<dyn panel::PanelOverdriveMutationBackend>>,
+    kb_authorizer: Box<dyn Authorizer>,
+    kb_backend: Option<Box<dyn keyboard_backlight::KeyboardBacklightMutationBackend>>,
+    aura_authorizer: Box<dyn Authorizer>,
+    aura_backend: Option<Box<dyn aura::AuraStaticRgbMutationBackend>>,
 }
 
 impl HardwareService {
-    /// Создать service object над авторизатором (writer — фиксированные paths).
     pub fn new(authorizer: Box<dyn Authorizer>) -> Self {
         Self {
             authorizer,
@@ -572,10 +668,15 @@ impl HardwareService {
             gpu_sender_fallback: None,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
     }
 
-    /// Создать production service с typed asusd Battery compatibility backend.
     pub fn with_battery_backend(
         authorizer: Box<dyn Authorizer>,
         battery_backend: Box<dyn BatteryMutationBackend>,
@@ -591,10 +692,15 @@ impl HardwareService {
             gpu_sender_fallback: None,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
     }
 
-    /// Создать production service с optional typed GPU backend.
     pub fn with_battery_and_gpu_backends(
         authorizer: Box<dyn Authorizer>,
         battery_backend: Box<dyn BatteryMutationBackend>,
@@ -612,10 +718,15 @@ impl HardwareService {
             gpu_sender_fallback: None,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
     }
 
-    /// Создать production service с fan curve mutation backend.
     pub fn with_fan_backend(
         authorizer: Box<dyn Authorizer>,
         fan_backend: Box<dyn fans::FanCurveMutationOperation>,
@@ -631,10 +742,15 @@ impl HardwareService {
             gpu_sender_fallback: None,
             fan_authorizer,
             fan_backend: Some(fan_backend),
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
     }
 
-    /// Создать production service с Battery, GPU и fan curve backends.
     pub fn with_battery_gpu_and_fan_backends(
         authorizer: Box<dyn Authorizer>,
         battery_backend: Box<dyn BatteryMutationBackend>,
@@ -654,10 +770,15 @@ impl HardwareService {
             gpu_sender_fallback: None,
             fan_authorizer,
             fan_backend: Some(fan_backend),
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
     }
 
-    /// Test/injection construction for the GPU Hardware1 boundary.
     pub fn with_gpu_backend(
         authorizer: Box<dyn Authorizer>,
         gpu_authorizer: Box<dyn Authorizer>,
@@ -671,13 +792,57 @@ impl HardwareService {
             battery_backend: None,
             gpu_authorizer,
             gpu_backend: Some(gpu_backend),
-            // Peer-to-peer D-Bus has no unique bus sender in its method header;
-            // tests inject the original caller identity explicitly. Production
-            // constructors leave it absent and require the real message sender.
             gpu_sender_fallback: p2p_sender,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
+            panel_authorizer: Box::new(DisabledAuthorizer),
+            panel_backend: None,
+            kb_authorizer: Box::new(DisabledAuthorizer),
+            kb_backend: None,
+            aura_authorizer: Box::new(DisabledAuthorizer),
+            aura_backend: None,
         }
+    }
+
+    /// Attach the Panel Overdrive mutation backend to an existing service.
+    ///
+    /// Builder-style so production main can keep the proven combined
+    /// constructor and attach the new capability without a 9-argument
+    /// constructor.
+    pub fn with_panel(
+        mut self,
+        panel_backend: Box<dyn panel::PanelOverdriveMutationBackend>,
+        panel_authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.panel_backend = Some(panel_backend);
+        self.panel_authorizer = panel_authorizer;
+        self
+    }
+
+    /// Attach keyboard backlight brightness mutation backend.
+    pub fn with_keyboard_backlight(
+        mut self,
+        kb_backend: Box<dyn keyboard_backlight::KeyboardBacklightMutationBackend>,
+        kb_authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.kb_backend = Some(kb_backend);
+        self.kb_authorizer = kb_authorizer;
+        self
+    }
+
+    /// Attach the Aura Static RGB mutation backend to an existing service.
+    ///
+    /// Builder-style so production main can keep the proven combined
+    /// constructor and attach the new capability without a 10-argument
+    /// constructor.
+    pub fn with_aura_static_rgb(
+        mut self,
+        aura_backend: Box<dyn aura::AuraStaticRgbMutationBackend>,
+        aura_authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.aura_backend = Some(aura_backend);
+        self.aura_authorizer = aura_authorizer;
+        self
     }
 }
 
@@ -694,8 +859,6 @@ impl Authorizer for DisabledAuthorizer {
 
 #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
 impl HardwareService {
-    /// Установить Performance profile (wire enum `y`; возвращает подтверждённый
-    /// profile после writer read-back).
     async fn set_performance_profile(
         &self,
         raw: u8,
@@ -706,6 +869,16 @@ impl HardwareService {
             .map(|s| s.to_string())
             .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
         handle_set_performance_profile(self.authorizer.as_ref(), &self.writer, raw, &sender).await
+    }
+
+    /// Read-only typed evidence about Performance mutation backend availability.
+    ///
+    /// This is capability metadata, not a mutation: no authorization is
+    /// required and no hardware write occurs. The returned wire value is one
+    /// of `performance_mutation_wire::*`.
+    fn performance_mutation_status(&self) -> u8 {
+        use performance_mutation_wire;
+        performance_mutation_wire::to_wire(self.writer.mutation_status())
     }
 
     /// Установить Battery configured threshold; возвращает подтверждённый
@@ -726,7 +899,6 @@ impl HardwareService {
         handle_set_charge_limit(self.battery_authorizer.as_ref(), backend, percent, &sender).await
     }
 
-    /// Set one supergfxd backend mode and return fresh staged observation.
     async fn set_gpu_mode(
         &self,
         raw: u32,
@@ -744,6 +916,22 @@ impl HardwareService {
             &sender,
         )
         .await
+    }
+
+    /// Read-only typed evidence about Battery mutation backend availability.
+    ///
+    /// This is capability metadata, not a mutation: no authorization is
+    /// required and no hardware I/O occurs. The returned wire value is one of
+    /// `battery::battery_mutation_wire::*` so the GUI can honestly gate its
+    /// mutation controls instead of guessing from `validate_charge_limit`.
+    fn battery_mutation_status(&self) -> u8 {
+        use battery::battery_mutation_wire;
+        battery_mutation_wire::to_wire(
+            self.battery_backend
+                .as_deref()
+                .map(|b| b.mutation_status())
+                .unwrap_or(battery::BatteryMutationStatus::Unknown),
+        )
     }
 
     /// Установить одну fan curve (profile wire 0..3, fan 0/1, ровно 8 точек);
@@ -773,30 +961,202 @@ impl HardwareService {
         )
         .await
     }
+
+    /// Read-only typed evidence about fan curve mutation backend availability.
+    ///
+    /// This is capability metadata, not a mutation: no authorization is
+    /// required and no fan write occurs. The probe uses the read-only
+    /// `FanCurveData` path; when no fan backend is configured it reports
+    /// `BackendMissing` (not configured ≠ proven Unsupported).
+    async fn fan_mutation_status(&self) -> u8 {
+        use fans::fan_mutation_wire;
+        let status = match self.fan_backend.as_deref() {
+            Some(backend) => backend.mutation_status().await,
+            None => fans::FanMutationStatus::BackendMissing,
+        };
+        fan_mutation_wire::to_wire(status)
+    }
+
+    /// Restore factory fan curves for the whole ASUS profile. This uses the
+    /// same typed fan mutation backend and polkit action as `SetFanCurve`.
+    async fn reset_fan_curves_to_defaults(
+        &self,
+        profile_raw: u32,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<u32> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self
+            .fan_backend
+            .as_deref()
+            .ok_or_else(|| zbus::fdo::Error::NotSupported("fan backend unavailable".into()))?;
+        handle_reset_fan_curves_to_defaults(
+            self.fan_authorizer.as_ref(),
+            backend,
+            profile_raw,
+            &sender,
+        )
+        .await
+    }
+
+    /// Установить Panel Overdrive; возвращает подтверждённое observed значение
+    /// (`0`/`1`) после typed asusd setter + authoritative fresh read-back.
+    async fn set_panel_overdrive(
+        &self,
+        enabled: bool,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<u8> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.panel_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("panel overdrive backend unavailable".into())
+        })?;
+        panel::handle_set_panel_overdrive(self.panel_authorizer.as_ref(), backend, enabled, &sender)
+            .await
+    }
+
+    /// Read-only typed evidence about Panel Overdrive mutation backend
+    /// availability.
+    ///
+    /// This is capability metadata, not a mutation: no authorization is
+    /// required and no hardware I/O occurs. The returned wire value is one of
+    /// `panel::panel_mutation_wire::*`.
+    fn panel_mutation_status(&self) -> u8 {
+        use panel::panel_mutation_wire;
+        panel_mutation_wire::to_wire(
+            self.panel_backend
+                .as_deref()
+                .map(|b| b.mutation_status())
+                .unwrap_or(panel::PanelOverdriveMutationStatus::Unknown),
+        )
+    }
+
+    /// Установить keyboard backlight brightness.
+    async fn set_keyboard_backlight(
+        &self,
+        level: u8,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<u8> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.kb_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("keyboard backlight backend unavailable".into())
+        })?;
+        keyboard_backlight::handle_set_keyboard_backlight(
+            self.kb_authorizer.as_ref(),
+            backend,
+            level,
+            &sender,
+        )
+        .await
+    }
+
+    /// Read-only typed evidence about keyboard backlight mutation backend.
+    fn keyboard_backlight_mutation_status(&self) -> u8 {
+        use keyboard_backlight::keyboard_backlight_mutation_wire;
+        keyboard_backlight_mutation_wire::to_wire(
+            self.kb_backend
+                .as_deref()
+                .map(|b| b.mutation_status())
+                .unwrap_or(keyboard_backlight::KeyboardBacklightMutationStatus::Unknown),
+        )
+    }
+
+    /// Установить Aura Static RGB; возвращает честный config-level результат
+    /// (`Accepted`), hardware state не подтверждается (`kbd_rgb_mode`
+    /// write-only).
+    async fn set_aura_static_rgb(
+        &self,
+        r: u8,
+        g: u8,
+        b: u8,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<aura::AuraMutationResult> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.aura_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("aura static rgb backend unavailable".into())
+        })?;
+        aura::handle_set_aura_static_rgb(
+            self.aura_authorizer.as_ref(),
+            backend,
+            AuraRgb { r, g, b },
+            &sender,
+        )
+        .await
+    }
+
+    /// Read-only typed evidence about Aura Static RGB mutation backend
+    /// availability.
+    ///
+    /// This is capability metadata, not a mutation: no authorization is
+    /// required and no hardware I/O occurs. The returned wire value is one of
+    /// `aura::aura_mutation_wire::*`.
+    fn aura_mutation_status(&self) -> u8 {
+        use aura::aura_mutation_wire;
+        aura_mutation_wire::to_wire(
+            self.aura_backend
+                .as_deref()
+                .map(|b| b.mutation_status())
+                .unwrap_or(aura::AuraMutationStatus::Unknown),
+        )
+    }
 }
 
-/// Client proxy контракта `io.github.orbiscontrol.Hardware1` (для sessiond).
-///
-/// Тот же wire contract, что server: `SetPerformanceProfile(y) -> y`; никаких
-/// strings/paths. Константы shared (`DBUS_NAME`/`DBUS_OBJECT_PATH`).
 #[zbus::proxy(
     interface = "io.github.orbiscontrol.Hardware1",
     default_service = "io.github.orbiscontrol.Hardware",
     default_path = "/io/github/orbiscontrol/Hardware"
 )]
 pub trait Hardware1 {
-    /// Установить Performance profile; возвращает подтверждённый wire profile.
     fn set_performance_profile(&self, profile: u8) -> zbus::Result<u8>;
+    /// Read-only typed Performance mutation backend availability (wire enum).
+    fn performance_mutation_status(&self) -> zbus::Result<u8>;
 
     /// Установить Battery configured threshold; возвращает подтверждённый
     /// configured percent, effective value остаётся отдельным read-model field.
     fn set_charge_limit(&self, percent: u8) -> zbus::Result<u8>;
-
-    /// Set one supergfxd backend mode and return staged observation.
     fn set_gpu_mode(&self, requested_mode: u32) -> zbus::Result<GpuMutationResult>;
+    /// Read-only typed Battery mutation backend availability (wire enum).
+    fn battery_mutation_status(&self) -> zbus::Result<u8>;
 
     /// Установить одну fan curve; возвращает подтверждённый profile wire.
     fn set_fan_curve(&self, profile: u32, fan: u8, curve: fans::FanCurveWire) -> zbus::Result<u32>;
+
+    /// Read-only typed fan curve mutation backend availability (wire enum).
+    fn fan_mutation_status(&self) -> zbus::Result<u8>;
+
+    /// Restore platform factory fan curves for the whole lossless ASUS profile.
+    fn reset_fan_curves_to_defaults(&self, profile: u32) -> zbus::Result<u32>;
+
+    /// Установить Panel Overdrive; возвращает подтверждённое observed значение
+    /// (`0`/`1`) после typed asusd setter + authoritative fresh read-back.
+    fn set_panel_overdrive(&self, enabled: bool) -> zbus::Result<u8>;
+
+    /// Read-only typed Panel Overdrive mutation backend availability (wire enum).
+    fn panel_mutation_status(&self) -> zbus::Result<u8>;
+
+    /// Установить keyboard backlight brightness.
+    fn set_keyboard_backlight(&self, level: u8) -> zbus::Result<u8>;
+
+    /// Read-only typed keyboard backlight mutation backend availability.
+    fn keyboard_backlight_mutation_status(&self) -> zbus::Result<u8>;
+
+    /// Установить Aura Static RGB; возвращает честный config-level результат
+    /// (`Accepted`), hardware state не подтверждается (`kbd_rgb_mode`
+    /// write-only).
+    fn set_aura_static_rgb(&self, r: u8, g: u8, b: u8) -> zbus::Result<aura::AuraMutationResult>;
+
+    /// Read-only typed Aura Static RGB mutation backend availability (wire enum).
+    fn aura_mutation_status(&self) -> zbus::Result<u8>;
 }
 
 #[cfg(test)]
@@ -806,14 +1166,13 @@ mod tests {
 
     use super::*;
 
-    /// Fake backend: отдельные значения choices/profile, счётчики, опциональные
-    /// сбои записи и подмена read-back.
     struct ScriptedIo {
         choices: Mutex<String>,
         profile: Mutex<String>,
         reads: AtomicUsize,
         writes: AtomicUsize,
         write_error: Mutex<Option<std::io::Error>>,
+        read_error: Mutex<Option<std::io::Error>>,
         override_read_back: Mutex<Option<String>>,
     }
 
@@ -825,6 +1184,7 @@ mod tests {
                 reads: AtomicUsize::new(0),
                 writes: AtomicUsize::new(0),
                 write_error: Mutex::new(None),
+                read_error: Mutex::new(None),
                 override_read_back: Mutex::new(None),
             }
         }
@@ -845,6 +1205,10 @@ mod tests {
             *self.write_error.lock().unwrap() = Some(err);
         }
 
+        fn set_read_error(&self, err: std::io::Error) {
+            *self.read_error.lock().unwrap() = Some(err);
+        }
+
         fn set_override_read_back(&self, value: &str) {
             *self.override_read_back.lock().unwrap() = Some(value.to_string());
         }
@@ -861,6 +1225,14 @@ mod tests {
     impl ProfileIo for ScriptedIo {
         fn read_to_string(&self, path: &Path) -> Result<String, ProviderError> {
             self.reads.fetch_add(1, Ordering::SeqCst);
+            if let Some(err) = self.read_error.lock().unwrap().as_ref() {
+                // Клонировать io::Error нельзя; воспроизводим с тем же kind.
+                let kind = err.kind();
+                return Err(ProviderError::Io(std::io::Error::new(
+                    kind,
+                    err.to_string(),
+                )));
+            }
             let name = path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -877,7 +1249,6 @@ mod tests {
         fn write(&self, _path: &Path, content: &str) -> Result<(), ProviderError> {
             self.writes.fetch_add(1, Ordering::SeqCst);
             if let Some(err) = self.write_error.lock().unwrap().as_ref() {
-                // Клонировать io::Error нельзя; воспроизводим аналогичный.
                 return Err(ProviderError::Io(std::io::Error::other(err.to_string())));
             }
             *self.profile.lock().unwrap() = content.to_string();
@@ -903,8 +1274,62 @@ mod tests {
     }
 
     #[test]
+    fn performance_mutation_status_classifies_read_evidence() {
+        // Present, non-empty ABI → Supported.
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        let w = writer(io);
+        assert_eq!(w.mutation_status(), PerformanceMutationStatus::Supported);
+
+        // Empty choices file is malformed → Unknown, never guessed Supported.
+        let io = ScriptedIo::new("", "balanced");
+        let w = writer(io);
+        assert_eq!(w.mutation_status(), PerformanceMutationStatus::Unknown);
+
+        // Structurally absent ABI → Unsupported.
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        io.set_read_error(std::io::Error::new(std::io::ErrorKind::NotFound, "missing"));
+        let w = writer(io);
+        assert_eq!(w.mutation_status(), PerformanceMutationStatus::Unsupported);
+
+        // Permission denied on the ABI read → PermissionDenied.
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        io.set_read_error(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "denied",
+        ));
+        let w = writer(io);
+        assert_eq!(
+            w.mutation_status(),
+            PerformanceMutationStatus::PermissionDenied
+        );
+
+        // Transient read failure → TemporarilyUnavailable.
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        io.set_read_error(std::io::Error::other("temporary"));
+        let w = writer(io);
+        assert_eq!(
+            w.mutation_status(),
+            PerformanceMutationStatus::TemporarilyUnavailable
+        );
+    }
+
+    #[test]
+    fn performance_mutation_wire_roundtrip_is_total() {
+        for status in [
+            PerformanceMutationStatus::Supported,
+            PerformanceMutationStatus::Unsupported,
+            PerformanceMutationStatus::TemporarilyUnavailable,
+            PerformanceMutationStatus::PermissionDenied,
+            PerformanceMutationStatus::Unknown,
+        ] {
+            let wire = performance_mutation_wire::to_wire(status);
+            assert_eq!(performance_mutation_wire::from_wire(wire), Some(status));
+        }
+        assert_eq!(performance_mutation_wire::from_wire(99), None);
+    }
+
+    #[test]
     fn exact_symbol_mapping_is_total() {
-        // Закрытая total mapping; никаких произвольных значений.
         assert_eq!(profile_symbol(PerformanceProfile::Silent), "quiet");
         assert_eq!(profile_symbol(PerformanceProfile::Balanced), "balanced");
         assert_eq!(profile_symbol(PerformanceProfile::Turbo), "performance");
@@ -922,10 +1347,8 @@ mod tests {
             .set_performance_profile(PerformanceProfile::Silent)
             .expect("silent доступен");
         assert_eq!(res, ApplyResult::Applied);
-        // ровно один write; содержимое — exact symbol с trailing newline.
         assert_eq!(w.io.writes(), 1);
         assert_eq!(w.io.profile(), "quiet\n");
-        // fresh reads: choices + read-back.
         assert_eq!(w.io.reads(), 2);
     }
 
@@ -956,7 +1379,7 @@ mod tests {
     #[test]
     fn read_back_mismatch_is_not_applied() {
         let io = ScriptedIo::new("quiet balanced performance", "balanced");
-        io.set_override_read_back("performance"); // backend вернул другое
+        io.set_override_read_back("performance");
         let w = writer(io);
         let err = w
             .set_performance_profile(PerformanceProfile::Silent)
@@ -985,8 +1408,6 @@ mod tests {
                 .expect("first"),
             ApplyResult::Applied
         );
-        // Backend изменился: quiet больше недоступен; второй вызов обязан
-        // увидеть свежие choices, а не кэш.
         w.io.set_choices("balanced performance");
         w.io.clear_override_read_back();
         *w.io.profile.lock().unwrap() = "balanced".to_string();
@@ -994,13 +1415,8 @@ mod tests {
             .set_performance_profile(PerformanceProfile::Silent)
             .expect_err("fresh choices без quiet");
         assert!(matches!(err, ProviderError::Unsupported(_)));
-        // Второй вызов не выполнял write (свежая валидация).
         assert_eq!(w.io.writes(), 1);
     }
-
-    // -----------------------------------------------------------------------
-    // D-Bus boundary: wire decode, authorization order, error mapping
-    // -----------------------------------------------------------------------
 
     #[derive(Clone, Copy)]
     enum AuthOutcome {
@@ -1083,7 +1499,7 @@ mod tests {
             .expect_err("unknown wire");
         assert!(matches!(err, zbus::fdo::Error::InvalidArgs(_)));
         assert_eq!(w.io.writes(), 0);
-        assert_eq!(auth.calls(), 0, "decode выполняется до авторизации");
+        assert_eq!(auth.calls(), 0);
     }
 
     #[tokio::test]
@@ -1140,6 +1556,10 @@ mod tests {
                 Ok(readback) => Ok(readback.clone()),
                 Err(error) => Err(ProviderError::Internal(error.to_string())),
             }
+        }
+
+        fn mutation_status(&self) -> battery::BatteryMutationStatus {
+            battery::BatteryMutationStatus::Supported
         }
     }
 
@@ -1226,6 +1646,28 @@ mod tests {
         );
     }
 
+    #[test]
+    fn battery_mutation_status_reflects_backend_presence() {
+        // Proven backend installed → SUPPORTED wire evidence.
+        let service = HardwareService::with_battery_backend(
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+            Box::new(battery_backend(80, 100)),
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+        );
+        assert_eq!(
+            service.battery_mutation_status(),
+            battery::battery_mutation_wire::SUPPORTED
+        );
+
+        // No battery backend configured → UNKNOWN wire (no evidence, never a
+        // guessed Supported).
+        let service = HardwareService::new(Box::new(FakeAuthorizer::new(AuthOutcome::Ok)));
+        assert_eq!(
+            service.battery_mutation_status(),
+            battery::battery_mutation_wire::UNKNOWN
+        );
+    }
+
     #[tokio::test]
     async fn writer_error_maps_to_dbus_error() {
         let io = ScriptedIo::new("quiet balanced performance", "balanced");
@@ -1241,7 +1683,7 @@ mod tests {
     #[tokio::test]
     async fn writer_read_back_mismatch_is_error_not_success() {
         let io = ScriptedIo::new("quiet balanced performance", "balanced");
-        io.set_override_read_back("performance"); // backend вернул другое
+        io.set_override_read_back("performance");
         let w = writer(io);
         let auth = FakeAuthorizer::new(AuthOutcome::Ok);
         let err = handle_set_performance_profile(&auth, &w, wire::SILENT, ":1.42")
@@ -1273,20 +1715,29 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Fan curve mutation (handle_set_fan_curve)
-    // -----------------------------------------------------------------------
-
     struct FakeFanBackend {
-        calls: AtomicUsize,
+        set_calls: AtomicUsize,
+        reset_calls: AtomicUsize,
         fail: std::sync::atomic::AtomicBool,
+        status: fans::FanMutationStatus,
     }
 
     impl FakeFanBackend {
         fn new() -> Self {
             Self {
-                calls: AtomicUsize::new(0),
+                set_calls: AtomicUsize::new(0),
+                reset_calls: AtomicUsize::new(0),
                 fail: std::sync::atomic::AtomicBool::new(false),
+                status: fans::FanMutationStatus::Supported,
+            }
+        }
+
+        fn with_status(status: fans::FanMutationStatus) -> Self {
+            Self {
+                set_calls: AtomicUsize::new(0),
+                reset_calls: AtomicUsize::new(0),
+                fail: std::sync::atomic::AtomicBool::new(false),
+                status,
             }
         }
     }
@@ -1299,7 +1750,7 @@ mod tests {
             fan: &orbis_core::fan::FanId,
             _curve: &fans::FanCurvePoints,
         ) -> Result<fans::FanCurveMutationReadback, ProviderError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.set_calls.fetch_add(1, Ordering::SeqCst);
             if self.fail.load(Ordering::SeqCst) {
                 return Err(ProviderError::BackendUnavailable("backend down".into()));
             }
@@ -1307,6 +1758,25 @@ mod tests {
                 requested_profile: profile,
                 requested_fan: fan.clone(),
                 result: ApplyResult::Applied,
+            })
+        }
+
+        async fn mutation_status(&self) -> fans::FanMutationStatus {
+            self.status
+        }
+
+        async fn reset_curves_to_defaults(
+            &self,
+            profile: orbis_core::profile::AsusdFanProfile,
+        ) -> Result<fans::FanCurveDefaultsReadback, ProviderError> {
+            self.reset_calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail.load(Ordering::SeqCst) {
+                return Err(ProviderError::BackendUnavailable("backend down".into()));
+            }
+            Ok(fans::FanCurveDefaultsReadback {
+                requested_profile: profile,
+                result: ApplyResult::Applied,
+                observed_curves: 2,
             })
         }
     }
@@ -1326,7 +1796,7 @@ mod tests {
             .await
             .expect_err("unknown profile");
         assert!(matches!(err, zbus::fdo::Error::InvalidArgs(_)));
-        assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.set_calls.load(Ordering::SeqCst), 0);
         assert_eq!(auth.calls(), 0);
     }
 
@@ -1338,7 +1808,7 @@ mod tests {
             .await
             .expect_err("unknown fan");
         assert!(matches!(err, zbus::fdo::Error::InvalidArgs(_)));
-        assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.set_calls.load(Ordering::SeqCst), 0);
         assert_eq!(auth.calls(), 0);
     }
 
@@ -1346,7 +1816,6 @@ mod tests {
     async fn fan_curve_invalid_curve_is_invalid_args_with_zero_calls() {
         let backend = FakeFanBackend::new();
         let auth = FakeAuthorizer::new(AuthOutcome::Ok);
-        // Убывающие PWM → invalid.
         let bad = fans::FanCurveWire {
             temps: vec![45, 49, 54, 68, 74, 79, 84, 89],
             pwms: vec![50, 22, 38, 45, 56, 63, 81, 94],
@@ -1355,7 +1824,7 @@ mod tests {
             .await
             .expect_err("invalid curve");
         assert!(matches!(err, zbus::fdo::Error::InvalidArgs(_)));
-        assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.set_calls.load(Ordering::SeqCst), 0);
         assert_eq!(auth.calls(), 0);
     }
 
@@ -1367,7 +1836,7 @@ mod tests {
             .await
             .expect_err("denied");
         assert!(matches!(err, zbus::fdo::Error::AccessDenied(_)));
-        assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.set_calls.load(Ordering::SeqCst), 0);
         assert_eq!(auth.calls(), 1);
     }
 
@@ -1378,8 +1847,8 @@ mod tests {
         let confirmed = handle_set_fan_curve(&auth, &backend, 2, 0, &fan_curve_wire(), ":1.1")
             .await
             .expect("success");
-        assert_eq!(confirmed, 2); // Quiet
-        assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(confirmed, 2);
+        assert_eq!(backend.set_calls.load(Ordering::SeqCst), 1);
         assert_eq!(auth.calls(), 1);
         assert_eq!(auth.last_sender(), Some(":1.1".to_string()));
     }
@@ -1393,13 +1862,81 @@ mod tests {
             .await
             .expect_err("backend error");
         assert!(matches!(err, zbus::fdo::Error::Failed(_)));
-        assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(backend.set_calls.load(Ordering::SeqCst), 1);
     }
 
-    // -----------------------------------------------------------------------
-    // Polkit policy deployment: каждый Rust action constant присутствует в
-    // установленном policy файле (packaging/nix/polkit).
-    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn fan_mutation_status_reflects_backend_evidence() {
+        use fans::fan_mutation_wire;
+        // No fan backend configured → BackendMissing wire (not configured ≠
+        // proven Unsupported).
+        let service = HardwareService::new(Box::new(FakeAuthorizer::new(AuthOutcome::Ok)));
+        assert_eq!(
+            service.fan_mutation_status().await,
+            fan_mutation_wire::BACKEND_MISSING
+        );
+
+        // Configured backend reporting Supported → SUPPORTED wire.
+        let service = HardwareService::with_fan_backend(
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+            Box::new(FakeFanBackend::with_status(
+                fans::FanMutationStatus::Supported,
+            )),
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+        );
+        assert_eq!(
+            service.fan_mutation_status().await,
+            fan_mutation_wire::SUPPORTED
+        );
+
+        // Configured backend reporting PermissionDenied → PERMISSION_DENIED wire.
+        let service = HardwareService::with_fan_backend(
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+            Box::new(FakeFanBackend::with_status(
+                fans::FanMutationStatus::PermissionDenied,
+            )),
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+        );
+        assert_eq!(
+            service.fan_mutation_status().await,
+            fan_mutation_wire::PERMISSION_DENIED
+        );
+    }
+
+    #[tokio::test]
+    async fn fan_defaults_unknown_profile_is_rejected_before_auth() {
+        let backend = FakeFanBackend::new();
+        let auth = FakeAuthorizer::new(AuthOutcome::Ok);
+        let err = handle_reset_fan_curves_to_defaults(&auth, &backend, 99, ":1.1")
+            .await
+            .expect_err("unknown profile");
+        assert!(matches!(err, zbus::fdo::Error::InvalidArgs(_)));
+        assert_eq!(auth.calls(), 0);
+        assert_eq!(backend.reset_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn fan_defaults_denied_does_not_reach_backend() {
+        let backend = FakeFanBackend::new();
+        let auth = FakeAuthorizer::new(AuthOutcome::Denied);
+        let err = handle_reset_fan_curves_to_defaults(&auth, &backend, 3, ":1.8")
+            .await
+            .expect_err("denied");
+        assert!(matches!(err, zbus::fdo::Error::AccessDenied(_)));
+        assert_eq!(backend.reset_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn fan_defaults_success_returns_lossless_profile() {
+        let backend = FakeFanBackend::new();
+        let auth = FakeAuthorizer::new(AuthOutcome::Ok);
+        let confirmed = handle_reset_fan_curves_to_defaults(&auth, &backend, 3, ":1.8")
+            .await
+            .expect("reset");
+        assert_eq!(confirmed, 3);
+        assert_eq!(backend.reset_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(auth.last_sender(), Some(":1.8".into()));
+    }
 
     #[test]
     fn polkit_policy_contains_all_mutation_actions() {

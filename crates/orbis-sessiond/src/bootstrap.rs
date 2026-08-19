@@ -7,6 +7,7 @@ use orbis_providers::error::ProviderError;
 
 use crate::armoury::{ArmouryGpuProvider, SysfsArmouryGpuSource};
 use crate::composition::build_upower_session_server;
+use crate::fans::{AsusdFanCurveSource, ZbusAsusdFanCurveSource};
 use crate::performance::{KernelPerformanceProvider, SysfsKernelPlatformProfileSource};
 use crate::server::GpuCapabilities;
 use crate::supergfxd::{SupergfxdGpuPowerProvider, ZbusSupergfxdGpuPowerSource};
@@ -46,27 +47,32 @@ pub async fn connect_upower_session_server(
         battery_native_path,
         GpuCapabilities::default(),
         None,
+        None,
     )
     .await
 }
 
-/// Открыть connections, обнаружить системную батарею и собрать session server.
+/// Открыть connections и собрать session server без обязательного startup
+/// discovery батареи (UPower resilience).
 ///
-/// - открывается одна system bus Connection для UPower;
+/// - открывается одна system bus Connection для UPower (и asusd),
+///   discovery выполняется **лениво** при первом battery read;
 /// - через ту же Connection выполняется read-only discovery батареи
-///   (`discover_battery`), ровно один раз при startup;
-/// - найденный object path/native path и та же UPower Connection передаются в
-///   существующий composition layer;
+///   (`discover_battery`) ровно при каждом battery read; если UPower/battery
+///   недоступен при startup — Session1 всё равно стартует, Performance/GPU/
+///   Fan read работают, Battery возвращает честную ошибку;
+/// - если UPower/battery появляется позже или UPower перезапускается —
+///   следующий Battery read повторит discovery без restart sessiond;
+/// - transient failure не кэшируется; никаких synthetic/default charge limits;
 /// - открывается session bus для Orbis service;
-/// - D-Bus startup failure и discovery failure сохраняются раздельно
-///   (`BootstrapError::Dbus` / `BootstrapError::Discovery`);
-/// - возвращённую session Connection необходимо удерживать живой; UPower
+/// - D-Bus startup failure сохраняется отдельно (`BootstrapError::Dbus`);
+///   discovery failure НЕ является фатальной для старта;
+/// - возвращённую session Connection необходимо удерживать живой; system
 ///   Connection переиспользуется provider'ом внутри service graph;
 /// - helper не управляет lifecycle, reconnect и signal handling.
 pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connection, BootstrapError>
 {
     let upower_connection = zbus::Connection::system().await?;
-    let battery = crate::discovery::discover_battery(&upower_connection).await?;
     let session_builder = zbus::connection::Builder::session()?;
 
     // Read-only GPU capabilities:
@@ -91,13 +97,17 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
         KernelPerformanceProvider::new(SysfsKernelPlatformProfileSource::default()),
     );
 
-    Ok(build_upower_session_server(
+    // Read-only asusd fan curve source (profile-specific curves): переиспользуем
+    // ту же system connection. Fan curve reads идут через sessiond, НЕ из GUI.
+    let fan_curves: Arc<dyn AsusdFanCurveSource> =
+        Arc::new(ZbusAsusdFanCurveSource::new(upower_connection.clone()));
+
+    Ok(crate::composition::build_lazy_upower_session_server(
         session_builder,
         upower_connection,
-        battery.object_path,
-        battery.native_path,
         gpu,
         Some(performance),
+        Some(fan_curves),
     )
     .await?)
 }

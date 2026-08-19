@@ -6,13 +6,18 @@ use async_trait::async_trait;
 
 use orbis_capabilities::engine::CapabilityPart;
 use orbis_core::action::{ActionRequirement, ApplyResult};
+use orbis_core::aura::AuraState;
 use orbis_core::automation::AutomationRule;
 use orbis_core::battery::ChargeLimit;
 use orbis_core::diagnostics::DiagnosticEntry;
-use orbis_core::display::DisplayMode;
+use orbis_core::display::{
+    DisplayMode, MiniLedModeState, PanelOverdriveState, ScreenAutoBrightnessState,
+};
+use orbis_core::display_output::DisplayOutputSnapshot;
 use orbis_core::fan::FanCurve;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
+use orbis_core::keyboard_backlight::KeyboardBacklightState;
 use orbis_core::lighting::LightingMode;
 use orbis_core::limits::{PowerLimitField, PowerLimits};
 use orbis_core::profile::PerformanceProfile;
@@ -250,6 +255,56 @@ pub trait GpuAccessProvider: Provider {
     async fn access_policy(&self) -> Result<GpuAccessPolicy, ProviderError>;
 }
 
+/// Read-only Panel Overdrive capability (ASUS firmware `panel_overdrive`).
+///
+/// Отдельный concept-specific trait (ADR 0005): провайдер, реализующий только
+/// Panel Overdrive, не обязан предоставлять полную модель дисплея. Состояние
+/// бинарное (`0`/`1`), но `Unknown` не подменяется значением `false`.
+#[async_trait]
+pub trait PanelOverdriveProvider: Provider {
+    /// Текущее состояние Panel Overdrive (fresh authoritative read).
+    async fn panel_overdrive_state(&self) -> Result<PanelOverdriveState, ProviderError>;
+}
+
+/// Read-only MiniLED mode capability (ASUS firmware `mini_led_mode`).
+///
+/// Отдельный concept-specific trait (ADR 0005): провайдер, реализующий только
+/// MiniLED, не обязан предоставлять полную модель дисплея. Состояние — честная
+/// device-specific firmware enumeration: raw current + authoritative allowed
+/// set + optional доказанная семантика. Mutation в этом slice отсутствует.
+#[async_trait]
+pub trait MiniLedModeProvider: Provider {
+    /// Текущее состояние MiniLED mode (fresh authoritative snapshot).
+    async fn mini_led_mode_state(&self) -> Result<MiniLedModeState, ProviderError>;
+}
+
+/// Read-only Screen Auto Brightness capability (ASUS firmware
+/// `screen_auto_brightness`).
+///
+/// Отдельный concept-specific trait (ADR 0005): провайдер, реализующий только
+/// Screen Auto Brightness, не обязан предоставлять полную модель дисплея.
+/// Состояние бинарное (`0`/`1`), но `Unknown` не подменяется значением
+/// `false`. Mutation в этом slice отсутствует.
+#[async_trait]
+pub trait ScreenAutoBrightnessProvider: Provider {
+    /// Текущее состояние Screen Auto Brightness (fresh authoritative read).
+    async fn screen_auto_brightness_state(
+        &self,
+    ) -> Result<ScreenAutoBrightnessState, ProviderError>;
+}
+
+/// Read-only display output state capability (Wayland/compositor session
+/// concern).
+///
+/// Отдельный concept-specific trait (ADR 0005): провайдер, реализующий только
+/// текущее состояние outputs, не обязан предоставлять полную модель дисплея.
+/// Mutation в этом slice отсутствует (никакого modeset/configuration API).
+#[async_trait]
+pub trait DisplayOutputProvider: Provider {
+    /// Текущий snapshot outputs compositor-а (fresh authoritative read).
+    async fn display_output_snapshot(&self) -> Result<DisplayOutputSnapshot, ProviderError>;
+}
+
 /// Дисплей.
 #[async_trait]
 pub trait DisplayProvider: Provider {
@@ -267,6 +322,29 @@ pub trait DisplayProvider: Provider {
 
     /// Валидация частоты.
     fn validate_refresh_rate(&self, hz: orbis_core::newtypes::RefreshHz) -> ValidationResult;
+}
+
+/// Read-only Aura RGB capability (ASUS asusd `xyz.ljones.Aura` interface).
+///
+/// Отдельный concept-specific trait (ADR 0005): провайдер, реализующий только
+/// Aura read, не обязан предоставлять полную модель подсветки. Mutation в этом
+/// slice отсутствует (никаких Aura writes). Wire semantics сохраняются
+/// losslessly: unknown enum values не коэрцятся в известные состояния.
+#[async_trait]
+pub trait AuraProvider: Provider {
+    /// Текущее Aura состояние (fresh authoritative read).
+    async fn aura_state(&self) -> Result<AuraState, ProviderError>;
+}
+
+/// Read-only Keyboard Backlight Brightness capability.
+///
+/// Яркость клавиатуры — hardware level/index, не Percentage.
+/// Max level определяется из sysfs (`max_brightness`), не hardcode-ится.
+/// Отдельный от `LightingProvider::set_brightness(Percent)` контракт.
+#[async_trait]
+pub trait KeyboardBacklightProvider: Provider {
+    /// Текущее состояние keyboard backlight brightness.
+    async fn keyboard_backlight_state(&self) -> Result<KeyboardBacklightState, ProviderError>;
 }
 
 /// Подсветка (клавиатура/Aura).

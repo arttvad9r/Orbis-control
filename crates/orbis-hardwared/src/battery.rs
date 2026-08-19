@@ -168,10 +168,81 @@ pub struct BatteryMutationReadback {
     pub result: ApplyResult,
 }
 
+/// Typed runtime evidence for Battery mutation backend availability.
+///
+/// This is the honest mutation-path classification produced by hardwared at
+/// startup. It deliberately preserves the distinction between a proven
+/// backend (`Supported`), a structurally absent mutation capability
+/// (`Unsupported`), a temporary discovery failure (`TemporarilyUnavailable`)
+/// and an authorization failure (`PermissionDenied`) instead of collapsing
+/// everything into a single bool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BatteryMutationStatus {
+    /// A proven production mutation backend (effective threshold reader +
+    /// typed asusd client) is installed.
+    Supported,
+    /// Mutation capability is structurally absent (no effective threshold
+    /// source discovered, no hardware support).
+    Unsupported,
+    /// A known/expected backend is temporarily unavailable (startup
+    /// discovery failed for a non-structural reason).
+    TemporarilyUnavailable,
+    /// Mutation exists but current authorization evidence denies it.
+    PermissionDenied,
+    /// No evidence about mutation availability.
+    Unknown,
+}
+
+/// Stable wire values for `Hardware1.BatteryMutationStatus`.
+pub mod battery_mutation_wire {
+    use super::BatteryMutationStatus;
+
+    /// Proven production mutation backend.
+    pub const SUPPORTED: u8 = 0;
+    /// Mutation capability structurally absent.
+    pub const UNSUPPORTED: u8 = 1;
+    /// Known backend temporarily unavailable.
+    pub const TEMPORARILY_UNAVAILABLE: u8 = 2;
+    /// Mutation denied by authorization evidence.
+    pub const PERMISSION_DENIED: u8 = 3;
+    /// No evidence.
+    pub const UNKNOWN: u8 = 4;
+
+    /// Encode typed status into the D-Bus wire value.
+    pub fn to_wire(status: BatteryMutationStatus) -> u8 {
+        match status {
+            BatteryMutationStatus::Supported => SUPPORTED,
+            BatteryMutationStatus::Unsupported => UNSUPPORTED,
+            BatteryMutationStatus::TemporarilyUnavailable => TEMPORARILY_UNAVAILABLE,
+            BatteryMutationStatus::PermissionDenied => PERMISSION_DENIED,
+            BatteryMutationStatus::Unknown => UNKNOWN,
+        }
+    }
+
+    /// Decode a wire value; unknown values produce `None` so callers can
+    /// classify them as `Unknown` instead of inventing a known state.
+    pub fn from_wire(raw: u8) -> Option<BatteryMutationStatus> {
+        match raw {
+            SUPPORTED => Some(BatteryMutationStatus::Supported),
+            UNSUPPORTED => Some(BatteryMutationStatus::Unsupported),
+            TEMPORARILY_UNAVAILABLE => Some(BatteryMutationStatus::TemporarilyUnavailable),
+            PERMISSION_DENIED => Some(BatteryMutationStatus::PermissionDenied),
+            UNKNOWN => Some(BatteryMutationStatus::Unknown),
+            _ => None,
+        }
+    }
+}
+
 #[async_trait]
 pub trait BatteryMutationBackend: Send + Sync {
     async fn set_charge_limit(&self, percent: u8)
     -> Result<BatteryMutationReadback, ProviderError>;
+
+    /// Report the typed runtime availability of this mutation backend.
+    ///
+    /// This is read-only evidence used by capability probing; it never
+    /// performs I/O and never mutates hardware.
+    fn mutation_status(&self) -> BatteryMutationStatus;
 }
 
 /// Internal compatibility backend; it never writes the kernel directly.
@@ -231,6 +302,10 @@ where
         percent: u8,
     ) -> Result<BatteryMutationReadback, ProviderError> {
         self.set_charge_limit(percent).await
+    }
+
+    fn mutation_status(&self) -> BatteryMutationStatus {
+        BatteryMutationStatus::Supported
     }
 }
 

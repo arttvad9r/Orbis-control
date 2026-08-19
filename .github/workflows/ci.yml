@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flake-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Evaluate flake
+        run: nix flake check --no-build --print-build-logs
+
+      - name: Build Rust workspace check
+        run: nix build .#checks.x86_64-linux.default --print-build-logs
+
+      - name: Build hardwared lifecycle VM check
+        run: nix build .#checks.x86_64-linux.hardwared-lifecycle --print-build-logs
+
+      - name: Build Performance mutation VM check
+        run: nix build .#checks.x86_64-linux.performance-mutation-vm --print-build-logs
+
+      - name: Build Battery mutation VM check
+        run: nix build .#checks.x86_64-linux.battery-mutation-vm --print-build-logs
+
+      - name: Check full flake
+        run: nix flake check --print-build-logs

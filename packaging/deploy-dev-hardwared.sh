@@ -39,15 +39,32 @@ fi
 # ─── BUILD ─────────────────────────────────────────────────────────
 # Собираем НАРЯДНЫЙ пакет orbis-hardwared (только daemon, без GUI/Slint).
 # Build time: ~1-2 min (clean) / ~10-20s (incremental).
+# --print-out-paths пишет store path в stdout; stderr оставляем на терминале,
+# чтобы progress/messages Nix не смешивались с машинно-читаемым результатом.
 echo "→ [BUILD] Собираем orbis-hardwared через nix build…"
 cd "$PROJECT_ROOT"
-nix build .#orbis-hardwared --max-jobs 1 --cores 4 --print-out-paths \
-  > /tmp/orbis-build-path.txt 2>&1
 
-BUILD_PATH="$(cat /tmp/orbis-build-path.txt)"
+BUILD_OUTPUT_FILE="$(mktemp /tmp/orbis-build-path.XXXXXX)"
+trap 'rm -f "$BUILD_OUTPUT_FILE"' EXIT
+
+if ! nix build .#orbis-hardwared --max-jobs 1 --cores 4 --print-out-paths \
+    > "$BUILD_OUTPUT_FILE"; then
+  echo "ERROR: nix build завершился с ненулевым exit code"
+  exit 1
+fi
+
+mapfile -t BUILD_PATHS < <(sed '/^[[:space:]]*$/d' "$BUILD_OUTPUT_FILE")
+if (( ${#BUILD_PATHS[@]} != 1 )); then
+  echo "ERROR: nix build --print-out-paths вернул ${#BUILD_PATHS[@]} путей (ожидается 1)"
+  if (( ${#BUILD_PATHS[@]} > 0 )); then
+    printf '  %s\n' "${BUILD_PATHS[@]}"
+  fi
+  exit 1
+fi
+
+BUILD_PATH="${BUILD_PATHS[0]}"
 if [[ ! -d "$BUILD_PATH" ]]; then
-  echo "ERROR: nix build завершился ошибкой"
-  cat /tmp/orbis-build-path.txt
+  echo "ERROR: output path не является существующей директорией: $BUILD_PATH"
   exit 1
 fi
 echo "✓ [BUILD] Пакет: $BUILD_PATH"

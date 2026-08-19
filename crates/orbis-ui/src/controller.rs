@@ -66,6 +66,29 @@ pub fn write_allows_mutation(status: CapabilityStatus) -> bool {
     )
 }
 
+/// Единый user-facing disabled reason для mutation capability.
+///
+/// Возвращает `None`, когда mutation разрешена (Supported /
+/// SupportedWithRequirement), иначе короткий нейтральный текст, точно
+/// отражающий `CapabilityAvailability`. Это единственный mapping
+/// `CapabilityAvailability -> reason`; каждый control использует его, не
+/// дублируя логику.
+pub fn mutation_unavailable_reason(availability: CapabilityAvailability) -> Option<String> {
+    match availability {
+        CapabilityAvailability::Supported => None,
+        CapabilityAvailability::ReadOnly => Some("Read-only".to_string()),
+        CapabilityAvailability::Unsupported => Some("Not supported on this system".to_string()),
+        CapabilityAvailability::BackendMissing => {
+            Some("Required backend is not available".to_string())
+        }
+        CapabilityAvailability::TemporarilyUnavailable => {
+            Some("Temporarily unavailable".to_string())
+        }
+        CapabilityAvailability::PermissionDenied => Some("Permission denied".to_string()),
+        CapabilityAvailability::Unknown => Some("Availability is unknown".to_string()),
+    }
+}
+
 /// Состояние готовности/доступности Battery Charge Limit.
 ///
 /// Отделено от `charge_limit_enabled` (фактический hardware/backend state):
@@ -206,8 +229,12 @@ pub struct UiState {
     pub gpu_access_value: i32,
     /// Capability availability: Performance Mode read/write support.
     pub perf_capability: CapabilityAvailability,
+    /// User-facing disabled reason for Performance mutation (None when writable).
+    pub perf_unavailable_reason: Option<String>,
     /// Capability availability: Battery Charge Limit read/write support.
     pub charge_limit_capability: CapabilityAvailability,
+    /// User-facing disabled reason for Charge Limit mutation (None when writable).
+    pub charge_limit_unavailable_reason: Option<String>,
     /// Capability availability: GPU Power state read support.
     pub gpu_power_capability: CapabilityAvailability,
     /// Capability availability: GPU MUX state read support.
@@ -219,6 +246,11 @@ pub struct UiState {
     /// Хранятся как display-строки: "—" = значение ещё не получено или
     /// отсутствует у backend. Production не показывает mock/placeholder
     /// значения до первого refresh.
+    ///
+    /// `telemetry_fresh` — true после успешного authoritative refresh, false
+    /// после failed refresh. Когда false, отображаемые значения являются
+    /// последним успешным снимком и НЕ должны выглядеть как актуальные.
+    pub telemetry_fresh: bool,
     pub cpu_temp: String,
     /// Температура dGPU, °C ("—" = неизвестно).
     pub gpu_temp: String,
@@ -251,6 +283,8 @@ pub struct UiState {
     pub fan_curve_writable: bool,
     /// Capability availability: Fan Curves read/write support.
     pub fan_curve_capability: CapabilityAvailability,
+    /// User-facing disabled reason for Fan Curve mutation (None when writable).
+    pub fan_curve_unavailable_reason: Option<String>,
     /// Выбранный вентилятор: 0=CPU, 1=GPU.
     pub fan_selected: i32,
     /// Выбранный lossless asusd профиль: 0=Balanced, 1=Performance, 2=Quiet, 3=LowPower.
@@ -388,10 +422,13 @@ impl UiState {
             gpu_mux_value: 0,
             gpu_access_value: 0,
             perf_capability: CapabilityAvailability::Unknown,
+            perf_unavailable_reason: None,
             charge_limit_capability: CapabilityAvailability::Unknown,
+            charge_limit_unavailable_reason: None,
             gpu_power_capability: CapabilityAvailability::Unknown,
             gpu_mux_capability: CapabilityAvailability::Unknown,
             gpu_access_capability: CapabilityAvailability::Unknown,
+            telemetry_fresh: false,
             cpu_temp,
             gpu_temp,
             cpu_fan_rpm,
@@ -412,6 +449,7 @@ impl UiState {
             fan_curve_state: FanCurveHwState::Loading,
             fan_curve_writable: false,
             fan_curve_capability: CapabilityAvailability::Unknown,
+            fan_curve_unavailable_reason: None,
             fan_selected: 0,         // CPU
             fan_profile_selected: 0, // Balanced
             fan_curve_temps: [0; 8],
@@ -439,10 +477,16 @@ impl UiState {
         if let Some(cap) = snapshot.capability(FeatureId::Performance) {
             self.perf_capability = CapabilityAvailability::from_status(cap.status);
             self.perf_writable = write_allows_mutation(cap.operations.write.status);
+            self.perf_unavailable_reason = mutation_unavailable_reason(
+                CapabilityAvailability::from_status(cap.operations.write.status),
+            );
         }
         if let Some(cap) = snapshot.capability(FeatureId::ChargeLimit) {
             self.charge_limit_capability = CapabilityAvailability::from_status(cap.status);
             self.charge_limit_writable = write_allows_mutation(cap.operations.write.status);
+            self.charge_limit_unavailable_reason = mutation_unavailable_reason(
+                CapabilityAvailability::from_status(cap.operations.write.status),
+            );
         }
         if let Some(cap) = snapshot.capability(FeatureId::GpuPower) {
             self.gpu_power_capability = CapabilityAvailability::from_status(cap.status);
@@ -456,6 +500,9 @@ impl UiState {
         if let Some(cap) = snapshot.capability(FeatureId::FanCurves) {
             self.fan_curve_capability = CapabilityAvailability::from_status(cap.status);
             self.fan_curve_writable = write_allows_mutation(cap.operations.write.status);
+            self.fan_curve_unavailable_reason = mutation_unavailable_reason(
+                CapabilityAvailability::from_status(cap.operations.write.status),
+            );
         }
     }
 
@@ -464,6 +511,7 @@ impl UiState {
     /// Используется production interactive startup: до первого authoritative
     /// `Telemetry` refresh mock fixture значения не должны отображаться.
     pub fn reset_telemetry(&mut self) {
+        self.telemetry_fresh = false;
         self.cpu_temp = "—".into();
         self.gpu_temp = "—".into();
         self.cpu_fan_rpm = "—".into();
@@ -477,6 +525,15 @@ impl UiState {
         self.power_ac = "—".into();
     }
 
+    /// Пометить telemetry как stale после failed refresh.
+    ///
+    /// Отображаемые значения остаются последним успешным снимком, но
+    /// `telemetry_fresh` становится false, чтобы UI не показывал их как
+    /// актуальные.
+    pub fn mark_telemetry_stale(&mut self) {
+        self.telemetry_fresh = false;
+    }
+
     /// Обновить telemetry-поля из authoritative `Telemetry` snapshot.
     ///
     /// Каждое поле обновляется независимо: отсутствующие (None) поля
@@ -485,6 +542,7 @@ impl UiState {
     pub fn update_telemetry(&mut self, telemetry: &orbis_core::telemetry::Telemetry) {
         use orbis_core::fan::FanId;
 
+        self.telemetry_fresh = true;
         self.cpu_temp = format_celsius(telemetry.cpu_temp);
         self.gpu_temp = format_celsius(telemetry.gpu_temp);
 
@@ -575,8 +633,8 @@ impl UiState {
         let mut temps = [0i32; 8];
         let mut pwms = [0i32; 8];
         for (i, pt) in curve.points.iter().take(8).enumerate() {
-            temps[i] = pt.temp.get() as i32;
-            pwms[i] = pt.pwm.get() as i32;
+            temps[i] = i32::from(pt.temp.get());
+            pwms[i] = i32::from(pt.pwm.get());
         }
         self.fan_curve_temps = temps;
         self.fan_curve_pwms = pwms;
@@ -585,14 +643,18 @@ impl UiState {
 
     /// Build `FanCurvePoints` from editor state for mutation.
     ///
-    /// Returns `None` if any temp/pwm value is out of the valid newtype range.
+    /// Returns `None` if any temp/pwm value cannot be represented by the wire
+    /// primitive or violates the domain newtype range. Narrowing is checked
+    /// before constructing newtypes so values such as PWM 256 cannot wrap to 0.
     pub fn build_fan_curve_points(&self) -> Option<orbis_providers::traits::FanCurvePoints> {
         use orbis_core::newtypes::{FanPwm, TemperatureC};
         let mut temps = [TemperatureC::new(0).ok()?; 8];
         let mut pwms = [FanPwm::new(0).ok()?; 8];
         for i in 0..8 {
-            temps[i] = TemperatureC::new(self.fan_curve_temps[i] as i16).ok()?;
-            pwms[i] = FanPwm::new(self.fan_curve_pwms[i] as u8).ok()?;
+            let temp = i16::try_from(self.fan_curve_temps[i]).ok()?;
+            let pwm = u8::try_from(self.fan_curve_pwms[i]).ok()?;
+            temps[i] = TemperatureC::new(temp).ok()?;
+            pwms[i] = FanPwm::new(pwm).ok()?;
         }
         Some(orbis_providers::traits::FanCurvePoints { temps, pwms })
     }
@@ -1181,6 +1243,78 @@ mod tests {
         assert_eq!(s.gpu_selected, before.gpu_selected);
     }
 
+    #[test]
+    fn telemetry_freshness_tracks_refresh_success() {
+        // Initially not fresh (no authoritative refresh yet).
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.reset_telemetry();
+        assert!(!s.telemetry_fresh);
+
+        // Successful refresh marks fresh.
+        s.update_telemetry(&sample_telemetry());
+        assert!(s.telemetry_fresh);
+
+        // Failed refresh marks stale but preserves the last values.
+        s.mark_telemetry_stale();
+        assert!(!s.telemetry_fresh);
+        assert_eq!(s.cpu_temp, "46°C"); // last successful value preserved
+        assert_eq!(s.battery_percent, "100%");
+    }
+
+    #[test]
+    fn ac_online_false_differs_from_unavailable() {
+        // Some(false) = on battery (a real value), None = unavailable.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.reset_telemetry();
+
+        let mut t = sample_telemetry();
+        t.ac_online = Some(false);
+        s.update_telemetry(&t);
+        assert_eq!(s.ac_online, "On battery");
+
+        let mut t = sample_telemetry();
+        t.ac_online = None;
+        s.update_telemetry(&t);
+        assert_eq!(s.ac_online, "—");
+    }
+
+    #[test]
+    fn fan_rpm_zero_is_valid_not_no_data() {
+        // RPM 0 is a valid physical value (fan stopped), distinct from "no data".
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.reset_telemetry();
+
+        let mut t = sample_telemetry();
+        t.fans = vec![orbis_core::telemetry::FanTelemetry {
+            fan: orbis_core::fan::FanId::Cpu,
+            rpm: orbis_core::newtypes::Rpm::new(0).unwrap(),
+            percent: None,
+        }];
+        s.update_telemetry(&t);
+        assert_eq!(s.cpu_fan_rpm, "0 rpm");
+
+        // No fan data at all → unknown placeholder.
+        let mut t = sample_telemetry();
+        t.fans.clear();
+        s.update_telemetry(&t);
+        assert_eq!(s.cpu_fan_rpm, "—");
+    }
+
+    #[test]
+    fn absent_telemetry_shows_unknown_not_zero() {
+        // Missing telemetry must render as the unknown placeholder, never "0".
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.reset_telemetry();
+        let t = orbis_core::telemetry::Telemetry::empty();
+        s.update_telemetry(&t);
+        assert_eq!(s.cpu_temp, "—");
+        assert_eq!(s.gpu_temp, "—");
+        assert_eq!(s.battery_percent, "—");
+        assert_eq!(s.ac_online, "—");
+        assert_eq!(s.cpu_fan_rpm, "—");
+        assert_eq!(s.gpu_fan_rpm, "—");
+    }
+
     // -----------------------------------------------------------------------
     // Fan Curve profile-aware read tests
     // -----------------------------------------------------------------------
@@ -1264,5 +1398,510 @@ mod tests {
             orbis_core::profile::AsusdFanProfile::Quiet,
             orbis_core::profile::AsusdFanProfile::LowPower
         );
+    }
+
+    #[test]
+    fn fan_curve_points_reject_integer_narrowing_overflow() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.fan_curve_temps = [50; 8];
+        s.fan_curve_pwms = [100; 8];
+        assert!(s.build_fan_curve_points().is_some());
+
+        s.fan_curve_temps[0] = i32::from(i16::MAX) + 1;
+        assert!(s.build_fan_curve_points().is_none());
+
+        s.fan_curve_temps[0] = 50;
+        s.fan_curve_pwms[0] = 256;
+        assert!(s.build_fan_curve_points().is_none());
+
+        s.fan_curve_pwms[0] = -1;
+        assert!(s.build_fan_curve_points().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Runtime capability mapping: registry → controller state
+    // -----------------------------------------------------------------------
+
+    /// Build a `CapabilityRegistrySnapshot` with the given capabilities
+    /// and return it. Helper for controller capability mapping tests.
+    fn registry_with(
+        entries: Vec<(orbis_core::FeatureId, orbis_core::capability::Capability)>,
+    ) -> orbis_capabilities::CapabilityRegistrySnapshot {
+        let mut builder = orbis_capabilities::CapabilityRegistryBuilder::new(
+            1,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        for (id, cap) in entries {
+            builder.add(id, cap).unwrap();
+        }
+        builder.build().unwrap()
+    }
+
+    fn cap(
+        status: CapabilityStatus,
+        read: CapabilityStatus,
+        write: CapabilityStatus,
+    ) -> orbis_core::capability::Capability {
+        use orbis_core::capability::{CapabilityOperations, OperationCapability};
+        orbis_core::capability::Capability::new(status).with_operations(CapabilityOperations {
+            read: OperationCapability::new(read),
+            write: OperationCapability::new(write),
+        })
+    }
+
+    #[test]
+    fn battery_read_write_supported_maps_to_controller() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.charge_limit_capability, CapabilityAvailability::Supported);
+        assert!(s.charge_limit_writable);
+        assert_eq!(s.charge_limit_unavailable_reason, None);
+    }
+
+    #[test]
+    fn battery_read_supported_write_unsupported_maps_to_controller() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Unsupported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        // Overall status is Supported (read is Supported), but write is
+        // Unsupported → not writable. Controller uses write status for gating.
+        assert_eq!(s.charge_limit_capability, CapabilityAvailability::Supported);
+        assert!(!s.charge_limit_writable);
+        assert_eq!(
+            s.charge_limit_unavailable_reason.as_deref(),
+            Some("Not supported on this system")
+        );
+    }
+
+    #[test]
+    fn battery_backend_missing_maps_to_controller() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+                CapabilityStatus::BackendMissing,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(
+            s.charge_limit_capability,
+            CapabilityAvailability::BackendMissing
+        );
+        assert!(!s.charge_limit_writable);
+    }
+
+    #[test]
+    fn battery_permission_denied_maps_to_controller() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        // PermissionDenied on read → overall PermissionDenied.
+        // Write stays Unsupported (no write evidence).
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::PermissionDenied,
+                CapabilityStatus::Unsupported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(
+            s.charge_limit_capability,
+            CapabilityAvailability::PermissionDenied
+        );
+        assert!(!s.charge_limit_writable);
+    }
+
+    #[test]
+    fn battery_write_temporarily_unavailable_does_not_enable_mutation() {
+        // Read is fine, but the mutation backend is temporarily unavailable:
+        // the UI must NOT enable the write control. The distinction is
+        // preserved in the capability availability, not collapsed to a bool.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.charge_limit_capability, CapabilityAvailability::Supported);
+        assert!(!s.charge_limit_writable);
+        // write_allows_mutation rejects TemporarilyUnavailable directly.
+        assert!(!write_allows_mutation(
+            CapabilityStatus::TemporarilyUnavailable
+        ));
+    }
+
+    #[test]
+    fn performance_read_write_supported_maps_to_controller() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::Performance,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.perf_capability, CapabilityAvailability::Supported);
+        assert!(s.perf_writable);
+    }
+
+    #[test]
+    fn performance_write_temporarily_unavailable_does_not_enable_mutation() {
+        // Read is fine, but the Performance mutation backend is temporarily
+        // unavailable: the UI must NOT enable the write control. The
+        // distinction is preserved, not collapsed to a bool.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::Performance,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.perf_capability, CapabilityAvailability::Supported);
+        assert!(!s.perf_writable);
+        // write_allows_mutation rejects TemporarilyUnavailable directly.
+        assert!(!write_allows_mutation(
+            CapabilityStatus::TemporarilyUnavailable
+        ));
+    }
+
+    #[test]
+    fn performance_write_permission_denied_does_not_enable_mutation() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::Performance,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::PermissionDenied,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.perf_writable);
+        assert!(!write_allows_mutation(CapabilityStatus::PermissionDenied));
+    }
+
+    #[test]
+    fn one_unavailable_domain_does_not_affect_others() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![
+            (
+                orbis_core::FeatureId::ChargeLimit,
+                cap(
+                    CapabilityStatus::BackendMissing,
+                    CapabilityStatus::BackendMissing,
+                    CapabilityStatus::BackendMissing,
+                ),
+            ),
+            (
+                orbis_core::FeatureId::Performance,
+                cap(
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                ),
+            ),
+            (
+                orbis_core::FeatureId::GpuPower,
+                cap(
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Unsupported,
+                ),
+            ),
+        ]);
+        s.update_capabilities(&snapshot);
+        // Battery is BackendMissing.
+        assert_eq!(
+            s.charge_limit_capability,
+            CapabilityAvailability::BackendMissing
+        );
+        assert!(!s.charge_limit_writable);
+        // Performance is Supported + writable — independent of Battery.
+        assert_eq!(s.perf_capability, CapabilityAvailability::Supported);
+        assert!(s.perf_writable);
+        // GPU Power is Supported but read-only — independent of Battery.
+        assert_eq!(s.gpu_power_capability, CapabilityAvailability::Supported);
+    }
+
+    #[test]
+    fn fan_curve_writable_matches_write_operation_status() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        // Write = Supported.
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.fan_curve_capability, CapabilityAvailability::Supported);
+        assert!(s.fan_curve_writable);
+
+        // Write = Unsupported.
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::ReadOnly,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Unsupported,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.fan_curve_capability, CapabilityAvailability::ReadOnly);
+        assert!(!s.fan_curve_writable);
+    }
+
+    #[test]
+    fn fan_curve_write_temporarily_unavailable_does_not_enable_mutation() {
+        // Read is fine, but the fan curve mutation backend is temporarily
+        // unavailable: the UI must NOT enable the write control. The
+        // distinction is preserved, not collapsed to a bool.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert_eq!(s.fan_curve_capability, CapabilityAvailability::Supported);
+        assert!(!s.fan_curve_writable);
+        assert!(!write_allows_mutation(
+            CapabilityStatus::TemporarilyUnavailable
+        ));
+    }
+
+    #[test]
+    fn fan_curve_write_permission_denied_does_not_enable_mutation() {
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::PermissionDenied,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.fan_curve_writable);
+        assert!(!write_allows_mutation(CapabilityStatus::PermissionDenied));
+    }
+
+    #[test]
+    fn mutation_unavailable_reason_maps_each_availability() {
+        // The single shared mapping must produce a distinct, honest reason for
+        // every non-writable availability and None for Supported.
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::Supported),
+            None
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::ReadOnly).as_deref(),
+            Some("Read-only")
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::Unsupported).as_deref(),
+            Some("Not supported on this system")
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::BackendMissing).as_deref(),
+            Some("Required backend is not available")
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::TemporarilyUnavailable).as_deref(),
+            Some("Temporarily unavailable")
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::PermissionDenied).as_deref(),
+            Some("Permission denied")
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::Unknown).as_deref(),
+            Some("Availability is unknown")
+        );
+    }
+
+    #[test]
+    fn battery_reasons_distinguish_statuses() {
+        // PermissionDenied and TemporarilyUnavailable must not be masked as a
+        // generic unavailable.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::PermissionDenied,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.charge_limit_writable);
+        assert_eq!(
+            s.charge_limit_unavailable_reason.as_deref(),
+            Some("Permission denied")
+        );
+
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::ChargeLimit,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.charge_limit_writable);
+        assert_eq!(
+            s.charge_limit_unavailable_reason.as_deref(),
+            Some("Temporarily unavailable")
+        );
+    }
+
+    #[test]
+    fn performance_reasons_distinguish_statuses() {
+        // BackendMissing and Unknown must not be masked as unsupported.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::Performance,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::BackendMissing,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.perf_writable);
+        assert_eq!(
+            s.perf_unavailable_reason.as_deref(),
+            Some("Required backend is not available")
+        );
+
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::Performance,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Unknown,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.perf_writable);
+        assert_eq!(
+            s.perf_unavailable_reason.as_deref(),
+            Some("Availability is unknown")
+        );
+    }
+
+    #[test]
+    fn fan_curve_reasons_distinguish_statuses() {
+        // Unknown and PermissionDenied must not be masked as unsupported.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::Unknown,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.fan_curve_writable);
+        assert_eq!(
+            s.fan_curve_unavailable_reason.as_deref(),
+            Some("Availability is unknown")
+        );
+
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![(
+            orbis_core::FeatureId::FanCurves,
+            cap(
+                CapabilityStatus::Supported,
+                CapabilityStatus::Supported,
+                CapabilityStatus::PermissionDenied,
+            ),
+        )]);
+        s.update_capabilities(&snapshot);
+        assert!(!s.fan_curve_writable);
+        assert_eq!(
+            s.fan_curve_unavailable_reason.as_deref(),
+            Some("Permission denied")
+        );
+    }
+
+    #[test]
+    fn unavailable_write_does_not_disable_independent_read_domains() {
+        // Battery write PermissionDenied must not affect Performance or GPU
+        // read capability in the same controller state.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        let snapshot = registry_with(vec![
+            (
+                orbis_core::FeatureId::ChargeLimit,
+                cap(
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::PermissionDenied,
+                ),
+            ),
+            (
+                orbis_core::FeatureId::Performance,
+                cap(
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                ),
+            ),
+            (
+                orbis_core::FeatureId::GpuPower,
+                cap(
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Supported,
+                    CapabilityStatus::Unsupported,
+                ),
+            ),
+        ]);
+        s.update_capabilities(&snapshot);
+        // Battery write denied, but read capability still present.
+        assert!(!s.charge_limit_writable);
+        assert_eq!(
+            s.charge_limit_unavailable_reason.as_deref(),
+            Some("Permission denied")
+        );
+        // Performance remains writable.
+        assert!(s.perf_writable);
+        assert_eq!(s.perf_unavailable_reason, None);
+        // GPU Power read remains Supported.
+        assert_eq!(s.gpu_power_capability, CapabilityAvailability::Supported);
     }
 }

@@ -13,7 +13,6 @@ name = "orbis-control"
 path = "src/main.rs"
 
 [dependencies]
-serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
@@ -21,9 +20,9 @@ async-trait = { workspace = true }
 zbus = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-clap = { workspace = true }
 slint = { workspace = true }
 orbis-core = { workspace = true }
+orbis-config = { workspace = true }
 orbis-capabilities = { workspace = true }
 orbis-application = { path = "../orbis-application", version = "0.1.0" }
 # Production read-only Battery backend поверх session D-Bus protocol.
@@ -31,12 +30,7 @@ orbis-session-client = { path = "../orbis-session-client", version = "0.1.0" }
 # Прямая зависимость на provider traits для worker; default-features=false,
 # чтобы не добавлять новых причин включения mock в production (mock уже идёт
 # транзитивно через orbis-sessiond на текущем этапе).
-orbis-providers = {
-    path = "../orbis-providers",
-    version = "0.1.0",
-    default-features = false,
-    features = ["mock"],
-}
+orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }
 orbis-sessiond = { workspace = true }
 orbis-test-support = { workspace = true }
 image = { workspace = true }

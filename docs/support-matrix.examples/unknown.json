@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "models": [
+    {
+      "model": "EXAMPLE-UNKNOWN",
+      "capabilities": [
+        {
+          "id": "performance",
+          "read": {
+            "status": "unknown",
+            "evidence": [
+              {
+                "level": "UNKNOWN",
+                "references": ["fixture: no authoritative read evidence"]
+              }
+            ]
+          },
+          "write": {
+            "status": "unknown",
+            "evidence": [
+              {
+                "level": "UNKNOWN",
+                "references": ["fixture: no authoritative write evidence"]
+              }
+            ]
+          },
+          "note": "Schema fixture only; not a hardware support claim."
+        }
+      ]
+    }
+  ]
+}

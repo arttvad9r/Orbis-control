@@ -1,385 +1,183 @@
 # Roadmap
 
-> Роль: **FUTURE PLAN**. Roadmap задаёт архитектурные milestones без сроков.
-> Фактическая готовность — в [`current-state.md`](current-state.md).
+> Роль: **FUTURE PLAN**. Актуальная очередность работ без календарных обещаний.
+> Фактическое состояние и evidence — в [`current-state.md`](current-state.md).
+> Обновлено: **2026-08-19**.
 
 ## Ordering principles
 
-- Сначала read-only integration и capability evidence, затем writes.
-- Mock backend сохраняется для deterministic tests и offscreen rendering.
-- Каждый milestone должен завершаться честным current-state update.
-- Hardware-specific implementation не переносится в UI/domain.
-- Новый privileged component не создаётся без отдельного доказанного use case.
-
-## Milestone 1 — Real read-only Battery state in GUI
+1. Сначала green build/CI и чистая интеграционная линия.
+2. Затем read-only evidence и capability-local failure handling.
+3. Только потом privileged mutation для конкретной доказанной операции.
+4. Read/write evidence всегда независимы.
+5. Никаких runtime model-name tables вместо typed probes.
+6. `Accepted` не считается `Applied`; authoritative observed state требует подтверждения.
+7. Live hardware claims делаются только по dated revision-scoped evidence.
 
-**Status: COMPLETED / LIVE-VALIDATED** (2026-08-09).
+## Milestone 0 — Repository/integration baseline
 
-**Goal:** подключить интерактивный GUI к существующему
-`orbis-session-client → sessiond → UPower` path, сохранив mock для tests и
-offscreen screenshots.
-
-**Why (на момент планирования):** daemon/client vertical slice уже
-live-validated, но пользовательский UI показывал mock state. Этот integration gap
-закрыт данным milestone; формулировка сохраняет историческую мотивацию.
+**Status: ACTIVE**
 
-**Entry conditions:**
+Цель: один понятный production baseline вместо разросшегося дерева Draft/validation веток.
 
-- Session1 getter, client conversion и sessiond lifecycle green;
-- Nix user service live-validated;
-- authoritative UI worker/application invariants сохранены.
+Done:
 
-**Definition of done (выполнен):**
+- Rust toolchain приведён к 1.87, совместимому с locked dependency graph;
+- UPower startup coupling исправлен: Battery failure capability-local;
+- NixOS UPower default добавлен без hard lifecycle dependency;
+- preferences stack консолидирован;
+- window-state foundation интегрирован;
+- release evidence taxonomy и security-boundary docs интегрированы;
+- устаревшие/одноразовые audit/validation PR закрываются как superseded.
 
-- running GUI открывает session connection вне session-client constructors;
-- Battery current/enabled приходят из sessiond;
-- отсутствующие bounds остаются unknown, без подстановки 40/100/5 как hardware;
-- read-only backend не предлагает успешную mutation;
-- mock остаётся для unit tests и `--screenshot`;
-- backend unavailable/invalid payload отображаются как явный status/error;
-- targeted UI/client tests и relevant workspace checks green;
-- live-validated: daemon absent → Unavailable без mock fallback; daemon present →
-  Ready со значением, совпадающим с authoritative D-Bus baseline; read-only
-  slider behavior зафиксирован исторически, а production mutation control
-  закрыт отдельным Battery GUI milestone.
+Remaining gate:
 
-**Result/notes:** split composition реализован (`ApplicationRuntime` с
-primitive GPU services, Battery и Performance; один sequential loop;
-FIFO/barriers/coalescing сохранены). MockProvider используется только в
-tests/offscreen/deterministic scenarios. Обнаружены два gap'а,
-вынесены в отдельные milestones: packaging runtime correctness (LD_LIBRARY_PATH)
-и GUI diagnostics (tracing initialization).
-
-**Risks/dependencies (закрыты):** ранее worker generic требовал один provider с
-Performance+GPU+Battery; split-дизайн устранил это требование.
-
-## Milestone 2 — Packaging runtime correctness
-
-**Status: COMPLETED / LIVE-VALIDATED** (2026-08-09).
-
-**Goal:** packaged GUI должен запускаться напрямую без ручного
-`LD_LIBRARY_PATH`.
-
-**Why:** `nix build .#orbis-control` PASS, но при live запуске packaged GUI
-требовал ручной LD_LIBRARY_PATH: runtime/dlopen библиотеки загружаются через
-dlopen/libloading и не были обычными DT_NEEDED/RUNPATH dependencies.
-
-**Entry conditions:**
-
-- текущий GUI/session composition code green (Milestone 1);
-- отсутствие несвязанных изменений.
-
-**Definition of done (выполнен):**
-
-- `nix build .#orbis-control` PASS;
-- direct packaged `result/bin/orbis-control` startup;
-- без ручного LD_LIBRARY_PATH;
-- runtime/dlopen зависимости предоставляются декларативно (wrapper);
-- live GUI startup повторно подтверждён (packaged GUI открывает окно без
-  ручного окружения);
-- `nix flake check` PASS, 273 Rust tests PASS;
-- loader errors отсутствуют; Battery без daemon корректно показал Unavailable;
-  Performance/GPU UI сохранён.
-
-**Result/notes:** исправление — стандартный Nix `makeWrapper` с минимальным
-declarative `LD_LIBRARY_PATH` для подтверждённого runtime set: wayland,
-libxkbcommon, fontconfig, libglvnd. EGL предоставляется через vendor-neutral
-`libglvnd` (Mesa driver не hard-coded). Обёрнут только `orbis-control`;
-`orbis-sessiond` и `orbisctl` не обёрнуты. Runtime libraries находятся в Nix
-closure.
-
-## Milestone 3 — GUI diagnostics / tracing initialization
-
-**Status: COMPLETED / LIVE-VALIDATED** (2026-08-09).
-
-**Goal:** инициализировать tracing subscriber в GUI, чтобы существующие
-`tracing::warn!`/`debug!` попадали в полезный runtime log.
-
-**Why:** ранее GUI tracing не инициализирован; диагностические события
-(включая `battery: refresh недоступен`) молча терялись — это затрудняло
-операционную диагностику (например, отсутствие sessiond требовало visual-only
-evidence).
-
-**Entry conditions:** packaging runtime correctness закрыт (Milestone 2).
-
-**Definition of done (выполнен):**
-
-- production GUI инициализирует tracing subscriber;
-- semantics `RUST_LOG`/EnvFilter определены;
-- существующие `tracing::warn!` реально появляются в stderr/log;
-- отсутствие sessiond можно диагностировать без visual-only evidence;
-- duplicate/global subscriber initialization корректно обрабатывается;
-- packaged GUI live validation подтверждает diagnostics.
-
-**Result/notes:**
-
-- default filter без `RUST_LOG` = `warn`;
-- `RUST_LOG`/EnvFilter: `RUST_LOG=debug` live-validated;
-- отсутствие sessiond видно в stderr: существующий Battery refresh WARN
-  (ServiceUnknown) наблюдается в packaged GUI stderr;
-- duplicate-safe initialization через non-panicking `try_init()`;
-- packaged live validation passed (273 Rust tests, nix flake check, nix build).
-
-## Milestone 4 — Real read-only ASUS providers
-
-**Status: ACTIVE — read-only MVP COMPLETED / LIVE-VALIDATED; fan/telemetry pending.**
-
-**Goal:** добавить доказанные read-only providers для приоритетных user-visible
-areas: Performance, GPU concepts, fan/telemetry и доступные ASUS properties.
-
-**Why:** расширить production visibility до write design и проверить provider
-selection на реальном hardware.
-
-**Entry conditions:** capability discovery умеет честно классифицировать
-отсутствующие/ошибочные endpoints; имеются dated probes для target backend/version.
-
-**Sequencing (внутри milestone, evidence-driven):**
-
-1. Performance read-only provider — READ-ONLY AUDIT + минимальный production
-   Performance provider — **COMPLETED / LIVE-VALIDATED**
-   (`KernelPerformanceProvider`, symbolic kernel `platform_profile` ABI; live
-   ignored integration test PASS); **Performance Session1 + GUI integration
-   COMPLETED / LIVE-VALIDATED** (expose `KernelPerformanceProvider` через
-   Session1/session-client → worker → GUI; current + available совпадают с raw
-   kernel; без mock fallback; initial refresh only; controls read-only;
-   Scenario A daemon absent → Unavailable; Scenario B packaged sessiond →
-   Balanced/{Silent,Balanced,Turbo} — совпало с raw; никаких writes).
-2. GPU concepts read-only providers — **COMPLETED / LIVE-VALIDATED** (GPU
-   runtime power sub-concept, ADR 0005 split traits, MUX/access evidence +
-   `ArmouryGpuProvider`, read-only Session1 GPU exposure, GUI read-only GPU
-   integration: production GUI отображает Power/MUX/Access через
-   session-client capability providers из одной session connection; без mock
-   fallback; Scenario A daemon absent → три Unavailable; Scenario B packaged
-   sessiond → Power=Active, MUX=Integrated, Access=Unblocked — совпало с raw
-   supergfxd Power=0, sysfs mux=1, dgpu_disable=0; product
-    Eco/Standard/Ultimate/Optimized product path остаётся
-    `Unsupported`/`Unavailable` в production, controls disabled; MockProvider
-    остаётся только для tests/fixtures; никаких writes).
-3. fan/other proven ASUS reads — pending.
-4. telemetry только по доказанным источникам — pending.
-
-Следующий ACTIVE substep (после read-only MVP):
-
-**Performance controlled mutation — COMPLETED / LIVE-VALIDATED** (Milestone 5
-foundations): узкий write path через Hardware1/hardwared, polkit, fixed kernel
-writer и authoritative read-back доказан production GUI cycle. Незавершёнными
-остаются GPU product policy/mutation, fan/telemetry (substeps 3–4) и UX/polish
-(Milestone 7); Battery mutation завершена и live-validated.
-
-Milestone 4 целиком **НЕ закрывается**: fan/telemetry (substeps 3–4) остаются
-pending; product GPU policy/mutation — pending.
-
-Technical note: worker composition теперь проходит через
-`ApplicationRuntime`/composition module; дальнейшее расширение не должно
-создавать неявную global registry и остаётся отдельным архитектурным вопросом.
-
-Pending остаётся: pending/action provider (отдельно: текущий `ActionRequirement`
-относится к product requested mode и НЕ должен автоматически использоваться
-для supergfxd `PendingUserAction`); mutation.
-
-**Definition of done:**
-
-- asusd/supergfxd/sysfs используются только там, где evidence подтверждает
-  semantics;
-- physical MUX, access, power и pending state не объединены;
-- raw enum/units mappings покрыты fixtures/tests;
-- reads не будят dGPU без необходимости;
-- unsupported sections скрыты или объяснены, без crashes.
-
-**Risks/dependencies:** backend version differences, raw enum ambiguity,
-несогласованные system services и incomplete hardware evidence.
-
-## Read-only MVP (достигнут)
-
-**COMPLETED / LIVE-VALIDATED** (2026-08-09).
-
-Production GUI реально показывает Battery Charge Limit, Performance
-(current + available), GPU Power/MUX/Access через session path; все real
-sections имеют честные Loading/Ready/Unavailable; без mock fallback; sessiond
-absent → честный Unavailable. Все mutation controls в production
-read-only/disabled. Это **не** означает завершённость Orbis в целом.
-
-Следующие крупные направления остаются отдельными (привязка к milestones):
-
-1. **Performance controlled mutation** (Milestone 5) — **COMPLETED /
-   LIVE-VALIDATED**: [ADR 0006](adr/0006-privileged-performance-write.md),
-   kernel `platform_profile` через узкий `orbis-hardwared`, polkit и
-   authoritative read-back; production GUI `Balanced → Silent → Balanced`
-   подтвердил ровно два valid calls/writes;
-2. **Battery mutation** (Milestone 5) — **COMPLETED / LIVE-VALIDATED**:
-   compatibility backend через единственного asusd owner, configured/effective/
-   Session1 read-back и controlled GUI `100 → 80 → 100` подтверждены; exact
-   Hardware1 sequence `[80, 100]`, total `2`, без retries. Архитектура зафиксирована
-   в [ADR 0007](adr/0007-battery-mutation-backend.md);
-3. **GPU staged mutation contract** (Milestone 5; [ADR 0008](adr/0008-supergfxd-staged-gpu-mutation.md)
-    принят; `Hybrid ↔ Integrated` READ/CONTRACT layer и private P2P fake tests
-    pending; live mutation не разрешена). Product GpuMode backend mapping всё
-    ещё NOT PROVEN;
-4. **fan/telemetry** (Milestone 4, substeps 3–4; только по доказанным
-   источникам);
-5. **UX/polish** (Milestone 7 — error/status UX, CLI diagnostics).
-
-## Milestone 5 — Controlled mutation foundations
-
-**Status: ACTIVE — Performance и Battery substeps COMPLETED / LIVE-VALIDATED;
-GPU mutation pending.**
-
-**Goal:** реализовать первый узкий production write path только для операции с
-доказанными capability, range/semantics и privilege boundary.
-
-**Why:** read support не доказывает безопасность записи.
-
-### Completed substep — Performance
-
-- production deployment: generation 80, `orbis-hardwared` auto-start через
-  `multi-user.target`, system D-Bus ownership и sandbox live-validated;
-- GUI controls enabled только после Hardware1 owner probe;
-- direct caller → Hardware1 → hardwared → polkit → fixed
-  `platform_profile` write → hardwared read-back;
-- `AppService` выполняет fresh Session1 post-write read-back;
-- controlled live GUI validation PASS: ровно `wire 0` и `wire 1`, final state
-  равен initial.
+- `nix flake check` должен быть green на актуальном hardening HEAD;
+- после green CI hardening переводится в `main`;
+- remote validation refs удаляются отдельно, когда доступен git/branch-delete интерфейс.
 
-GPU live mutation, fan control, real telemetry и broader UX polish не отмечаются как
-completed и остаются отдельными следующими этапами. Battery GUI mutation
-completed; отдельными pending scopes остаются GPU contract implementation/live
-mutation, fan control,
-telemetry и UX polish.
+## Milestone 1 — Existing production vertical slices
 
-**Architecture:** принята в [ADR 0006](adr/0006-privileged-performance-write.md)
-(Performance profile через kernel `platform_profile` + узкий `orbis-hardwared`;
-GUI/sessiond unprivileged; polkit action; validate → один write → read-back →
-success только при совпадении).
+**Status: COMPLETED with revision-scoped live evidence**
 
-**Entry conditions:**
+- Battery read.
+- Battery controlled mutation with read-back.
+- Performance read.
+- Performance controlled mutation with read-back.
+- GPU primitive reads: power / physical MUX / access policy.
+- Narrow Hardware1 privilege boundary.
 
-- read-only provider и capability proof stable;
-- backend write API и permissions подтверждены dated evidence;
-- error/status UX готов показывать partial/read-back failures;
-- выбран один конкретный owner, отсутствует конфликтующий writer.
+Эти результаты не означают поддержку product GPU mode или всех ASUS устройств.
 
-**Definition of done:**
+## Milestone 2 — Production resilience and lifecycle
 
-- validation до write;
-- typed error mapping;
-- authoritative read-back;
-- tests для unsupported, denied, invalid, backend failure и read-back failure;
-- hardware operation opt-in и отдельно live-validated;
-- никакого universal root helper.
-
-**Risks/dependencies:** unsafe guessed ranges, firmware-latched behavior,
-privilege escalation, conflict с asusd/system policy.
-
-## Milestone 6 — Persistence and automation semantics
-
-**Goal:** определить, что является user intent, confirmed hardware state и
-pending state; подключить versioned config без ложного applied state.
-
-**Why:** persistent settings до стабильных capability/write semantics могут
-повторно применять неподдерживаемые или опасные значения.
-
-**Entry conditions:** хотя бы один controlled mutation path и стабильная
-authoritative state model.
-
-**Definition of done:**
-
-- миграции/backup/atomic write покрыты integration tests;
-- unsupported values не сохраняются как applied;
-- startup/resume automation сравнивает current state перед действием;
-- ownership/conflict semantics явны;
-- no polling/retry loops, маскирующих races.
-
-**Risks/dependencies:** stale config после backend/hardware change, automation
-conflicts, resume lifecycle.
-
-## Milestone 7 — Error/status UX and diagnostics
-
-**Goal:** сделать degraded/unknown/read-only state понятным без обращения к
-логам.
-
-**Entry conditions:** runtime capability/error data существует.
-
-**Definition of done:**
-
-- section-level loading/error/read-only states;
-- actionable backend/reason details;
-- pending/reboot/logout state не выглядит applied;
-- anonymized diagnostics export;
-- CLI получает read-only status/diagnostics вместо stub.
-
-**Risks/dependencies:** утечка hardware identifiers, слишком общие errors,
-расхождение GUI и CLI semantics.
-
-## Milestone 8 — Packaging and installation maturity
-
-**Goal:** перейти от validated Nix development package к устойчивой установке и
-обновлению.
-
-**Entry conditions:** real GUI/session integration и service lifecycle stable.
-
-**Definition of done:**
-
-- persistent NixOS enablement documented and tested;
-- dead module options либо реализованы, либо удалены отдельным change;
-- D-Bus/service activation policy определена;
-- desktop/AppStream assets и uninstall behavior готовы;
-- non-Nix packaging добавляется только с reproducible checks.
-
-**Risks/dependencies:** user-session target lifecycle, package/backend version
-compatibility, duplicated service ownership.
-
-## Milestone 9 — Broader hardware support
-
-**Goal:** расширять support по evidence-driven device profiles, не по общим ASUS
-предположениям.
-
-**Entry conditions:** probe format и privacy process stable; providers умеют
-возвращать Unknown честно.
-
-**Definition of done:**
-
-- каждый новый device profile имеет dated read-only evidence;
-- differences покрыты fixtures/mapping tests;
-- unknown constraints не заменяются defaults;
-- hardware writes для новой модели проходят отдельную validation.
-
-**Risks/dependencies:** firmware/kernel/backend drift, privacy of probe exports,
-малое количество доступных test devices.
-
-## Architecture consolidation (архитектурный этап)
-
-**Status: ACTIVE — composition refactor и production Mock isolation COMPLETED;
-Capability Registry и legacy GPU migration PLANNED.** Направление зафиксировано в
-[ADR 0010](adr/0010-architecture-evolution.md) после source audit. Это
-архитектурный этап, а не отдельный feature milestone; его пункты выполняются
-отдельными последующими задачами и не входят в scope текущей
-документационной работы.
-
-**Goal:** устранить накопленный архитектурный долг, не меняя runtime-поведение
-в рамках этого этапа.
-
-**Scope (без реализации сейчас):**
-
-- **application composition refactor** — **COMPLETED**: `run_worker` принимает
-  `ApplicationRuntime`, construction вынесен в composition module;
-- **runtime Capability Registry** — превратить `orbis-capabilities` из
-  report/fixture assembly в полноценный runtime discovery system, строящий
-  capabilities из фактических providers/probes;
-- **production Mock removal** — **COMPLETED**: production GPU composition
-  использует `GpuPrimitiveServices` без `MockProvider`; `MockProvider` остаётся
-  для tests/offscreen/deterministic scenarios;
-- **GPU split migration** — завершить миграцию с legacy `GpuProvider` на
-  capability-specific interfaces.
-
-**Definition of done (для будущего этапа):**
-
-- `run_worker` composition вынесен в отдельный слой — **COMPLETED**;
-- runtime capability discovery реализован и покрыт tests;
-- production path не использует `MockProvider` — **COMPLETED**;
-- legacy `GpuProvider` заменён capability-specific interfaces (после проверки
-  usages).
-
-**Risks/dependencies:** миграция legacy `GpuProvider` требует проверки всех
-usages; runtime Capability Registry не должен ломать authoritative read-back и
-no-cache semantics. Production GPU product policy/backend остаётся отдельным
-future/deferred этапом и не следует автоматически из Mock isolation.
+**Status: PARTIAL**
+
+Completed:
+
+- Session1 survives missing/unready UPower; Battery rediscovery is lazy.
+- Independent capabilities do not depend on Battery startup success.
+
+Next:
+
+- reconcile Desired / Observed / Pending domain foundation with the integrated config baseline;
+- integrate inert lifecycle events;
+- design reconciliation separately: startup/resume compares authoritative observed state before any action;
+- no retry/poll loops that mask races or ownership conflicts.
+
+## Milestone 3 — User persistence and desktop integration
+
+**Status: PARTIAL**
+
+Completed:
+
+- versioned safe `preferences.toml`;
+- atomic + durable writes and permission preservation;
+- persisted Dark/Light theme;
+- persisted Start Minimized;
+- redacted config warning diagnostics;
+- independent XDG window-state store.
+
+Next:
+
+- resolve/integrate XDG Run on Startup stack against current preferences/UI baseline;
+- integrate desktop/AppStream metadata only after packaged validation is green;
+- keep automation policy and desired hardware state separate from UI preferences.
+
+## Milestone 4 — Fans and telemetry
+
+**Status: IMPLEMENTED/TESTED; acceptance incomplete**
+
+Telemetry:
+
+- production sysfs provider exists;
+- worker-owned polling exists;
+- failures preserve honest availability/freshness semantics.
+
+Fans:
+
+- active curve authority remains sysfs;
+- profile-specific reads go through Session1 → sessiond → asusd;
+- Hardware1 typed mutation path exists;
+- Quiet/LowPower profile identity is preserved losslessly.
+
+Gate before completion:
+
+- dated live fan mutation validation with authoritative post-write read-back and restored final hardware state;
+- no universal ranges/defaults inferred from one model.
+
+## Milestone 5 — Diagnostics and supportability
+
+**Status: ACTIVE in Draft stack**
+
+Target architecture:
+
+- application-owned immutable diagnostics snapshot;
+- privacy-safe application/system/hardware identity sources;
+- service presence independent from capability support;
+- GPU primitives remain independent;
+- telemetry freshness preserved;
+- display observation read-only;
+- presentation DTO separated from collectors;
+- text/JSON export uses a strict allowlist and versioned schema.
+
+Next:
+
+- consolidate the already validated read-only diagnostics stack into the current hardening baseline;
+- wire Diagnostics UI only from the typed snapshot;
+- integrate privacy-bounded exporters and their end-to-end regression;
+- never collect raw journals, arbitrary files, full environment dumps, serial/UUID/asset-tag fields or shell output by default.
+
+## Milestone 6 — GPU product policy
+
+**Status: BLOCKED**
+
+Eco / Standard / Ultimate / Optimized are product policy, not aliases for one primitive.
+
+Before implementation:
+
+- prove mapping between product intent and independent MUX/access/power primitives;
+- define pending/reboot/logout requirements explicitly;
+- define owner and authoritative read-back;
+- add P2P/fake-system tests;
+- only then permit controlled live mutation.
+
+Until then production product-mode controls remain unsupported/disabled.
+
+## Milestone 7 — Power limits and extended ASUS controls
+
+**Status: BLOCKED / UNKNOWN by concept**
+
+Power limits:
+
+- typed scaffolding exists;
+- production provider, units/ranges/default evidence and Hardware1 per-field contract do not.
+
+Extended controls:
+
+- Panel OD / keyboard / Aura have narrower foundations;
+- MiniLED / Screen Auto Brightness remain read-only where write evidence is absent;
+- AniMe/Slash and boot sound/MCU powersave/panel HD/eGPU require concept-specific evidence/design.
+
+Do not add generic firmware writers or enable features from DMI model names.
+
+## Milestone 8 — CLI and release packaging
+
+**Status: NOT COMPLETE**
+
+- Replace the `orbisctl` stub with a real read/diagnostic CLI before calling CLI support complete.
+- Integrate desktop/AppStream assets into the Nix package and validate installed metadata.
+- Maintain support matrix evidence separately from runtime capability detection.
+- Run full packaged acceptance after green CI and integration into `main`.
+
+## Release gate
+
+A beta/release candidate requires all of the following:
+
+- `main` contains the intended production baseline;
+- `cargo fmt/check/test/clippy` relevant integration tier is green;
+- `nix flake check` is green;
+- package builds and required metadata is installed/validated;
+- no Draft branch is being treated as integrated functionality;
+- hardware mutation claims have exact dated live evidence;
+- remaining unsupported controls are explicitly disabled/unknown rather than simulated.

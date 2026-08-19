@@ -1,6 +1,6 @@
-# Минимально поддерживаемая версия Rust.
-# edition 2024 требует Rust 1.85+.
+# Pinned minimum toolchain compatible with the locked dependency graph.
+# `fontdue 0.9.4` uses integer sign-cast APIs stabilized in Rust 1.87.
 [toolchain]
-channel = "1.85"
+channel = "1.87"
 components = ["rustfmt", "clippy"]
 profile = "minimal"

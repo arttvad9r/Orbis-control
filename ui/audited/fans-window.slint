@@ -1,0 +1,76 @@
+import { UiState } from "model.slint";
+import { FanCurveEditor } from "fan-curve-editor-v3.slint";
+import { ToggleRow, PreviewSliderRow } from "../components/visual-controls.slint";
+import { SectionCard, ActionButton } from "common.slint";
+import { Palette } from "../themes/dark.slint";
+
+export component FansWindow inherits Window {
+    width: 760px;
+    height: 590px;
+    title: "Orbis Control — Fans + Power";
+    background: Palette.window-background;
+
+    in-out property <UiState> ui-state;
+    property <bool> factory-reset-pending: false;
+    property <bool> fan-clamp-preview: true;
+    property <float> hysteresis-up-preview: 3;
+    property <float> hysteresis-down-preview: 3;
+    property <string> calibration-status: "Calibrate";
+
+    callback fan-changed(int);
+    callback fan-profile-changed(int);
+    callback fan-temp-point-changed(int, int);
+    callback fan-pwm-point-changed(int, int);
+    callback fan-apply-clicked(bool);
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 7px;
+        FanCurveEditor {
+            height: 460px;
+            state: root.ui-state.fan-curve-state;
+            writable: root.ui-state.fan-curve-writable;
+            error-state: root.ui-state.fan-curve-error;
+            dirty: root.ui-state.fan-curve-dirty;
+            fan-selected: root.ui-state.fan-selected;
+            profile-selected: root.ui-state.fan-profile-selected;
+            temp-0: root.ui-state.fan-temp-0; temp-1: root.ui-state.fan-temp-1; temp-2: root.ui-state.fan-temp-2; temp-3: root.ui-state.fan-temp-3;
+            temp-4: root.ui-state.fan-temp-4; temp-5: root.ui-state.fan-temp-5; temp-6: root.ui-state.fan-temp-6; temp-7: root.ui-state.fan-temp-7;
+            pwm-0: root.ui-state.fan-pwm-0; pwm-1: root.ui-state.fan-pwm-1; pwm-2: root.ui-state.fan-pwm-2; pwm-3: root.ui-state.fan-pwm-3;
+            pwm-4: root.ui-state.fan-pwm-4; pwm-5: root.ui-state.fan-pwm-5; pwm-6: root.ui-state.fan-pwm-6; pwm-7: root.ui-state.fan-pwm-7;
+            fan-changed(i) => { root.factory-reset-pending = false; root.fan-changed(i); }
+            profile-changed(i) => { root.factory-reset-pending = false; root.fan-profile-changed(i); }
+            temp-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-temp-point-changed(i, v); }
+            pwm-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-pwm-point-changed(i, v); }
+        }
+
+        SectionCard {
+            height: 62px;
+            HorizontalLayout { padding: 7px; spacing: 9px; alignment: center;
+                ToggleRow { width: 145px; label: "Clamp to Grid"; checked <=> root.fan-clamp-preview; }
+                PreviewSliderRow { horizontal-stretch: 1; label: "Hysteresis up"; unit: "°"; minimum: 0; maximum: 10; value <=> root.hysteresis-up-preview; }
+                PreviewSliderRow { horizontal-stretch: 1; label: "Hysteresis down"; unit: "°"; minimum: 0; maximum: 10; value <=> root.hysteresis-down-preview; }
+                ActionButton { width: 104px; label: root.calibration-status; clicked => { root.calibration-status = root.calibration-status == "Calibrated preview" ? "Calibrate" : "Calibrated preview"; } }
+            }
+        }
+
+        HorizontalLayout { height: 32px; spacing: 8px; alignment: center;
+            Rectangle { width: 3px; height: 16px; border-radius: 1.5px; background: root.ui-state.fan-curve-error ? Palette.error : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning : Palette.success; }
+            Text {
+                text: root.ui-state.fan-curve-error ? "Apply failed" : root.factory-reset-pending ? "Factory defaults pending · no hardware write yet" : !root.ui-state.fan-curve-writable ? "Read only" : root.ui-state.fan-curve-dirty ? "Modified" : "Current";
+                font-size: 9px;
+                color: root.ui-state.fan-curve-error ? Palette.error : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning : Palette.text-secondary;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            ActionButton { width: 116px; label: "Factory Defaults"; disabled: !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error; clicked => { root.factory-reset-pending = true; } }
+            ActionButton {
+                width: 166px;
+                label: root.factory-reset-pending ? "Apply Factory Defaults" : "Apply Custom Fan Curve";
+                accent: true;
+                disabled: !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
+                clicked => { let reset = root.factory-reset-pending; root.fan-apply-clicked(reset); if (reset) { root.factory-reset-pending = false; } }
+            }
+        }
+    }
+}

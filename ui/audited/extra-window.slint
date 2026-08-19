@@ -1,0 +1,167 @@
+import { ScrollView } from "std-widgets.slint";
+import { BindingRow, SelectRow, NumericRow, TextInputRow, ToggleRow, ChoiceChip, PreviewSliderRow } from "../components/visual-controls.slint";
+import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
+import { Palette } from "../themes/dark.slint";
+
+export component ExtraWindow inherits Window {
+    width: 560px;
+    height: 760px;
+    title: "Orbis Control — Extra";
+    background: Palette.window-background;
+
+    property <[string]> binding-actions: ["Default", "None", "Mute", "Volume Up", "Volume Down", "Mic", "Screen", "Aura", "Performance Mode", "GPU Mode", "Custom Command"];
+    property <int> m1-action: 0; property <int> m2-action: 0; property <int> m3-action: 0; property <int> m4-action: 0; property <int> m5-action: 0;
+    property <int> fnf4-action: 0; property <int> fnc-action: 0; property <int> fnv-action: 0; property <int> fnenter-action: 0;
+    property <string> m1-param: ""; property <string> m2-param: ""; property <string> m3-param: ""; property <string> m4-param: ""; property <string> m5-param: "";
+    property <string> fnf4-param: ""; property <string> fnc-param: ""; property <string> fnv-param: ""; property <string> fnenter-param: "";
+    property <float> backlight-brightness: 3;
+    property <int> keyboard-speed: 1;
+    property <int> battery-timeout: 60;
+    property <int> plugged-timeout: 0;
+    property <bool> xg-mobile: false;
+    property <bool> auto-clamshell: false; property <bool> topmost: false; property <bool> no-overdrive: false;
+    property <bool> boot-sound: true; property <bool> keystone-sound: true; property <bool> usb-c: true; property <bool> gpu-apps: true;
+    property <bool> nv-platform: true; property <bool> status-led: true; property <bool> number-pad: true; property <bool> aspm: false; property <bool> standby-networking: false;
+    property <int> hibernate-after: 60; property <int> igpu-memory: 0; property <int> p-cores: 8; property <int> e-cores: 8;
+    property <string> acpi-command: ""; property <string> acpi-param: ""; property <int> optimal-brightness: 1;
+    property <bool> asusd-service: true; property <bool> supergfx-service: true;
+    property <bool> key-awake: true; property <bool> key-boot: true; property <bool> key-sleep: false; property <bool> key-battery: true;
+    property <bool> logo-awake: true; property <bool> logo-boot: false; property <bool> logo-sleep: false; property <bool> logo-battery: false;
+    property <bool> bar-awake: true; property <bool> bar-boot: true; property <bool> bar-sleep: true; property <bool> bar-battery: false;
+    property <bool> lid-awake: true; property <bool> lid-boot: true; property <bool> lid-sleep: false; property <bool> lid-battery: false;
+    property <string> local-status: "Visual-only controls · no hardware writes";
+
+    function reset-bindings() {
+        root.m1-action = 0; root.m2-action = 0; root.m3-action = 0; root.m4-action = 0; root.m5-action = 0;
+        root.fnf4-action = 0; root.fnc-action = 0; root.fnv-action = 0; root.fnenter-action = 0;
+        root.m1-param = ""; root.m2-param = ""; root.m3-param = ""; root.m4-param = ""; root.m5-param = "";
+        root.fnf4-param = ""; root.fnc-param = ""; root.fnv-param = ""; root.fnenter-param = "";
+        root.local-status = "Bindings reset locally";
+    }
+
+    scroll := ScrollView {
+        width: parent.width;
+        height: parent.height;
+        viewport-width: scroll.width - 18px;
+        viewport-height: 1920px;
+
+        VerticalLayout {
+            width: scroll.width - 18px;
+            height: 1920px;
+            padding-left: 10px; padding-right: 10px; padding-top: 10px; padding-bottom: 10px;
+            spacing: 7px;
+
+            WindowHeader { title: "Extra"; subtitle: "Bindings, backlight and advanced device settings"; }
+            LocalStatus { text: root.local-status; accent: Palette.warning; }
+
+            SectionTitle { title: "Bindings"; detail: "Action + optional parameter"; }
+            SectionCard {
+                height: 410px;
+                VerticalLayout { padding: 9px; spacing: 2px;
+                    BindingRow { key-label: "M1"; actions: root.binding-actions; action-index <=> root.m1-action; parameter <=> root.m1-param; }
+                    BindingRow { key-label: "M2"; actions: root.binding-actions; action-index <=> root.m2-action; parameter <=> root.m2-param; }
+                    BindingRow { key-label: "M3"; actions: root.binding-actions; action-index <=> root.m3-action; parameter <=> root.m3-param; }
+                    BindingRow { key-label: "M4"; actions: root.binding-actions; action-index <=> root.m4-action; parameter <=> root.m4-param; }
+                    BindingRow { key-label: "M5"; actions: root.binding-actions; action-index <=> root.m5-action; parameter <=> root.m5-param; }
+                    BindingRow { key-label: "Fn+F4"; actions: root.binding-actions; action-index <=> root.fnf4-action; parameter <=> root.fnf4-param; }
+                    BindingRow { key-label: "Fn+C"; actions: root.binding-actions; action-index <=> root.fnc-action; parameter <=> root.fnc-param; }
+                    BindingRow { key-label: "Fn+V"; actions: root.binding-actions; action-index <=> root.fnv-action; parameter <=> root.fnv-param; }
+                    BindingRow { key-label: "Fn+NmEnt"; actions: root.binding-actions; action-index <=> root.fnenter-action; parameter <=> root.fnenter-param; }
+                    HorizontalLayout { height: 28px; spacing: 6px;
+                        ActionButton { width: 100px; label: "Reset"; clicked => { root.reset-bindings(); } }
+                        ActionButton { width: 100px; label: "Help"; clicked => { root.local-status = "Choose an action; parameter is optional for commands"; } }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+                }
+            }
+
+            SectionTitle { title: "Backlight"; detail: "Brightness / device states"; }
+            SectionCard {
+                height: 356px;
+                VerticalLayout { padding: 9px; spacing: 3px;
+                    PreviewSliderRow { label: "Brightness"; unit: " / 3"; minimum: 0; maximum: 3; step: 1; value <=> root.backlight-brightness; }
+                    SectionTitle { title: "Device states"; detail: "Awake / Boot / Sleep / Battery"; }
+                    HorizontalLayout { height: 28px; spacing: 4px; Text { width: 76px; text: "Keyboard"; font-size: 9px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.key-awake; clicked => { root.key-awake = !root.key-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.key-boot; clicked => { root.key-boot = !root.key-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.key-sleep; clicked => { root.key-sleep = !root.key-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.key-battery; clicked => { root.key-battery = !root.key-battery; } } }
+                    HorizontalLayout { height: 28px; spacing: 4px; Text { width: 76px; text: "Logo"; font-size: 9px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.logo-awake; clicked => { root.logo-awake = !root.logo-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.logo-boot; clicked => { root.logo-boot = !root.logo-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.logo-sleep; clicked => { root.logo-sleep = !root.logo-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.logo-battery; clicked => { root.logo-battery = !root.logo-battery; } } }
+                    HorizontalLayout { height: 28px; spacing: 4px; Text { width: 76px; text: "Lightbar"; font-size: 9px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.bar-awake; clicked => { root.bar-awake = !root.bar-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.bar-boot; clicked => { root.bar-boot = !root.bar-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.bar-sleep; clicked => { root.bar-sleep = !root.bar-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.bar-battery; clicked => { root.bar-battery = !root.bar-battery; } } }
+                    HorizontalLayout { height: 28px; spacing: 4px; Text { width: 76px; text: "Lid"; font-size: 9px; color: Palette.text-primary; vertical-alignment: center; } ChoiceChip { horizontal-stretch: 1; label: "Awake"; selected: root.lid-awake; clicked => { root.lid-awake = !root.lid-awake; } } ChoiceChip { horizontal-stretch: 1; label: "Boot"; selected: root.lid-boot; clicked => { root.lid-boot = !root.lid-boot; } } ChoiceChip { horizontal-stretch: 1; label: "Sleep"; selected: root.lid-sleep; clicked => { root.lid-sleep = !root.lid-sleep; } } ChoiceChip { horizontal-stretch: 1; label: "Battery"; selected: root.lid-battery; clicked => { root.lid-battery = !root.lid-battery; } } }
+                    ToggleRow { label: "XG Mobile"; checked <=> root.xg-mobile; }
+                    SelectRow { label: "Animation speed"; model: ["Slow", "Normal", "Fast"]; current-index <=> root.keyboard-speed; }
+                    NumericRow { label: "Plugged timeout"; unit: "sec"; minimum: 0; maximum: 3600; step-size: 5; value <=> root.plugged-timeout; }
+                    NumericRow { label: "Battery timeout"; unit: "sec"; minimum: 0; maximum: 3600; step-size: 5; value <=> root.battery-timeout; }
+                }
+            }
+
+            SectionTitle { title: "Other / Settings"; detail: "Compact two-column layout"; }
+            SectionCard {
+                height: 218px;
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 0px;
+                        ToggleRow { label: "Auto clamshell mode"; checked <=> root.auto-clamshell; }
+                        ToggleRow { label: "Always on top"; checked <=> root.topmost; }
+                        ToggleRow { label: "Disable panel overdrive automation"; checked <=> root.no-overdrive; }
+                        ToggleRow { label: "Boot sound"; checked <=> root.boot-sound; }
+                        ToggleRow { label: "Keystone sound"; checked <=> root.keystone-sound; }
+                        ToggleRow { label: "Status LEDs"; checked <=> root.status-led; }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 0px;
+                        ToggleRow { label: "Keep GPU disabled on USB-C charger"; checked <=> root.usb-c; }
+                        ToggleRow { label: "Stop GPU apps when switching to Eco"; checked <=> root.gpu-apps; }
+                        ToggleRow { label: "Manage NVIDIA services with dGPU"; checked <=> root.nv-platform; }
+                        ToggleRow { label: "Touchpad NumberPad"; checked <=> root.number-pad; }
+                        ToggleRow { label: "Disable PCIe ASPM (plugged in)"; checked <=> root.aspm; }
+                        ToggleRow { label: "Disable networking in Modern Standby"; checked <=> root.standby-networking; }
+                    }
+                }
+            }
+
+            SectionTitle { title: "Power"; }
+            SectionCard {
+                height: 50px;
+                NumericRow { x: 12px; y: 7px; width: 360px; label: "Hibernate after"; unit: "min"; minimum: 0; maximum: 1440; step-size: 5; value <=> root.hibernate-after; }
+            }
+
+            SectionTitle { title: "iGPU Memory"; }
+            SectionCard {
+                height: 50px;
+                SelectRow { x: 12px; y: 7px; width: 360px; label: "UMA frame buffer"; model: ["Auto", "512 MB", "1 GB", "2 GB", "4 GB", "8 GB"]; current-index <=> root.igpu-memory; }
+            }
+
+            SectionTitle { title: "CPU Cores"; }
+            SectionCard {
+                height: 124px;
+                NumericRow { x: 12px; y: 8px; width: 360px; label: "Performance cores"; minimum: 1; maximum: 32; value <=> root.p-cores; }
+                NumericRow { x: 12px; y: 46px; width: 360px; label: "Efficiency cores"; minimum: 0; maximum: 32; value <=> root.e-cores; }
+                ActionButton { x: 12px; y: 86px; width: 105px; label: "Apply Cores"; accent: true; clicked => { root.local-status = "CPU core selection applied locally"; } }
+            }
+
+            SectionTitle { title: "ACPI DEVS"; }
+            SectionCard {
+                height: 126px;
+                TextInputRow { x: 12px; y: 8px; width: 400px; label: "Command"; placeholder: "Device command"; text <=> root.acpi-command; }
+                TextInputRow { x: 12px; y: 46px; width: 400px; label: "Parameter"; placeholder: "Value / parameter"; text <=> root.acpi-param; }
+                ActionButton { x: 12px; y: 88px; width: 90px; label: "Send"; accent: true; clicked => { root.local-status = root.acpi-command == "" ? "Enter an ACPI command first" : "ACPI command staged locally"; } }
+            }
+
+            SectionTitle { title: "Optimal Brightness"; }
+            SectionCard {
+                height: 50px;
+                SelectRow { x: 12px; y: 7px; width: 360px; label: "Policy"; model: ["Off", "On Always", "On Battery"]; current-index <=> root.optimal-brightness; }
+            }
+
+            SectionTitle { title: "ASUS Services"; }
+            SectionCard {
+                height: 128px;
+                ToggleRow { x: 12px; y: 5px; width: 360px; label: "asusd"; description: "ASUS platform service"; checked <=> root.asusd-service; }
+                ToggleRow { x: 12px; y: 47px; width: 360px; label: "supergfxd"; description: "GPU lifecycle service"; checked <=> root.supergfx-service; }
+                ActionButton { x: 12px; y: 94px; width: 110px; label: "Start Services"; clicked => { root.asusd-service = true; root.supergfx-service = true; root.local-status = "Services marked running in preview"; } }
+            }
+        }
+    }
+}

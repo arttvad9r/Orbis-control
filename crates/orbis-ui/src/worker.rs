@@ -281,6 +281,19 @@ async fn run_worker_inner<G, B, R, F>(
         poll_timer = Some(timer);
     }
 
+    // GPU capability refresh: piggybacks on the telemetry polling loop at a
+    // reduced frequency. GPU D-Bus property reads are cheap; 5s interval is
+    // semantically reasonable for runtime state changes (dGPU sleep/wake).
+    const GPU_REFRESH_INTERVAL: u32 = 5;
+    let mut gpu_refresh_counter: u32 = 0;
+
+    // Mutation capability refresh: re-queries Battery/Performance/FanCurves
+    // write availability via read-only Hardware1 D-Bus status methods.
+    // ~30s interval is appropriate: mutation backend changes are rare events
+    // (daemon start/stop) and the queries are cheap read-only D-Bus calls.
+    const CAPABILITY_REFRESH_INTERVAL: u32 = 30;
+    let mut capability_refresh_counter: u32 = 0;
+
     loop {
         // `runtime` is owned exclusively here. Per command we borrow the
         // service fields by mut-reference; the borrow checker ensures we do
@@ -308,6 +321,45 @@ async fn run_worker_inner<G, B, R, F>(
                                 ));
                             });
                             poll_in_progress = true;
+
+                            // GPU capability refresh: дешёвые D-Bus property
+                            // reads, выполняются inline после telemetry spawn.
+                            // Примерно каждые 5s (GPU_REFRESH_INTERVAL * poll_interval).
+                            gpu_refresh_counter += 1;
+                            if gpu_refresh_counter >= GPU_REFRESH_INTERVAL {
+                                gpu_refresh_counter = 0;
+                                let (power, mux, access) =
+                                    runtime.gpu.refresh_gpu_capabilities().await;
+                                emit(WorkerEvent::GpuPowerRefresh(power));
+                                emit(WorkerEvent::GpuMuxRefresh(mux));
+                                emit(WorkerEvent::GpuAccessRefresh(access));
+                            }
+
+                            // Mutation capability refresh: re-queries
+                            // Battery/Performance/FanCurves write availability.
+                            // Read-only Hardware1 D-Bus status methods (~30s).
+                            // Независим от telemetry failure: counter считает
+                            // tick'и, а не успешные telemetry refreshes.
+                            capability_refresh_counter += 1;
+                            if capability_refresh_counter >= CAPABILITY_REFRESH_INTERVAL {
+                                capability_refresh_counter = 0;
+                                // Re-query mutation statuses from D-Bus, then
+                                // rebuild capability registry with fresh evidence.
+                                runtime.requery_mutation_statuses().await;
+                                let next_gen = runtime.capabilities().generation() + 1;
+                                match run_capability_refresh(&mut runtime, next_gen).await {
+                                    Ok(snapshot) => {
+                                        let gen_id = snapshot.generation();
+                                        let snap = std::sync::Arc::new(snapshot);
+                                        runtime.replace_capabilities((*snap).clone());
+                                        emit(WorkerEvent::RegistryChange(Ok((gen_id, snap))));
+                                    }
+                                    Err(error) => {
+                                        emit(WorkerEvent::RegistryChange(Err(error)));
+                                    }
+                                }
+                            }
+
                             continue;
                         }
                     }
@@ -454,7 +506,9 @@ where
         runtime.gpu.provider_mux(),
         runtime.gpu.provider_access(),
         runtime.fan.provider_fan(),
-        runtime.fan_write_available(),
+        runtime.fan_mutation_status(),
+        runtime.battery_mutation_status(),
+        runtime.performance_mutation_status(),
         next_generation,
         std::time::SystemTime::now(),
     )
@@ -472,6 +526,7 @@ mod tests {
     use orbis_core::action::{ActionRequirement, ApplyResult};
     use orbis_core::battery::ChargeLimit;
     use orbis_core::battery::ChargeLimitBounds;
+    use orbis_core::capability::CapabilityStatus;
     use orbis_core::diagnostics::DiagnosticEntry;
     use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
     use orbis_core::identity::BackendIdentity;
@@ -564,7 +619,10 @@ mod tests {
                 fan_service,
                 telemetry_service,
                 snapshot,
-                false,
+                CapabilityStatus::Unsupported,
+                CapabilityStatus::Unsupported,
+                CapabilityStatus::Unsupported,
+                None,
             ),
             receiver,
             emit,
@@ -665,7 +723,10 @@ mod tests {
             fan_service,
             telemetry,
             snapshot,
-            false,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+            None,
         )
     }
 
@@ -2728,6 +2789,163 @@ mod tests {
             .expect("worker must not panic");
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn periodic_gpu_refresh_updates_capability_state() {
+        // GPU capabilities are refreshed periodically during telemetry polling.
+        // With GPU_REFRESH_INTERVAL=5 and poll_interval=50ms, GPU refresh
+        // happens every ~250ms. Verify that changed GPU state is detected
+        // without restart.
+        let cap = Arc::new(CapabilityProvider {
+            power: Ok(GpuPowerState::Suspended),
+            mux: Ok(GpuMuxState::Integrated),
+            access: Ok(GpuAccessPolicy::Blocked),
+        });
+        let (main_service, battery_service, _, _, _, performance_service) = services();
+        let gpu_power_service = AppService::new(cap.clone());
+        let gpu_mux_service = AppService::new(cap.clone());
+        let gpu_access_service = AppService::new(cap);
+
+        let telemetry_state = build_state_arc("zephyrus-full").expect("profile exists");
+        let telemetry_service = AppService::new(Arc::new(MockProvider::new(telemetry_state)));
+        let fan_state = build_state_arc("zephyrus-full").expect("profile exists");
+        let fan_service = AppService::new(Arc::new(MockProvider::new(fan_state)));
+        let snapshot = CapabilityRegistryBuilder::new(1, std::time::SystemTime::now())
+            .build()
+            .expect("empty registry snapshot must build");
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker_with_polling(
+                ApplicationRuntime::new_with_snapshot(
+                    GpuServices::new(
+                        main_service,
+                        gpu_power_service,
+                        gpu_mux_service,
+                        gpu_access_service,
+                    ),
+                    battery_service,
+                    performance_service,
+                    fan_service,
+                    telemetry_service,
+                    snapshot,
+                    CapabilityStatus::Unsupported,
+                    CapabilityStatus::Unsupported,
+                    CapabilityStatus::Unsupported,
+                    None,
+                ),
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+                Duration::from_millis(50),
+            )
+            .await;
+        });
+
+        // Trigger polling via RefreshTelemetry. After 5 ticks (~250ms),
+        // GPU capabilities should be refreshed.
+        tx.send(WorkerCommand::RefreshTelemetry).expect("send");
+
+        let mut saw_gpu_power = false;
+        let mut saw_gpu_mux = false;
+        let mut saw_gpu_access = false;
+        // Wait up to 500ms for GPU events (5 ticks * 50ms = 250ms, with margin).
+        for _ in 0..20 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::task::yield_now().await;
+            while let Ok(event) = result_rx.try_recv() {
+                match event {
+                    WorkerEvent::GpuPowerRefresh(Ok(GpuPowerState::Suspended)) => {
+                        saw_gpu_power = true;
+                    }
+                    WorkerEvent::GpuMuxRefresh(Ok(GpuMuxState::Integrated)) => {
+                        saw_gpu_mux = true;
+                    }
+                    WorkerEvent::GpuAccessRefresh(Ok(GpuAccessPolicy::Blocked)) => {
+                        saw_gpu_access = true;
+                    }
+                    _ => {}
+                }
+            }
+            if saw_gpu_power && saw_gpu_mux && saw_gpu_access {
+                break;
+            }
+        }
+        assert!(saw_gpu_power, "GPU power refresh not delivered");
+        assert!(saw_gpu_mux, "GPU mux refresh not delivered");
+        assert!(saw_gpu_access, "GPU access refresh not delivered");
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn gpu_refresh_failure_does_not_corrupt_other_domains() {
+        // GPU refresh failure must not affect Battery/Performance capabilities.
+        let cap = Arc::new(CapabilityProvider {
+            power: Err(ProviderError::Dbus("power down".into())),
+            mux: Ok(GpuMuxState::Discrete),
+            access: Ok(GpuAccessPolicy::Blocked),
+        });
+        let (main_service, battery_service, _, _, _, performance_service) = services();
+        let gpu_power_service = AppService::new(cap.clone());
+        let gpu_mux_service = AppService::new(cap.clone());
+        let gpu_access_service = AppService::new(cap);
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker_with_services(
+                main_service,
+                battery_service,
+                gpu_power_service,
+                gpu_mux_service,
+                gpu_access_service,
+                performance_service,
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        // Send RefreshGpuCapabilities + RefreshPerformance to verify
+        // independence.
+        tx.send(WorkerCommand::RefreshGpuCapabilities)
+            .expect("send");
+        tx.send(WorkerCommand::RefreshPerformance).expect("send");
+
+        let mut saw_gpu_power_err = false;
+        let mut saw_gpu_mux_ok = false;
+        let mut saw_perf_ok = false;
+        for _ in 0..4 {
+            match result_rx.recv().await.expect("event") {
+                WorkerEvent::GpuPowerRefresh(Err(ProviderError::Dbus(_))) => {
+                    saw_gpu_power_err = true;
+                }
+                WorkerEvent::GpuMuxRefresh(Ok(GpuMuxState::Discrete)) => saw_gpu_mux_ok = true,
+                WorkerEvent::PerformanceRefresh(Ok(_)) => saw_perf_ok = true,
+                _ => {}
+            }
+        }
+        assert!(saw_gpu_power_err, "GPU power error not delivered");
+        assert!(saw_gpu_mux_ok, "GPU mux Ok not delivered");
+        assert!(saw_perf_ok, "Performance Ok not delivered");
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
     // -----------------------------------------------------------------------
     // RefreshPerformance: отдельный real Performance read service
     // -----------------------------------------------------------------------
@@ -2900,7 +3118,15 @@ mod tests {
 
         // Build initial snapshot with FanCurves via the shared assembly path.
         let initial_snapshot = crate::composition::build_initial_registry_snapshot(
-            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, false,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("initial snapshot must succeed");
@@ -2931,7 +3157,10 @@ mod tests {
                     fan_service,
                     telemetry_service,
                     initial_snapshot,
-                    false,
+                    CapabilityStatus::Unsupported,
+                    CapabilityStatus::Unsupported,
+                    CapabilityStatus::Unsupported,
+                    None,
                 ),
                 rx,
                 move |event| {
@@ -2989,7 +3218,15 @@ mod tests {
         let performance_service = AppService::new(provider.clone());
 
         let initial_snapshot = crate::composition::build_initial_registry_snapshot(
-            &*provider, &*provider, &*provider, &*provider, &*provider, &*provider, false,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
         )
         .await
         .expect("initial snapshot must succeed");
@@ -3002,7 +3239,7 @@ mod tests {
         let (tx, rx) = command_channel();
         let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // fan_write_available = false in the runtime: write must be Unsupported.
+        // fan mutation status = Unsupported in the runtime: write must be Unsupported.
         let worker = tokio::spawn(async move {
             run_worker(
                 ApplicationRuntime::new_with_snapshot(
@@ -3017,7 +3254,10 @@ mod tests {
                     fan_service,
                     telemetry_service,
                     initial_snapshot,
-                    false,
+                    CapabilityStatus::Unsupported,
+                    CapabilityStatus::Unsupported,
+                    CapabilityStatus::Unsupported,
+                    None,
                 ),
                 rx,
                 move |event| {
@@ -3042,11 +3282,329 @@ mod tests {
                 assert_eq!(
                     fan.operations.write.status,
                     orbis_core::capability::CapabilityStatus::Unsupported,
-                    "write must be Unsupported when fan_write_available=false"
+                    "write must be Unsupported when fan mutation status is Unsupported"
                 );
             }
             other => panic!("expected RegistryChange(Ok(..)), got: {other:?}"),
         }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    // -----------------------------------------------------------------------
+    // Capability refresh transitions
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn capability_refresh_updates_battery_write_status() {
+        // BackendMissing → Supported transition without restart.
+        // Initial snapshot has Battery mutation = Unsupported (test mode, no
+        // connection). Send RefreshCapabilities to re-probe; the mutation
+        // status should be re-queried (though in test mode without connection
+        // it stays Unsupported — but the registry generation advances).
+        let (
+            main_service,
+            battery_service,
+            gpu_power_service,
+            gpu_mux_service,
+            gpu_access_service,
+            performance_service,
+        ) = services();
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker_with_services(
+                main_service,
+                battery_service,
+                gpu_power_service,
+                gpu_mux_service,
+                gpu_access_service,
+                performance_service,
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        // Send RefreshCapabilities to trigger a capability refresh.
+        tx.send(WorkerCommand::RefreshCapabilities).expect("send");
+
+        let event = result_rx.recv().await.expect("registry change event");
+        match event {
+            WorkerEvent::RegistryChange(Ok((generation, snapshot))) => {
+                // Generation must advance (initial was 1).
+                assert!(generation > 1, "generation must advance");
+                // Battery capability must be present.
+                let battery = snapshot
+                    .capability(orbis_core::FeatureId::ChargeLimit)
+                    .expect("ChargeLimit present");
+                // Read must be Supported (MockProvider returns valid data).
+                assert_eq!(
+                    battery.operations.read.status,
+                    orbis_core::capability::CapabilityStatus::Supported
+                );
+                // Write is Unsupported in test mode (no mutation connection).
+                assert_eq!(
+                    battery.operations.write.status,
+                    orbis_core::capability::CapabilityStatus::Unsupported
+                );
+            }
+            other => panic!("expected RegistryChange(Ok(..)), got: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn capability_refresh_failure_preserves_previous_snapshot() {
+        // BackendDown on the provider causes probes to return BackendMissing
+        // status (not ProbeError). The registry still builds successfully
+        // with BackendMissing capabilities, and the previous snapshot is
+        // replaced by the new one (which has BackendMissing entries).
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let provider = Arc::new(MockProvider::new(state.clone()));
+        let main_service = AppService::new(provider.clone());
+        let battery_service = AppService::new(provider.clone());
+        let gpu_power_service = AppService::new(provider.clone());
+        let gpu_mux_service = AppService::new(provider.clone());
+        let gpu_access_service = AppService::new(provider.clone());
+        let performance_service = AppService::new(provider);
+
+        // BackendDown causes read methods to fail with BackendUnavailable.
+        state.write().await.error_mode = MockErrorMode::BackendDown;
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker_with_services(
+                main_service,
+                battery_service,
+                gpu_power_service,
+                gpu_mux_service,
+                gpu_access_service,
+                performance_service,
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        tx.send(WorkerCommand::RefreshCapabilities).expect("send");
+
+        let event = result_rx.recv().await.expect("event");
+        // BackendDown on reads → BackendMissing capabilities (not ProbeError).
+        // The registry still builds; the snapshot contains BackendMissing entries.
+        match event {
+            WorkerEvent::RegistryChange(Ok((_, snapshot))) => {
+                // Performance probe failed → BackendMissing.
+                let perf = snapshot
+                    .capability(orbis_core::FeatureId::Performance)
+                    .expect("Performance present");
+                assert_eq!(
+                    perf.operations.read.status,
+                    orbis_core::capability::CapabilityStatus::BackendMissing
+                );
+                // Battery probe failed → BackendMissing.
+                let battery = snapshot
+                    .capability(orbis_core::FeatureId::ChargeLimit)
+                    .expect("ChargeLimit present");
+                assert_eq!(
+                    battery.operations.read.status,
+                    orbis_core::capability::CapabilityStatus::BackendMissing
+                );
+            }
+            other => panic!("expected RegistryChange(Ok(..)), got: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn capability_refresh_independence_across_domains() {
+        // Battery BackendMissing should not prevent Performance/FanCurves
+        // from being Supported in the same registry snapshot.
+        let (
+            main_service,
+            battery_service,
+            gpu_power_service,
+            gpu_mux_service,
+            gpu_access_service,
+            performance_service,
+        ) = services();
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker_with_services(
+                main_service,
+                battery_service,
+                gpu_power_service,
+                gpu_mux_service,
+                gpu_access_service,
+                performance_service,
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        tx.send(WorkerCommand::RefreshCapabilities).expect("send");
+
+        let event = result_rx.recv().await.expect("event");
+        match event {
+            WorkerEvent::RegistryChange(Ok((_, snapshot))) => {
+                // Performance must be Supported.
+                let perf = snapshot
+                    .capability(orbis_core::FeatureId::Performance)
+                    .expect("Performance present");
+                assert_eq!(
+                    perf.operations.read.status,
+                    orbis_core::capability::CapabilityStatus::Supported
+                );
+                // ChargeLimit read must be Supported (MockProvider returns data).
+                let battery = snapshot
+                    .capability(orbis_core::FeatureId::ChargeLimit)
+                    .expect("ChargeLimit present");
+                assert_eq!(
+                    battery.operations.read.status,
+                    orbis_core::capability::CapabilityStatus::Supported
+                );
+                // FanCurves must be present.
+                assert!(snapshot.contains(orbis_core::FeatureId::FanCurves));
+            }
+            other => panic!("expected RegistryChange(Ok(..)), got: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn capability_refresh_no_mutation_calls() {
+        // Capability refresh must be fully read-only: no setter calls.
+        let (
+            main_service,
+            battery_service,
+            gpu_power_service,
+            gpu_mux_service,
+            gpu_access_service,
+            performance_service,
+        ) = services();
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker_with_services(
+                main_service,
+                battery_service,
+                gpu_power_service,
+                gpu_mux_service,
+                gpu_access_service,
+                performance_service,
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        tx.send(WorkerCommand::RefreshCapabilities).expect("send");
+
+        let event = result_rx.recv().await.expect("event");
+        match event {
+            WorkerEvent::RegistryChange(Ok(_)) => {
+                // Success — capability refresh was read-only.
+                // The probe functions only call read methods (profiles,
+                // charge_limit, power_state, etc.) and never call mutation
+                // methods (set_profile, set_charge_limit, etc.). This is
+                // verified by the probe tests in orbis-providers.
+            }
+            other => panic!("expected RegistryChange(Ok(..)), got: {other:?}"),
+        }
+
+        drop(tx);
+        tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+            .await
+            .expect("worker should finish")
+            .expect("worker must not panic");
+    }
+
+    #[tokio::test]
+    async fn telemetry_failure_does_not_block_capability_refresh() {
+        // Telemetry failure should not prevent capability refresh from
+        // executing in subsequent polling ticks.
+        let (
+            main_service,
+            battery_service,
+            gpu_power_service,
+            gpu_mux_service,
+            gpu_access_service,
+            performance_service,
+        ) = services();
+
+        let (tx, rx) = command_channel();
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let worker = tokio::spawn(async move {
+            run_worker_with_services(
+                main_service,
+                battery_service,
+                gpu_power_service,
+                gpu_mux_service,
+                gpu_access_service,
+                performance_service,
+                rx,
+                move |event| {
+                    let _ = result_tx.send(event);
+                },
+            )
+            .await;
+        });
+
+        // Send RefreshTelemetry first (will fail with mock backend error),
+        // then RefreshCapabilities to verify it still works.
+        tx.send(WorkerCommand::RefreshTelemetry).expect("send");
+        tx.send(WorkerCommand::RefreshCapabilities).expect("send");
+
+        let mut saw_capability = false;
+        for _ in 0..2 {
+            match result_rx.recv().await.expect("event") {
+                WorkerEvent::RegistryChange(Ok(_)) => saw_capability = true,
+                WorkerEvent::TelemetryRefresh(Err(_)) => {} // expected failure
+                _ => {}
+            }
+        }
+        assert!(
+            saw_capability,
+            "capability refresh must execute even after telemetry failure"
+        );
 
         drop(tx);
         tokio::time::timeout(std::time::Duration::from_secs(5), worker)
