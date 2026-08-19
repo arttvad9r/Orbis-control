@@ -13,7 +13,6 @@ name = "orbis-control"
 path = "src/main.rs"
 
 [dependencies]
-serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
@@ -21,7 +20,6 @@ async-trait = { workspace = true }
 zbus = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-clap = { workspace = true }
 slint = { workspace = true }
 orbis-core = { workspace = true }
 orbis-capabilities = { workspace = true }
