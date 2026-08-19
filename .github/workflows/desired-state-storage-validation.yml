@@ -1,0 +1,570 @@
+name: Desired state storage validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  targeted:
+    if: github.head_ref == 'agent/desired-state-storage-validate-trigger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/desired-observed-domain
+          fetch-depth: 0
+      - name: Verify exact stacked base
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "97f88386396380361afbfc26530d2a23f560dd07"
+          ! git ls-remote --exit-code --heads origin refs/heads/agent/desired-state-storage >/dev/null 2>&1
+      - name: Apply desired-state storage foundation
+        run: |
+          set -euo pipefail
+          cat > crates/orbis-config/src/desired_state.rs <<'EOF'
+          //! Generic typed persistence for application-owned desired state.
+          //!
+          //! This layer only reads and writes `desired-state.toml`. It has no
+          //! provider, D-Bus, Hardware1, reconciliation, or execution behavior.
+
+          use std::fs::{self, File, OpenOptions};
+          use std::io::{self, Write};
+          #[cfg(unix)]
+          use std::os::unix::fs::OpenOptionsExt;
+          use std::path::{Path, PathBuf};
+          use std::sync::atomic::{AtomicU64, Ordering};
+          use std::time::{SystemTime, UNIX_EPOCH};
+
+          use serde::{Deserialize, Serialize, de::DeserializeOwned};
+          use thiserror::Error;
+
+          use crate::CONFIG_DIR_NAME;
+
+          /// Desired-state filename owned by Orbis.
+          pub const DESIRED_STATE_FILE: &str = "desired-state.toml";
+          /// Current desired-state storage schema version.
+          pub const DESIRED_STATE_SCHEMA_VERSION: u32 = 1;
+
+          static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+          /// Versioned document wrapping an application-defined typed payload.
+          #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+          #[serde(deny_unknown_fields)]
+          pub struct DesiredStateDocument<T> {
+              schema_version: u32,
+              desired: T,
+          }
+
+          impl<T> DesiredStateDocument<T> {
+              /// Construct a current-version document around typed desired state.
+              pub fn new(desired: T) -> Self {
+                  Self {
+                      schema_version: DESIRED_STATE_SCHEMA_VERSION,
+                      desired,
+                  }
+              }
+
+              /// Storage schema version.
+              pub fn schema_version(&self) -> u32 {
+                  self.schema_version
+              }
+
+              /// Borrow the typed desired-state payload.
+              pub fn desired(&self) -> &T {
+                  &self.desired
+              }
+
+              /// Consume the document and return the typed payload.
+              pub fn into_desired(self) -> T {
+                  self.desired
+              }
+
+              fn validate(&self) -> Result<(), DesiredStateError> {
+                  if self.schema_version != DESIRED_STATE_SCHEMA_VERSION {
+                      return Err(DesiredStateError::UnsupportedVersion(self.schema_version));
+                  }
+                  Ok(())
+              }
+          }
+
+          impl<T: Default> Default for DesiredStateDocument<T> {
+              fn default() -> Self {
+                  Self::new(T::default())
+              }
+          }
+
+          /// XDG path-resolution failures for desired-state storage.
+          #[derive(Debug, Error, Clone, PartialEq, Eq)]
+          pub enum DesiredStatePathError {
+              /// Explicit `XDG_CONFIG_HOME` was empty or relative.
+              #[error("invalid XDG_CONFIG_HOME for desired state: {0:?}; expected an absolute path")]
+              InvalidXdgConfigHome(PathBuf),
+              /// No home directory was available for the XDG fallback.
+              #[error("cannot resolve desired-state path: no home directory is available")]
+              MissingHome,
+              /// Fallback home directory was empty or relative.
+              #[error("invalid home directory for desired-state fallback: {0:?}; expected an absolute path")]
+              InvalidHome(PathBuf),
+          }
+
+          /// Hard desired-state storage failures.
+          #[derive(Debug, Error)]
+          pub enum DesiredStateError {
+              /// XDG path resolution failed.
+              #[error(transparent)]
+              Path(#[from] DesiredStatePathError),
+              /// A filesystem operation failed.
+              #[error("{operation} failed for {path:?}: {source}")]
+              Io {
+                  /// Operation being attempted.
+                  operation: &'static str,
+                  /// Path involved in the failure.
+                  path: PathBuf,
+                  /// Original I/O error.
+                  #[source]
+                  source: io::Error,
+              },
+              /// TOML serialization failed.
+              #[error("desired-state TOML serialization failed: {0}")]
+              Serialize(#[from] toml::ser::Error),
+              /// A future or otherwise unsupported schema version was found.
+              #[error("unsupported desired-state schema version {0}")]
+              UnsupportedVersion(u32),
+              /// Unique same-directory temp allocation failed repeatedly.
+              #[error("could not allocate a unique desired-state temp file in {dir:?}")]
+              TempFileExhausted {
+                  /// Directory where the temp file must live.
+                  dir: PathBuf,
+              },
+          }
+
+          /// Non-fatal invalid-source classification.
+          #[derive(Debug, Clone, PartialEq, Eq)]
+          pub enum DesiredStateWarningKind {
+              /// Source was malformed TOML.
+              MalformedToml(String),
+              /// Mandatory schema version was absent or invalid.
+              InvalidSchemaVersion,
+              /// Current-version document or typed payload failed strict decoding.
+              InvalidSchema(String),
+          }
+
+          /// Preserved invalid-source warning accompanying safe defaults.
+          #[derive(Debug, Clone, PartialEq, Eq)]
+          pub struct DesiredStateWarning {
+              /// Source file left untouched by the load path.
+              pub path: PathBuf,
+              /// Typed warning classification.
+              pub kind: DesiredStateWarningKind,
+          }
+
+          /// Proven source of returned desired state.
+          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          pub enum DesiredStateLoadSource {
+              /// Valid state was decoded from disk.
+              Stored,
+              /// Safe typed defaults were returned.
+              Defaults,
+          }
+
+          /// Result of a non-destructive desired-state load.
+          #[derive(Debug, Clone, PartialEq, Eq)]
+          pub struct DesiredStateLoad<T> {
+              /// Typed state document safe for runtime use.
+              pub state: DesiredStateDocument<T>,
+              /// Proven source of the returned state.
+              pub source: DesiredStateLoadSource,
+              /// Invalid-source warning, if applicable.
+              pub warning: Option<DesiredStateWarning>,
+          }
+
+          /// Resolve `$XDG_CONFIG_HOME/orbis-control` for desired-state storage.
+          pub fn desired_state_dir() -> Result<PathBuf, DesiredStatePathError> {
+              desired_state_dir_with(
+                  std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+                  dirs::home_dir(),
+              )
+          }
+
+          /// Pure desired-state XDG path resolver.
+          pub fn desired_state_dir_with(
+              xdg_config_home: Option<PathBuf>,
+              home: Option<PathBuf>,
+          ) -> Result<PathBuf, DesiredStatePathError> {
+              if let Some(xdg) = xdg_config_home {
+                  if xdg.as_os_str().is_empty() || !xdg.is_absolute() {
+                      return Err(DesiredStatePathError::InvalidXdgConfigHome(xdg));
+                  }
+                  return Ok(xdg.join(CONFIG_DIR_NAME));
+              }
+              match home {
+                  Some(home) if !home.as_os_str().is_empty() && home.is_absolute() => {
+                      Ok(home.join(".config").join(CONFIG_DIR_NAME))
+                  }
+                  Some(home) => Err(DesiredStatePathError::InvalidHome(home)),
+                  None => Err(DesiredStatePathError::MissingHome),
+              }
+          }
+
+          /// Resolve the exact production `desired-state.toml` path.
+          pub fn desired_state_file() -> Result<PathBuf, DesiredStatePathError> {
+              Ok(desired_state_dir()?.join(DESIRED_STATE_FILE))
+          }
+
+          /// Load typed desired state from the production user config location.
+          pub fn load_desired_state<T>() -> Result<DesiredStateLoad<T>, DesiredStateError>
+          where
+              T: DeserializeOwned + Default,
+          {
+              load_desired_state_from_dir(&desired_state_dir()?)
+          }
+
+          /// Save typed desired state to the production user config location.
+          pub fn save_desired_state<T>(
+              state: &DesiredStateDocument<T>,
+          ) -> Result<PathBuf, DesiredStateError>
+          where
+              T: Serialize,
+          {
+              save_desired_state_to_dir(state, &desired_state_dir()?)
+          }
+
+          /// Non-destructively load typed desired state from an explicit directory.
+          pub fn load_desired_state_from_dir<T>(
+              dir: &Path,
+          ) -> Result<DesiredStateLoad<T>, DesiredStateError>
+          where
+              T: DeserializeOwned + Default,
+          {
+              let path = dir.join(DESIRED_STATE_FILE);
+              let text = match fs::read_to_string(&path) {
+                  Ok(text) => text,
+                  Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                      return Ok(default_load(None));
+                  }
+                  Err(source) => return Err(io_failure("read desired state", path, source)),
+              };
+
+              let value: toml::Value = match toml::from_str(&text) {
+                  Ok(value) => value,
+                  Err(error) => {
+                      return Ok(default_load(Some(DesiredStateWarning {
+                          path,
+                          kind: DesiredStateWarningKind::MalformedToml(error.to_string()),
+                      })));
+                  }
+              };
+              let Some(version) = value
+                  .get("schema_version")
+                  .and_then(toml::Value::as_integer)
+                  .and_then(|value| u32::try_from(value).ok())
+              else {
+                  return Ok(default_load(Some(DesiredStateWarning {
+                      path,
+                      kind: DesiredStateWarningKind::InvalidSchemaVersion,
+                  })));
+              };
+              if version != DESIRED_STATE_SCHEMA_VERSION {
+                  return Err(DesiredStateError::UnsupportedVersion(version));
+              }
+
+              match toml::from_str::<DesiredStateDocument<T>>(&text) {
+                  Ok(state) => Ok(DesiredStateLoad {
+                      state,
+                      source: DesiredStateLoadSource::Stored,
+                      warning: None,
+                  }),
+                  Err(error) => Ok(default_load(Some(DesiredStateWarning {
+                      path,
+                      kind: DesiredStateWarningKind::InvalidSchema(error.to_string()),
+                  }))),
+              }
+          }
+
+          /// Atomically save typed desired state into an explicit directory.
+          pub fn save_desired_state_to_dir<T>(
+              state: &DesiredStateDocument<T>,
+              dir: &Path,
+          ) -> Result<PathBuf, DesiredStateError>
+          where
+              T: Serialize,
+          {
+              state.validate()?;
+              let text = toml::to_string_pretty(state)?;
+              fs::create_dir_all(dir).map_err(|source| {
+                  io_failure("create desired-state directory", dir.to_path_buf(), source)
+              })?;
+
+              let final_path = dir.join(DESIRED_STATE_FILE);
+              let existing_permissions = match fs::symlink_metadata(&final_path) {
+                  Ok(metadata) if metadata.file_type().is_file() => Some(metadata.permissions()),
+                  Ok(_) => None,
+                  Err(source) if source.kind() == io::ErrorKind::NotFound => None,
+                  Err(source) => {
+                      return Err(io_failure(
+                          "inspect existing desired-state permissions",
+                          final_path.clone(),
+                          source,
+                      ));
+                  }
+              };
+
+              let (mut temp, temp_path) = create_unique_temp(dir)?;
+              if let Some(permissions) = existing_permissions {
+                  if let Err(source) = temp.set_permissions(permissions) {
+                      drop(temp);
+                      let _ = fs::remove_file(&temp_path);
+                      return Err(io_failure(
+                          "set desired-state temp permissions",
+                          temp_path,
+                          source,
+                      ));
+                  }
+              }
+              if let Err(source) = temp.write_all(text.as_bytes()) {
+                  drop(temp);
+                  let _ = fs::remove_file(&temp_path);
+                  return Err(io_failure("write desired-state temp file", temp_path, source));
+              }
+              if let Err(source) = temp.flush() {
+                  drop(temp);
+                  let _ = fs::remove_file(&temp_path);
+                  return Err(io_failure("flush desired-state temp file", temp_path, source));
+              }
+              if let Err(source) = temp.sync_all() {
+                  drop(temp);
+                  let _ = fs::remove_file(&temp_path);
+                  return Err(io_failure("sync desired-state temp file", temp_path, source));
+              }
+              drop(temp);
+              if let Err(source) = fs::rename(&temp_path, &final_path) {
+                  let _ = fs::remove_file(&temp_path);
+                  return Err(io_failure("rename desired-state temp file", final_path, source));
+              }
+              sync_parent_directory(dir)?;
+              Ok(final_path)
+          }
+
+          fn default_load<T: Default>(warning: Option<DesiredStateWarning>) -> DesiredStateLoad<T> {
+              DesiredStateLoad {
+                  state: DesiredStateDocument::default(),
+                  source: DesiredStateLoadSource::Defaults,
+                  warning,
+              }
+          }
+
+          fn create_unique_temp(dir: &Path) -> Result<(File, PathBuf), DesiredStateError> {
+              for _ in 0..64 {
+                  let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+                  let nanos = SystemTime::now()
+                      .duration_since(UNIX_EPOCH)
+                      .map(|duration| duration.as_nanos())
+                      .unwrap_or(0);
+                  let path = dir.join(format!(
+                      ".{DESIRED_STATE_FILE}.tmp.{}.{}.{}",
+                      std::process::id(), nanos, sequence
+                  ));
+                  let mut options = OpenOptions::new();
+                  options.write(true).create_new(true);
+                  #[cfg(unix)]
+                  options.mode(0o600);
+                  match options.open(&path) {
+                      Ok(file) => return Ok((file, path)),
+                      Err(source) if source.kind() == io::ErrorKind::AlreadyExists => continue,
+                      Err(source) => {
+                          return Err(io_failure("create desired-state temp file", path, source));
+                      }
+                  }
+              }
+              Err(DesiredStateError::TempFileExhausted {
+                  dir: dir.to_path_buf(),
+              })
+          }
+
+          #[cfg(unix)]
+          fn sync_parent_directory(dir: &Path) -> Result<(), DesiredStateError> {
+              let directory = File::open(dir).map_err(|source| {
+                  io_failure("open desired-state directory for sync", dir.to_path_buf(), source)
+              })?;
+              directory.sync_all().map_err(|source| {
+                  io_failure("sync desired-state directory", dir.to_path_buf(), source)
+              })
+          }
+
+          #[cfg(not(unix))]
+          fn sync_parent_directory(_dir: &Path) -> Result<(), DesiredStateError> {
+              Ok(())
+          }
+
+          fn io_failure(operation: &'static str, path: PathBuf, source: io::Error) -> DesiredStateError {
+              DesiredStateError::Io {
+                  operation,
+                  path,
+                  source,
+              }
+          }
+
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+              use orbis_core::DesiredValue;
+
+              #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+              #[serde(deny_unknown_fields)]
+              struct TestIntent {
+                  keyboard_level: DesiredValue<u8>,
+                  profile_index: DesiredValue<u8>,
+              }
+
+              #[test]
+              fn xdg_path_is_user_config_and_never_cwd() {
+                  let td = tempfile::tempdir().unwrap();
+                  let xdg = td.path().join("config");
+                  let home = td.path().join("home");
+                  assert_eq!(
+                      desired_state_dir_with(Some(xdg.clone()), None).unwrap(),
+                      xdg.join(CONFIG_DIR_NAME)
+                  );
+                  assert_eq!(
+                      desired_state_dir_with(None, Some(home.clone())).unwrap(),
+                      home.join(".config").join(CONFIG_DIR_NAME)
+                  );
+                  assert!(desired_state_dir_with(Some(PathBuf::from("relative")), None).is_err());
+              }
+
+              #[test]
+              fn missing_file_returns_typed_defaults_without_creating_file() {
+                  let td = tempfile::tempdir().unwrap();
+                  let load: DesiredStateLoad<TestIntent> =
+                      load_desired_state_from_dir(td.path()).unwrap();
+                  assert_eq!(load.source, DesiredStateLoadSource::Defaults);
+                  assert_eq!(load.state.desired(), &TestIntent::default());
+                  assert!(!td.path().join(DESIRED_STATE_FILE).exists());
+              }
+
+              #[test]
+              fn typed_desired_values_roundtrip() {
+                  let td = tempfile::tempdir().unwrap();
+                  let state = DesiredStateDocument::new(TestIntent {
+                      keyboard_level: DesiredValue::Set(3),
+                      profile_index: DesiredValue::Set(1),
+                  });
+                  save_desired_state_to_dir(&state, td.path()).unwrap();
+                  let load: DesiredStateLoad<TestIntent> =
+                      load_desired_state_from_dir(td.path()).unwrap();
+                  assert_eq!(load.source, DesiredStateLoadSource::Stored);
+                  assert_eq!(load.state, state);
+              }
+
+              #[test]
+              fn malformed_source_returns_defaults_and_is_preserved() {
+                  let td = tempfile::tempdir().unwrap();
+                  let path = td.path().join(DESIRED_STATE_FILE);
+                  let original = "schema_version = 1\n[desired\n";
+                  fs::write(&path, original).unwrap();
+                  let load: DesiredStateLoad<TestIntent> =
+                      load_desired_state_from_dir(td.path()).unwrap();
+                  assert_eq!(load.source, DesiredStateLoadSource::Defaults);
+                  assert!(matches!(
+                      load.warning.as_ref().map(|warning| &warning.kind),
+                      Some(DesiredStateWarningKind::MalformedToml(_))
+                  ));
+                  assert_eq!(fs::read_to_string(path).unwrap(), original);
+              }
+
+              #[test]
+              fn future_schema_is_rejected_without_rewrite() {
+                  let td = tempfile::tempdir().unwrap();
+                  let path = td.path().join(DESIRED_STATE_FILE);
+                  let original = "schema_version = 9\n[desired]\n";
+                  fs::write(&path, original).unwrap();
+                  let error = load_desired_state_from_dir::<TestIntent>(td.path()).unwrap_err();
+                  assert!(matches!(error, DesiredStateError::UnsupportedVersion(9)));
+                  assert_eq!(fs::read_to_string(path).unwrap(), original);
+              }
+
+              #[test]
+              fn load_is_inert_and_does_not_create_side_effect_files() {
+                  let td = tempfile::tempdir().unwrap();
+                  let state = DesiredStateDocument::new(TestIntent {
+                      keyboard_level: DesiredValue::Set(2),
+                      profile_index: DesiredValue::Unset,
+                  });
+                  save_desired_state_to_dir(&state, td.path()).unwrap();
+                  let before: Vec<_> = fs::read_dir(td.path())
+                      .unwrap()
+                      .map(|entry| entry.unwrap().file_name())
+                      .collect();
+                  let _: DesiredStateLoad<TestIntent> =
+                      load_desired_state_from_dir(td.path()).unwrap();
+                  let after: Vec<_> = fs::read_dir(td.path())
+                      .unwrap()
+                      .map(|entry| entry.unwrap().file_name())
+                      .collect();
+                  assert_eq!(before, after);
+              }
+
+              #[cfg(unix)]
+              #[test]
+              fn new_file_is_owner_only_and_temp_is_cleaned() {
+                  use std::os::unix::fs::PermissionsExt;
+                  let td = tempfile::tempdir().unwrap();
+                  let path = save_desired_state_to_dir(
+                      &DesiredStateDocument::new(TestIntent::default()),
+                      td.path(),
+                  )
+                  .unwrap();
+                  assert_eq!(fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+                  assert!(fs::read_dir(td.path()).unwrap().all(|entry| {
+                      !entry
+                          .unwrap()
+                          .file_name()
+                          .to_string_lossy()
+                          .starts_with(".desired-state.toml.tmp.")
+                  }));
+              }
+          }
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/orbis-config/src/lib.rs')
+          s=p.read_text()
+          s=s.replace('pub mod paths;\n','pub mod desired_state;\npub mod paths;\n',1)
+          marker='pub use store::{\n'
+          exports='''pub use desired_state::{
+              DESIRED_STATE_FILE, DESIRED_STATE_SCHEMA_VERSION, DesiredStateDocument,
+              DesiredStateError, DesiredStateLoad, DesiredStateLoadSource, DesiredStatePathError,
+              DesiredStateWarning, DesiredStateWarningKind, desired_state_dir, desired_state_dir_with,
+              desired_state_file, load_desired_state, load_desired_state_from_dir,
+              save_desired_state, save_desired_state_to_dir,
+          };
+
+          '''
+          s=s.replace(marker,exports+marker,1)
+          p.write_text(s)
+          PY
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Targeted validation
+        run: |
+          nix develop --command bash -lc 'set -euo pipefail; cargo fmt --all; cargo fmt --all -- --check; cargo check -p orbis-core --all-targets; cargo check -p orbis-config --all-targets; cargo test -p orbis-config desired_state; cargo clippy -p orbis-config --all-targets -- -D warnings'
+      - name: Verify scope
+        run: |
+          set -euo pipefail
+          git add -N crates/orbis-config/src/desired_state.rs
+          git diff --check
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = "crates/orbis-config/src/desired_state.rs crates/orbis-config/src/lib.rs "
+      - name: Publish implementation
+        run: |
+          set -euo pipefail
+          git config user.name arttvad9r
+          git config user.email arttvad9r@gmail.com
+          git add crates/orbis-config/src/desired_state.rs crates/orbis-config/src/lib.rs
+          git commit -m 'config: add desired-state persistence foundation [skip ci]'
+          test "$(git rev-list --count 97f88386396380361afbfc26530d2a23f560dd07..HEAD)" = 1
+          git push origin HEAD:refs/heads/agent/desired-state-storage
