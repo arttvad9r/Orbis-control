@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Orbis Control: trait-ы провайдеров и mock-реализации"
+description = "Orbis Control: typed production provider interfaces and implementations"
 
 [dependencies]
 serde = { workspace = true }
@@ -24,8 +24,8 @@ orbis-core = { workspace = true }
 orbis-capabilities = { workspace = true }
 
 [features]
-# mock включён по умолчанию ТОЛЬКО на Этапе 2 (mock-first).
-# При добавлении реальных провайдеров (Этап 3+) feature становится
-# не-default, чтобы production-сборка не могла имитировать hardware writes.
+# Mock остаётся отдельным test/development capability. Default feature
+# сохраняется временно для совместимости существующего test/snapshot graph;
+# production composition не использует MockProvider.
 default = ["mock"]
 mock = []
