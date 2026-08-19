@@ -25,7 +25,6 @@ jobs:
 
           path = Path('crates/orbis-config/src/preferences.rs')
           text = path.read_text()
-
           old = '''#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreferencesWarningKind {
     /// The file was not syntactically valid TOML.
@@ -84,7 +83,6 @@ impl std::fmt::Debug for PreferencesWarningKind {
           if text.count(old) != 1:
               raise SystemExit('PreferencesWarningKind block did not match exactly once')
           text = text.replace(old, new, 1)
-
           test = r'''
 
     #[test]
@@ -111,9 +109,9 @@ impl std::fmt::Debug for PreferencesWarningKind {
           marker = '\n}\n'
           if not text.endswith(marker):
               raise SystemExit('unexpected preferences.rs ending')
-          text = text[:-len(marker)] + test + marker
-          path.write_text(text)
+          path.write_text(text[:-len(marker)] + test + marker)
           PY
+          rustfmt crates/orbis-config/src/preferences.rs
 
       - name: Normalize known Cargo 1.85 parse blocker in checkout only
         run: |
@@ -121,12 +119,14 @@ impl std::fmt::Debug for PreferencesWarningKind {
           from pathlib import Path
           path = Path('crates/orbis-ui/Cargo.toml')
           text = path.read_text()
-          old = '''orbis-providers = {
-              path = "../orbis-providers",
-              version = "0.1.0",
-              default-features = false,
-              features = ["mock"],
-          }'''
+          old = '\n'.join([
+              'orbis-providers = {',
+              '    path = "../orbis-providers",',
+              '    version = "0.1.0",',
+              '    default-features = false,',
+              '    features = ["mock"],',
+              '}',
+          ])
           new = 'orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }'
           if text.count(old) != 1:
               raise SystemExit('known orbis-providers manifest block did not match exactly once')
@@ -140,14 +140,13 @@ impl std::fmt::Debug for PreferencesWarningKind {
           cargo test --locked -p orbis-config preferences
           cargo clippy --locked -p orbis-config --all-targets -- -D warnings
           git diff --check -- crates/orbis-config/src/preferences.rs
-          test "$(git diff --name-only -- crates/orbis-config/src/preferences.rs)" = "crates/orbis-config/src/preferences.rs"
 
       - name: Publish validated implementation
         run: |
           set -euo pipefail
           git checkout -- crates/orbis-ui/Cargo.toml
-          git diff --check
           test "$(git diff --name-only)" = "crates/orbis-config/src/preferences.rs"
+          git diff --check
           git config user.name "arttvad9r"
           git config user.email "arttvad9r@gmail.com"
           git add crates/orbis-config/src/preferences.rs
