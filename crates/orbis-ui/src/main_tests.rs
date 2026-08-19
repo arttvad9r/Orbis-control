@@ -1092,6 +1092,52 @@ fn persisted_light_initializes_light_before_first_render() {
 }
 
 #[test]
+fn persisted_start_minimized_is_loaded_before_first_render() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let mut preferences = orbis_config::PreferencesConfig::default();
+    preferences.appearance.theme = orbis_config::ThemePreference::Light;
+    preferences.window.start_minimized = true;
+    orbis_config::save_preferences_to_dir(&preferences, td.path())
+        .expect("save start minimized preferences");
+
+    let startup =
+        initialize_runtime_preferences_with(|| orbis_config::load_preferences_from_dir(td.path()));
+
+    assert!(startup.theme_light);
+    assert!(startup.start_minimized);
+    assert!(matches!(current_theme_mode(), ThemeMode::Light));
+}
+
+#[test]
+fn missing_start_minimized_defaults_to_visible_startup() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let startup =
+        initialize_runtime_preferences_with(|| orbis_config::load_preferences_from_dir(td.path()));
+
+    assert!(!startup.start_minimized);
+    assert!(!startup.theme_light);
+    assert!(matches!(current_theme_mode(), ThemeMode::Dark));
+}
+
+#[test]
+fn start_minimized_window_state_is_applied_only_when_enabled() {
+    let calls = Cell::new(0usize);
+    let requested = Cell::new(false);
+    apply_start_minimized(false, |value| {
+        calls.set(calls.get() + 1);
+        requested.set(value);
+    });
+    assert_eq!(calls.get(), 0);
+
+    apply_start_minimized(true, |value| {
+        calls.set(calls.get() + 1);
+        requested.set(value);
+    });
+    assert_eq!(calls.get(), 1);
+    assert!(requested.get());
+}
+
+#[test]
 fn theme_toggle_persists_only_theme_field() {
     let td = tempfile::tempdir().expect("tempdir");
     let mut preferences = orbis_config::PreferencesConfig::default();

@@ -352,37 +352,65 @@ fn set_current_theme_light(light: bool) {
     THEME_LIGHT.with(|state| state.set(light));
 }
 
-fn initial_theme_light_with(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StartupPreferences {
+    theme_light: bool,
+    start_minimized: bool,
+}
+
+fn initial_startup_preferences_with(
     load: impl FnOnce() -> Result<PreferencesLoad, PreferencesError>,
-) -> bool {
+) -> StartupPreferences {
     match load() {
         Ok(load) => {
             if let Some(warning) = &load.warning {
                 tracing::warn!(
                     path = ?warning.path,
                     kind = ?warning.kind,
-                    "preferences load warning; using safe runtime theme"
+                    "preferences load warning; using safe runtime preferences"
                 );
             }
-            matches!(load.preferences.appearance.theme, ThemePreference::Light)
+            StartupPreferences {
+                theme_light: matches!(load.preferences.appearance.theme, ThemePreference::Light),
+                start_minimized: load.preferences.window.start_minimized,
+            }
         }
         Err(error) => {
-            tracing::warn!(error = %error, "preferences load failed; using dark theme");
-            false
+            tracing::warn!(
+                error = %error,
+                "preferences load failed; using safe runtime preferences"
+            );
+            StartupPreferences {
+                theme_light: false,
+                start_minimized: false,
+            }
         }
     }
 }
 
+fn initialize_runtime_preferences_with(
+    load: impl FnOnce() -> Result<PreferencesLoad, PreferencesError>,
+) -> StartupPreferences {
+    let preferences = initial_startup_preferences_with(load);
+    set_current_theme_light(preferences.theme_light);
+    preferences
+}
+
+fn initialize_runtime_preferences() -> StartupPreferences {
+    initialize_runtime_preferences_with(load_preferences)
+}
+
+#[cfg(test)]
 fn initialize_runtime_theme_with(
     load: impl FnOnce() -> Result<PreferencesLoad, PreferencesError>,
 ) -> bool {
-    let light = initial_theme_light_with(load);
-    set_current_theme_light(light);
-    light
+    initialize_runtime_preferences_with(load).theme_light
 }
 
-fn initialize_runtime_theme() {
-    initialize_runtime_theme_with(load_preferences);
+fn apply_start_minimized(start_minimized: bool, mut set_minimized: impl FnMut(bool)) {
+    if start_minimized {
+        set_minimized(true);
+    }
 }
 
 #[derive(Debug)]
@@ -1581,7 +1609,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     init_tracing();
-    initialize_runtime_theme();
+    let startup_preferences = initialize_runtime_preferences();
     let runtime = tokio::runtime::Runtime::new()?;
 
     state.charge_limit_state = controller::ChargeLimitState::Loading;
@@ -1614,6 +1642,9 @@ fn main() -> anyhow::Result<()> {
 
     let app = build_app(&state, Some(worker_tx.clone()), Some(fan_defaults))?;
     app.window().set_size(LogicalSize::new(500.0, 680.0));
+    apply_start_minimized(startup_preferences.start_minimized, |minimized| {
+        app.window().set_minimized(minimized);
+    });
 
     let weak = app.as_weak();
     let event_sink = move |event: WorkerEvent| {
