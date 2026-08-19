@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   flake-check:
-    if: github.event_name != 'pull_request' || github.head_ref != 'agent/diagnostics-window-wiring-validate-trigger'
+    if: github.event_name != 'pull_request' || (github.head_ref != 'agent/diagnostics-window-wiring-validate-trigger' && github.head_ref != 'agent/diagnostics-window-wiring-validate2-trigger')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
