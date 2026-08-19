@@ -63,8 +63,8 @@ slint = { version = "1", features = [
 orbis-core = { path = "crates/orbis-core", version = "0.1.0" }
 orbis-config = { path = "crates/orbis-config", version = "0.1.0" }
 orbis-capabilities = { path = "crates/orbis-capabilities", version = "0.1.0" }
-orbis-providers = { path = "crates/orbis-providers", version = "0.1.0" }
-orbis-sessiond = { path = "crates/orbis-sessiond", version = "0.1.0" }
+orbis-providers = { path = "crates/orbis-providers", version = "0.1.0", default-features = false }
+orbis-sessiond = { path = "crates/orbis-sessiond", version = "0.1.0", default-features = false }
 orbis-ui = { path = "crates/orbis-ui", version = "0.1.0" }
 orbis-cli = { path = "crates/orbis-cli", version = "0.1.0" }
 orbis-test-support = { path = "crates/orbis-test-support", version = "0.1.0" }
