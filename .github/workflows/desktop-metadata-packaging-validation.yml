@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           git checkout -- crates/orbis-ui/Cargo.toml
-          git diff --check agent/desktop-integration-metadata..HEAD
-          git diff --name-only agent/desktop-integration-metadata..HEAD | sort > /tmp/changed.txt
-          printf '%s\n' data/applications/io.github.orbiscontrol.Orbis.desktop packaging/nix/package.nix | sort > /tmp/allowed.txt
+          git diff --check origin/agent/desktop-integration-metadata..HEAD
+          git diff --name-only origin/agent/desktop-integration-metadata..HEAD | sort > /tmp/changed.txt
+          printf '%s\n' data/applications/io.github.orbiscontrol.Orbis.desktop data/metainfo/io.github.orbiscontrol.Orbis.metainfo.xml packaging/nix/package.nix | sort > /tmp/allowed.txt
           diff -u /tmp/allowed.txt /tmp/changed.txt
