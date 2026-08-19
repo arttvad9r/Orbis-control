@@ -4,11 +4,16 @@
 # Проверяет:
 # - system service `orbis-hardwared` существует и становится active;
 # - system bus name `io.github.orbiscontrol.Hardware` owned процессом hardwared
-#   (uid 0), introspection содержит только `SetPerformanceProfile`;
+#   (uid 0), Hardware1 introspection содержит обязательный typed
+#   `SetPerformanceProfile` контракт;
 # - CapEff/CapBnd == 0 (generated `CapabilityBoundingSet=` реально работает);
 # - invalid-wire smoke: SetPerformanceProfile(255) -> InvalidArgs, daemon жив,
 #   writer не вызывается (strict decode раньше authorizer);
 # - effective systemd sandbox properties.
+#
+# Hardware1 может содержать другие отдельно типизированные capability methods /
+# status properties; этот lifecycle smoke не утверждает, что Performance —
+# единственный член интерфейса.
 #
 # НИКАКИХ valid mutation / sysfs writes.
 
@@ -49,7 +54,7 @@
     status = machine.succeed(f"cat /proc/{pid}/status")
     assert "Uid:\t0" in status, "hardwared not uid 0"
 
-    # --- introspection: interface Hardware1 с ожидаемым методом ---
+    # --- introspection: interface Hardware1 содержит обязательный Performance method ---
     intr = machine.succeed(
         "busctl --system introspect io.github.orbiscontrol.Hardware "
         "/io/github/orbiscontrol/Hardware io.github.orbiscontrol.Hardware1"
@@ -70,7 +75,7 @@
         "SetPerformanceProfile y 255 2>&1; echo EXIT:$?'"
     )
     # busctl не печатает D-Bus error name; сообщение уникально для ветки
-    # strict decode (InvalidArgs) и доказывает, что полка/writer не вызывались.
+    # strict decode (InvalidArgs) и доказывает, что polkit/writer не вызывались.
     assert "неизвестный performance wire value" in out, (
         f"expected InvalidArgs message, got: {out}"
     )
