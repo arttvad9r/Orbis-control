@@ -12,4 +12,6 @@ pub mod composition;
 pub mod diagnostics_dto;
 pub mod diagnostics_export;
 pub mod diagnostics_metadata;
+pub mod diagnostics_runtime;
+pub mod diagnostics_window_model;
 pub mod worker;
