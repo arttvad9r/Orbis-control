@@ -1,0 +1,379 @@
+//! User-level XDG autostart backend for Orbis Control.
+//!
+//! The single source of truth is the owned user desktop entry under
+//! `$XDG_CONFIG_HOME/autostart`. This module never uses root, polkit,
+//! systemd services, or a second persisted boolean.
+
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use thiserror::Error;
+
+/// Owned desktop-entry filename used for user autostart.
+pub const AUTOSTART_FILE_NAME: &str = "io.github.orbiscontrol.Orbis.desktop";
+
+/// Canonical desktop entry written by the backend.
+pub const AUTOSTART_ENTRY: &str =
+    "[Desktop Entry]\nType=Application\nName=Orbis Control\nExec=orbis-control\nTerminal=false\n";
+
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Current state of the owned user autostart entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutostartStatus {
+    /// The owned user file does not exist.
+    Missing,
+    /// The owned user file exactly matches the canonical entry.
+    Enabled,
+    /// The owned path exists but is not the canonical Orbis entry.
+    Invalid,
+}
+
+/// Failures while resolving the user autostart location.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum AutostartPathError {
+    /// Explicit `XDG_CONFIG_HOME` was empty or relative.
+    #[error("invalid XDG_CONFIG_HOME for autostart: {0:?}; expected an absolute path")]
+    InvalidXdgConfigHome(PathBuf),
+    /// No home directory was available for the XDG fallback.
+    #[error("cannot resolve autostart path: no home directory is available")]
+    MissingHome,
+    /// Fallback home directory was empty or relative.
+    #[error("invalid home directory for autostart fallback: {0:?}; expected an absolute path")]
+    InvalidHome(PathBuf),
+}
+
+/// Hard failures from the user autostart backend.
+#[derive(Debug, Error)]
+pub enum AutostartError {
+    /// User autostart path resolution failed.
+    #[error(transparent)]
+    Path(#[from] AutostartPathError),
+    /// A filesystem operation failed.
+    #[error("{operation} failed for {path:?}: {source}")]
+    Io {
+        /// Operation being attempted.
+        operation: &'static str,
+        /// Path involved in the failure.
+        path: PathBuf,
+        /// Original I/O error.
+        #[source]
+        source: io::Error,
+    },
+    /// Exclusive temporary-file allocation collided repeatedly.
+    #[error("could not allocate a unique autostart temporary file in {dir:?}")]
+    TempFileExhausted {
+        /// Directory where the temporary file must live.
+        dir: PathBuf,
+    },
+}
+
+/// Resolve the user XDG autostart directory.
+pub fn autostart_dir() -> Result<PathBuf, AutostartPathError> {
+    autostart_dir_with(
+        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        dirs::home_dir(),
+    )
+}
+
+/// Pure XDG autostart path resolver used by production code and tests.
+pub fn autostart_dir_with(
+    xdg_config_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Result<PathBuf, AutostartPathError> {
+    if let Some(xdg) = xdg_config_home {
+        if xdg.as_os_str().is_empty() || !xdg.is_absolute() {
+            return Err(AutostartPathError::InvalidXdgConfigHome(xdg));
+        }
+        return Ok(xdg.join("autostart"));
+    }
+
+    match home {
+        Some(home) if !home.as_os_str().is_empty() && home.is_absolute() => {
+            Ok(home.join(".config").join("autostart"))
+        }
+        Some(home) => Err(AutostartPathError::InvalidHome(home)),
+        None => Err(AutostartPathError::MissingHome),
+    }
+}
+
+/// Resolve the exact owned user autostart file.
+pub fn autostart_file() -> Result<PathBuf, AutostartPathError> {
+    Ok(autostart_dir()?.join(AUTOSTART_FILE_NAME))
+}
+
+/// Read the current production user autostart state.
+pub fn autostart_status() -> Result<AutostartStatus, AutostartError> {
+    autostart_status_from_dir(&autostart_dir()?)
+}
+
+/// Enable user autostart by atomically writing the owned entry.
+pub fn enable_autostart() -> Result<PathBuf, AutostartError> {
+    enable_autostart_from_dir(&autostart_dir()?)
+}
+
+/// Disable user autostart by removing only the owned entry.
+///
+/// Returns `true` when the file existed and was removed.
+pub fn disable_autostart() -> Result<bool, AutostartError> {
+    disable_autostart_from_dir(&autostart_dir()?)
+}
+
+/// Read autostart state from an explicit user autostart directory.
+pub fn autostart_status_from_dir(dir: &Path) -> Result<AutostartStatus, AutostartError> {
+    let path = dir.join(AUTOSTART_FILE_NAME);
+    match fs::read_to_string(&path) {
+        Ok(text) if text == AUTOSTART_ENTRY => Ok(AutostartStatus::Enabled),
+        Ok(_) => Ok(AutostartStatus::Invalid),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(AutostartStatus::Missing),
+        Err(source) => Err(io_failure("read autostart entry", path, source)),
+    }
+}
+
+/// Atomically write the canonical entry into an explicit user directory.
+pub fn enable_autostart_from_dir(dir: &Path) -> Result<PathBuf, AutostartError> {
+    fs::create_dir_all(dir)
+        .map_err(|source| io_failure("create autostart directory", dir.to_path_buf(), source))?;
+
+    let final_path = dir.join(AUTOSTART_FILE_NAME);
+    let (mut temp, temp_path) = create_unique_temp(dir)?;
+
+    if let Err(source) = temp.write_all(AUTOSTART_ENTRY.as_bytes()) {
+        drop(temp);
+        let _ = fs::remove_file(&temp_path);
+        return Err(io_failure(
+            "write autostart temporary file",
+            temp_path,
+            source,
+        ));
+    }
+    if let Err(source) = temp.flush() {
+        drop(temp);
+        let _ = fs::remove_file(&temp_path);
+        return Err(io_failure(
+            "flush autostart temporary file",
+            temp_path,
+            source,
+        ));
+    }
+    if let Err(source) = temp.sync_all() {
+        drop(temp);
+        let _ = fs::remove_file(&temp_path);
+        return Err(io_failure(
+            "sync autostart temporary file",
+            temp_path,
+            source,
+        ));
+    }
+    drop(temp);
+
+    if let Err(source) = fs::rename(&temp_path, &final_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(io_failure(
+            "rename autostart temporary file",
+            final_path,
+            source,
+        ));
+    }
+
+    sync_parent_directory(dir)?;
+    Ok(final_path)
+}
+
+/// Remove only the exact owned entry from an explicit user directory.
+pub fn disable_autostart_from_dir(dir: &Path) -> Result<bool, AutostartError> {
+    let path = dir.join(AUTOSTART_FILE_NAME);
+    match fs::remove_file(&path) {
+        Ok(()) => {
+            sync_parent_directory(dir)?;
+            Ok(true)
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(io_failure("remove autostart entry", path, source)),
+    }
+}
+
+fn create_unique_temp(dir: &Path) -> Result<(File, PathBuf), AutostartError> {
+    for _ in 0..64 {
+        let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let path = dir.join(format!(
+            ".{AUTOSTART_FILE_NAME}.tmp.{}.{}.{}",
+            std::process::id(),
+            nanos,
+            sequence
+        ));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        match options.open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(source) => {
+                return Err(io_failure("create autostart temporary file", path, source));
+            }
+        }
+    }
+
+    Err(AutostartError::TempFileExhausted {
+        dir: dir.to_path_buf(),
+    })
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(dir: &Path) -> Result<(), AutostartError> {
+    let directory = File::open(dir).map_err(|source| {
+        io_failure(
+            "open autostart directory for sync",
+            dir.to_path_buf(),
+            source,
+        )
+    })?;
+    directory
+        .sync_all()
+        .map_err(|source| io_failure("sync autostart directory", dir.to_path_buf(), source))
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_dir: &Path) -> Result<(), AutostartError> {
+    Ok(())
+}
+
+fn io_failure(operation: &'static str, path: PathBuf, source: io::Error) -> AutostartError {
+    AutostartError::Io {
+        operation,
+        path,
+        source,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xdg_config_and_home_fallback_resolve_only_user_autostart() {
+        let td = tempfile::tempdir().unwrap();
+        let xdg = td.path().join("xdg-config");
+        let home = td.path().join("home");
+        assert_eq!(
+            autostart_dir_with(Some(xdg.clone()), None).unwrap(),
+            xdg.join("autostart")
+        );
+        assert_eq!(
+            autostart_dir_with(None, Some(home.clone())).unwrap(),
+            home.join(".config").join("autostart")
+        );
+    }
+
+    #[test]
+    fn relative_explicit_xdg_config_home_is_rejected() {
+        let error = autostart_dir_with(Some(PathBuf::from("relative")), None)
+            .expect_err("relative XDG_CONFIG_HOME must fail");
+        assert!(matches!(error, AutostartPathError::InvalidXdgConfigHome(_)));
+    }
+
+    #[test]
+    fn missing_owned_entry_is_disabled_without_creating_anything() {
+        let td = tempfile::tempdir().unwrap();
+        let dir = td.path().join("autostart");
+        assert_eq!(
+            autostart_status_from_dir(&dir).unwrap(),
+            AutostartStatus::Missing
+        );
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn enable_writes_exact_canonical_entry_and_reports_enabled() {
+        let td = tempfile::tempdir().unwrap();
+        let dir = td.path().join("autostart");
+        let path = enable_autostart_from_dir(&dir).unwrap();
+        assert_eq!(path, dir.join(AUTOSTART_FILE_NAME));
+        assert_eq!(fs::read_to_string(&path).unwrap(), AUTOSTART_ENTRY);
+        assert_eq!(
+            autostart_status_from_dir(&dir).unwrap(),
+            AutostartStatus::Enabled
+        );
+    }
+
+    #[test]
+    fn modified_owned_entry_is_invalid_not_enabled() {
+        let td = tempfile::tempdir().unwrap();
+        let dir = td.path().join("autostart");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(AUTOSTART_FILE_NAME),
+            "[Desktop Entry]\nType=Application\nName=Orbis Control\nExec=false\n",
+        )
+        .unwrap();
+        assert_eq!(
+            autostart_status_from_dir(&dir).unwrap(),
+            AutostartStatus::Invalid
+        );
+    }
+
+    #[test]
+    fn enable_repairs_only_owned_path_and_preserves_siblings() {
+        let td = tempfile::tempdir().unwrap();
+        let dir = td.path().join("autostart");
+        fs::create_dir_all(&dir).unwrap();
+        let sibling = dir.join("other.desktop");
+        fs::write(&sibling, "do not touch").unwrap();
+        fs::write(dir.join(AUTOSTART_FILE_NAME), "corrupt").unwrap();
+
+        enable_autostart_from_dir(&dir).unwrap();
+
+        assert_eq!(fs::read_to_string(&sibling).unwrap(), "do not touch");
+        assert_eq!(
+            fs::read_to_string(dir.join(AUTOSTART_FILE_NAME)).unwrap(),
+            AUTOSTART_ENTRY
+        );
+    }
+
+    #[test]
+    fn disable_removes_only_owned_path_and_is_idempotent() {
+        let td = tempfile::tempdir().unwrap();
+        let dir = td.path().join("autostart");
+        fs::create_dir_all(&dir).unwrap();
+        let sibling = dir.join("other.desktop");
+        fs::write(&sibling, "do not touch").unwrap();
+        fs::write(dir.join(AUTOSTART_FILE_NAME), AUTOSTART_ENTRY).unwrap();
+
+        assert!(disable_autostart_from_dir(&dir).unwrap());
+        assert!(!disable_autostart_from_dir(&dir).unwrap());
+        assert_eq!(fs::read_to_string(sibling).unwrap(), "do not touch");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_owned_entry_is_private_and_temp_files_are_cleaned() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let td = tempfile::tempdir().unwrap();
+        let dir = td.path().join("autostart");
+        let path = enable_autostart_from_dir(&dir).unwrap();
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| {
+                name.to_string_lossy()
+                    .starts_with(".io.github.orbiscontrol.Orbis.desktop.tmp.")
+            })
+            .collect();
+        assert!(leftovers.is_empty());
+    }
+}
