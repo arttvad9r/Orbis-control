@@ -12,8 +12,9 @@ of truth.
 2. [`current-state.md`](current-state.md) — что реально существует сейчас;
 3. [`architecture.md`](architecture.md) — текущие boundaries и invariants;
 4. [`verification.md`](verification.md) — какой evidence нужен для claims;
-5. [`roadmap.md`](roadmap.md) — следующий порядок работ;
-6. релевантный [ADR](adr/) или hardware evidence только по задаче.
+5. [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md) — release claim levels;
+6. [`roadmap.md`](roadmap.md) — следующий порядок работ;
+7. релевантный [ADR](adr/) или hardware evidence только по задаче.
 
 ## Source-of-truth hierarchy
 
@@ -58,8 +59,10 @@ current-state, architecture, roadmap или ADR и может устареть.
 | [`current-state.md`](current-state.md) | CURRENT STATUS | Operational baseline текущего HEAD |
 | [`architecture.md`](architecture.md) | CURRENT DESIGN | Boundaries, semantics, safety contracts |
 | [`verification.md`](verification.md) | VERIFICATION CONTRACT | Evidence levels, profiles и claims policy |
+| [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md) | RELEASE EVIDENCE | IMPLEMENTED/TESTED/PACKAGED/LIVE-VALIDATED/BLOCKED/UNKNOWN claims |
 | [`roadmap.md`](roadmap.md) | FUTURE PLAN | Milestones и порядок работ |
 | [`adr/`](adr/) | ADR | Принятые архитектурные решения |
+| [`support-matrix-schema.md`](support-matrix-schema.md) | RELEASE/SUPPORT CONTRACT | Формат read/write evidence matrix; не runtime model inference |
 | [`provider-matrix.md`](provider-matrix.md) | CURRENT DESIGN + dated evidence | Target provider strategy; не implementation status |
 | [`feature-matrix.md`](feature-matrix.md) | HISTORICAL SNAPSHOT | Stage 0 Linux feasibility, не список готовых функций |
 | [`research-report.md`](research-report.md) | HARDWARE EVIDENCE / HISTORICAL SNAPSHOT | Audit от 2026-08-06; факты не ретушировать |
@@ -70,27 +73,17 @@ current-state, architecture, roadmap или ADR и может устареть.
 Accepted ADR:
 
 - [`0001-rust-and-slint.md`](adr/0001-rust-and-slint.md) — Rust + Slint;
-- [`0002-daemon-boundaries.md`](adr/0002-daemon-boundaries.md) — GUI/sessiond/
-  hardwared boundaries (положение о «hardwared не создаётся» частично
-  superseded ADR 0006/0007/0008);
-- [`0003-gpu-provider-strategy.md`](adr/0003-gpu-provider-strategy.md) — GPU
-  concepts и backend strategy;
-- [`0004-authoritative-read-only-session.md`](adr/0004-authoritative-read-only-session.md)
-  — read-only session semantics, unknown bounds, no-cache reads и lifecycle;
-- [`0005-split-gpu-provider-capabilities.md`](adr/0005-split-gpu-provider-capabilities.md)
-  — split GPU provider capabilities по hardware concepts;
-- [`0006-privileged-performance-write.md`](adr/0006-privileged-performance-write.md)
-  — первый привилегированный write path (Performance profile) и введение
-  `orbis-hardwared` в workspace;
-- [`0007-battery-mutation-backend.md`](adr/0007-battery-mutation-backend.md)
-  — Battery mutation backend через asusd (COMPLETED / LIVE-VALIDATED);
-- [`0008-supergfxd-staged-gpu-mutation.md`](adr/0008-supergfxd-staged-gpu-mutation.md)
-  — staged GPU mutation contract через supergfxd; live mutation ещё не
-  реализована;
-- [`0009-native-asus-eco-backend.md`](adr/0009-native-asus-eco-backend.md)
-  — native ASUS Eco read-only preflight foundation;
-- [`0010-architecture-evolution.md`](adr/0010-architecture-evolution.md)
-  — архитектурный verdict после source audit (KEEP/EVOLVE/REPLACE/DEFER).
+- [`0002-daemon-boundaries.md`](adr/0002-daemon-boundaries.md) — первоначальные GUI/sessiond/hardwared boundaries; privileged-write часть superseded более поздними ADR;
+- [`0003-gpu-provider-strategy.md`](adr/0003-gpu-provider-strategy.md) — GPU concepts и backend strategy;
+- [`0004-authoritative-read-only-session.md`](adr/0004-authoritative-read-only-session.md) — read-only session semantics, unknown bounds, no-cache reads и lifecycle;
+- [`0005-split-gpu-provider-capabilities.md`](adr/0005-split-gpu-provider-capabilities.md) — split GPU provider capabilities по hardware concepts;
+- [`0006-privileged-performance-write.md`](adr/0006-privileged-performance-write.md) — privileged Performance path и введение `orbis-hardwared`;
+- [`0007-battery-mutation-backend.md`](adr/0007-battery-mutation-backend.md) — Battery mutation через typed asusd owner;
+- [`0008-supergfxd-staged-gpu-mutation.md`](adr/0008-supergfxd-staged-gpu-mutation.md) — staged GPU mutation contract; product mutation остаётся blocked;
+- [`0009-native-asus-eco-backend.md`](adr/0009-native-asus-eco-backend.md) — native ASUS Eco read-only preflight foundation;
+- [`0010-architecture-evolution.md`](adr/0010-architecture-evolution.md) — architecture evolution verdict;
+- [`0011-fan-curve-write-ownership.md`](adr/0011-fan-curve-write-ownership.md) — asusd ownership boundary для fan writes; фактические writes сейчас fail-closed из-за current safety issues;
+- [`0012-apply-result-accepted-semantics.md`](adr/0012-apply-result-accepted-semantics.md) — `Accepted != Applied` и authoritative confirmation rule.
 
 Hardware fixtures FA707NV собраны 2026-08-06 read-only. В частности, наличие
 `xyz.ljones.Platform` и `xyz.ljones.FanCurves` доказано introspection evidence.
@@ -109,3 +102,5 @@ Hardware fixtures FA707NV собраны 2026-08-06 read-only. В частнос
 - Mechanical refactor → документацию менять только если изменился externally
   visible state, contract или source-of-truth link.
 - Feasibility не отмечать как IMPLEMENTED без production code/tests.
+- Открытый Issue/PR не становится current behavior, пока соответствующий код не
+  интегрирован в `main`.
