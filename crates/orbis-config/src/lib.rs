@@ -11,6 +11,7 @@
 pub mod paths;
 pub mod preferences;
 pub mod store;
+pub mod window_state;
 
 pub use preferences::{
     AppearancePreferences, CloseAction, PREFERENCES_FILE, PREFERENCES_SCHEMA_VERSION,
@@ -21,6 +22,13 @@ pub use preferences::{
 };
 pub use store::{
     AppConfig, AutomationConfig, BatteryConfig, ExperimentalConfig, UiConfig, load_or_default,
+};
+pub use window_state::{
+    WINDOW_STATE_FILE, WINDOW_STATE_SCHEMA_VERSION, WindowPositionState, WindowState,
+    WindowStateError, WindowStateLoad, WindowStateLoadSource, WindowStatePathError,
+    WindowStateWarning, WindowStateWarningKind, load_window_state, load_window_state_from_dir,
+    save_window_state, save_window_state_to_dir, window_state_dir, window_state_dir_with,
+    window_state_file,
 };
 
 use std::path::PathBuf;
