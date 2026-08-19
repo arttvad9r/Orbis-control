@@ -58,15 +58,15 @@ fi
 
 # ─── BUILD ─────────────────────────────────────────────────────────
 # Собираем узкий пакет orbis-hardwared (только daemon, без GUI/Slint).
-# --print-out-paths пишет store path в stdout; stderr оставляем на терминале,
-# чтобы progress/messages Nix не смешивались с машинно-читаемым результатом.
+# --print-out-paths пишет store path в stdout; --no-link не оставляет
+# root-owned ./result в рабочем дереве. stderr оставляем на терминале.
 echo "→ [BUILD] Собираем orbis-hardwared через nix build…"
 cd "$PROJECT_ROOT"
 
 BUILD_OUTPUT_FILE="$(mktemp /tmp/orbis-build-path.XXXXXX)"
 trap 'rm -f "$BUILD_OUTPUT_FILE"' EXIT
 
-if ! nix build .#orbis-hardwared --max-jobs 1 --cores 4 --print-out-paths \
+if ! nix build .#orbis-hardwared --max-jobs 1 --cores 4 --no-link --print-out-paths \
     > "$BUILD_OUTPUT_FILE"; then
   echo "ERROR: nix build завершился с ненулевым exit code"
   exit 1
@@ -126,6 +126,19 @@ echo "=== Проверка ==="
 systemctl is-active "${SERVICE_NAME}.service" && echo "✓ Service active" || echo "✗ Service NOT active"
 busctl list 2>/dev/null | grep -q "io.github.orbiscontrol.Hardware" && \
   echo "✓ D-Bus name registered" || echo "✗ D-Bus name NOT found"
+
+READ_WRITE_PATHS="$(systemctl show "${SERVICE_NAME}.service" -p ReadWritePaths --value)"
+for expected_path in \
+  "/sys/firmware/acpi/platform_profile" \
+  "/sys/class/leds/asus::kbd_backlight/brightness"; do
+  if grep -Fq "$expected_path" <<<"$READ_WRITE_PATHS"; then
+    echo "✓ Sandbox write path: $expected_path"
+  else
+    echo "✗ Sandbox missing expected write path: $expected_path" >&2
+    exit 1
+  fi
+done
+
 echo ""
 echo "✓ Deploy завершён."
 echo "  Бинарник: ${STABLE_BIN}/orbis-hardwared"
