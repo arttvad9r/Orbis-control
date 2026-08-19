@@ -10,8 +10,8 @@
 # service (deploy script делает explicit restart).
 #
 # Direct sysfs write scope intentionally matches the full NixOS module:
-# Performance platform_profile + ASUS keyboard backlight brightness only.
-# Other Hardware1 mutations use typed service backends and do not widen /sys.
+# only Performance platform_profile is writable. Keyboard brightness and other
+# unvalidated product writes remain sandbox/policy-blocked.
 
 [Unit]
 Description=Orbis Control hardware helper (standalone dev deployment)
@@ -39,8 +39,6 @@ MemoryDenyWriteExecute=true
 AmbientCapabilities=
 CapabilityBoundingSet=
 
-# /sys stays read-only except the same two exact optional attributes used by
-# the full NixOS module. A missing path does not widen the sandbox.
+# /sys stays read-only except the one exact optional production write path.
 ReadOnlyPaths=/sys
 ReadWritePaths=-/sys/firmware/acpi/platform_profile
-ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/brightness
