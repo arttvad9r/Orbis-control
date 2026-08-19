@@ -46,7 +46,14 @@ pub use battery::ChargeLimit;
 pub use capability::{
     Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId,
 };
-pub use diagnostics::{DiagnosticEntry, DiagnosticReport};
+pub use diagnostics::{
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, DIAGNOSTICS_SNAPSHOT_SCHEMA_VERSION,
+    DiagnosticEntry, DiagnosticObservation, DiagnosticReport, DiagnosticsServiceId,
+    DiagnosticsSnapshot, DiagnosticsSnapshotSections, DisplayDiagnostics, DisplayProtocol,
+    GpuDiagnostics, HardwareDiagnostics, ServiceAvailability, ServiceBusScope, ServiceCriticality,
+    ServiceDiagnostics, SessionType, SystemDiagnostics, TelemetryCollectionStatus,
+    TelemetryDiagnostics, TelemetryFreshness,
+};
 pub use display::{
     DisplayMode, HdrState, MiniLedModeKind, MiniLedModeState, MiniLedModeValue,
     PanelOverdriveState, RefreshMode, ScreenAutoBrightnessState, interpret_mini_led_mode,

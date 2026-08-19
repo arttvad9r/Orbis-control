@@ -6,11 +6,13 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod diagnostics;
 pub mod engine;
 pub mod fixture;
 pub mod probe;
 pub mod registry;
 
+pub use diagnostics::capability_snapshot_diagnostics;
 pub use engine::{ProbeReport, build_from_parts};
 pub use fixture::{
     ExpectedCapabilitiesFixture, ExpectedFeature, parse_status, privacy_check_fixture_dir,
