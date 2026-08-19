@@ -19,18 +19,18 @@ action. Do not continue to the next architectural task automatically.
 
 ## Workspace / crate structure
 
-Rust workspace (`resolver = 3`, edition 2024, MSRV 1.85). Crates:
+Rust workspace (`resolver = 3`, edition 2024, MSRV **1.87**). Crates:
 
 - `orbis-core` — domain types and their invariants.
-- `orbis-config` — configuration.
-- `orbis-capabilities` — capability probing/detection.
-- `orbis-providers` — provider traits plus real/read-only and compatibility backends.
+- `orbis-config` — configuration/state persistence.
+- `orbis-capabilities` — runtime capability probing/detection.
+- `orbis-providers` — provider traits plus production/test implementations.
 - `orbis-application` — application layer.
 - `orbis-sessiond` — unprivileged user-session D-Bus daemon/read boundary.
 - `orbis-session-protocol` — D-Bus protocol DTOs.
 - `orbis-session-client` — session + Hardware1 client/provider composition.
-- `orbis-ui` — Slint UI (src + `ui/` slint files).
-- `orbis-cli` — CLI.
+- `orbis-ui` — Slint UI (src + `ui/` Slint files).
+- `orbis-cli` — CLI; current binary remains incomplete.
 - `orbis-test-support` — test support.
 - `orbis-hardwared` — narrow privileged Hardware1 system-bus daemon, in the
   workspace since ADR 0006 proved the first privileged mutation boundary.
@@ -58,13 +58,15 @@ Rust workspace (`resolver = 3`, edition 2024, MSRV 1.85). Crates:
 - asusd/supergfxd compatibility backends are used only where their typed
   semantics have been evidenced. Prefer standard kernel ABI for reads/control
   when ownership and semantics are proven.
+- Desired, Observed and Pending are independent. Loading persisted/default config
+  must never itself apply hardware state.
 
 ## Safety defaults
 
 - Hardware writes, sysfs writes, privileged commands and mutation D-Bus methods
   are forbidden without explicit permission from the specific task.
 - Read-only capability must never be presented as write capability.
-- Unsupported mutations return `Unsupported` honestly; never simulate success.
+- Unsupported or blocked mutations return/appear honestly; never simulate success.
 - Do not use `sudo` or real system/session bus in tests without explicit task
   permission.
 - Do not run real UPower/asusd/supergfxd, external D-Bus daemons, Docker,
@@ -74,15 +76,18 @@ Rust workspace (`resolver = 3`, edition 2024, MSRV 1.85). Crates:
   manipulation require explicit permission. VM/fake-system validation does not
   prove real hardware behavior.
 - Fan curve writes are owned by typed asusd through Hardware1; never add direct
-  sysfs fan writes or bypass Hardware1 for production mutation.
+  sysfs fan writes or bypass Hardware1. **Current fan mutation/default-reset is
+  fail-closed in UI and packaged polkit policy. Do not re-enable it until the
+  current fan safety/evidence blockers in `docs/current-state.md` are resolved,
+  executable tests are green and required live validation is recorded.**
 - Do not add `unsafe`; keep existing `forbid`/`deny unsafe_code` lints. Do not
   weaken lint policy or tests to make a check pass.
 
 ## Scope discipline
 
-- Before making changes, check `git status --short`.
-- Change only files explicitly allowed by the task prompt. No incidental
-  refactoring; do not format or rewrite unrelated files.
+- Before making changes, check `git status --short` when a local checkout is
+  available.
+- Change only files allowed by the task. No incidental broad refactoring.
 - Do not change public API without explicit permission.
 - Do not add dependencies without a clear need and permission. Do not change
   `Cargo.lock` unless it is the mandatory result of legitimate resolution.
@@ -100,8 +105,7 @@ Rust workspace (`resolver = 3`, edition 2024, MSRV 1.85). Crates:
   committed.
 - `rustc`, `cargo`, `rustfmt`, `clippy`, `rust-analyzer`, `slint-lsp`, and
   native build dependencies come from the project devShell, not the global
-  workstation environment. OpenCode is global, but inherits this environment
-  when started from the repository after direnv activation.
+  workstation environment.
 
 ## Build / check / test commands
 
@@ -115,9 +119,6 @@ Verification tiers: выбирай минимальный tier, который �
 
 ### FAST — default для обычного изменения одного crate
 
-Во время разработки используй targeted checks. Не гоняй весь workspace после
-каждой правки.
-
 ```bash
 cargo fmt --all
 cargo check -p <affected-crate> --all-targets
@@ -128,8 +129,6 @@ git diff --check
 
 ### INTEGRATION — изменение пересекает несколько crates / service boundaries
 
-Полный workspace tier запускается один раз перед commit/acceptance:
-
 ```bash
 cargo fmt --all
 cargo fmt --all -- --check
@@ -139,33 +138,34 @@ cargo clippy --workspace --all-targets -- -D warnings
 git diff --check
 ```
 
-### FULL — только для milestone/release acceptance, Nix/package/module изменений,
-перед контролируемой live hardware mutation, или когда task явно требует
+### FULL — milestone/release acceptance, Nix/package/module changes,
+controlled live hardware preparation, or explicit task requirement
 
-INTEGRATION + (при необходимости) тяжёлые Nix commands:
+INTEGRATION + appropriate Nix checks:
 
 ```bash
 nix build .#orbis-control --max-jobs 1 --cores 4
 nix flake check --max-jobs 1 --cores 4
 ```
 
-Для Rust-only изменений полный `nix flake check` не обязателен: он включает
-build-heavy Nix derivations и VM checks. Для изменений в `flake.nix`,
-`packaging/nix`, systemd, polkit или D-Bus сначала выполни подходящий Cargo
-tier, затем targeted Nix validation:
+For Rust-only changes full `nix flake check` is not automatically required. For
+`flake.nix`, packaging, systemd, polkit or D-Bus changes, run the relevant Cargo
+tier and targeted Nix validation first:
 
 ```bash
 nix flake check --no-build --system x86_64-linux
 ```
 
-Для system integration выбирай соответствующий существующей boundary VM check,
-а не запускай все VM checks без необходимости:
+Existing system-integration VM checks:
 
 ```text
 checks.x86_64-linux.hardwared-lifecycle
 checks.x86_64-linux.performance-mutation-vm
 checks.x86_64-linux.battery-mutation-vm
 ```
+
+The Performance VM intentionally runs with UPower disabled: it must prove that
+Battery availability is not a Session1 startup dependency.
 
 Standalone development deployment deliberately owns only the hardwared binary
 and `/etc/systemd/system/orbis-hardwared.service`. Static D-Bus/polkit policy is
@@ -183,8 +183,7 @@ git diff --check
 
 ### Notes
 
-- Для тяжёлых Nix commands всегда использовать `--max-jobs 1 --cores 4`
-  (предотвращает OOM / SIGKILL 137 на рабочих машинах).
+- Для тяжёлых Nix commands всегда использовать `--max-jobs 1 --cores 4`.
 - Интеграционные тесты, которые могут deadlock во время handshake, обязаны
   использовать bounded timeout; timeout не заменяет корректную обработку
   lifecycle.
@@ -193,18 +192,22 @@ git diff --check
   двумя последовательными различающимися значениями. Ассертируй класс
   ошибки, не только факт ошибки. Ассертируй счётчики/порядок вызовов, если
   short-circuit важен.
+- A GitHub Actions run object is **not** verification evidence by itself. A run
+  that fails before Checkout, has `steps=[]`, or has no executable log must be
+  recorded as BLOCKED/FAIL infrastructure evidence, never as a repository PASS.
 
 ## Git policy
 
 - Never use `git add .`. Stage only an explicit list of files.
-- Do not create a commit unless the task prompt explicitly asks for it.
+- Do not create a commit unless the task prompt explicitly authorizes repository
+  writes/commits or the task is explicitly an integration/cleanup operation.
 - Do not amend, rebase, reset, force push or remove others' changes without
   direct permission.
-- After a commit, verify the commit contains exactly the intended files and
-  pre-existing baseline paths remain unchanged; unrelated baseline changes may
-  remain in the working tree.
-- Commit messages: `<scope>: <imperative summary>` (scopes like `ui:`,
-  `session:`, `sessiond:`, `hardwared:`).
+- After a commit, verify it contains exactly the intended files and pre-existing
+  baseline paths remain unchanged; unrelated baseline changes may remain in the
+  working tree.
+- Commit messages: `<scope>: <imperative summary>` (for example `ui:`,
+  `session:`, `sessiond:`, `hardwared:`, `docs:`).
 
 ## Known project gotchas
 
@@ -216,25 +219,32 @@ git diff --check
   `docs/ui-measurements.json`.
 - Dev environment: `nix develop` provides cargo/rustc/rustfmt/clippy and
   headless-Slint test env. Do not install a global Rust toolchain.
-- Production providers already include real read-only sysfs/session backends and
-  typed asusd/supergfxd compatibility adapters. Do not reintroduce production
-  mock fallback.
+- Production providers include real read-only sysfs/session backends and typed
+  asusd/supergfxd compatibility adapters. Do not reintroduce production mock
+  fallback.
+- The release UI feature graph still carries development mock/test-support code;
+  do not interpret that as production hardware fallback. Cleanup is tracked in
+  the current backlog.
 - Fan curve sysfs values are raw PWM `0..255`, not percentages.
+- Stored asusd fan curve points, their `enabled` state and the active sysfs curve
+  are distinct evidence concepts.
 - GPU product policy (Eco/Standard/Ultimate/Optimized) is not proven merely by
   exposing backend-level supergfxd modes; keep product controls disabled until
-  evidence establishes the mapping and lifecycle semantics.
+  evidence establishes mapping and lifecycle semantics.
+- Legacy `AppConfig`/path helpers are compatibility-only and must not become the
+  basis of reconciliation or new persistence until hardened.
 
 ## Reporting
 
 Keep the final report short:
 
 1. Changed files. 2. What was implemented. 3. Key architectural invariants.
-4. Tests added or changed. 5. Check results. 6. `git status --short`.
-7. Whether a commit was created. 8. What was intentionally left out of scope.
+4. Tests added or changed. 5. Check results. 6. Repository status when visible.
+7. Whether commits/merges were created. 8. What was intentionally left out.
 
-A detailed report is only required for: diagnostic stops, public API changes,
-protocol/ABI changes, privileged or hardware operations, real system/session
-bus bootstrap, and migration or dependency-resolution issues.
+A detailed report is required for diagnostic stops, public API changes,
+protocol/ABI changes, privileged or hardware operations, real system/session bus
+bootstrap, and migration or dependency-resolution issues.
 
 ## Skills
 
