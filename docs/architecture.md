@@ -7,7 +7,7 @@
 
 ## 1. Основные принципы
 
-- GUI работает от обычного пользователя и не получает root.
+- GUI работает от обычного пользователя; raw euid-0 guard ещё должен быть enforced (#125).
 - `sessiond` — read/session boundary; он не является privileged mutation deputy.
 - Privileged mutations проходят только через узкий typed `Hardware1` service.
 - Никаких generic sysfs/filesystem/shell/D-Bus proxy APIs.
@@ -17,17 +17,16 @@
   и `Unknown` — разные состояния.
 - `ApplyResult::Accepted` не означает `Applied`.
 - Authoritative observed state обновляется только из read/read-back evidence.
-- Неподтверждённая функция остаётся fail-closed в UI/policy.
+- Неподтверждённая функция остаётся fail-closed в UI, Hardware1 composition,
+  policy и sandbox where applicable.
 - Live hardware claims всегда revision-scoped.
 
 ## 2. Слои
 
 ```text
-Slint UI
-  ↓ typed callbacks
-orbis-ui sequential worker
-  ↓
-orbis-application services/commands
+Slint UI / read-only orbisctl
+  ↓ typed commands/reads
+orbis-ui sequential worker / application services
   ↓
 provider traits + capability registry
   ├─ Session1 reads → orbis-sessiond → UPower / kernel / supergfxd / asusd
@@ -49,8 +48,8 @@ provider traits + capability registry
 | `orbis-sessiond` | User read daemon and session D-Bus service |
 | `orbis-hardwared` | Root system service for bounded privileged operations |
 | `orbis-ui` | Slint presentation, worker, production composition |
-| `orbis-cli` | CLI crate; current binary is incomplete |
-| `orbis-test-support` | Test/demo fixtures only; release-graph cleanup tracked separately |
+| `orbis-cli` | Read-only Session1 CLI (`orbisctl`) |
+| `orbis-test-support` | Test/demo fixtures; remaining GUI release-graph cleanup tracked in #115 |
 
 ## 3. Read path
 
@@ -61,19 +60,20 @@ authoritative backend
 → orbis-sessiond
 → io.github.orbiscontrol.Session1
 → orbis-session-client/provider
-→ application worker
-→ GUI
+→ application worker / orbisctl
+→ GUI or terminal output
 ```
 
-Session1 reads are fresh and do not become mutation proxies.
+Session1 reads are fresh and do not become mutation proxies. `orbisctl status`
+uses only Session1 Battery/Performance/GPU reads and applies provider-declared
+timeouts; it has no Hardware1 mutation command.
 
 Current production read concepts include Battery Charge Limit, Performance,
 independent GPU power/MUX/access, profile-specific fan curves, telemetry and
 selected ASUS/display diagnostics.
 
-Battery discovery is **lazy/capability-local**. Absence or temporary failure of
-UPower must not prevent Session1 from serving independent Performance/GPU/Fan
-reads.
+Battery discovery is **lazy/capability-local** in Session1. Absence or temporary
+failure of UPower must not prevent independent Performance/GPU/Fan reads.
 
 ## 4. Privileged mutation path
 
@@ -91,20 +91,32 @@ Linux capability bounding set. D-Bus policy controls bus ownership/access;
 operation authorization remains inside Hardware1 via per-capability polkit
 actions.
 
-The existence of a Hardware1 method or backend object does **not** itself prove
-write support; mutation status must be backed by concept-specific evidence.
+### Current production enablement
 
-Confirmed mutation patterns include Performance fixed-path write + read-back and
-Battery typed asusd write + configured/effective confirmation. Historical live
-evidence is revision-scoped and recorded in `current-state.md`.
+Typed backend code or a stable Hardware1 method does **not** imply a shipped
+write feature. Current production composition intentionally enables live
+mutation backends only for:
 
-Blocked patterns:
+- **Performance** — fixed `platform_profile` write + fresh read-back;
+- **Battery** — only after fail-closed startup evidence: effective threshold
+  discovery, non-activating `NameHasOwner(xyz.ljones.Asusd)`, and readable
+  effective kernel threshold.
 
-- GPU product mode remains disabled until product policy is proven;
-- fan mutation/reset remains fail-closed until #104, #105, #109 and #116 are
-  resolved and validated;
-- power limits and extended ASUS controls remain unavailable/unknown without
-  concept-specific evidence.
+The following are hard-disabled in production Hardware1 composition and return
+`Unsupported` even if a local administrator weakens polkit:
+
+- raw GPU mutation;
+- Fan curve/set-defaults mutation;
+- Panel Overdrive mutation;
+- Keyboard Backlight mutation;
+- Aura Static RGB mutation.
+
+Packaged polkit independently denies these five groups by default. The root
+service keeps all `/sys` read-only except the one exact enabled direct-write
+path `/sys/firmware/acpi/platform_profile`.
+
+Historical live evidence for Performance/Battery is revision-scoped and recorded
+in `current-state.md`; it does not automatically validate later revisions.
 
 ## 5. Capability registry
 
@@ -115,9 +127,11 @@ separate operation evidence; consumers must gate writes from
 Production composition performs read probes, queries typed mutation-status
 evidence, builds a whole snapshot, swaps it atomically and publishes generation
 changes. Periodic refresh re-queries mutation status before rebuilding. Explicit
-refresh must follow the same rule; the remaining consistency fix is #112.
+refresh must follow the same rule; #112 records the current stale-status defect.
 
-Failure in one capability must not collapse unrelated capabilities.
+Disabled Hardware1 backends must remain non-writable in downstream UI,
+diagnostics and support evidence (#120). Failure in one capability must not
+collapse unrelated capabilities.
 
 ## 6. Battery contract
 
@@ -139,8 +153,13 @@ Sources remain distinct:
 
 No value is clamped or invented at domain/wire boundaries. Session1 decoding
 handles D-Bus data as untrusted and rejects noncanonical payloads. Hardware1
-mutation confirms fresh configured/effective state. Discovery and write-owner
-liveness classification still require #107/#108.
+mutation confirms fresh configured/effective state.
+
+Battery power-supply discovery now preserves permission/transient failures and
+uses `Unsupported` only for successfully inspected structural absence (#108
+source fix). Production Hardware1 does not activate a stopped asusd merely to
+probe writability: startup uses D-Bus `NameHasOwner`. Dynamic owner/interface
+refresh after startup remains #107/#112.
 
 ## 7. Performance contract
 
@@ -175,8 +194,8 @@ physical MUX
 
 Production supports independent reads. Product buttons
 Eco/Standard/Ultimate/Optimized remain unavailable until a proven policy maps
-those concepts and defines confirmation semantics. Raw backend enum values are
-not a product API.
+those concepts and defines confirmation semantics. Raw GPU Hardware1 mutation
+is code-disabled and policy-denied; raw backend enum values are not a product API.
 
 ## 9. Fan contract
 
@@ -189,15 +208,16 @@ They must not be conflated. ASUS fan profile identity is lossless
 (`Balanced/Performance/Quiet/LowPower`). Quiet and LowPower must not collapse in
 mutation/wire state.
 
-Current write path is deliberately blocked. Known contract issues:
+Current production write path is hard-disabled in UI + polkit + Hardware1
+composition. The dormant compatibility backend still has known issues:
 
 - preserve custom `CurveData.enabled` (#104);
 - restore original performance profile even when Factory Defaults fails (#105);
 - do not infer CPU/GPU fan support from each other (#109);
 - preserve profile-specific `enabled` evidence through Session1/UI (#116).
 
-Until these are resolved, fan reads may be used but writes/default reset remain
-fail-closed.
+No fan mutation is re-enabled until these are fixed, executable CI is green and
+controlled hardware validation confirms final state.
 
 ## 10. Telemetry
 
@@ -221,9 +241,10 @@ Pending = explicit unconfirmed transition + requirement
 generic versioned desired-state persistence. There is **no production
 reconciliation executor yet**.
 
-Loading config/defaults must never itself trigger hardware mutation. Before
-reconciliation is implemented, legacy config/path APIs must be retired or
-hardened (#113).
+Loading config/defaults must never itself trigger hardware mutation. Legacy
+`AppConfig` defaults are now hardware-inert; legacy writes are durable/atomic;
+checked XDG resolvers fail instead of choosing CWD. Deprecated fallback helpers
+remain compatibility-only pending removal (#113).
 
 ## 12. Preferences and XDG state
 
@@ -235,10 +256,8 @@ Production persistence concerns remain separate:
 - `desired-state.toml` — typed desired-state foundation.
 
 New stores use versioning, same-directory atomic replacement, durability and
-permission handling. Legacy AppConfig/path helpers are compatibility-only (#113).
-
-Run on Startup backend exists, but current Rust lifecycle glue is incomplete;
-its UI remains disabled until #110 is completed.
+permission handling. Run on Startup backend exists, but current Rust lifecycle
+glue is incomplete; its UI remains disabled until #110 is completed.
 
 ## 13. Diagnostics
 
@@ -261,15 +280,28 @@ until current-main lifecycle/refresh wiring is completed (#111).
 
 Mock providers and deterministic device fixtures exist for tests, screenshots
 and development. They are not authoritative production hardware fallbacks.
-The current release dependency graph still carries some mock/test-support code;
-removal from the default production graph is tracked in #115.
+Workspace/sessiond/session-client default dependency paths now disable mock
+features explicitly. The full GUI still carries `orbis-test-support` because
+production and screenshot bootstrap share `UiState::from_mock_profile`; removing
+that remaining dependency/fixture-derived initial state is #115.
 
-## 15. Packaging and release gate
+## 15. Runtime timeout boundary
 
-Nix packaging installs GUI/sessiond/CLI, Hardware1 support where applicable,
-D-Bus policy, per-capability polkit policy, desktop/AppStream metadata and NixOS
-services. Current fan polkit default is deny for active users until fan safety
-issues are resolved.
+Provider traits expose a timeout, but the sequential GUI application/worker path
+does not yet enforce it generically (#123). One stuck provider can therefore
+block unrelated queued work. New `orbisctl status` already wraps each read in
+its provider timeout; GUI/application enforcement remains a release hardening
+item.
+
+## 16. Packaging and release gate
+
+Nix packaging installs GUI/sessiond/CLI, Hardware1 support, D-Bus policy,
+per-capability polkit policy, desktop/AppStream metadata and NixOS services.
+
+Canonical checks are lockfile-strict (`cargo ... --locked`) and flake checks now
+include support-matrix schema validation plus XML/desktop metadata syntax gates.
+Hardware1 lifecycle VM asserts the exact minimal sysfs writable surface and
+polkit default matrix without performing valid hardware mutation.
 
 A release candidate requires:
 
@@ -280,10 +312,11 @@ A release candidate requires:
 - dated evidence for device-specific claims;
 - unsupported/incomplete controls shown honestly as unavailable/unknown.
 
-GitHub Actions currently fails before its first workflow step (#106). After CI
-is executable, `main` should be protected with required checks (#114).
+GitHub Actions currently fails before its first workflow step / fresh pushes may
+receive no run (#106). After CI is executable, `main` should be protected with
+required checks (#114).
 
-## 16. Source-of-truth hierarchy
+## 17. Source-of-truth hierarchy
 
 Use documents by role:
 
@@ -291,8 +324,7 @@ Use documents by role:
 2. this file — architecture that must hold;
 3. ADRs — why stable decisions were made;
 4. [`roadmap.md`](roadmap.md) — future ordering;
-5. research/audit documents — supporting evidence, not automatic production
-   claims.
+5. research/audit documents — supporting evidence, not automatic production claims.
 
 When code and a current-design document diverge, update the document or block
 the behavior; do not silently reinterpret evidence.
