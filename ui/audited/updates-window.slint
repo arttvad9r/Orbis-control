@@ -1,6 +1,6 @@
 import { ComboBox } from "std-widgets.slint";
 import { StatusBadge } from "../components/visual-controls.slint";
-import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
+import { ThemeBridge, WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 
 export component UpdatesWindow inherits Window {
@@ -25,6 +25,8 @@ export component UpdatesWindow inherits Window {
     callback install-requested;
 
     property <bool> notes-visible: false;
+
+    ThemeBridge { }
 
     VerticalLayout {
         padding: 12px;
