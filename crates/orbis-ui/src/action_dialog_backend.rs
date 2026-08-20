@@ -1,42 +1,127 @@
-//! Fail-closed backend for the generic confirmation dialog.
+//! Typed, fail-closed backend for confirmation dialogs.
 //!
-//! `PreviewDialogWindow.kind == 3` currently carries no typed action identity.
-//! A generic "Confirm" callback therefore cannot safely be bound to reboot,
-//! logout, hardware mutation, process execution or any other side effect. Keep
-//! the button disabled until a future caller supplies a closed typed action
-//! context. The reboot/logout variants are informational "Later" dialogs and
-//! continue to dismiss without performing a system action.
+//! Legacy `PreviewDialogWindow.kind` is presentation-only and is never treated
+//! as authorization for a side effect. A confirm button becomes active only
+//! when the caller supplies an explicit closed [`ConfirmedAction`]. Existing
+//! reboot/logout/failure dialogs remain informational, and the legacy generic
+//! confirm kind remains unavailable.
 
 use slint::ComponentHandle;
 
 use crate::PreviewDialogWindow;
 
-/// Apply the only safe state supported by the current dialog contract.
-pub(crate) fn wire(window: &PreviewDialogWindow, kind: i32) {
-    if kind == 3 {
-        window.set_action_label("Unavailable".into());
-        window.set_action_enabled(false);
-    } else {
-        // `action-enabled` is ignored by the non-generic variants, but keeping
-        // it false ensures a later UI refactor cannot accidentally turn the
-        // informational reboot/logout/failure dialog into an active action.
-        window.set_action_enabled(false);
-    }
+/// Closed set of side effects that may be attached to a confirmation dialog.
+///
+/// Deliberately small: reboot/logout are not included because current callers
+/// expose only "Later" informational dialogs and no typed system-action owner is
+/// attached to them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfirmedAction {
+    /// Explicitly terminate the Orbis application event loop.
+    QuitApplication,
+}
 
-    window.on_confirm_clicked(|| {
-        tracing::warn!(
-            "generic confirmation ignored: no typed action context is attached"
-        );
+/// Typed dialog context. Presentation kind and executable action are separate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActionDialogContext {
+    RebootRequiredInfo,
+    LogoutRequiredInfo,
+    FailureInfo,
+    /// Generic/unknown caller without a typed action identity.
+    UnavailableGeneric,
+    /// Explicit caller-owned confirmation action.
+    Confirm(ConfirmedAction),
+}
+
+/// Convert the old presentation-only numeric kind into a non-executable typed
+/// context. This is intentionally total and fail-closed for unknown values.
+pub(crate) fn legacy_context(kind: i32) -> ActionDialogContext {
+    match kind {
+        0 => ActionDialogContext::RebootRequiredInfo,
+        1 => ActionDialogContext::LogoutRequiredInfo,
+        2 => ActionDialogContext::FailureInfo,
+        _ => ActionDialogContext::UnavailableGeneric,
+    }
+}
+
+/// Wire a dialog from an explicit typed context.
+pub(crate) fn wire(window: &PreviewDialogWindow, context: ActionDialogContext) {
+    let action = match context {
+        ActionDialogContext::Confirm(action) => {
+            window.set_kind(3);
+            match action {
+                ConfirmedAction::QuitApplication => window.set_action_label("Quit".into()),
+            }
+            window.set_action_enabled(true);
+            Some(action)
+        }
+        ActionDialogContext::RebootRequiredInfo => {
+            window.set_kind(0);
+            window.set_action_enabled(false);
+            None
+        }
+        ActionDialogContext::LogoutRequiredInfo => {
+            window.set_kind(1);
+            window.set_action_enabled(false);
+            None
+        }
+        ActionDialogContext::FailureInfo => {
+            window.set_kind(2);
+            window.set_action_enabled(false);
+            None
+        }
+        ActionDialogContext::UnavailableGeneric => {
+            window.set_kind(3);
+            window.set_action_label("Unavailable".into());
+            window.set_action_enabled(false);
+            None
+        }
+    };
+
+    window.on_confirm_clicked(move || match action {
+        Some(ConfirmedAction::QuitApplication) => {
+            if let Err(error) = slint::quit_event_loop() {
+                tracing::warn!(error = ?error, "confirmed Quit could not terminate Slint event loop");
+            }
+        }
+        None => tracing::warn!(
+            "confirmation ignored: no typed executable action context is attached"
+        ),
     });
+}
+
+/// Compatibility entry point for existing callers. Legacy kinds can never
+/// create an executable action.
+pub(crate) fn wire_legacy_kind(window: &PreviewDialogWindow, kind: i32) {
+    wire(window, legacy_context(kind));
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
-    fn backend_has_no_side_effect_surface() {
+    fn legacy_kinds_never_map_to_executable_actions() {
+        for kind in [-1, 0, 1, 2, 3, 4, 99] {
+            assert!(!matches!(legacy_context(kind), ActionDialogContext::Confirm(_)));
+        }
+    }
+
+    #[test]
+    fn executable_context_is_closed_and_explicit() {
+        let context = ActionDialogContext::Confirm(ConfirmedAction::QuitApplication);
+        assert!(matches!(
+            context,
+            ActionDialogContext::Confirm(ConfirmedAction::QuitApplication)
+        ));
+    }
+
+    #[test]
+    fn backend_has_no_hardware_process_or_login1_surface() {
         let source = include_str!("action_dialog_backend.rs");
-        assert!(source.contains("set_action_enabled(false)"));
-        assert!(source.contains("no typed action context"));
+        assert!(source.contains("UnavailableGeneric"));
+        assert!(source.contains("ConfirmedAction::QuitApplication"));
+        assert!(source.contains("slint::quit_event_loop()"));
 
         let forbidden = [
             ["Command", "::new"].concat(),
