@@ -19,7 +19,7 @@
 
 **Status: CONSOLIDATED; EXECUTABLE CI EXTERNALLY BLOCKED**
 
-Completed/in review:
+Completed:
 
 - production hardening integrated into `main`;
 - Rust MSRV/toolchain moved to 1.87;
@@ -28,9 +28,9 @@ Completed/in review:
 - diagnostics foundations integrated;
 - desktop/AppStream/Nix packaging and support-matrix tooling integrated;
 - historical broken sessiond `mockDevice` / `readOnlyEmpty` options removed (#122 resolved);
-- obsolete self-publishing/targeted validation workflows removed in repository cleanup PR #127;
-- private session transcript removed from repository cleanup PR #127;
-- stray binary ADR archive removed; ADR directory returns to reviewable Markdown-only decisions;
+- obsolete self-publishing/targeted validation workflows removed;
+- private session transcript removed from the repository;
+- stray binary ADR archive removed; ADR directory contains reviewable Markdown decisions;
 - documentation hierarchy normalized with explicit canonical vs historical classification.
 
 Remaining:
@@ -38,8 +38,7 @@ Remaining:
 - #106: restore executable GitHub Actions when repository/account infrastructure permits it; until then do not manufacture substitute CI evidence;
 - #114: after a real executable check exists, protect `main` with required checks;
 - #118: prune obsolete `agent/*` refs when delete-ref access/workflow is available;
-- #124: confirm permanent reverse-DNS identity before stable release;
-- merge repository cleanup PR only after human review; lack of CI must remain visible in the merge decision.
+- #124: confirm permanent reverse-DNS identity before stable release.
 
 ## Milestone 1 — Runtime reliability and truthful capability state
 
