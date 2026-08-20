@@ -58,8 +58,10 @@ export component ModeCard inherits Rectangle {
                 width: 6px;
                 height: 6px;
                 border-radius: 3px;
-                background: root.disabled ? Palette.text-disabled : root.accent;
-                opacity: root.selected || root.pending ? 1 : 0.72;
+                background: root.disabled ? Palette.text-disabled
+                    : root.selected || root.pending ? root.accent
+                    : Palette.text-secondary;
+                opacity: root.selected || root.pending ? 1 : 0.48;
             }
             Text {
                 text: root.title;
