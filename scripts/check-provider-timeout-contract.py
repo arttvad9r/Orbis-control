@@ -43,6 +43,10 @@ def forbid(source: str, relative: str, markers: tuple[str, ...], errors: list[st
             errors.append(f"{relative}: forbidden marker present {marker!r}")
 
 
+def production_prefix(source: str) -> str:
+    return source.split("#[cfg(test)]", 1)[0]
+
+
 def run(root: Path) -> list[str]:
     errors: list[str] = []
     sources = {key: read(root, path, errors) for key, path in FILES.items()}
@@ -62,7 +66,7 @@ def run(root: Path) -> list[str]:
         errors,
     )
     # A generic retry loop in the timeout primitive would be unsafe for writes.
-    forbid(execution.split("#[cfg(test)]", 1)[0], FILES["execution"], ("loop {", "retry("), errors)
+    forbid(production_prefix(execution), FILES["execution"], ("loop {", "retry("), errors)
 
     bounded = sources["bounded_probes"]
     require(
@@ -99,8 +103,9 @@ def run(root: Path) -> list[str]:
         )
 
     worker = sources["worker"]
+    production_worker = production_prefix(worker)
     require(
-        worker,
+        production_worker,
         FILES["worker"],
         (
             "async fn bounded_performance_state",
@@ -114,7 +119,7 @@ def run(root: Path) -> list[str]:
         errors,
     )
     forbid(
-        worker,
+        production_worker,
         FILES["worker"],
         (
             "runtime.gpu.refresh_gpu_capabilities().await",
@@ -125,18 +130,17 @@ def run(root: Path) -> list[str]:
         ),
         errors,
     )
-    if worker.count("runtime.requery_mutation_statuses().await") != 1:
+    if production_worker.count("runtime.requery_mutation_statuses().await") != 1:
         errors.append(
             f"{FILES['worker']}: mutation-status requery must have exactly one canonical owner"
         )
-    if worker.count("refresh_capability_registry(&mut runtime).await") != 2:
+    if production_worker.count("refresh_capability_registry(&mut runtime).await") != 2:
         errors.append(
             f"{FILES['worker']}: explicit and periodic refresh must both use the canonical helper"
         )
 
     # Mutation commands deliberately remain outside the generic timeout helper
     # until unknown-outcome recovery is modeled end-to-end.
-    production_worker = worker.split("#[cfg(test)]", 1)[0]
     for mutation in ("set_performance", "set_gpu_mode", "set_charge_limit", "set_fan_curve"):
         suspicious = f"bounded_provider_call(runtime.{mutation}"
         if suspicious in production_worker:
