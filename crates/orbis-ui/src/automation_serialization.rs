@@ -1,18 +1,29 @@
 //! Hardware-inert serialization boundary for future Automation execution.
 //!
-//! This module accepts only a fully revalidated [`AutomationExecutionHandoff`]
-//! and models exclusive ownership of one future mutation batch. It deliberately
-//! contains no provider, worker, D-Bus, sysfs or process execution surface.
-//! Admission is fail-closed on capability-generation drift or an already active
-//! lease. Completing a lease only releases the serialization slot.
+//! This module accepts only a fully revalidated revision-bound Automation
+//! handoff and models exclusive ownership of one future mutation batch. It
+//! deliberately contains no provider, worker, D-Bus, sysfs or process execution
+//! surface. Admission is fail-closed on lifecycle-revision drift,
+//! capability-generation drift, or an already active lease. Completing a lease
+//! only releases the serialization slot.
 
 use orbis_core::automation::{AutomationAction, AutomationTrigger};
 
-use crate::automation_execution_guard::AutomationExecutionHandoff;
+use crate::automation_lifecycle_revision::{
+    AutomationLifecycleRevision, AutomationRevisionHandoff,
+};
 
 /// Why a revalidated handoff cannot enter the serialized execution slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AutomationAdmissionBlock {
+    /// A newer confirmed lifecycle event superseded this handoff after
+    /// revalidation and before serialization admission.
+    LifecycleRevisionChanged {
+        /// Lifecycle revision required by the revalidated handoff.
+        required: AutomationLifecycleRevision,
+        /// Lifecycle revision current at admission.
+        current: AutomationLifecycleRevision,
+    },
     /// Capability generation changed after revalidation and before admission.
     CapabilityGenerationChanged {
         /// Generation required by the revalidated handoff.
@@ -46,6 +57,7 @@ pub enum AutomationAdmissionOutcome {
 #[derive(Debug, PartialEq, Eq)]
 pub struct AutomationDryRunLease {
     id: u64,
+    required_revision: AutomationLifecycleRevision,
     required_generation: u64,
     trigger: AutomationTrigger,
     actions: Vec<AutomationAction>,
@@ -55,6 +67,11 @@ impl AutomationDryRunLease {
     /// Opaque monotonic identifier used only for serialization/audit state.
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Lifecycle revision that must still be current for a future executor.
+    pub fn required_revision(&self) -> AutomationLifecycleRevision {
+        self.required_revision
     }
 
     /// Capability generation that must still be current for a future executor.
@@ -76,9 +93,9 @@ impl AutomationDryRunLease {
 /// Single-slot coordinator that models future executor serialization.
 ///
 /// The coordinator performs no asynchronous work. It only ensures at most one
-/// revalidated handoff owns the slot and checks capability generation again at
-/// admission. The real executor will later need to hold the same serialization
-/// ownership across mutation and authoritative read-back.
+/// revalidated handoff owns the slot and checks lifecycle + capability identity
+/// again at admission. The real executor will later need to hold the same
+/// serialization ownership across mutation and authoritative read-back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AutomationSerializationCoordinator {
     next_lease: u64,
@@ -101,19 +118,30 @@ impl AutomationSerializationCoordinator {
 
     /// Admit one already-revalidated handoff into the exclusive dry-run slot.
     ///
-    /// `current_generation` must be sampled by the future serialization owner
-    /// immediately before this call. Generation drift or an occupied slot blocks
-    /// the whole batch. No partial admission exists.
+    /// Both current identities must be sampled by the future serialization
+    /// owner immediately before this call. Drift or an occupied slot blocks the
+    /// whole batch. No partial admission exists.
     pub fn admit(
         &mut self,
-        handoff: AutomationExecutionHandoff,
+        handoff: AutomationRevisionHandoff,
+        current_revision: AutomationLifecycleRevision,
         current_generation: u64,
     ) -> AutomationAdmissionOutcome {
-        let required = handoff.required_generation();
-        if required != current_generation {
+        let required_revision = handoff.required_revision();
+        if required_revision != current_revision {
+            return AutomationAdmissionOutcome::Blocked(
+                AutomationAdmissionBlock::LifecycleRevisionChanged {
+                    required: required_revision,
+                    current: current_revision,
+                },
+            );
+        }
+
+        let required_generation = handoff.required_generation();
+        if required_generation != current_generation {
             return AutomationAdmissionOutcome::Blocked(
                 AutomationAdmissionBlock::CapabilityGenerationChanged {
-                    required,
+                    required: required_generation,
                     current: current_generation,
                 },
             );
@@ -137,7 +165,8 @@ impl AutomationSerializationCoordinator {
 
         AutomationAdmissionOutcome::Admitted(AutomationDryRunLease {
             id,
-            required_generation: required,
+            required_revision,
+            required_generation,
             trigger: handoff.trigger().clone(),
             actions: handoff.actions().to_vec(),
         })
@@ -176,9 +205,9 @@ mod tests {
     use orbis_core::profile::PerformanceProfile;
     use orbis_core::telemetry::Telemetry;
 
-    use crate::automation_execution_guard::{
-        AutomationExecutionCandidate, AutomationExecutionGuardOutcome,
-        revalidate_automation_candidate,
+    use crate::automation_lifecycle_revision::{
+        AutomationLifecycleClock, AutomationRevisionCandidate, AutomationRevisionGuardOutcome,
+        revalidate_revision_candidate,
     };
     use crate::automation_shadow_runtime::AutomationShadowRuntime;
 
@@ -227,7 +256,9 @@ mod tests {
         telemetry
     }
 
-    fn handoff(generation: u64) -> AutomationExecutionHandoff {
+    fn handoff(
+        generation: u64,
+    ) -> (AutomationLifecycleRevision, AutomationRevisionHandoff) {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let snapshot = snapshot(generation, base);
         let policy = policy();
@@ -245,29 +276,34 @@ mod tests {
             &snapshot,
             base + Duration::from_secs(2),
         );
-        let candidate = AutomationExecutionCandidate::from_shadow(&outcome).unwrap();
-        let guard = revalidate_automation_candidate(
+        let mut clock = AutomationLifecycleClock::new();
+        let revision = clock.advance().unwrap();
+        let candidate = AutomationRevisionCandidate::from_shadow(&outcome, revision).unwrap();
+        let guard = revalidate_revision_candidate(
             &candidate,
+            revision,
             &policy,
             &snapshot,
             base + Duration::from_secs(3),
             Duration::from_secs(30),
         );
-        let AutomationExecutionGuardOutcome::Ready(handoff) = guard else {
-            panic!("expected revalidated handoff");
+        let AutomationRevisionGuardOutcome::Ready(handoff) = guard else {
+            panic!("expected revalidated revision handoff");
         };
-        handoff
+        (revision, handoff)
     }
 
     #[test]
-    fn matching_generation_admits_only_one_hardware_inert_lease() {
+    fn matching_identities_admit_only_one_hardware_inert_lease() {
         let mut coordinator = AutomationSerializationCoordinator::new();
-        let outcome = coordinator.admit(handoff(7), 7);
+        let (revision, handoff) = handoff(7);
+        let outcome = coordinator.admit(handoff, revision, 7);
         let AutomationAdmissionOutcome::Admitted(lease) = outcome else {
             panic!("expected dry-run lease");
         };
         assert!(coordinator.is_busy());
         assert_eq!(lease.id(), 1);
+        assert_eq!(lease.required_revision(), revision);
         assert_eq!(lease.required_generation(), 7);
         assert_eq!(lease.trigger(), &AutomationTrigger::OnBattery);
         assert_eq!(
@@ -279,10 +315,30 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_revision_drift_blocks_before_slot_ownership() {
+        let mut coordinator = AutomationSerializationCoordinator::new();
+        let (revision, handoff) = handoff(8);
+        let mut clock = AutomationLifecycleClock::new();
+        assert_eq!(clock.advance().unwrap(), revision);
+        let newer = clock.advance().unwrap();
+        assert_eq!(
+            coordinator.admit(handoff, newer, 8),
+            AutomationAdmissionOutcome::Blocked(
+                AutomationAdmissionBlock::LifecycleRevisionChanged {
+                    required: revision,
+                    current: newer,
+                }
+            )
+        );
+        assert!(!coordinator.is_busy());
+    }
+
+    #[test]
     fn generation_drift_blocks_before_slot_ownership() {
         let mut coordinator = AutomationSerializationCoordinator::new();
+        let (revision, handoff) = handoff(9);
         assert_eq!(
-            coordinator.admit(handoff(9), 10),
+            coordinator.admit(handoff, revision, 10),
             AutomationAdmissionOutcome::Blocked(
                 AutomationAdmissionBlock::CapabilityGenerationChanged {
                     required: 9,
@@ -296,12 +352,14 @@ mod tests {
     #[test]
     fn occupied_slot_rejects_second_batch_without_partial_state() {
         let mut coordinator = AutomationSerializationCoordinator::new();
-        let first = coordinator.admit(handoff(11), 11);
+        let (revision, first_handoff) = handoff(11);
+        let first = coordinator.admit(first_handoff, revision, 11);
         let AutomationAdmissionOutcome::Admitted(first_lease) = first else {
             panic!("expected first lease");
         };
+        let (_, second_handoff) = handoff(11);
         assert_eq!(
-            coordinator.admit(handoff(11), 11),
+            coordinator.admit(second_handoff, revision, 11),
             AutomationAdmissionOutcome::Blocked(AutomationAdmissionBlock::Busy {
                 active_lease: first_lease.id(),
             })
