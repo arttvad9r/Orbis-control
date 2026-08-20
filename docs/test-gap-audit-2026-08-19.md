@@ -1,5 +1,12 @@
 # Orbis Control test gap audit — 2026-08-19
 
+> **HISTORICAL SNAPSHOT — partially superseded.** The Rust 1.85/UI dependency
+> blocker in this document is no longer current because the repository now pins
+> Rust 1.87. The preferences warning redaction source fix also exists now;
+> executable regression evidence must still not be claimed while #106 blocks
+> GitHub Actions. Use [`current-state.md`](current-state.md),
+> [`roadmap.md`](roadmap.md) and [`history.md`](history.md) for active gaps.
+
 Scope: backlog item #79. Audit pure/unit/P2P coverage across config/core/application/UI and implement only safe hermetic regressions in this slice.
 
 ## Result
