@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Static fail-closed contract checks for Automation shadow lifecycle.
+"""Static fail-closed contract checks for Automation lifecycle/execution design.
 
 The checker intentionally uses only the Python standard library so it remains
 useful in minimal review containers where Rust/Cargo are unavailable. It is not
-a substitute for `cargo check`, tests or clippy. Its job is narrower: make
-accidental hardware execution, optimistic runtime readiness, or removal of the
-lifecycle/freshness/revalidation barriers fail visibly before executable
-validation is available.
+a substitute for `cargo check`, tests or clippy. Its narrower job is to make
+accidental production execution, optimistic runtime readiness, or removal of
+lifecycle/freshness/revalidation/serialization barriers fail visibly before
+executable validation is available.
 """
 
 from __future__ import annotations
@@ -60,6 +60,33 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "PreflightBlocked",
         "generation_still_matches",
     ),
+    "crates/orbis-ui/src/automation_lifecycle_revision.rs": (
+        "AutomationLifecycleClock",
+        "AutomationLifecycleRevision",
+        "AutomationRevisionCandidate",
+        "LifecycleRevisionChanged",
+        "revalidate_revision_candidate",
+        "AutomationRevisionHandoff",
+        "identities_still_match",
+        "SequenceExhausted",
+    ),
+    "crates/orbis-ui/src/automation_serialization.rs": (
+        "AutomationRevisionHandoff",
+        "required_revision",
+        "current_revision",
+        "LifecycleRevisionChanged",
+        "CapabilityGenerationChanged",
+        "AutomationDryRunLease",
+        "Busy",
+    ),
+    "crates/orbis-ui/src/automation_execution_scope.rs": (
+        "AutomationPreparedBatch",
+        "required_revision",
+        "required_generation",
+        "AutomationPreparedKind::Performance",
+        "UnsupportedAction",
+        "DuplicatePerformanceAction",
+    ),
     "crates/orbis-ui/src/automation_backend.rs": (
         "ResumeTelemetryGate",
         "observe_prepare_for_sleep",
@@ -85,6 +112,9 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "observe_prepare_for_sleep",
         "observe_automation_telemetry",
         "replace_automation_capabilities",
+        "AutomationLifecycleClock",
+        "advance_automation_revision",
+        "current_automation_revision",
     ),
 }
 
@@ -92,6 +122,9 @@ HARDWARE_INERT_FILES = (
     "crates/orbis-core/src/lifecycle.rs",
     "crates/orbis-ui/src/automation_shadow_runtime.rs",
     "crates/orbis-ui/src/automation_execution_guard.rs",
+    "crates/orbis-ui/src/automation_lifecycle_revision.rs",
+    "crates/orbis-ui/src/automation_serialization.rs",
+    "crates/orbis-ui/src/automation_execution_scope.rs",
     "crates/orbis-ui/src/automation_backend.rs",
     "crates/orbis-ui/src/resume_observer.rs",
     "crates/orbis-ui/src/secondary_windows_backend.rs",
@@ -158,7 +191,6 @@ def strip_rust_non_code(source: str) -> str:
             i += 2
             continue
 
-        # Rust raw string: r"...", r#"..."#, br##"..."##, etc.
         raw_start = i
         if source.startswith("br", i):
             j = i + 2
@@ -179,7 +211,6 @@ def strip_rust_non_code(source: str) -> str:
                 i = end
                 continue
 
-        # Normal byte/string literal.
         quote_start = i
         if source.startswith('b"', i):
             i += 1
@@ -200,9 +231,6 @@ def strip_rust_non_code(source: str) -> str:
             i = j
             continue
 
-        # Conservative char/byte-char literal handling. Lifetimes such as 'a
-        # are left intact because they have no closing quote immediately after
-        # one escaped-or-unescaped character sequence.
         char_start = i
         byte_char = source.startswith("b'", i)
         quote_pos = i + 1 if byte_char else i
@@ -273,19 +301,24 @@ def check_runtime_readiness(root: Path, errors: list[str]) -> None:
 
 
 def check_execution_guard_api(root: Path, errors: list[str]) -> None:
-    relative = "crates/orbis-ui/src/automation_execution_guard.rs"
-    source = read_required(root, relative, errors)
-    if source is None:
-        return
-    code = strip_rust_non_code(source)
-    risky_public = re.compile(
-        r"\bpub\s+(?:async\s+)?fn\s+(execute|apply|dispatch|commit|mutate|write)\b"
-    )
-    match = risky_public.search(code)
-    if match:
-        errors.append(
-            f"{relative}: execution handoff exposes forbidden public method {match.group(1)!r}"
+    for relative in (
+        "crates/orbis-ui/src/automation_execution_guard.rs",
+        "crates/orbis-ui/src/automation_lifecycle_revision.rs",
+        "crates/orbis-ui/src/automation_serialization.rs",
+        "crates/orbis-ui/src/automation_execution_scope.rs",
+    ):
+        source = read_required(root, relative, errors)
+        if source is None:
+            continue
+        code = strip_rust_non_code(source)
+        risky_public = re.compile(
+            r"\bpub\s+(?:async\s+)?fn\s+(execute|apply|dispatch|commit|mutate|write)\b"
         )
+        match = risky_public.search(code)
+        if match:
+            errors.append(
+                f"{relative}: dry-run guard exposes forbidden public method {match.group(1)!r}"
+            )
 
 
 def check_resume_observer(root: Path, errors: list[str]) -> None:
@@ -303,6 +336,48 @@ def check_resume_observer(root: Path, errors: list[str]) -> None:
             errors.append(
                 f"{relative}: resume observer contains unexpected D-Bus active operation {suspicious!r}"
             )
+
+
+def check_proof_executor_is_test_only(root: Path, errors: list[str]) -> None:
+    lib_relative = "crates/orbis-ui/src/lib.rs"
+    proof_relative = "crates/orbis-ui/src/automation_performance_executor.rs"
+    lib = read_required(root, lib_relative, errors)
+    proof = read_required(root, proof_relative, errors)
+    if lib is not None:
+        if not re.search(
+            r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*mod\s+automation_performance_executor\s*;",
+            lib,
+        ):
+            errors.append(
+                f"{lib_relative}: Performance Automation executor proof must remain cfg(test)-only"
+            )
+        if re.search(r"\bpub\s+mod\s+automation_performance_executor\b", lib):
+            errors.append(f"{lib_relative}: proof executor must not be publicly exported")
+    if proof is not None:
+        for marker in (
+            "run_performance_proof",
+            "LifecycleRevisionChanged",
+            "CapabilityGenerationChanged",
+            "ReadBackAfterMutation",
+            "ReadBackMismatch",
+            "set_performance_for_automation",
+            "prepared.required_revision()",
+            "lease.required_revision()",
+        ):
+            if marker not in proof:
+                errors.append(f"{proof_relative}: missing proof safety marker {marker!r}")
+        code = strip_rust_non_code(proof)
+        for forbidden in (
+            "set_gpu_mode(",
+            "set_fan_curve(",
+            "set_charge_limit(",
+            "Command::new(",
+            "unsafe {",
+        ):
+            if forbidden in code:
+                errors.append(
+                    f"{proof_relative}: Performance-only proof contains forbidden surface {forbidden!r}"
+                )
 
 
 def check_manifests(root: Path, errors: list[str]) -> None:
@@ -331,6 +406,7 @@ def run(root: Path) -> list[str]:
     check_runtime_readiness(root, errors)
     check_execution_guard_api(root, errors)
     check_resume_observer(root, errors)
+    check_proof_executor_is_test_only(root, errors)
     check_manifests(root, errors)
     return errors
 
