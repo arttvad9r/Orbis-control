@@ -95,12 +95,14 @@ impl HysteresisGate {
     /// Inactive -> active at `threshold + width`.
     /// Active -> inactive at `threshold - width`.
     pub fn update(&mut self, temperature: TemperatureC) -> bool {
-        let value = temperature.get();
+        let value = i32::from(temperature.get());
+        let threshold = i32::from(self.threshold_c);
+        let width = i32::from(self.width_c);
         if self.active {
-            if value <= self.threshold_c - self.width_c {
+            if value <= threshold - width {
                 self.active = false;
             }
-        } else if value >= self.threshold_c + self.width_c {
+        } else if value >= threshold + width {
             self.active = true;
         }
         self.active
@@ -210,6 +212,12 @@ mod tests {
         assert!(gate.update(TemperatureC::new(83).unwrap()));
         assert!(gate.update(TemperatureC::new(79).unwrap()));
         assert!(!gate.update(TemperatureC::new(77).unwrap()));
+    }
+
+    #[test]
+    fn hysteresis_arithmetic_is_safe_for_extreme_configuration() {
+        let mut gate = HysteresisGate::new(i16::MIN, i16::MAX, false);
+        assert!(gate.update(TemperatureC::new(150).unwrap()));
     }
 
     #[test]

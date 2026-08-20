@@ -116,10 +116,12 @@ impl<T> MutationTransaction<T> {
     /// Whether a blind automatic retry is safe from the state-machine point of
     /// view.
     ///
-    /// Unknown outcome is explicitly non-retryable because the first mutation
-    /// may actually have reached hardware.
+    /// Only `Prepared` is retryable because no mutation attempt has been
+    /// recorded yet. Once any attempt was dispatched, even a reported failure
+    /// may conceal backend-specific partial effects; retry requires explicit
+    /// higher-level evidence and policy.
     pub fn allows_automatic_retry(&self) -> bool {
-        matches!(self.phase, MutationPhase::Prepared | MutationPhase::Failed { .. })
+        matches!(self.phase, MutationPhase::Prepared)
     }
 }
 
@@ -184,9 +186,15 @@ mod tests {
     }
 
     #[test]
-    fn failed_before_unknown_dispatch_can_be_retried_by_policy() {
+    fn reported_failure_still_forbids_automatic_retry() {
         let mut tx = MutationTransaction::new(1u8, 2u8);
         tx.mark_failed("request rejected", "test");
+        assert!(!tx.allows_automatic_retry());
+    }
+
+    #[test]
+    fn only_prepared_transaction_is_automatically_retryable() {
+        let tx = MutationTransaction::new(1u8, 2u8);
         assert!(tx.allows_automatic_retry());
     }
 

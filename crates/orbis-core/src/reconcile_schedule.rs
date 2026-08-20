@@ -15,8 +15,11 @@ pub enum ReconcileTrigger {
     Startup,
     /// Desired intent changed due to direct user action.
     DesiredChanged,
-    /// System resumed from sleep.
+    /// System resumed from sleep; first pass must only observe.
     Resume,
+    /// Fresh authoritative observations after resume are now available and the
+    /// normal reconciliation policy may plan one mutation if needed.
+    ResumeObserved,
     /// Capability/readiness evidence changed.
     CapabilityChanged,
     /// Authoritative observation changed.
@@ -39,13 +42,14 @@ pub enum DispatchPermission {
 /// Determine dispatch permission for a trigger.
 ///
 /// Startup is observe-only by default: merely loading persisted/default config
-/// must not apply hardware state. Resume and capability changes also start
-/// observe-only so changed hardware/backend state is learned before any write.
-/// A direct desired change may mutate after normal capability/reconciliation
-/// checks.
+/// must not apply hardware state. Resume is two-phase: `Resume` is observe-only
+/// and only `ResumeObserved`, emitted after fresh authoritative reads, may
+/// converge a known Desired/Observed mismatch.
 pub fn dispatch_permission(trigger: ReconcileTrigger) -> DispatchPermission {
     match trigger {
-        ReconcileTrigger::DesiredChanged => DispatchPermission::MayMutate,
+        ReconcileTrigger::DesiredChanged | ReconcileTrigger::ResumeObserved => {
+            DispatchPermission::MayMutate
+        }
         ReconcileTrigger::Startup
         | ReconcileTrigger::Resume
         | ReconcileTrigger::CapabilityChanged
@@ -88,7 +92,7 @@ mod tests {
     use crate::{ActionRequirement, CapabilityStatus};
 
     #[test]
-    fn startup_and_resume_never_write_just_because_config_exists() {
+    fn startup_and_initial_resume_never_write_just_because_config_exists() {
         assert_eq!(
             dispatch_permission(ReconcileTrigger::Startup),
             DispatchPermission::ObserveOnly
@@ -97,6 +101,17 @@ mod tests {
             dispatch_permission(ReconcileTrigger::Resume),
             DispatchPermission::ObserveOnly
         );
+    }
+
+    #[test]
+    fn resume_can_converge_only_after_fresh_observation_phase() {
+        let decision = ReconcileDecision::Apply { target: 80u8 };
+        assert!(!may_dispatch(ReconcileTrigger::Resume, &decision, None));
+        assert!(may_dispatch(
+            ReconcileTrigger::ResumeObserved,
+            &decision,
+            None
+        ));
     }
 
     #[test]
