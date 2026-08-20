@@ -187,6 +187,20 @@ pub(crate) fn wire_window(app: &AppWindow) {
             }
         });
     }
+
+    // Explicit Quit is never reinterpreted as CloseAction::HideToTray. It
+    // persists position best-effort and terminates even when a tray host exists.
+    {
+        let weak = app.as_weak();
+        app.on_quit_clicked(move || {
+            if let Some(app) = weak.upgrade() {
+                let _ = window_lifecycle_backend::persist_position(&app);
+            }
+            if let Err(error) = slint::quit_event_loop() {
+                tracing::warn!(error = ?error, "explicit Quit could not terminate Slint event loop");
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -212,6 +226,8 @@ mod tests {
         assert!(source.contains("app.on_extra_clicked"));
         assert!(source.contains("app.on_automation_clicked"));
         assert!(source.contains("app.on_preferences_clicked"));
+        assert!(source.contains("app.on_quit_clicked"));
+        assert!(source.contains("slint::quit_event_loop()"));
         assert!(source.contains("tray_backend::wire_app(app)"));
         assert!(source.contains("wire_app_window(app)"));
         assert!(!source.contains("app.on_perf_clicked"));
