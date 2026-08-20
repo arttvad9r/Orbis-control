@@ -680,6 +680,13 @@ where
 mod tests {
     use super::*;
 
+    fn production_source() -> &'static str {
+        include_str!("worker_runtime.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("worker source always has a production prefix")
+    }
+
     #[test]
     fn execution_promotion_is_fail_closed_on_this_revision() {
         assert!(!AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED);
@@ -687,7 +694,7 @@ mod tests {
 
     #[test]
     fn worker_source_owns_automation_and_only_performance_executor() {
-        let source = include_str!("worker_runtime.rs");
+        let source = production_source();
         assert!(source.contains("AutomationWorkerDriver::new()"));
         assert!(source.contains("observe_prepare_for_sleep"));
         assert!(source.contains("observe_automation_telemetry"));
@@ -702,7 +709,7 @@ mod tests {
 
     #[test]
     fn capability_refresh_has_one_canonical_status_requery_path() {
-        let source = include_str!("worker_runtime.rs");
+        let source = production_source();
         assert_eq!(
             source
                 .matches("runtime.requery_mutation_statuses().await")
@@ -722,7 +729,7 @@ mod tests {
 
     #[test]
     fn worker_authoritative_reads_use_bounded_helpers_where_provider_identity_exists() {
-        let source = include_str!("worker_runtime.rs");
+        let source = production_source();
         assert!(!source.contains("runtime.gpu.refresh_gpu_capabilities().await"));
         assert!(!source.contains("runtime.battery.charge_limit().await"));
         assert!(!source.contains("runtime.performance.performance_state().await"));
