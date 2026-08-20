@@ -4,17 +4,18 @@
 //! intended Performance-only execution semantics against the already-existing
 //! application owner contract without making Automation reachable in production.
 //! Promotion to production requires executable Rust tests plus wiring under the
-//! worker/capability-generation serialization owner.
+//! worker/lifecycle/capability serialization owner.
 
 use async_trait::async_trait;
 use orbis_application::{
-    CommandError, PerformanceCommandOutcome, PerformanceState, SetPerformanceError,
+    CommandError, PerformanceCommandOutcome, SetPerformanceError,
 };
 use orbis_core::action::ApplyResult;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 
 use crate::automation_execution_scope::{AutomationPreparedBatch, AutomationPreparedKind};
+use crate::automation_lifecycle_revision::AutomationLifecycleRevision;
 use crate::automation_serialization::AutomationDryRunLease;
 use crate::composition::PerformanceServiceRuntime;
 
@@ -23,6 +24,11 @@ use crate::composition::PerformanceServiceRuntime;
 enum AutomationPerformanceExecutionError {
     /// Prepared metadata does not belong to the supplied serialization lease.
     LeaseMismatch,
+    /// A newer lifecycle event superseded the lease before the owner call.
+    LifecycleRevisionChanged {
+        required: AutomationLifecycleRevision,
+        current: AutomationLifecycleRevision,
+    },
     /// Capability generation changed before the mutation call.
     CapabilityGenerationChanged { required: u64, current: u64 },
     /// Provider mutation failed before a successful command result existed.
@@ -56,6 +62,7 @@ enum AutomationPerformanceExecutionOutcome {
     /// authoritative read-back.
     Applied {
         lease_id: u64,
+        revision: AutomationLifecycleRevision,
         generation: u64,
         profile: PerformanceProfile,
     },
@@ -86,20 +93,23 @@ where
 
 /// Execute one already-scoped Performance-only batch in the proof environment.
 ///
-/// The caller must still own the serialization lease. Generation is compared
-/// immediately before the owner call. This proof does not solve the remaining
-/// production TOCTOU requirement: capability refresh and this call must later be
-/// serialized by the same worker/runtime owner.
+/// The caller must still own the serialization lease. Lifecycle revision and
+/// capability generation are compared immediately before the owner call. This
+/// proof does not solve the remaining production TOCTOU requirement: lifecycle
+/// admission, capability refresh and this call must later be serialized by the
+/// same worker/runtime owner.
 async fn run_performance_proof<O>(
     owner: &O,
     lease: &AutomationDryRunLease,
     prepared: &AutomationPreparedBatch,
+    current_revision: AutomationLifecycleRevision,
     current_generation: u64,
 ) -> AutomationPerformanceExecutionOutcome
 where
     O: PerformanceAutomationOwner + ?Sized,
 {
     if prepared.lease_id() != lease.id()
+        || prepared.required_revision() != lease.required_revision()
         || prepared.required_generation() != lease.required_generation()
         || prepared.trigger() != lease.trigger()
     {
@@ -108,11 +118,21 @@ where
         );
     }
 
-    let required = lease.required_generation();
-    if current_generation != required {
+    let required_revision = lease.required_revision();
+    if current_revision != required_revision {
+        return AutomationPerformanceExecutionOutcome::Failed(
+            AutomationPerformanceExecutionError::LifecycleRevisionChanged {
+                required: required_revision,
+                current: current_revision,
+            },
+        );
+    }
+
+    let required_generation = lease.required_generation();
+    if current_generation != required_generation {
         return AutomationPerformanceExecutionOutcome::Failed(
             AutomationPerformanceExecutionError::CapabilityGenerationChanged {
-                required,
+                required: required_generation,
                 current: current_generation,
             },
         );
@@ -158,7 +178,8 @@ where
 
     AutomationPerformanceExecutionOutcome::Applied {
         lease_id: lease.id(),
-        generation: required,
+        revision: required_revision,
+        generation: required_generation,
         profile,
     }
 }
@@ -176,13 +197,12 @@ mod tests {
         Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, FeatureId,
         OperationCapability,
     };
-    use orbis_providers::error::ProviderError;
 
-    use crate::automation_execution_guard::{
-        AutomationExecutionCandidate, AutomationExecutionGuardOutcome,
-        revalidate_automation_candidate,
-    };
     use crate::automation_execution_scope::prepare_automation_execution_scope;
+    use crate::automation_lifecycle_revision::{
+        AutomationLifecycleClock, AutomationRevisionCandidate, AutomationRevisionGuardOutcome,
+        revalidate_revision_candidate,
+    };
     use crate::automation_serialization::{
         AutomationAdmissionOutcome, AutomationSerializationCoordinator,
     };
@@ -268,7 +288,11 @@ mod tests {
 
     fn lease_and_prepared(
         generation: u64,
-    ) -> (AutomationSerializationCoordinator, AutomationDryRunLease, AutomationPreparedBatch) {
+    ) -> (
+        AutomationSerializationCoordinator,
+        AutomationDryRunLease,
+        AutomationPreparedBatch,
+    ) {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let snapshot = snapshot(generation, base);
         let policy = policy();
@@ -286,19 +310,23 @@ mod tests {
             &snapshot,
             base + Duration::from_secs(2),
         );
-        let candidate = AutomationExecutionCandidate::from_shadow(&outcome).unwrap();
-        let guard = revalidate_automation_candidate(
+
+        let mut clock = AutomationLifecycleClock::new();
+        let revision = clock.advance().unwrap();
+        let candidate = AutomationRevisionCandidate::from_shadow(&outcome, revision).unwrap();
+        let guard = revalidate_revision_candidate(
             &candidate,
+            revision,
             &policy,
             &snapshot,
             base + Duration::from_secs(3),
             Duration::from_secs(30),
         );
-        let AutomationExecutionGuardOutcome::Ready(handoff) = guard else {
-            panic!("expected handoff");
+        let AutomationRevisionGuardOutcome::Ready(handoff) = guard else {
+            panic!("expected revision handoff");
         };
         let mut coordinator = AutomationSerializationCoordinator::new();
-        let admission = coordinator.admit(handoff, generation);
+        let admission = coordinator.admit(handoff, revision, generation);
         let AutomationAdmissionOutcome::Admitted(lease) = admission else {
             panic!("expected lease");
         };
@@ -310,10 +338,13 @@ mod tests {
         (coordinator, lease, prepared)
     }
 
-    fn command_outcome(result: ApplyResult, current: PerformanceProfile) -> PerformanceCommandOutcome {
+    fn command_outcome(
+        result: ApplyResult,
+        current: PerformanceProfile,
+    ) -> PerformanceCommandOutcome {
         orbis_application::CommandOutcome {
             result,
-            state: PerformanceState {
+            state: orbis_application::PerformanceState {
                 current,
                 available: PerformanceProfile::ALL.to_vec(),
             },
@@ -328,16 +359,45 @@ mod tests {
             PerformanceProfile::Balanced,
         )));
 
-        let outcome = run_performance_proof(&owner, &lease, &prepared, 7).await;
+        let outcome = run_performance_proof(
+            &owner,
+            &lease,
+            &prepared,
+            lease.required_revision(),
+            7,
+        )
+        .await;
         assert!(matches!(
             outcome,
             AutomationPerformanceExecutionOutcome::Applied {
                 lease_id: 1,
                 generation: 7,
                 profile: PerformanceProfile::Balanced,
+                ..
             }
         ));
         assert_eq!(owner.call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn newer_lifecycle_revision_blocks_before_owner_call() {
+        let (_coordinator, lease, prepared) = lease_and_prepared(8);
+        let owner = FakeOwner::new(Ok(command_outcome(
+            ApplyResult::Applied,
+            PerformanceProfile::Balanced,
+        )));
+        let mut clock = AutomationLifecycleClock::new();
+        assert_eq!(clock.advance().unwrap(), lease.required_revision());
+        let newer = clock.advance().unwrap();
+
+        let outcome = run_performance_proof(&owner, &lease, &prepared, newer, 8).await;
+        assert!(matches!(
+            outcome,
+            AutomationPerformanceExecutionOutcome::Failed(
+                AutomationPerformanceExecutionError::LifecycleRevisionChanged { .. }
+            )
+        ));
+        assert_eq!(owner.call_count(), 0);
     }
 
     #[tokio::test]
@@ -347,7 +407,14 @@ mod tests {
             ApplyResult::Applied,
             PerformanceProfile::Balanced,
         )));
-        let outcome = run_performance_proof(&owner, &lease, &prepared, 10).await;
+        let outcome = run_performance_proof(
+            &owner,
+            &lease,
+            &prepared,
+            lease.required_revision(),
+            10,
+        )
+        .await;
         assert!(matches!(
             outcome,
             AutomationPerformanceExecutionOutcome::Failed(
@@ -368,7 +435,14 @@ mod tests {
             PerformanceProfile::Balanced,
         )));
         assert!(matches!(
-            run_performance_proof(&accepted, &lease, &prepared, 11).await,
+            run_performance_proof(
+                &accepted,
+                &lease,
+                &prepared,
+                lease.required_revision(),
+                11,
+            )
+            .await,
             AutomationPerformanceExecutionOutcome::Failed(
                 AutomationPerformanceExecutionError::UnexpectedApplyResult { .. }
             )
@@ -380,7 +454,14 @@ mod tests {
             PerformanceProfile::Silent,
         )));
         assert!(matches!(
-            run_performance_proof(&mismatch, &lease, &prepared, 12).await,
+            run_performance_proof(
+                &mismatch,
+                &lease,
+                &prepared,
+                lease.required_revision(),
+                12,
+            )
+            .await,
             AutomationPerformanceExecutionOutcome::Failed(
                 AutomationPerformanceExecutionError::ReadBackMismatch { .. }
             )
@@ -394,7 +475,14 @@ mod tests {
             ProviderError::Unsupported("test".into()),
         )));
         assert!(matches!(
-            run_performance_proof(&command, &lease, &prepared, 13).await,
+            run_performance_proof(
+                &command,
+                &lease,
+                &prepared,
+                lease.required_revision(),
+                13,
+            )
+            .await,
             AutomationPerformanceExecutionOutcome::Failed(
                 AutomationPerformanceExecutionError::Command(_)
             )
@@ -406,7 +494,14 @@ mod tests {
             source: ProviderError::Timeout("test".into()),
         }));
         assert!(matches!(
-            run_performance_proof(&readback, &lease, &prepared, 14).await,
+            run_performance_proof(
+                &readback,
+                &lease,
+                &prepared,
+                lease.required_revision(),
+                14,
+            )
+            .await,
             AutomationPerformanceExecutionOutcome::Failed(
                 AutomationPerformanceExecutionError::ReadBackAfterMutation { .. }
             )
