@@ -3,6 +3,9 @@ use std::future::Future;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use orbis_core::battery::ChargeLimit;
+use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
+use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
     BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
@@ -13,14 +16,22 @@ use orbis_session_client::{
     SessionGpuPowerProvider, SessionPerformanceProvider, ZbusSessionChargeLimitSource,
     ZbusSessionGpuSource, ZbusSessionPerformanceSource,
 };
+use serde::Serialize;
 
-const HELP: &str = "orbisctl — Orbis Control read-only command-line client\n\nUSAGE:\n    orbisctl [OPTIONS] <COMMAND>\n\nOPTIONS:\n    -h, --help       Print help\n    -V, --version    Print version\n\nCOMMANDS:\n    status            Read current Session1 state without performing mutations\n";
+const STATUS_SCHEMA_VERSION: u32 = 1;
+const HELP: &str = "orbisctl — Orbis Control read-only command-line client\n\nUSAGE:\n    orbisctl [OPTIONS] <COMMAND>\n\nOPTIONS:\n    -h, --help       Print help\n    -V, --version    Print version\n\nCOMMANDS:\n    status [--json]  Read current Session1 state without performing mutations\n";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputFormat {
+    Human,
+    Json,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Command {
     Help,
     Version,
-    Status,
+    Status(OutputFormat),
     Invalid(String),
 }
 
@@ -28,28 +39,93 @@ fn parse_args<I>(args: I) -> Command
 where
     I: IntoIterator<Item = String>,
 {
-    let mut args = args.into_iter();
-    let first = args.next();
-    let extra = args.next();
-
-    match (first.as_deref(), extra) {
-        (None, _) | (Some("-h" | "--help"), None) => Command::Help,
-        (Some("-V" | "--version"), None) => Command::Version,
-        (Some("status"), None) => Command::Status,
-        (Some(arg), _) => Command::Invalid(arg.to_string()),
+    let args: Vec<String> = args.into_iter().collect();
+    match args.as_slice() {
+        [] => Command::Help,
+        [arg] if matches!(arg.as_str(), "-h" | "--help") => Command::Help,
+        [arg] if matches!(arg.as_str(), "-V" | "--version") => Command::Version,
+        [arg] if arg == "status" => Command::Status(OutputFormat::Human),
+        [command, flag] if command == "status" && flag == "--json" => {
+            Command::Status(OutputFormat::Json)
+        }
+        [arg, ..] => Command::Invalid(arg.clone()),
     }
 }
 
-fn error_state(error: &ProviderError) -> &'static str {
-    match error {
-        ProviderError::Unsupported(_) => "Unsupported",
-        ProviderError::PermissionDenied(_) => "PermissionDenied",
-        ProviderError::BackendUnavailable(_) | ProviderError::Timeout(_) | ProviderError::Dbus(_) => {
-            "Unavailable"
+#[derive(Debug, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum Observation<T> {
+    Available { value: T },
+    Unsupported { detail: String },
+    PermissionDenied { detail: String },
+    Unavailable { detail: String },
+    Unknown { detail: String },
+}
+
+impl<T> Observation<T> {
+    fn is_available(&self) -> bool {
+        matches!(self, Self::Available { .. })
+    }
+}
+
+fn observation_from_result<T>(result: Result<T, ProviderError>) -> Observation<T> {
+    match result {
+        Ok(value) => Observation::Available { value },
+        Err(error) => {
+            let detail = error.to_string();
+            match error {
+                ProviderError::Unsupported(_) => Observation::Unsupported { detail },
+                ProviderError::PermissionDenied(_) => Observation::PermissionDenied { detail },
+                ProviderError::BackendUnavailable(_)
+                | ProviderError::Timeout(_)
+                | ProviderError::Dbus(_) => Observation::Unavailable { detail },
+                ProviderError::InvalidRequest(_)
+                | ProviderError::Io(_)
+                | ProviderError::Internal(_) => Observation::Unknown { detail },
+            }
         }
-        ProviderError::InvalidRequest(_) | ProviderError::Io(_) | ProviderError::Internal(_) => {
-            "Unknown"
-        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct BatteryStatusSnapshot {
+    charge_limit: Observation<ChargeLimit>,
+}
+
+#[derive(Debug, Serialize)]
+struct PerformanceStatusSnapshot {
+    current: Observation<PerformanceProfile>,
+    available: Observation<Vec<PerformanceProfile>>,
+}
+
+#[derive(Debug, Serialize)]
+struct GpuStatusSnapshot {
+    power: Observation<GpuPowerState>,
+    mux: Observation<GpuMuxState>,
+    access: Observation<GpuAccessPolicy>,
+}
+
+#[derive(Debug, Serialize)]
+struct StatusSnapshot {
+    schema_version: u32,
+    battery: BatteryStatusSnapshot,
+    performance: PerformanceStatusSnapshot,
+    gpu: GpuStatusSnapshot,
+}
+
+impl StatusSnapshot {
+    fn successful_reads(&self) -> usize {
+        [
+            self.battery.charge_limit.is_available(),
+            self.performance.current.is_available(),
+            self.performance.available.is_available(),
+            self.gpu.power.is_available(),
+            self.gpu.mux.is_available(),
+            self.gpu.access.is_available(),
+        ]
+        .into_iter()
+        .filter(|available| *available)
+        .count()
     }
 }
 
@@ -69,30 +145,36 @@ where
     }
 }
 
-fn print_observation<T>(label: &str, result: Result<T, ProviderError>) -> bool
+fn print_observation<T>(label: &str, observation: &Observation<T>)
 where
     T: Debug,
 {
-    match result {
-        Ok(value) => {
-            println!("{label}: {value:?}");
-            true
+    match observation {
+        Observation::Available { value } => println!("{label}: {value:?}"),
+        Observation::Unsupported { detail } => {
+            println!("{label}: Unsupported ({detail})")
         }
-        Err(error) => {
-            println!("{label}: {} ({error})", error_state(&error));
-            false
+        Observation::PermissionDenied { detail } => {
+            println!("{label}: PermissionDenied ({detail})")
         }
+        Observation::Unavailable { detail } => {
+            println!("{label}: Unavailable ({detail})")
+        }
+        Observation::Unknown { detail } => println!("{label}: Unknown ({detail})"),
     }
 }
 
-async fn status() -> ExitCode {
-    let connection = match zbus::Connection::session().await {
-        Ok(connection) => connection,
-        Err(error) => {
-            eprintln!("orbisctl: cannot connect to the user session bus: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
+fn print_human(snapshot: &StatusSnapshot) {
+    print_observation("battery.charge_limit", &snapshot.battery.charge_limit);
+    print_observation("performance.current", &snapshot.performance.current);
+    print_observation("performance.available", &snapshot.performance.available);
+    print_observation("gpu.power", &snapshot.gpu.power);
+    print_observation("gpu.mux", &snapshot.gpu.mux);
+    print_observation("gpu.access", &snapshot.gpu.access);
+}
+
+async fn collect_status() -> Result<StatusSnapshot, zbus::Error> {
+    let connection = zbus::Connection::session().await?;
 
     let battery = SessionChargeLimitProvider::new(ZbusSessionChargeLimitSource::new(
         connection.clone(),
@@ -104,75 +186,83 @@ async fn status() -> ExitCode {
     let gpu_mux = SessionGpuMuxProvider::new(ZbusSessionGpuSource::new(connection.clone()));
     let gpu_access = SessionGpuAccessProvider::new(ZbusSessionGpuSource::new(connection));
 
-    let mut successful_reads = 0usize;
-
     let battery_timeout = battery.timeout();
-    if print_observation(
-        "battery.charge_limit",
+    let charge_limit = observation_from_result(
         bounded_read(
             "battery.charge_limit",
             battery_timeout,
             battery.charge_limit(),
         )
         .await,
-    ) {
-        successful_reads += 1;
-    }
+    );
 
     let performance_timeout = performance.timeout();
-    if print_observation(
-        "performance.current",
+    let current = observation_from_result(
         bounded_read(
             "performance.current",
             performance_timeout,
             performance.current_profile(),
         )
         .await,
-    ) {
-        successful_reads += 1;
-    }
-    if print_observation(
-        "performance.available",
+    );
+    let available = observation_from_result(
         bounded_read(
             "performance.available",
             performance_timeout,
             performance.profiles(),
         )
         .await,
-    ) {
-        successful_reads += 1;
-    }
+    );
 
     let gpu_power_timeout = gpu_power.timeout();
-    if print_observation(
-        "gpu.power",
+    let power = observation_from_result(
         bounded_read("gpu.power", gpu_power_timeout, gpu_power.power_state()).await,
-    ) {
-        successful_reads += 1;
-    }
+    );
 
     let gpu_mux_timeout = gpu_mux.timeout();
-    if print_observation(
-        "gpu.mux",
+    let mux = observation_from_result(
         bounded_read("gpu.mux", gpu_mux_timeout, gpu_mux.mux_state()).await,
-    ) {
-        successful_reads += 1;
-    }
+    );
 
     let gpu_access_timeout = gpu_access.timeout();
-    if print_observation(
-        "gpu.access",
+    let access = observation_from_result(
         bounded_read(
             "gpu.access",
             gpu_access_timeout,
             gpu_access.access_policy(),
         )
         .await,
-    ) {
-        successful_reads += 1;
+    );
+
+    Ok(StatusSnapshot {
+        schema_version: STATUS_SCHEMA_VERSION,
+        battery: BatteryStatusSnapshot { charge_limit },
+        performance: PerformanceStatusSnapshot { current, available },
+        gpu: GpuStatusSnapshot { power, mux, access },
+    })
+}
+
+async fn status(format: OutputFormat) -> ExitCode {
+    let snapshot = match collect_status().await {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            eprintln!("orbisctl: cannot connect to the user session bus: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match format {
+        OutputFormat::Human => print_human(&snapshot),
+        OutputFormat::Json => match serde_json::to_string_pretty(&snapshot) {
+            Ok(json) => println!("{json}"),
+            Err(error) => {
+                eprintln!("orbisctl: cannot serialize status JSON: {error}");
+                return ExitCode::FAILURE;
+            }
+        },
     }
 
-    if successful_reads == 0 {
+    if snapshot.successful_reads() == 0 {
         eprintln!("orbisctl: no Session1 reads succeeded");
         ExitCode::FAILURE
     } else {
@@ -191,7 +281,7 @@ async fn main() -> ExitCode {
             println!("orbisctl {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Command::Status => status().await,
+        Command::Status(format) => status(format).await,
         Command::Invalid(arg) => {
             eprintln!("orbisctl: unknown or invalid argument: {arg}");
             eprintln!("Try 'orbisctl --help'.");
@@ -205,11 +295,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parser_accepts_help_version_and_status() {
+    fn parser_accepts_help_version_and_status_formats() {
         assert_eq!(parse_args(Vec::<String>::new()), Command::Help);
         assert_eq!(parse_args(["--help".into()]), Command::Help);
         assert_eq!(parse_args(["--version".into()]), Command::Version);
-        assert_eq!(parse_args(["status".into()]), Command::Status);
+        assert_eq!(
+            parse_args(["status".into()]),
+            Command::Status(OutputFormat::Human)
+        );
+        assert_eq!(
+            parse_args(["status".into(), "--json".into()]),
+            Command::Status(OutputFormat::Json)
+        );
     }
 
     #[test]
@@ -222,29 +319,72 @@ mod tests {
             parse_args(["status".into(), "extra".into()]),
             Command::Invalid("status".into())
         );
+        assert_eq!(
+            parse_args(["status".into(), "--json".into(), "extra".into()]),
+            Command::Invalid("status".into())
+        );
     }
 
     #[test]
-    fn provider_errors_are_rendered_without_fake_values() {
-        assert_eq!(
-            error_state(&ProviderError::Unsupported("x".into())),
-            "Unsupported"
-        );
-        assert_eq!(
-            error_state(&ProviderError::PermissionDenied("x".into())),
-            "PermissionDenied"
-        );
-        assert_eq!(
-            error_state(&ProviderError::BackendUnavailable("x".into())),
-            "Unavailable"
-        );
-        assert_eq!(
-            error_state(&ProviderError::Timeout("x".into())),
-            "Unavailable"
-        );
-        assert_eq!(
-            error_state(&ProviderError::Internal("x".into())),
-            "Unknown"
-        );
+    fn provider_errors_are_classified_without_fake_values() {
+        assert!(matches!(
+            observation_from_result::<()>(Err(ProviderError::Unsupported("x".into()))),
+            Observation::Unsupported { .. }
+        ));
+        assert!(matches!(
+            observation_from_result::<()>(Err(ProviderError::PermissionDenied("x".into()))),
+            Observation::PermissionDenied { .. }
+        ));
+        assert!(matches!(
+            observation_from_result::<()>(Err(ProviderError::BackendUnavailable("x".into()))),
+            Observation::Unavailable { .. }
+        ));
+        assert!(matches!(
+            observation_from_result::<()>(Err(ProviderError::Timeout("x".into()))),
+            Observation::Unavailable { .. }
+        ));
+        assert!(matches!(
+            observation_from_result::<()>(Err(ProviderError::Internal("x".into()))),
+            Observation::Unknown { .. }
+        ));
+    }
+
+    #[test]
+    fn json_status_is_versioned_and_preserves_typed_error_state() {
+        let snapshot = StatusSnapshot {
+            schema_version: STATUS_SCHEMA_VERSION,
+            battery: BatteryStatusSnapshot {
+                charge_limit: Observation::Unsupported {
+                    detail: "not supported".into(),
+                },
+            },
+            performance: PerformanceStatusSnapshot {
+                current: Observation::Available {
+                    value: PerformanceProfile::Balanced,
+                },
+                available: Observation::Available {
+                    value: vec![PerformanceProfile::Balanced],
+                },
+            },
+            gpu: GpuStatusSnapshot {
+                power: Observation::Unavailable {
+                    detail: "backend down".into(),
+                },
+                mux: Observation::Unknown {
+                    detail: "unknown".into(),
+                },
+                access: Observation::PermissionDenied {
+                    detail: "denied".into(),
+                },
+            },
+        };
+
+        let json = serde_json::to_value(&snapshot).expect("serialize status");
+        assert_eq!(json["schema_version"], STATUS_SCHEMA_VERSION);
+        assert_eq!(json["battery"]["charge_limit"]["state"], "unsupported");
+        assert_eq!(json["performance"]["current"]["state"], "available");
+        assert_eq!(json["performance"]["current"]["value"], "balanced");
+        assert_eq!(json["gpu"]["access"]["state"], "permission_denied");
+        assert_eq!(snapshot.successful_reads(), 2);
     }
 }
