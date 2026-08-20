@@ -12,9 +12,12 @@ fn main() {
 
     let entry_str = entry.to_string_lossy().to_string();
 
-    slint_build::compile_with_config(
-        &entry_str,
-        slint_build::CompilerConfiguration::new().with_include_paths(vec![ui_dir]),
-    )
-    .expect("slint compile");
+    // Use one cross-platform widget style instead of Linux `native`, which may
+    // select Qt and ignore runtime Palette.color-scheme overrides. Fluent keeps
+    // ComboBox/SpinBox/ScrollView consistent with Orbis dark/light theme logic.
+    let config = slint_build::CompilerConfiguration::new()
+        .with_include_paths(vec![ui_dir])
+        .with_style("fluent".into());
+
+    slint_build::compile_with_config(&entry_str, config).expect("slint compile");
 }
