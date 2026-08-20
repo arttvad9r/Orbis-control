@@ -1,31 +1,123 @@
 # Beta Acceptance Checklist
 
-This checklist records what is currently proven for the hardening/preferences slices referenced by the beta-readiness backlog. It uses the release evidence taxonomy and deliberately does not treat targeted tests as packaged or live acceptance.
+> Current checklist for the active integration branch.
+> Status date: 2026-08-20.
+>
+> This file intentionally contains **current release gates**, not old PR-stack status. Historical beta-readiness plans remain indexed by [`history.md`](history.md).
 
-## Current evidence
+## Evidence rule
 
-| Slice | Repository state | Proven evidence | Beta acceptance still required |
-|---|---|---|---|
-| PR #12 — NixOS PolicyKit authority default | Merged | `IMPLEMENTED / TESTED`: targeted Nix module evaluation proved Orbis default enablement, host override, disabled-module behavior, and retained policy installation. | Packaged NixOS/module acceptance if this behavior is part of the beta install contract. No live authorization-agent claim is made by this PR. |
-| PR #14 — hardwared keyboard LED sandbox allowlist | Merged | `IMPLEMENTED / TESTED`: exact writable-path assertions cover only `platform_profile` and keyboard brightness, with negative checks for `max_brightness` and broad LED paths. | Packaged service sandbox inspection on the beta package; live keyboard mutation remains a separate claim. |
-| PR #16 — keyboard backlight capability probe | Merged | `IMPLEMENTED / TESTED`: zero-write structural probe and error classification are covered by targeted tests/clippy. | Live hardware evidence before claiming writable keyboard control. `Supported` remains structural evidence, not proof that a write succeeds. |
-| PR #18 — profile-specific fan curve read via Session1 | Merged | `IMPLEMENTED / TESTED`: protocol/sessiond/session-client/UI read path and profile/fan separation have targeted regression coverage. | Packaged end-to-end read acceptance and live read evidence for the supported hardware/profile set. Fan mutation is outside this claim. |
-| PR #19 — safe preferences storage | Draft, not merged | `IMPLEMENTED / TESTED` on its branch: versioned XDG preferences storage, strict/non-destructive loading, and atomic replacement tests. | Merge/integration with current hardening, then packaged startup/persistence acceptance. Durability follow-up PR #51 must be resolved with the preferences stack. |
-| PR #21 — Dark/Light theme persistence | Draft, stacked on #19 | `IMPLEMENTED / TESTED` on its branch: startup ordering, persistence, multi-window inheritance, and failure handling are covered by targeted UI/config tests. | Parent stack integration plus packaged first-render/restart acceptance. No acceptance claim while the parent preferences stack is unmerged. |
-| PR #23 — UPower default in NixOS module | Draft, not merged | `IMPLEMENTED / TESTED` on its branch: targeted Nix evaluation proves default enablement, host override, disabled-module behavior, and absence of hard daemon ordering. | Merge/integration and packaged NixOS module evaluation/service acceptance. This PR alone does not prove UPower runtime availability on a beta installation. |
+Use [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 
-## Beta gates
+- source presence/review → at most `IMPLEMENTED`;
+- executable tests/checks → `TESTED` only for the exact revision/environment;
+- installed artifact acceptance → `PACKAGED`;
+- hardware behavior observed on a named environment → `LIVE-VALIDATED` for that revision/environment only;
+- absent evidence remains `UNKNOWN` or `BLOCKED`.
 
-- [ ] All required Draft stacks are integrated without silently dropping their validated semantics.
-- [ ] Target beta package/module builds successfully from the release candidate revision.
-- [ ] Packaged startup validates PolicyKit/UPower/service integration without relying on developer-shell state.
-- [ ] Preferences survive a packaged restart and invalid-source behavior remains non-destructive.
-- [ ] Theme is applied before first visible render in the packaged application.
-- [ ] Keyboard capability remains honest on live hardware: readable structural support is not reported as successful write evidence.
-- [ ] Profile-specific fan reads are checked through the packaged Session1 path on supported live hardware before a `LIVE-VALIDATED` claim.
-- [ ] Hardware-facing evidence records identify the exact model/environment and distinguish read from write validation.
-- [ ] Any failed or unexecuted packaged/live gate remains `UNKNOWN` or `BLOCKED`; it is not promoted from unit/CI evidence.
+## Repository / CI
 
-## Explicit non-claims
+- [x] One canonical general-purpose workflow remains: `.github/workflows/ci.yml`.
+- [x] Obsolete one-off validation trigger artifacts are removed from `.github`.
+- [x] Canonical documentation hierarchy exists and historical plans are separated.
+- [ ] #106: GitHub Actions actually executes repository steps and produces trustworthy green results.
+- [ ] Exact candidate passes `cargo fmt --all -- --check`.
+- [ ] Exact candidate passes `cargo check --workspace --all-targets --locked`.
+- [ ] Exact candidate passes `cargo test --workspace --locked`.
+- [ ] Exact candidate passes `cargo clippy --workspace --all-targets --locked -- -D warnings`.
+- [ ] Exact candidate passes `nix flake check`.
+- [ ] #114: after CI recovery, `main` is protected by the real required checks.
 
-This refresh does not claim that the current Draft preference/theme/UPower branches are merged, packaged, or live-validated. It does not claim keyboard mutation acceptance, fan mutation acceptance, or any hardware support beyond evidence already recorded elsewhere. No checklist item is completed merely because architecture or code exists.
+## Security / privilege boundary
+
+- [x] Privileged mutation is behind typed `Hardware1`, not a generic root proxy.
+- [x] `sessiond` remains a read/session boundary.
+- [x] Raw GPU/Fan/Panel/Keyboard/Aura writes are product/policy blocked in the current production composition.
+- [x] Fan writes are defense-in-depth blocked while known safety defects remain.
+- [ ] #125: interactive GUI rejects euid 0 before preferences/runtime/D-Bus setup.
+- [ ] #123: provider/status hang handling is complete, including mutation unknown-outcome recovery without blind retry.
+- [ ] #126: packaged/VM inspection proves the intended minimal hardwared sandbox on the exact candidate.
+
+## Capability truth
+
+- [x] Read and write operation evidence are separate.
+- [x] Explicit and periodic capability refresh use one canonical mutation-status requery path (#112 source-complete).
+- [x] Public probes use bounded read-only adapters.
+- [ ] #107: Battery write owner/interface liveness is dynamically re-proven across restart/disappearance.
+- [ ] #120: UI/diagnostics/support evidence is audited against shipped product-policy blocks.
+- [ ] #117: telemetry distinguishes useful fresh data from empty/partial/field-local failure states.
+
+## Battery / Performance / GPU reads
+
+- [x] Source contract preserves Battery configured/effective/enabled distinctions.
+- [x] Performance read/write uses typed profile values and read-back.
+- [x] GPU power / MUX / access remain independent concepts.
+- [ ] Re-run executable integration tests on the exact beta candidate.
+- [ ] Re-run packaged acceptance on the exact beta candidate.
+- [ ] Any live hardware claims are recorded with model/environment/revision and read/write distinction.
+
+## Fans
+
+- [x] Profile/fan-specific Session1 reads request a concrete fan; one requested fan no longer requires the other fan in the same response.
+- [x] Fan mutation remains disabled.
+- [ ] #109: aggregate capability no longer infers GPU support from CPU-only evidence.
+- [ ] #116: stored `FanCurveData.enabled` reaches typed Session1/client/UI evidence.
+- [ ] #104: dormant custom-write path preserves authoritative enabled state on write/read-back.
+- [ ] #105: Factory Defaults guarantees restoration of the previous platform profile on every failure path or avoids temporary switching.
+- [ ] Controlled hardware validation proves final fan/profile state before any write promotion.
+
+## Preferences / desktop lifecycle
+
+- [x] Theme persistence source wiring exists.
+- [x] XDG Autostart read/write/read-back exists (#110 closed as source-complete).
+- [x] Start Minimized persistence/startup lifecycle exists.
+- [x] Window position is supported only where absolute placement is valid; Wayland fails closed.
+- [x] Tray close behavior requires a live host; Quit explicitly terminates the event loop (#121 closed).
+- [x] Diagnostics Refresh/Export/Copy lifecycle exists (#111 closed); Open Logs remains intentionally unavailable.
+- [ ] Packaged desktop/tray/preferences restart acceptance on the exact candidate.
+
+## CLI / supportability
+
+- [x] `orbisctl status` is read-only.
+- [x] `orbisctl status --json` uses a versioned schema and explicit observation states.
+- [x] CLI uses provider deadlines and has no Hardware1 mutation commands.
+- [ ] #119: executable service-present/service-absent integration coverage on the exact candidate.
+- [ ] Diagnostics export is checked in the packaged environment for permissions/path/privacy behavior.
+
+## Production dependency graph
+
+- [x] Providers/sessiond defaults no longer implicitly enable mock features.
+- [ ] #115: GUI production startup no longer constructs fixture-derived initial state.
+- [ ] #115: `orbis-test-support` is removed from the normal GUI release dependency graph.
+- [ ] UI uses compile-time package version rather than fixture hardcoding.
+
+## Automation / future writes
+
+- [x] Automation shadow/policy/lifecycle/recovery/serialization contracts exist in source.
+- [x] Performance executor requires authoritative read-back.
+- [x] `AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED` remains false without executable validation.
+- [x] GPU/Fan/Battery/Display/Lighting unattended executors remain disabled.
+- [ ] Any future promotion has an exact-build executable test and explicit product-policy approval.
+
+## Display / Updates / extended controls
+
+- [x] Display Refresh has typed target/request/read-back semantics.
+- [x] No shell fallback is used as a substitute for a compositor mutation owner.
+- [ ] A concrete typed compositor owner exists and is validated before Display modeset is enabled.
+- [x] Updates does not invent a release feed/downloader/installer.
+- [ ] A canonical signed source and installation-owner contract exists before application self-update is enabled.
+- [ ] #124 application identity is explicitly accepted or migrated before stable release.
+
+## Final beta decision
+
+A beta is acceptable only when:
+
+1. the intended integration branch is merged into `main`;
+2. #106 is resolved and the exact candidate has executable green Rust/Nix checks;
+3. #125 and the remaining safety-critical #123 contract are complete;
+4. no known unsafe or policy-unproven write is enabled;
+5. package/desktop/D-Bus/polkit/tray acceptance succeeds on the exact artifact;
+6. support claims match recorded evidence;
+7. unresolved items are presented as unavailable/blocked rather than hidden behind optimistic UI.
+
+Until then, the beta gate is **BLOCKED** even if source-level static contracts pass.
