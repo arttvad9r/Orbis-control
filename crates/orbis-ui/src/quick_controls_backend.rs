@@ -1,3 +1,5 @@
+#[path = "resume_observer.rs"]
+mod resume_observer;
 #[path = "secondary_windows_backend.rs"]
 mod secondary_windows_backend;
 
@@ -26,6 +28,7 @@ struct QuickControlsContext {
     runtime: tokio::runtime::Handle,
     refreshing: Arc<AtomicBool>,
     automation_observing: Arc<AtomicBool>,
+    resume_observer_started: Arc<AtomicBool>,
     last_started: Arc<Mutex<Option<Instant>>>,
 }
 
@@ -54,6 +57,7 @@ pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
             runtime,
             refreshing: Arc::new(AtomicBool::new(false)),
             automation_observing: Arc::new(AtomicBool::new(false)),
+            resume_observer_started: Arc::new(AtomicBool::new(false)),
             last_started: Arc::new(Mutex::new(None)),
         });
     });
@@ -80,7 +84,18 @@ pub(crate) fn observe_automation_telemetry(telemetry: &orbis_core::telemetry::Te
 }
 
 pub(crate) fn wire_window(app: &AppWindow) {
-    let runtime_ready = CONTEXT.with(|slot| slot.borrow().is_some());
+    let context = CONTEXT.with(|slot| slot.borrow().clone());
+    let runtime_ready = context.is_some();
+
+    // Start the logind observer only after an AppWindow exists so every signal
+    // can be marshalled back onto the Slint event-loop thread before touching
+    // thread-local backend state. Offscreen/test builds without initialize()
+    // never attempt a system-bus connection.
+    if let Some(context) = context {
+        if !context.resume_observer_started.swap(true, Ordering::AcqRel) {
+            resume_observer::spawn(context.runtime.clone(), app.as_weak());
+        }
+    }
 
     app.set_display_state_ready(false);
     app.set_display_control_ready(false);
@@ -414,6 +429,7 @@ mod tests {
         let source = include_str!("quick_controls_backend.rs");
         assert!(source.contains("replace_automation_capabilities"));
         assert!(source.contains("observe_automation_telemetry"));
+        assert!(source.contains("resume_observer::spawn"));
         assert!(source.contains("SysfsTelemetryProvider"));
         assert!(source.contains("AUTOMATION_READ_TIMEOUT"));
         let mutation = ["WorkerCommand::", "Set"].concat();
