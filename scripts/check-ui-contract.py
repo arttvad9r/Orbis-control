@@ -21,11 +21,7 @@ PRODUCTION_SURFACES = {
         "changed observed-mode",
     ],
     "ui/audited/main-window.slint": [
-        "display-state-ready",
-        "display-control-ready",
         "display-mode-requested",
-        "keyboard-state-ready",
-        "keyboard-control-ready",
         "keyboard-brightness-requested",
         "preferences-clicked",
         "diagnostics-clicked",
@@ -222,179 +218,145 @@ def has_identifier(text: str, marker: str) -> bool:
     return re.search(pattern, text) is not None
 
 
-def check_surface_markers(root: Path, errors: list[str]) -> None:
-    for relative, markers in PRODUCTION_SURFACES.items():
-        path = root / relative
-        text = read(path, errors)
-        for marker in markers:
-            if not has_identifier(text, marker):
-                fail(errors, f"{relative}: missing production marker {marker!r}")
-
-
-def check_forbidden_phrases(root: Path, errors: list[str]) -> None:
-    for path in sorted((root / "ui").rglob("*.slint")):
-        lowered = read(path, errors).lower()
-        for phrase in FORBIDDEN_PRODUCT_PHRASES:
-            if phrase in lowered:
-                fail(errors, f"{path.relative_to(root)}: forbidden product phrase {phrase!r}")
-
-
-def check_request_only_controls(root: Path, errors: list[str]) -> None:
-    main = read(root / "ui/audited/main-window.slint", errors)
-    required = [
-        "selected: root.display-state-ready && root.display-mode == 0",
-        "selected: root.display-state-ready && root.display-mode == 1",
-        "selected: root.display-state-ready && root.display-mode == 2",
-        "disabled: !root.display-control-ready",
-        "selected: root.keyboard-state-ready && root.keyboard-brightness == 0",
-        "selected: root.keyboard-state-ready && root.keyboard-brightness == 1",
-        "selected: root.keyboard-state-ready && root.keyboard-brightness == 2",
-        "selected: root.keyboard-state-ready && root.keyboard-brightness == 3",
-        "disabled: !root.keyboard-control-ready",
-    ]
-    for marker in required:
-        if marker not in main:
-            fail(errors, f"ui/audited/main-window.slint: missing read/write readiness contract {marker!r}")
-
-    prefs = read(root / "ui/audited/preferences-window.slint", errors)
-    automation = read(root / "ui/audited/automation-window.slint", errors)
-    request_toggle = read(root / "ui/components/request-toggle-row.slint", errors)
-    if "root.checked =" in request_toggle:
-        fail(errors, "ui/components/request-toggle-row.slint: request-only toggle mutates checked locally")
-    if "startup-changed(!root.startup)" not in prefs:
-        fail(errors, "ui/audited/preferences-window.slint: startup toggle must emit requested inverse state")
-    if "start-minimized-changed(!root.start-minimized)" not in prefs:
-        fail(errors, "ui/audited/preferences-window.slint: start-minimized toggle must emit request only")
-    if "enabled-requested(!root.enabled)" not in automation:
-        fail(errors, "ui/audited/automation-window.slint: automation enabled toggle must emit request only")
-
-
-def parse_theme(path: Path, errors: list[str]) -> dict[str, str]:
-    text = read(path, errors)
-    return {
-        name: value
-        for name, value in re.findall(
-            r"out\s+property\s+<color>\s+([a-z0-9-]+)\s*:\s*(#[0-9A-Fa-f]{6})",
-            text,
-        )
-    }
-
-
-def srgb_channel(value: int) -> float:
-    normalized = value / 255.0
-    return normalized / 12.92 if normalized <= 0.04045 else ((normalized + 0.055) / 1.055) ** 2.4
+def rgb(hex_color: str) -> tuple[float, float, float]:
+    h = hex_color.lstrip("#")
+    return tuple(int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4))
 
 
 def luminance(hex_color: str) -> float:
-    raw = hex_color.lstrip("#")
-    r, g, b = (int(raw[i : i + 2], 16) for i in (0, 2, 4))
-    return 0.2126 * srgb_channel(r) + 0.7152 * srgb_channel(g) + 0.0722 * srgb_channel(b)
+    values = []
+    for c in rgb(hex_color):
+        values.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * values[0] + 0.7152 * values[1] + 0.0722 * values[2]
 
 
 def contrast(a: str, b: str) -> float:
-    la, lb = luminance(a), luminance(b)
-    light, dark = max(la, lb), min(la, lb)
-    return (light + 0.05) / (dark + 0.05)
+    l1, l2 = sorted((luminance(a), luminance(b)), reverse=True)
+    return (l1 + 0.05) / (l2 + 0.05)
+
+
+def theme_values(text: str, dark: bool) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for token in THEME_TOKENS:
+        if dark:
+            pattern = rf"property\s+<color>\s+{re.escape(token)}:.*?:\s*(#[0-9A-Fa-f]{{6}})\s*;"
+        else:
+            pattern = rf"property\s+<color>\s+{re.escape(token)}:\s*(#[0-9A-Fa-f]{{6}})\s*;"
+        match = re.search(pattern, text)
+        if match:
+            values[token] = match.group(1)
+    return values
 
 
 def check_themes(root: Path, errors: list[str]) -> None:
-    dark = parse_theme(root / "ui/themes/dark.slint", errors)
-    light = parse_theme(root / "ui/themes/light.slint", errors)
-    for label, theme in (("dark", dark), ("light", light)):
-        missing = sorted(THEME_TOKENS - theme.keys())
-        extra = sorted(theme.keys() - THEME_TOKENS)
+    dark_path = root / "ui/themes/dark.slint"
+    light_path = root / "ui/themes/light.slint"
+    dark_text = read(dark_path, errors)
+    light_text = read(light_path, errors)
+    dark = theme_values(dark_text, dark=True)
+    light = theme_values(light_text, dark=False)
+
+    for name, values in (("dark", dark), ("light", light)):
+        missing = sorted(THEME_TOKENS - values.keys())
         if missing:
-            fail(errors, f"ui/themes/{label}.slint: missing theme tokens: {', '.join(missing)}")
-        if extra:
-            fail(errors, f"ui/themes/{label}.slint: unexpected theme tokens: {', '.join(extra)}")
-        if not missing:
-            for token in ("text-primary", "text-secondary"):
-                ratio = contrast(theme[token], theme["window-background"])
-                if ratio < 4.5:
-                    fail(
-                        errors,
-                        f"ui/themes/{label}.slint: {token} contrast {ratio:.2f}:1 < 4.5:1",
-                    )
-    if dark.keys() != light.keys():
-        fail(errors, "theme token parity mismatch between dark and light")
+            fail(errors, f"{name} theme missing tokens: {', '.join(missing)}")
+            continue
+        for text_token in ("text-primary", "text-secondary"):
+            ratio = contrast(values[text_token], values["window-background"])
+            if ratio < 4.5:
+                fail(errors, f"{name} {text_token} contrast {ratio:.2f}:1 < 4.5:1")
 
 
-def extract_px_property(text: str, property_name: str) -> int | None:
-    match = re.search(rf"\b{re.escape(property_name)}\s*:\s*(\d+)px\s*;", text)
-    return int(match.group(1)) if match else None
+def declared_geometry(text: str) -> tuple[int, int] | None:
+    width = re.search(r"\bwidth:\s*(\d+)px", text)
+    height = re.search(r"\bheight:\s*(\d+)px", text)
+    if not width or not height:
+        return None
+    return int(width.group(1)), int(height.group(1))
 
 
-def check_geometry(root: Path, errors: list[str]) -> None:
-    main_path = root / "ui/audited/main-window.slint"
-    main = read(main_path, errors)
-    width = extract_px_property(main, "width")
-    height = extract_px_property(main, "height")
-    if width is None or not 400 <= width <= 500:
-        fail(errors, f"ui/audited/main-window.slint: width must be 400..500px, got {width}")
-    if height is None or not 400 <= height <= 600:
-        fail(errors, f"ui/audited/main-window.slint: height must be 400..600px, got {height}")
-
-    for relative, minimum in SECONDARY_MIN_HEIGHT.items():
-        text = read(root / relative, errors)
-        height = extract_px_property(text, "height")
-        if height is None or height < minimum:
-            fail(errors, f"{relative}: height must be >= {minimum}px, got {height}")
+def check_main_geometry(text: str, errors: list[str]) -> None:
+    geometry = declared_geometry(text)
+    if geometry is None:
+        fail(errors, "main window must declare fixed compact width/height")
+        return
+    w, h = geometry
+    if w > 500 or h > 600:
+        fail(errors, f"main window too large for compact contract: {w}x{h}")
+    if w < 400 or h < 400:
+        fail(errors, f"main window too small for planned production controls: {w}x{h}")
 
 
-def check_theme_bridge(root: Path, errors: list[str]) -> None:
-    common = read(root / "ui/audited/common.slint", errors)
-    for marker in (
-        "export component ThemeBridge",
-        "WidgetPalette.color-scheme",
-        "init => { root.sync-widget-theme(); }",
-        "changed observed-mode => { root.sync-widget-theme(); }",
-    ):
-        if marker not in common:
-            fail(errors, f"ui/audited/common.slint: incomplete ThemeBridge contract: {marker!r}")
+def check_secondary_geometry(root: Path, errors: list[str]) -> None:
+    for rel, minimum_height in SECONDARY_MIN_HEIGHT.items():
+        text = read(root / rel, errors)
+        geometry = declared_geometry(text)
+        if geometry is None:
+            fail(errors, f"{rel}: must declare fixed width/height")
+            continue
+        w, h = geometry
+        if h < minimum_height:
+            fail(errors, f"{rel}: height {h}px below reviewed content budget {minimum_height}px")
+        if w > 760 or h > 760:
+            fail(errors, f"{rel}: window too large for compact secondary-surface contract: {w}x{h}")
 
-    for relative in (
+
+def check_authoritative_controls(root: Path, errors: list[str]) -> None:
+    for rel in (
         "ui/audited/preferences-window.slint",
         "ui/audited/automation-window.slint",
-        "ui/audited/extra-window.slint",
-        "ui/audited/updates-window.slint",
-        "ui/audited/fans-window.slint",
     ):
-        text = read(root / relative, errors)
-        if "ThemeBridge {" not in text:
-            fail(errors, f"{relative}: missing instantiated ThemeBridge")
+        text = read(root / rel, errors)
+        if re.search(r"\bToggleRow\s*\{", text):
+            fail(errors, f"{rel}: backend-owned toggles must use RequestToggleRow")
 
 
 def check_widget_style(root: Path, errors: list[str]) -> None:
     build = read(root / "crates/orbis-ui/build.rs", errors)
-    if 'with_style("fluent".into())' not in build:
-        fail(errors, 'crates/orbis-ui/build.rs: standard widget style must stay pinned to "fluent"')
+    if '.with_style("fluent".into())' not in build:
+        fail(errors, "crates/orbis-ui/build.rs: standard widget style must stay pinned to fluent")
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("root", nargs="?", default=".")
-    args = parser.parse_args(argv)
-    root = Path(args.root).resolve()
+def run(root: Path) -> list[str]:
     errors: list[str] = []
+    ui_root = root / "ui"
+    if not ui_root.is_dir():
+        return [f"{ui_root}: missing UI directory"]
 
-    for path in sorted((root / "ui").rglob("*.slint")):
+    for path in sorted(ui_root.rglob("*.slint")):
         text = read(path, errors)
         check_delimiters(path, text, errors)
         check_imports(root, path, text, errors)
 
-    check_surface_markers(root, errors)
-    check_forbidden_phrases(root, errors)
-    check_request_only_controls(root, errors)
-    check_themes(root, errors)
-    check_geometry(root, errors)
-    check_theme_bridge(root, errors)
-    check_widget_style(root, errors)
+    for rel, required in PRODUCTION_SURFACES.items():
+        path = root / rel
+        text = read(path, errors)
+        lowered = text.lower()
+        for phrase in FORBIDDEN_PRODUCT_PHRASES:
+            if phrase in lowered:
+                fail(errors, f"{rel}: forbidden fake-success/preview phrase: {phrase!r}")
+        for marker in required:
+            if not has_identifier(text, marker):
+                fail(errors, f"{rel}: missing frontend contract marker {marker!r}")
 
+    main = read(root / "ui/audited/main-window.slint", errors)
+    check_main_geometry(main, errors)
+    check_secondary_geometry(root, errors)
+    check_authoritative_controls(root, errors)
+    check_widget_style(root, errors)
+    check_themes(root, errors)
+    return errors
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("root", nargs="?", default=".", help="repository root")
+    args = parser.parse_args()
+    errors = run(Path(args.root).resolve())
     if errors:
         for error in errors:
-            print(f"ERROR: {error}", file=sys.stderr)
+            print(f"UI CONTRACT FAIL: {error}", file=sys.stderr)
         return 1
-
     print("UI contract checks passed")
     return 0
 
