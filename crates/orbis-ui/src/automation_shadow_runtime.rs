@@ -2,13 +2,15 @@
 //!
 //! This module connects typed lifecycle evidence, persisted policy and one
 //! immutable capability generation without crossing the mutation boundary.
-//! A fully ready plan is reported only as `ReadyButExecutionDisabled`.
+//! A fully dry-run-ready plan is reported only as `ReadyButExecutionDisabled`;
+//! production execution must still pass the strict Automation write gate later.
 
 use std::time::{Duration, SystemTime};
 
 use orbis_capabilities::CapabilityRegistrySnapshot;
 use orbis_config::{
-    AutomationPolicy, AutomationPowerSource, AutomationPreflight, preflight_automation_plan,
+    AutomationPolicy, AutomationPowerSource, AutomationPreflight,
+    preflight_automation_plan_for_dry_run,
 };
 use orbis_core::automation::{
     AutomationTrigger, PowerSourceEdgeDetector, PowerSourceObservationOutcome,
@@ -180,7 +182,7 @@ impl AutomationShadowRuntime {
 
         let plan = policy.plan_for(trigger.clone(), source);
         let preflight =
-            preflight_automation_plan(plan, capabilities.device_capabilities());
+            preflight_automation_plan_for_dry_run(plan, capabilities.device_capabilities());
 
         if preflight.is_ready() {
             AutomationShadowOutcome::ReadyButExecutionDisabled {
@@ -208,7 +210,7 @@ impl Default for AutomationShadowRuntime {
 mod tests {
     use super::*;
     use orbis_capabilities::CapabilityRegistryBuilder;
-    use orbis_config::DesiredPerformancePolicy;
+    use orbis_config::{DesiredPerformancePolicy, preflight_automation_plan};
     use orbis_core::automation::AutomationAction;
     use orbis_core::capability::{
         Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, FeatureId,
@@ -217,12 +219,16 @@ mod tests {
     use orbis_core::profile::PerformanceProfile;
 
     fn capability(write: CapabilityStatus, constraints: CapabilityConstraints) -> Capability {
-        Capability::new(CapabilityStatus::Supported)
-            .with_operations(CapabilityOperations {
-                read: OperationCapability::new(CapabilityStatus::Supported),
-                write: OperationCapability::new(write),
-            })
-            .with_constraints(constraints)
+        Capability::new(if write == CapabilityStatus::Supported {
+            CapabilityStatus::Supported
+        } else {
+            CapabilityStatus::ReadOnly
+        })
+        .with_operations(CapabilityOperations {
+            read: OperationCapability::new(CapabilityStatus::Supported),
+            write: OperationCapability::new(write),
+        })
+        .with_constraints(constraints)
     }
 
     fn snapshot(
@@ -308,6 +314,36 @@ mod tests {
             preflight.actions_if_ready(),
             Some(&[AutomationAction::SetProfile(PerformanceProfile::Balanced)][..])
         );
+    }
+
+    #[test]
+    fn read_only_runtime_can_be_dry_run_ready_but_strict_execution_stays_blocked() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let snapshot = snapshot(20, base, CapabilityStatus::Unsupported);
+        let policy = policy(false);
+        let plan = policy.plan_for(AutomationTrigger::OnBattery, AutomationPowerSource::Battery);
+        assert!(!preflight_automation_plan(plan, snapshot.device_capabilities()).is_ready());
+
+        let mut runtime = AutomationShadowRuntime::default();
+        runtime.observe_telemetry(&telemetry(Some(true), base), &policy, &snapshot, base);
+        runtime.observe_telemetry(
+            &telemetry(Some(false), base + Duration::from_secs(1)),
+            &policy,
+            &snapshot,
+            base + Duration::from_secs(1),
+        );
+        assert!(matches!(
+            runtime.observe_telemetry(
+                &telemetry(Some(false), base + Duration::from_secs(2)),
+                &policy,
+                &snapshot,
+                base + Duration::from_secs(2),
+            ),
+            AutomationShadowOutcome::ReadyButExecutionDisabled {
+                trigger: AutomationTrigger::OnBattery,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -463,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_capabilities_or_runtime_write_block_handoff() {
+    fn stale_capabilities_block_handoff() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let stale = snapshot(7, base, CapabilityStatus::Supported);
         let mut runtime = AutomationShadowRuntime::new(
@@ -487,28 +523,6 @@ mod tests {
             ),
             AutomationShadowOutcome::Blocked {
                 block: AutomationShadowBlock::CapabilitySnapshotStale,
-                ..
-            }
-        ));
-
-        let blocked = snapshot(8, base, CapabilityStatus::Unsupported);
-        let mut runtime = AutomationShadowRuntime::default();
-        runtime.observe_telemetry(&telemetry(Some(true), base), &policy, &blocked, base);
-        runtime.observe_telemetry(
-            &telemetry(Some(false), base + Duration::from_secs(1)),
-            &policy,
-            &blocked,
-            base + Duration::from_secs(1),
-        );
-        assert!(matches!(
-            runtime.observe_telemetry(
-                &telemetry(Some(false), base + Duration::from_secs(2)),
-                &policy,
-                &blocked,
-                base + Duration::from_secs(2),
-            ),
-            AutomationShadowOutcome::PreflightBlocked {
-                trigger: AutomationTrigger::OnBattery,
                 ..
             }
         ));
