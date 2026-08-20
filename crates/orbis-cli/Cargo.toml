@@ -15,5 +15,8 @@ path = "src/main.rs"
 [dependencies]
 tokio = { workspace = true }
 zbus = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+orbis-core = { workspace = true }
 orbis-session-client = { path = "../orbis-session-client", version = "0.1.0" }
 orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false }
