@@ -20,7 +20,6 @@ const READ_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Clone)]
 struct ExtraContext {
     runtime: tokio::runtime::Handle,
-    system_connection: zbus::Connection,
     refreshing: Arc<AtomicBool>,
 }
 
@@ -50,11 +49,10 @@ struct PanelObserved {
     status: String,
 }
 
-pub(crate) fn initialize(runtime: tokio::runtime::Handle, system_connection: zbus::Connection) {
+pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
     CONTEXT.with(|slot| {
         *slot.borrow_mut() = Some(ExtraContext {
             runtime,
-            system_connection,
             refreshing: Arc::new(AtomicBool::new(false)),
         });
     });
@@ -124,15 +122,16 @@ pub(crate) fn refresh(window: &ExtraWindow) {
 
     let weak = window.as_weak();
     let completion = context.refreshing.clone();
-    let system_connection = context.system_connection.clone();
     context.runtime.spawn(async move {
         let keyboard_provider = AsusKeyboardBacklightProvider::default();
-        let aura_provider = AsusAuraProvider::new(system_connection);
         let panel_provider = AsusArmouryPanelOverdriveProvider::default();
 
+        // Keyboard and panel reads are independent of D-Bus. Aura obtains its
+        // own bounded system-bus connection so this bridge can be bootstrapped
+        // from the existing UI runtime hook without changing the large entrypoint.
         let (keyboard_result, aura_result, panel_result) = tokio::join!(
             bounded_keyboard_read(&keyboard_provider),
-            bounded_aura_read(&aura_provider),
+            bounded_aura_read(),
             bounded_panel_read(&panel_provider),
         );
 
@@ -189,9 +188,14 @@ async fn bounded_keyboard_read(
         .map_err(|_| ProviderError::Timeout("Extra keyboard read timed out".into()))?
 }
 
-async fn bounded_aura_read(
-    provider: &AsusAuraProvider,
-) -> Result<orbis_core::aura::AuraState, ProviderError> {
+async fn bounded_aura_read() -> Result<orbis_core::aura::AuraState, ProviderError> {
+    let connection = tokio::time::timeout(READ_TIMEOUT, zbus::Connection::system())
+        .await
+        .map_err(|_| ProviderError::Timeout("Extra Aura bus connect timed out".into()))?
+        .map_err(|error| ProviderError::BackendUnavailable(format!(
+            "Extra Aura system bus unavailable: {error}"
+        )))?;
+    let provider = AsusAuraProvider::new(connection);
     tokio::time::timeout(READ_TIMEOUT, provider.aura_state())
         .await
         .map_err(|_| ProviderError::Timeout("Extra Aura read timed out".into()))?
@@ -265,7 +269,9 @@ fn aura_effect_index(mode: AuraMode) -> i32 {
         AuraMode::Static => 0,
         AuraMode::Breathe => 1,
         AuraMode::RainbowCycle => 2,
-        AuraMode::Flash => 3,
+        // The current Extra UI's fourth legacy label is "Strobing" while the
+        // exact domain value is Flash. Do not claim that they are equivalent.
+        AuraMode::Flash => -1,
         _ => -1,
     }
 }
@@ -310,7 +316,7 @@ mod tests {
         assert_eq!(aura_effect_index(AuraMode::Static), 0);
         assert_eq!(aura_effect_index(AuraMode::Breathe), 1);
         assert_eq!(aura_effect_index(AuraMode::RainbowCycle), 2);
-        assert_eq!(aura_effect_index(AuraMode::Flash), 3);
+        assert_eq!(aura_effect_index(AuraMode::Flash), -1);
         assert_eq!(aura_effect_index(AuraMode::RainbowWave), -1);
         assert_eq!(aura_effect_index(AuraMode::Unknown(99)), -1);
     }
