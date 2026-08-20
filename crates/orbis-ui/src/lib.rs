@@ -1,10 +1,8 @@
-//! # orbis-ui
+//! # Orbis UI
 //!
-//! GUI на Slint (только представление). Аппаратный I/O и provider-вызовы здесь
-//! не выполняются: команды уходят в application/worker слой.
-//!
-//! `worker` — независимый от Slint последовательный async-worker для команд
-//! Performance Mode (инфраструктура, подключается к callbacks позже).
+//! Slint presentation plus application/runtime coordination for Orbis Control.
+//! Hardware mutation remains owned by typed application/provider boundaries and
+//! the sequential worker; UI-facing modules must not invent support state.
 
 #![forbid(unsafe_code)]
 
@@ -14,8 +12,10 @@ pub mod automation_execution_scope;
 pub mod automation_lifecycle_revision;
 #[cfg(test)]
 mod automation_performance_executor;
+pub mod automation_recovery;
 pub mod automation_serialization;
 pub mod automation_shadow_runtime;
+pub mod automation_worker_coordinator;
 pub mod automation_worker_runtime;
 pub mod composition;
 pub mod diagnostics_dto;
