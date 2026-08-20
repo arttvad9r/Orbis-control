@@ -44,13 +44,18 @@ export component AppWindow inherits Window {
     callback preview-dialog-clicked(int);
     callback quit-clicked;
 
+    // Readiness of the observed state is independent from mutation readiness.
+    // This lets a read-only backend show the real current value without making
+    // a disabled control look unavailable or optimistically writable.
+    in property <bool> display-state-ready: false;
     in property <bool> display-control-ready: false;
-    in property <int> display-mode: 0;
+    in property <int> display-mode: -1;
     in property <string> display-status: "Unavailable";
     callback display-mode-requested(int);
 
+    in property <bool> keyboard-state-ready: false;
     in property <bool> keyboard-control-ready: false;
-    in property <int> keyboard-brightness: 0;
+    in property <int> keyboard-brightness: -1;
     in property <string> keyboard-status: "Unavailable";
     callback keyboard-brightness-requested(int);
 
@@ -72,9 +77,9 @@ export component AppWindow inherits Window {
     function perf-detail() -> string { return "CPU " + root.ui-state.cpu-temp + " · Fan " + root.ui-state.cpu-fan-rpm; }
     function gpu-detail() -> string { return "GPU " + root.ui-state.gpu-temp + " · Fan " + root.ui-state.gpu-fan-rpm; }
     function quick-detail() -> string {
-        if (!root.display-control-ready && !root.keyboard-control-ready) { return "Unavailable"; }
-        if (!root.display-control-ready) { return "Display unavailable · " + root.keyboard-status; }
-        if (!root.keyboard-control-ready) { return root.display-status + " · Keyboard unavailable"; }
+        if (!root.display-state-ready && !root.keyboard-state-ready) { return "Unavailable"; }
+        if (!root.display-state-ready) { return "Display unavailable · " + root.keyboard-status; }
+        if (!root.keyboard-state-ready) { return root.display-status + " · Keyboard unavailable"; }
         return root.display-status + " · " + root.keyboard-status;
     }
     function charge-detail() -> string {
@@ -121,18 +126,18 @@ export component AppWindow inherits Window {
                     padding: 8px; spacing: 8px;
                     HorizontalLayout {
                         height: 32px; spacing: 6px; alignment: center;
-                        Text { width: 76px; text: "Display"; font-size: 10px; font-weight: 650; color: root.display-control-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
-                        ChoiceChip { horizontal-stretch: 1; label: "Auto"; selected: root.display-control-ready && root.display-mode == 0; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(0); } }
-                        ChoiceChip { horizontal-stretch: 1; label: "60 Hz"; selected: root.display-control-ready && root.display-mode == 1; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(1); } }
-                        ChoiceChip { horizontal-stretch: 1; label: "120 Hz"; selected: root.display-control-ready && root.display-mode == 2; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(2); } }
+                        Text { width: 76px; text: "Display"; font-size: 10px; font-weight: 650; color: root.display-state-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
+                        ChoiceChip { horizontal-stretch: 1; label: "Auto"; selected: root.display-state-ready && root.display-mode == 0; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(0); } }
+                        ChoiceChip { horizontal-stretch: 1; label: "60 Hz"; selected: root.display-state-ready && root.display-mode == 1; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(1); } }
+                        ChoiceChip { horizontal-stretch: 1; label: "120 Hz"; selected: root.display-state-ready && root.display-mode == 2; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(2); } }
                     }
                     HorizontalLayout {
                         height: 32px; spacing: 6px; alignment: center;
-                        Text { width: 76px; text: "Keyboard"; font-size: 10px; font-weight: 650; color: root.keyboard-control-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
-                        ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.keyboard-control-ready && root.keyboard-brightness == 0; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(0); } }
-                        ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.keyboard-control-ready && root.keyboard-brightness == 1; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(1); } }
-                        ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.keyboard-control-ready && root.keyboard-brightness == 2; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(2); } }
-                        ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.keyboard-control-ready && root.keyboard-brightness == 3; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(3); } }
+                        Text { width: 76px; text: "Keyboard"; font-size: 10px; font-weight: 650; color: root.keyboard-state-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
+                        ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.keyboard-state-ready && root.keyboard-brightness == 0; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(0); } }
+                        ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.keyboard-state-ready && root.keyboard-brightness == 1; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(1); } }
+                        ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.keyboard-state-ready && root.keyboard-brightness == 2; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(2); } }
+                        ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.keyboard-state-ready && root.keyboard-brightness == 3; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(3); } }
                     }
                 }
             }
