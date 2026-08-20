@@ -2,9 +2,9 @@
 """Static cross-surface backend completion invariants.
 
 This checker intentionally uses only the Python standard library. It does not
-replace Rust/Slint compilation; it prevents already-proven fail-closed ownership
-and request/read-back contracts from silently regressing while executable
-validation is unavailable.
+replace Rust/Slint compilation; it prevents already-proven fail-closed ownership,
+write-evidence consumption and request/read-back contracts from silently
+regressing while executable validation is unavailable.
 """
 
 from __future__ import annotations
@@ -63,6 +63,43 @@ def run(root: Path) -> list[str]:
     require(resume, "publish_prepare_for_sleep", resume_rel, errors)
     require(resume, "receive_signal(PREPARE_FOR_SLEEP)", resume_rel, errors)
 
+    # Effective write capability must be consumed from operation-level evidence,
+    # never inferred from overall capability support or backend/model presence.
+    controller_rel = "crates/orbis-ui/src/controller.rs"
+    controller = read(root, controller_rel, errors)
+    require(controller, "write_allows_mutation(cap.operations.write.status)", controller_rel, errors)
+    require(
+        controller,
+        "CapabilityAvailability::from_status(cap.operations.write.status)",
+        controller_rel,
+        errors,
+    )
+    if controller.count("write_allows_mutation(cap.operations.write.status)") < 3:
+        errors.append(
+            f"{controller_rel}: Performance/Battery/Fan write gates must all consume operations.write.status"
+        )
+
+    diagnostics_dto_rel = "crates/orbis-ui/src/diagnostics_dto.rs"
+    diagnostics_dto = read(root, diagnostics_dto_rel, errors)
+    require(
+        diagnostics_dto,
+        "write_status: capability.operations.write.status",
+        diagnostics_dto_rel,
+        errors,
+    )
+    require(
+        diagnostics_dto,
+        "read_status: capability.operations.read.status",
+        diagnostics_dto_rel,
+        errors,
+    )
+
+    diagnostics_model_rel = "crates/orbis-ui/src/diagnostics_window_model.rs"
+    diagnostics_model = read(root, diagnostics_model_rel, errors)
+    require(diagnostics_model, "read={:?} · write={:?}", diagnostics_model_rel, errors)
+    require(diagnostics_model, "row.write_status", diagnostics_model_rel, errors)
+    require(diagnostics_model, "row.read_status", diagnostics_model_rel, errors)
+
     extra_ui_rel = "ui/audited/extra-window.slint"
     extra_ui = read(root, extra_ui_rel, errors)
     require(extra_ui, "keyboard-brightness-requested", extra_ui_rel, errors)
@@ -99,6 +136,7 @@ def run(root: Path) -> list[str]:
     controls = read(root, controls_rel, errors)
     require(controls, "require_supported(self.keyboard_status().await?", controls_rel, errors)
     require(controls, "require_supported(self.panel_status().await?", controls_rel, errors)
+    require(controls, "matches!(self, Self::Supported)", controls_rel, errors)
     require(controls, "read-back mismatch", controls_rel, errors)
     forbid(controls, "Command::new", controls_rel, errors)
     forbid(controls, "std::fs::write", controls_rel, errors)
@@ -108,12 +146,7 @@ def run(root: Path) -> list[str]:
     require(promotion, "ExecutableValidationMissing", promotion_rel, errors)
     require(promotion, "ProductPolicyNotApproved", promotion_rel, errors)
     require(promotion, "NonMutatingPreflightMissing", promotion_rel, errors)
-    require(
-        promotion,
-        "HardwareReadBackRequiredForUnattended",
-        promotion_rel,
-        errors,
-    )
+    require(promotion, "HardwareReadBackRequiredForUnattended", promotion_rel, errors)
     require(promotion, "executable_validation: false", promotion_rel, errors)
     require(promotion, "product_policy_approved: false", promotion_rel, errors)
     forbid(promotion, "CapabilityStatus::Supported", promotion_rel, errors)
