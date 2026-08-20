@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Static fail-closed checks for the future Automation executor boundary.
+"""Static fail-closed checks for the Automation execution boundary.
 
-This checker intentionally uses only the Python standard library. It does not
-claim Rust type correctness; it protects the architectural boundary while the
-sandbox lacks Cargo. Serialization/scope code must remain hardware-inert, and
-the first real Performance mutation proof must stay test-only until executable
-validation and worker-generation serialization are available.
+This checker uses only the Python standard library. It is not Rust type
+validation. It protects the architectural barriers that must remain true while
+Cargo/Clippy are unavailable in the review sandbox:
+
+- every execution candidate is bound to a monotonic lifecycle revision;
+- serialization checks lifecycle revision and capability generation and blocks
+  replay of an already-admitted event;
+- worker-owned preparation state is unique/non-cloneable and hardware-inert;
+- the first mutation proof remains Performance-only and `cfg(test)`;
+- Automation capability may advertise shadow/read support but never write.
 """
 
 from __future__ import annotations
@@ -15,22 +20,35 @@ import re
 import sys
 from pathlib import Path
 
+REVISION = "crates/orbis-ui/src/automation_lifecycle_revision.rs"
 SERIALIZATION = "crates/orbis-ui/src/automation_serialization.rs"
 SCOPE = "crates/orbis-ui/src/automation_execution_scope.rs"
+WORKER_RUNTIME = "crates/orbis-ui/src/automation_worker_runtime.rs"
 PROOF = "crates/orbis-ui/src/automation_performance_executor.rs"
-GUARD = "crates/orbis-ui/src/automation_execution_guard.rs"
+CAPABILITY = "crates/orbis-ui/src/automation_capability.rs"
 LIB = "crates/orbis-ui/src/lib.rs"
 
-REQUIRED = {
-    SERIALIZATION: (
-        "AutomationSerializationCoordinator",
-        "AutomationDryRunLease",
-        "AutomationExecutionHandoff",
-        "CapabilityGenerationChanged",
-        "Busy",
+REQUIRED: dict[str, tuple[str, ...]] = {
+    REVISION: (
+        "AutomationLifecycleRevision",
+        "AutomationLifecycleClock",
         "SequenceExhausted",
+        "AutomationRevisionCandidate",
+        "LifecycleRevisionChanged",
+        "revalidate_revision_candidate",
+        "identities_still_match",
+    ),
+    SERIALIZATION: (
+        "AutomationRevisionHandoff",
+        "AutomationDryRunLease",
+        "required_revision",
+        "required_generation",
+        "LifecycleRevisionChanged",
+        "LifecycleRevisionAlreadyAdmitted",
+        "CapabilityGenerationChanged",
+        "last_admitted_revision",
+        "current_revision",
         "current_generation",
-        "checked_add",
         "pub fn admit",
         "pub fn finish",
     ),
@@ -39,32 +57,50 @@ REQUIRED = {
         "AutomationPreparedBatch",
         "DuplicatePerformanceAction",
         "UnsupportedAction",
-        "prepare_automation_execution_scope",
         "AutomationAction::SetProfile",
+        "required_revision",
+        "required_generation",
+    ),
+    WORKER_RUNTIME: (
+        "AutomationLifecycleClock",
+        "AutomationSerializationCoordinator",
+        "latest_candidate",
+        "prepare_latest",
+        "current_revision",
+        "required_revision",
+        "NoReadyCandidate",
     ),
     PROOF: (
         "Test-only proof",
         "PerformanceAutomationOwner",
         "run_performance_proof",
+        "LifecycleRevisionChanged",
+        "CapabilityGenerationChanged",
+        "current_revision",
+        "current_generation",
         "CommandError::ReadBack",
         "ReadBackAfterMutation",
         "UnexpectedApplyResult",
         "ReadBackMismatch",
         "outcome.result.is_applied()",
     ),
-    GUARD: (
-        "AutomationExecutionCandidate",
-        "revalidate_automation_candidate",
-        "generation_still_matches",
+    CAPABILITY: (
+        "CapabilityStatus::ReadOnly",
+        "read: OperationCapability::new(CapabilityStatus::Supported)",
+        "CapabilityStatus::Unsupported",
+        "CapabilityConstraints::None",
     ),
     LIB: (
-        "pub mod automation_serialization;",
+        "pub mod automation_capability;",
         "pub mod automation_execution_scope;",
+        "pub mod automation_lifecycle_revision;",
+        "pub mod automation_serialization;",
+        "pub mod automation_worker_runtime;",
         "mod automation_performance_executor;",
     ),
 }
 
-# Build dangerous spellings from fragments so this file does not self-match.
+INERT_FILES = (REVISION, SERIALIZATION, SCOPE, WORKER_RUNTIME, CAPABILITY)
 FORBIDDEN_INERT = tuple(
     "".join(parts)
     for parts in (
@@ -81,28 +117,31 @@ FORBIDDEN_INERT = tuple(
     )
 )
 
-RISKY_PUBLIC = re.compile(
-    r"\bpub\s+(?:async\s+)?fn\s+(execute|apply|dispatch|commit|mutate|write)\b"
+TEST_ONLY_PROOF = re.compile(
+    r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*"
+    r"mod\s+automation_performance_executor\s*;",
+    re.S,
 )
-LEASE_DERIVE = re.compile(
+DRY_LEASE_DERIVE = re.compile(
     r"#\s*\[\s*derive\((?P<traits>[^\)]*)\)\s*\]\s*"
     r"pub\s+struct\s+AutomationDryRunLease\b",
     re.S,
 )
+SERIALIZATION_DERIVE = re.compile(
+    r"#\s*\[\s*derive\((?P<traits>[^\)]*)\)\s*\]\s*"
+    r"pub\s+struct\s+AutomationSerializationCoordinator\b",
+    re.S,
+)
+WORKER_RUNTIME_DERIVE = re.compile(
+    r"#\s*\[\s*derive\((?P<traits>[^\)]*)\)\s*\]\s*"
+    r"pub\s+struct\s+AutomationWorkerRuntime\b",
+    re.S,
+)
 ADMIT_SIGNATURE = re.compile(
     r"pub\s+fn\s+admit\s*\(\s*&mut\s+self\s*,\s*"
-    r"handoff\s*:\s*AutomationExecutionHandoff\s*,\s*"
+    r"handoff\s*:\s*AutomationRevisionHandoff\s*,\s*"
+    r"current_revision\s*:\s*AutomationLifecycleRevision\s*,\s*"
     r"current_generation\s*:\s*u64\s*,?\s*\)",
-    re.S,
-)
-FINISH_SIGNATURE = re.compile(
-    r"pub\s+fn\s+finish\s*\(\s*&mut\s+self\s*,\s*"
-    r"lease\s*:\s*AutomationDryRunLease\s*\)",
-    re.S,
-)
-TEST_ONLY_PROOF = re.compile(
-    r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*"
-    r"mod\s+automation_performance_executor\s*;",
     re.S,
 )
 
@@ -113,6 +152,13 @@ def read(root: Path, relative: str, errors: list[str]) -> str | None:
     except OSError as error:
         errors.append(f"{relative}: cannot read: {error}")
         return None
+
+
+def traits_from(pattern: re.Pattern[str], source: str) -> set[str] | None:
+    match = pattern.search(source)
+    if not match:
+        return None
+    return {item.strip() for item in match.group("traits").split(",")}
 
 
 def run(root: Path) -> list[str]:
@@ -128,70 +174,100 @@ def run(root: Path) -> list[str]:
             if marker not in source:
                 errors.append(f"{relative}: missing required marker {marker!r}")
 
-    for relative in (SERIALIZATION, SCOPE):
+    for relative in INERT_FILES:
         source = sources.get(relative)
         if source is None:
             continue
         for token in FORBIDDEN_INERT:
             if token in source:
-                errors.append(f"{relative}: forbidden execution token {token!r}")
-        risky = RISKY_PUBLIC.search(source)
-        if risky:
-            errors.append(
-                f"{relative}: forbidden public execution method {risky.group(1)!r}"
-            )
+                errors.append(f"{relative}: forbidden mutation/process token {token!r}")
 
     serialization = sources.get(SERIALIZATION)
     if serialization is not None:
-        derive = LEASE_DERIVE.search(serialization)
-        if not derive:
+        lease_traits = traits_from(DRY_LEASE_DERIVE, serialization)
+        if lease_traits is None:
             errors.append(f"{SERIALIZATION}: cannot locate AutomationDryRunLease derive")
-        else:
-            traits = {item.strip() for item in derive.group("traits").split(",")}
-            if "Clone" in traits or "Copy" in traits:
-                errors.append(f"{SERIALIZATION}: dry-run lease must not be Clone/Copy")
+        elif {"Clone", "Copy"} & lease_traits:
+            errors.append(f"{SERIALIZATION}: dry-run lease must not be Clone/Copy")
+
+        owner_traits = traits_from(SERIALIZATION_DERIVE, serialization)
+        if owner_traits is None:
+            errors.append(
+                f"{SERIALIZATION}: cannot locate AutomationSerializationCoordinator derive"
+            )
+        elif {"Clone", "Copy"} & owner_traits:
+            errors.append(f"{SERIALIZATION}: serialization owner must not be Clone/Copy")
 
         if not ADMIT_SIGNATURE.search(serialization):
             errors.append(
-                f"{SERIALIZATION}: admit must consume AutomationExecutionHandoff and take current generation"
+                f"{SERIALIZATION}: admit must consume revision handoff and take both current identities"
             )
-        if not FINISH_SIGNATURE.search(serialization):
+        for marker in (
+            "required_revision != current_revision",
+            "required_generation != current_generation",
+            "required_revision <= self.last_admitted_revision",
+            "self.last_admitted_revision = required_revision",
+            "self.active_lease = Some(id)",
+            "self.active_lease = None",
+        ):
+            if marker not in serialization:
+                errors.append(f"{SERIALIZATION}: missing admission/replay invariant {marker!r}")
+
+    worker_runtime = sources.get(WORKER_RUNTIME)
+    if worker_runtime is not None:
+        runtime_traits = traits_from(WORKER_RUNTIME_DERIVE, worker_runtime)
+        if runtime_traits is None:
+            errors.append(f"{WORKER_RUNTIME}: cannot locate AutomationWorkerRuntime derive")
+        elif {"Clone", "Copy"} & runtime_traits:
+            errors.append(f"{WORKER_RUNTIME}: unique worker-owned runtime must not be Clone/Copy")
+        if "self.latest_candidate = candidate.clone()" not in worker_runtime:
             errors.append(
-                f"{SERIALIZATION}: finish must consume the exact AutomationDryRunLease"
+                f"{WORKER_RUNTIME}: every confirmed event must replace/supersede previous candidate"
             )
-        if "required != current_generation" not in serialization:
-            errors.append(
-                f"{SERIALIZATION}: missing final generation comparison before slot ownership"
-            )
-        if "self.active_lease = Some(id)" not in serialization:
-            errors.append(f"{SERIALIZATION}: missing exclusive slot ownership marker")
-        if "self.active_lease = None" not in serialization:
-            errors.append(f"{SERIALIZATION}: missing explicit lease release marker")
 
     lib = sources.get(LIB)
     if lib is not None:
         if not TEST_ONLY_PROOF.search(lib):
-            errors.append(
-                f"{LIB}: Performance executor proof must remain behind #[cfg(test)]"
-            )
-        if "pub mod automation_performance_executor" in lib:
-            errors.append(
-                f"{LIB}: Performance executor proof must not be publicly exported"
-            )
+            errors.append(f"{LIB}: Performance mutation proof must remain behind #[cfg(test)]")
+        if re.search(r"\bpub(?:\(crate\))?\s+mod\s+automation_performance_executor\b", lib):
+            errors.append(f"{LIB}: Performance mutation proof must not be production-exported")
 
-    # Until promotion, production runtime owners must not reference the proof
-    # module at all. Reading these files is cheap and catches accidental wiring.
+    proof = sources.get(PROOF)
+    if proof is not None:
+        for token in (
+            "set_gpu_mode(",
+            "set_fan_curve(",
+            "set_charge_limit(",
+            "Command::new(",
+            "std::process::Command",
+        ):
+            if token in proof:
+                errors.append(f"{PROOF}: Performance proof escaped scope via {token!r}")
+        if "current_revision != required_revision" not in proof:
+            errors.append(f"{PROOF}: missing final lifecycle revision comparison")
+        if "current_generation != required_generation" not in proof:
+            errors.append(f"{PROOF}: missing final capability generation comparison")
+
+    capability = sources.get(CAPABILITY)
+    if capability is not None:
+        risky_write = re.compile(
+            r"write\s*:\s*OperationCapability::(?:new|with_reason)\(\s*"
+            r"CapabilityStatus::Supported\b"
+        )
+        if risky_write.search(capability):
+            errors.append(f"{CAPABILITY}: shadow capability must never advertise write support")
+
+    # Until promotion, no production runtime path may reference the test proof.
     for relative in (
         "crates/orbis-ui/src/main.rs",
         "crates/orbis-ui/src/worker.rs",
         "crates/orbis-ui/src/automation_backend.rs",
+        "crates/orbis-ui/src/automation_worker_runtime.rs",
         "crates/orbis-ui/src/quick_controls_backend.rs",
     ):
         source = read(root, relative, errors)
         if source is not None and "automation_performance_executor" in source:
-            errors.append(
-                f"{relative}: test-only Performance executor proof is wired into production"
-            )
+            errors.append(f"{relative}: test-only Performance proof is wired into production")
 
     return errors
 
