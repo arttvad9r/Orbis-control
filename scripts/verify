@@ -68,6 +68,12 @@ def profile_checks(profile: str) -> list[dict[str, Any]]:
             [],
         ),
         check(
+            "ui-contract",
+            "static",
+            [sys.executable, "scripts/check-ui-contract.py"],
+            [],
+        ),
+        check(
             "cargo-check",
             "static",
             ["cargo", "check", "--locked", "--workspace", "--all-targets"],
