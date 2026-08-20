@@ -20,7 +20,8 @@ Use [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 - [x] One canonical general-purpose workflow remains: `.github/workflows/ci.yml`.
 - [x] Obsolete one-off validation trigger artifacts are removed from `.github`.
 - [x] Canonical documentation hierarchy exists and historical plans are separated.
-- [ ] #106: GitHub Actions actually executes repository steps and produces trustworthy green results.
+- [x] Draft PR #129 exists as the explicit integration checkpoint; it remains Draft while release blockers are open.
+- [ ] #106: GitHub Actions actually executes repository steps and produces trustworthy green results. A fresh #129 run still failed pre-step with `steps=null`.
 - [ ] Exact candidate passes `cargo fmt --all -- --check`.
 - [ ] Exact candidate passes `cargo check --workspace --all-targets --locked`.
 - [ ] Exact candidate passes `cargo test --workspace --locked`.
@@ -43,8 +44,8 @@ Use [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 - [x] Read and write operation evidence are separate.
 - [x] Explicit and periodic capability refresh use one canonical mutation-status requery path (#112 source-complete).
 - [x] Public probes use bounded read-only adapters.
+- [x] #120: UI/Diagnostics consume operation-level/equivalent typed write evidence; support-matrix schema separates read/write; product-disabled unvalidated writers remain conservative `Unsupported` with reasons.
 - [ ] #107: Battery write owner/interface liveness is dynamically re-proven across restart/disappearance.
-- [ ] #120: UI/diagnostics/support evidence is audited against shipped product-policy blocks.
 - [ ] #117: telemetry distinguishes useful fresh data from empty/partial/field-local failure states.
 
 ## Battery / Performance / GPU reads
@@ -112,7 +113,7 @@ Use [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 
 A beta is acceptable only when:
 
-1. the intended integration branch is merged into `main`;
+1. Draft PR #129 (or its validated successor) is merged into `main`;
 2. #106 is resolved and the exact candidate has executable green Rust/Nix checks;
 3. #125 and the remaining safety-critical #123 contract are complete;
 4. no known unsafe or policy-unproven write is enabled;
