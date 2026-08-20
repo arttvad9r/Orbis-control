@@ -14,6 +14,11 @@ use zbus::proxy::CacheProperties;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(2);
 
+// Hardware1 AuraMutationResult is a D-Bus structure with this exact ordered
+// signature. A tuple keeps this UI adapter independent from daemon crate types
+// and avoids adding a direct serde dependency to orbis-ui.
+type AuraMutationWire = (u8, u8, u8, u8, u8, u8, u32);
+
 #[zbus::proxy(
     interface = "io.github.orbiscontrol.Hardware1",
     default_service = "io.github.orbiscontrol.Hardware",
@@ -28,27 +33,6 @@ trait HardwareProductControls {
 
     fn aura_mutation_status(&self) -> zbus::Result<u8>;
     fn set_aura_static_rgb(&self, r: u8, g: u8, b: u8) -> zbus::Result<AuraMutationWire>;
-}
-
-/// Stable Hardware1 Aura Static RGB response DTO.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    zbus::zvariant::Type,
-)]
-struct AuraMutationWire {
-    requested_r: u8,
-    requested_g: u8,
-    requested_b: u8,
-    observed_r: u8,
-    observed_g: u8,
-    observed_b: u8,
-    outcome: u32,
 }
 
 const AURA_OUTCOME_CONFIG_CONFIRMED: u32 = 0;
@@ -81,7 +65,7 @@ impl ProductWriteStatus {
 
 /// Config-confirmed Aura observation. Hardware state is not readable, so a
 /// validated Hardware1 reply remains `Accepted`, never `Applied`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AuraConfigObservation {
     pub(crate) requested: AuraRgb,
     pub(crate) observed: AuraRgb,
@@ -188,24 +172,24 @@ impl HardwareProductControlClient {
         .await?;
 
         let returned_requested = AuraRgb {
-            r: wire.requested_r,
-            g: wire.requested_g,
-            b: wire.requested_b,
+            r: wire.0,
+            g: wire.1,
+            b: wire.2,
         };
         let observed = AuraRgb {
-            r: wire.observed_r,
-            g: wire.observed_g,
-            b: wire.observed_b,
+            r: wire.3,
+            g: wire.4,
+            b: wire.5,
         };
         if returned_requested != requested || observed != requested {
             return Err(ProviderError::BackendUnavailable(format!(
                 "Hardware1 Aura config read-back mismatch: requested={requested:?}, returned={returned_requested:?}, observed={observed:?}"
             )));
         }
-        if wire.outcome != AURA_OUTCOME_CONFIG_CONFIRMED {
+        if wire.6 != AURA_OUTCOME_CONFIG_CONFIRMED {
             return Err(ProviderError::Internal(format!(
                 "Hardware1 Aura returned unknown outcome {}",
-                wire.outcome
+                wire.6
             )));
         }
 
