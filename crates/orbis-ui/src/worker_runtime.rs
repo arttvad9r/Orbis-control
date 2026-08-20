@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use crate::automation_capability::augment_snapshot_with_automation_shadow;
+use crate::automation_execution_promotion::authorize_prepared_execution;
 use crate::automation_performance_executor::{
     AutomationPerformanceExecutionOutcome, execute_prepared_performance,
 };
@@ -276,12 +277,34 @@ async fn observe_automation_telemetry<R>(
         return;
     }
 
+    // The compile-time promotion bit is necessary but not sufficient. The same
+    // immutable generation must still be fresh and explicitly advertise direct
+    // Automation write support. Shadow/dry-run only removes this one runtime
+    // blocker; action-level evidence has already been checked twice under the
+    // exact same generation.
+    let permit = match authorize_prepared_execution(
+        &envelope,
+        &capabilities,
+        SystemTime::now(),
+        AUTOMATION_MAX_CAPABILITY_AGE,
+    ) {
+        Ok(permit) => permit,
+        Err(block) => {
+            tracing::warn!(?block, "Automation strict execution promotion blocked");
+            if let Err(error) = driver.finish_dry_run(envelope) {
+                tracing::error!(?error, "Automation blocked lease release failed");
+            }
+            return;
+        }
+    };
+    debug_assert_eq!(permit.required_generation(), capabilities.generation());
+
     let outcome = execute_prepared_performance(
         performance,
         &envelope,
         driver.current_policy_revision(),
         driver.current_revision(),
-        capabilities.generation(),
+        permit.required_generation(),
     )
     .await;
 
@@ -603,6 +626,7 @@ mod tests {
         assert!(source.contains("AutomationWorkerDriver::new()"));
         assert!(source.contains("observe_prepare_for_sleep"));
         assert!(source.contains("observe_automation_telemetry"));
+        assert!(source.contains("authorize_prepared_execution"));
         assert!(source.contains("execute_prepared_performance"));
         assert!(source.contains("finish_performance_unknown"));
         assert!(source.contains("reconcile_performance"));
