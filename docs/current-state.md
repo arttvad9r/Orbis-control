@@ -19,6 +19,7 @@ Production product path намеренно включает только док�
 ## Repository status
 
 - Active integration branch: `chatgpt/ui-refresh-ghelper-20260820`.
+- Draft integration PR: #129; он не должен merge до executable validation и safety blockers.
 - `main` — previous consolidated baseline; required checks не включены из-за #106/#114.
 - Единственный canonical workflow — `.github/workflows/ci.yml`.
 - Удалён оставшийся одноразовый `.github/keyboard-backlight-probe-validation-trigger` artifact.
@@ -29,7 +30,7 @@ Production product path намеренно включает только док�
 
 | Area | Status | Current fact |
 |---|---|---|
-| Repository baseline | CLEANED / IMPLEMENTED | One-off validation artifact удалён; canonical workflow/document hierarchy сохранены. |
+| Repository baseline | CLEANED / IMPLEMENTED | One-off validation artifact удалён; canonical workflow/document hierarchy сохранены; Draft PR #129 создан как integration checkpoint. |
 | Rust/build contract | IMPLEMENTED | Workspace MSRV/toolchain contract — Rust 1.87. |
 | Executable CI | BLOCKED — #106 | Actions failure/no-run occurs before trustworthy repository steps; не интерпретируется как Cargo/Nix result. |
 | Main protection | DEFERRED — #114 | Required checks включать только после реально исполняемого CI. |
@@ -45,7 +46,7 @@ Production product path намеренно включает только док�
 | Performance read/write | HISTORICAL LIVE-VALIDATED / CURRENT SOURCE IMPLEMENTED | Session1 read + Hardware1/polkit write + read-back. |
 | GPU primitives | HISTORICAL LIVE-VALIDATED READS | Power, physical MUX and access policy remain separate read concepts. |
 | GPU product/raw mutation | BLOCKED | Product modes are policy, not raw backend enum. Production raw mutation disabled. |
-| Capability registry | IMPLEMENTED / HARDENING OPEN | Whole-swap immutable generations; explicit and periodic refresh share canonical mutation-status requery (#112 source-complete). Consumer/policy truth remains #120; Battery owner evidence #107. |
+| Capability registry | IMPLEMENTED / HARDENING OPEN | Whole-swap immutable generations; explicit and periodic refresh share canonical mutation-status requery (#112 source-complete). UI/Diagnostics/support-policy source audit #120 is complete; Battery owner evidence remains #107. |
 | Provider execution | PARTIAL HARDENING — #123 | Canonical `bounded_provider_call`; public probes, CLI and main worker read refreshes use provider deadlines. Telemetry/status requery and mutation unknown-outcome boundary remain. |
 | CLI | IMPLEMENTED READ-ONLY / VALIDATION OPEN — #119 | `status` + versioned `status --json`; typed states; no mutation commands. |
 | Telemetry | IMPLEMENTED / EVIDENCE GAP — #117 | Partial metrics are supported, but empty/useful/field-local failure coverage is not fully modeled. |
@@ -81,6 +82,18 @@ Still open:
 2. Hardware1 mutation-status requery still needs an explicit bounded read contract;
 3. mutation timeout after possible dispatch is an **unknown outcome**, not an ordinary failure; it requires observation/recovery before any retry;
 4. executable Rust validation remains blocked.
+
+## Effective product-policy truth (#120 complete)
+
+The current source contract is deliberately conservative:
+
+- Performance/Battery/Fan UI writability derives from `operations.write.status`;
+- Diagnostics carries and renders read/write statuses independently;
+- Panel/Keyboard request paths require explicit `ProductWriteStatus::Supported`;
+- support-matrix schema requires separate read/write evidence and the repository currently contains only `empty`/`unknown` examples, not optimistic model claims;
+- current deliberately disabled/unvalidated product writes remain effective `Unsupported` with a reason rather than a generic `DisabledByPolicy` status that could imply already-proven hardware support.
+
+These invariants are protected by the static backend completion contract. Executable validation still belongs to #106.
 
 ## Fan truth status (#109/#116)
 
@@ -139,16 +152,15 @@ Do not promote fan/GPU/Panel/Keyboard/Aura writes, unattended Automation, Displa
 3. #123 remaining telemetry/status/mutation unknown-outcome timeout design.
 4. #107 dynamic Battery mutation owner/interface liveness.
 5. #117 telemetry coverage/freshness semantics.
-6. #120 consumer/support-matrix policy truth.
-7. #109 aggregate CPU/GPU fan capability truth.
-8. #116 fan stored-enabled read evidence.
-9. #115 production-native UiState + release dependency graph cleanup.
-10. #113 removal of deprecated legacy config/path API after executable compatibility validation.
-11. #119 CLI integration/executable validation.
-12. #126 package/VM sandbox validation.
-13. #124 application identity decision.
-14. #118 old remote branch cleanup when delete-ref access exists.
-15. #114 required checks after #106.
+6. #109 aggregate CPU/GPU fan capability truth.
+7. #116 fan stored-enabled read evidence.
+8. #115 production-native UiState + release dependency graph cleanup.
+9. #113 removal of deprecated legacy config/path API after executable compatibility validation.
+10. #119 CLI integration/executable validation.
+11. #126 package/VM sandbox validation.
+12. #124 application identity decision.
+13. #118 old remote branch cleanup when delete-ref access exists.
+14. #114 required checks after #106.
 
 ## Historical live evidence retained
 
