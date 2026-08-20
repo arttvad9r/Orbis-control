@@ -23,6 +23,7 @@ export component ExtraWindow inherits Window {
     in property <bool> aura-control-ready: false;
     in property <bool> panel-overdrive-state-ready: false;
     in property <bool> panel-overdrive-control-ready: false;
+    in property <bool> boot-sound-state-ready: false;
 
     in-out property <int> m1-action: 0;
     in-out property <int> m2-action: 0;
@@ -52,7 +53,7 @@ export component ExtraWindow inherits Window {
     callback keyboard-brightness-requested(int);
     callback panel-overdrive-requested(bool);
 
-    property <bool> any-observed-state: root.keyboard-state-ready || root.aura-state-ready || root.panel-overdrive-state-ready;
+    property <bool> any-observed-state: root.keyboard-state-ready || root.aura-state-ready || root.panel-overdrive-state-ready || root.boot-sound-state-ready;
     property <bool> any-direct-write: root.keyboard-control-ready || root.panel-overdrive-control-ready;
     property <[string]> binding-actions: ["Default", "None", "Mute", "Volume Up", "Volume Down", "Mic", "Screen", "Aura", "Performance", "GPU Mode"];
 
@@ -126,7 +127,7 @@ export component ExtraWindow inherits Window {
                             ComboBox { horizontal-stretch: 1; enabled: false; model: ["Static", "Breathing", "Color Cycle", "Strobing"]; current-index <=> root.keyboard-effect; }
                             ComboBox { width: 122px; enabled: false; model: ["Slow", "Normal", "Fast"]; current-index <=> root.keyboard-speed; }
                         }
-                        ToggleRow { label: "Boot sound"; checked <=> root.boot-sound; disabled: !root.backend-ready || root.applying; }
+                        ToggleRow { label: "Boot sound"; checked: root.boot-sound-state-ready && root.boot-sound; disabled: true; }
                         ToggleRow { label: "Status LEDs"; checked <=> root.status-led; disabled: !root.backend-ready || root.applying; }
                     }
                 }
