@@ -1,120 +1,113 @@
 # Documentation Index
 
-Этот индекс определяет source-of-truth hierarchy документации Orbis Control.
-Chat/session transcripts, одноразовые validation instructions и старые planning
-snapshots не являются project source of truth.
+Этот индекс определяет source-of-truth hierarchy документации Orbis Control. Chat/session transcripts, одноразовые validation triggers и старые planning snapshots не являются current project source of truth.
 
 ## Быстрый вход
 
-После корневого [`AGENTS.md`](../AGENTS.md) новая development session читает:
+После [`AGENTS.md`](../AGENTS.md) новая development session читает:
 
-1. [`product.md`](product.md) — продуктовая цель, user outcomes и non-goals;
-2. [`current-state.md`](current-state.md) — что реально существует сейчас;
-3. [`architecture.md`](architecture.md) — текущие boundaries и invariants;
-4. [`verification.md`](verification.md) — какой evidence нужен для claims;
-5. [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md) — уровни release evidence;
-6. [`roadmap.md`](roadmap.md) — порядок незавершённой работы;
-7. релевантный [ADR](adr/) или hardware evidence только по конкретной задаче.
+1. [`product.md`](product.md) — product intent и non-goals;
+2. [`current-state.md`](current-state.md) — фактический source status активной integration line;
+3. [`architecture.md`](architecture.md) — boundaries/invariants;
+4. [`backend-completion-status.md`](backend-completion-status.md) — concise UI/backend connection summary;
+5. [`verification.md`](verification.md) — evidence contract;
+6. [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md) — допустимые claim levels;
+7. [`roadmap.md`](roadmap.md) — текущая очередь незавершённой работы;
+8. релевантный [ADR](adr/) или dated hardware evidence по конкретной задаче.
 
-Если найден dated audit, старый remediation plan или implementation snapshot,
-сначала проверьте [`history.md`](history.md): такие документы сохраняются для
-provenance и не должны переопределять current state.
+Если найден dated audit, старый remediation plan или implementation snapshot, сначала смотрите [`history.md`](history.md). Historical document сохраняет provenance и не переопределяет current code/status.
+
+## Current branch vs release baseline
+
+На 2026-08-20 активная интеграционная ветка `chatgpt/ui-refresh-ghelper-20260820` содержит более новый UI/runtime/backend слой, чем `main`. `current-state.md`, `architecture.md`, `backend-completion-status.md`, `roadmap.md` и `beta-acceptance-checklist.md` описывают именно этот source snapshot и явно отделяют его от executable/release evidence.
+
+До merge `main` остаётся последней консолидированной release baseline. Наличие source work в integration branch не делает его автоматически `TESTED`/`PACKAGED`/`LIVE-VALIDATED`.
 
 ## Source-of-truth hierarchy
 
 ### Current implementation facts
 
-1. Production code и tests.
+1. Production source code and tests of the named revision.
 2. [`current-state.md`](current-state.md).
+3. [`backend-completion-status.md`](backend-completion-status.md) for concise UI/backend wiring status.
 
-Открытый Issue/PR описывает planned или proposed work и не становится current
-behavior до интеграции. Source inspection может доказать `IMPLEMENTED`, но не
-`TESTED`, `PACKAGED` или `LIVE-VALIDATED` без соответствующего execution evidence.
+Issue/PR describes work tracking. Source inspection proves at most `IMPLEMENTED`; stronger claims require execution evidence.
 
 ### Architectural intent
 
 1. Accepted ADR.
 2. [`architecture.md`](architecture.md).
-3. [`threat-model.md`](threat-model.md) для security assumptions/mitigations.
+3. [`threat-model.md`](threat-model.md) for security assumptions/mitigations.
 
 ### Hardware facts
 
 1. Dated live hardware audit / immutable probe evidence.
-2. Hardware fixtures в [`tests/fixtures/hardware/`](../tests/fixtures/hardware/).
+2. Hardware fixtures in [`tests/fixtures/hardware/`](../tests/fixtures/hardware/).
 3. Historical research reports.
 
-Inference, product defaults и mock values не становятся hardware facts. При
-конфликте current code не переписывает прошлое hardware snapshot: новый probe
-создаёт новый dated evidence artifact.
+Model names, mock values and product defaults are never hardware proof. A new live probe creates new dated evidence; do not rewrite old evidence to fit current code.
 
 ### Future work
 
-[`roadmap.md`](roadmap.md) + GitHub Issues. Длинный design/remediation document не
-должен быть единственным местом, где существует незавершённая задача.
+[`roadmap.md`](roadmap.md) + GitHub Issues. A long design/remediation document must not be the only place an unfinished task exists.
+
+### Release acceptance
+
+[`beta-acceptance-checklist.md`](beta-acceptance-checklist.md) is the current beta gate. [`beta-readiness-plan.md`](beta-readiness-plan.md) is historical and is indexed by `history.md`.
 
 ### Historical records
 
-[`history.md`](history.md) классифицирует dated audits, superseded plans и
-historical evidence. Они сохраняются как engineering record, но не являются
-описанием текущего HEAD.
-
-### Agent rules
-
-Корневой [`AGENTS.md`](../AGENTS.md).
+[`history.md`](history.md) classifies dated audits, superseded plans and historical evidence. They are engineering records, not descriptions of current HEAD.
 
 ## Canonical documents
 
-| Документ | Роль | Что считать authoritative |
+| Document | Role | Authoritative for |
 |---|---|---|
 | [`product.md`](product.md) | PRODUCT INTENT | User outcomes, invariants, non-goals |
-| [`current-state.md`](current-state.md) | CURRENT STATUS | Operational baseline текущей production-линии |
+| [`current-state.md`](current-state.md) | CURRENT STATUS | Current integration source status and blockers |
 | [`architecture.md`](architecture.md) | CURRENT DESIGN | Boundaries, semantics, safety contracts |
-| [`verification.md`](verification.md) | VERIFICATION CONTRACT | Evidence profiles и claims policy |
+| [`backend-completion-status.md`](backend-completion-status.md) | BACKEND STATUS | Concise connected/blocked UI/backend surfaces |
+| [`verification.md`](verification.md) | VERIFICATION CONTRACT | Evidence profiles and claims policy |
 | [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md) | RELEASE EVIDENCE | `IMPLEMENTED / TESTED / PACKAGED / LIVE-VALIDATED / BLOCKED / UNKNOWN` |
-| [`roadmap.md`](roadmap.md) | FUTURE PLAN | Milestones и порядок работ |
+| [`roadmap.md`](roadmap.md) | FUTURE PLAN | Milestones and work ordering |
+| [`beta-acceptance-checklist.md`](beta-acceptance-checklist.md) | RELEASE GATE | Current beta acceptance gates |
 | [`threat-model.md`](threat-model.md) | SECURITY MODEL | Threats, trust boundaries, mitigations |
-| [`support-matrix-schema.md`](support-matrix-schema.md) | SUPPORT CONTRACT | Формат read/write evidence matrix |
-| [`provider-matrix.md`](provider-matrix.md) | PROVIDER DESIGN | Provider strategy; не implementation-status substitute |
-| [`history.md`](history.md) | HISTORICAL INDEX | Где старые документы расходятся с current truth |
-| [`adr/`](adr/) | ARCHITECTURAL DECISIONS | Accepted/reviewable Markdown ADR |
+| [`support-matrix-schema.md`](support-matrix-schema.md) | SUPPORT CONTRACT | Read/write evidence matrix format |
+| [`provider-matrix.md`](provider-matrix.md) | PROVIDER DESIGN | Provider strategy, not implementation-status substitute |
+| [`history.md`](history.md) | HISTORICAL INDEX | Superseded/historical material classification |
+| [`adr/`](adr/) | ARCHITECTURAL DECISIONS | Accepted/reviewable decisions |
 
 ## Supporting references
 
-- [`feature-matrix.md`](feature-matrix.md) — historical Stage 0 Linux feasibility snapshot;
-- [`research-report.md`](research-report.md) — dated hardware/research evidence;
-- [`ui-reference.md`](ui-reference.md) и [`ui-measurements.json`](ui-measurements.json) — UI reference material;
-- [`ci-validation-matrix.md`](ci-validation-matrix.md) — intended CI coverage, но не evidence того, что Actions действительно выполнился;
-- [`beta-acceptance-checklist.md`](beta-acceptance-checklist.md) — release acceptance checklist.
-
-Остальные крупные design/remediation документы классифицированы в
-[`history.md`](history.md), если они описывают завершённый или superseded этап.
+- [`ci-validation-matrix.md`](ci-validation-matrix.md) — intended CI coverage, not proof that GitHub Actions ran;
+- [`research-report.md`](research-report.md) — dated research/hardware context;
+- [`feature-matrix.md`](feature-matrix.md) — historical feasibility snapshot;
+- [`ui-reference.md`](ui-reference.md) and [`ui-measurements.json`](ui-measurements.json) — UI reference material;
+- [`history.md`](history.md) — classification for large older remediation/design documents.
 
 ## Accepted ADR
 
-- [`0001-rust-and-slint.md`](adr/0001-rust-and-slint.md) — Rust + Slint;
-- [`0002-daemon-boundaries.md`](adr/0002-daemon-boundaries.md) — исходные GUI/sessiond/hardwared boundaries; privileged-write часть уточнена более поздними ADR;
-- [`0003-gpu-provider-strategy.md`](adr/0003-gpu-provider-strategy.md) — GPU concepts и backend strategy;
-- [`0004-authoritative-read-only-session.md`](adr/0004-authoritative-read-only-session.md) — read-only session semantics;
-- [`0005-split-gpu-provider-capabilities.md`](adr/0005-split-gpu-provider-capabilities.md) — split GPU capabilities;
-- [`0006-privileged-performance-write.md`](adr/0006-privileged-performance-write.md) — privileged Performance path;
-- [`0007-battery-mutation-backend.md`](adr/0007-battery-mutation-backend.md) — Battery mutation ownership;
-- [`0008-supergfxd-staged-gpu-mutation.md`](adr/0008-supergfxd-staged-gpu-mutation.md) — staged GPU mutation contract;
-- [`0009-native-asus-eco-backend.md`](adr/0009-native-asus-eco-backend.md) — native ASUS Eco preflight foundation;
-- [`0010-architecture-evolution.md`](adr/0010-architecture-evolution.md) — architecture evolution verdict;
-- [`0011-fan-curve-write-ownership.md`](adr/0011-fan-curve-write-ownership.md) — asusd ownership boundary для fan writes;
-- [`0012-apply-result-accepted-semantics.md`](adr/0012-apply-result-accepted-semantics.md) — `Accepted != Applied`.
+- [`0001-rust-and-slint.md`](adr/0001-rust-and-slint.md)
+- [`0002-daemon-boundaries.md`](adr/0002-daemon-boundaries.md)
+- [`0003-gpu-provider-strategy.md`](adr/0003-gpu-provider-strategy.md)
+- [`0004-authoritative-read-only-session.md`](adr/0004-authoritative-read-only-session.md)
+- [`0005-split-gpu-provider-capabilities.md`](adr/0005-split-gpu-provider-capabilities.md)
+- [`0006-privileged-performance-write.md`](adr/0006-privileged-performance-write.md)
+- [`0007-battery-mutation-backend.md`](adr/0007-battery-mutation-backend.md)
+- [`0008-supergfxd-staged-gpu-mutation.md`](adr/0008-supergfxd-staged-gpu-mutation.md)
+- [`0009-native-asus-eco-backend.md`](adr/0009-native-asus-eco-backend.md)
+- [`0010-architecture-evolution.md`](adr/0010-architecture-evolution.md)
+- [`0011-fan-curve-write-ownership.md`](adr/0011-fan-curve-write-ownership.md)
+- [`0012-apply-result-accepted-semantics.md`](adr/0012-apply-result-accepted-semantics.md)
 
-ADR directory содержит reviewable Markdown decisions. Binary archives и
-дублирующие generated bundles рядом с ADR не являются частью документационного
-контракта.
+## Update rules
 
-## Правила обновления
-
-- Изменился architecture contract → обновить `architecture.md` и при значимом решении ADR.
-- Завершён vertical slice или изменился release blocker → обновить `current-state.md`.
-- Изменились приоритеты/очередность → обновить `roadmap.md`.
-- Получен hardware probe → добавить новый dated snapshot; старый не ретушировать.
-- Dated audit устарел → сохранить его как snapshot и описать supersession в `history.md`.
-- Mechanical refactor → менять docs только если изменился visible state, contract или source-of-truth link.
-- Feasibility не помечать `IMPLEMENTED` без production code.
-- В репозиторий не добавлять chat/session transcripts, локальные handoff dumps, секреты или одноразовые validation archives.
+- architecture contract changed → update `architecture.md`, and ADR when a stable decision changed;
+- production source/status or blocker changed → update `current-state.md` + `backend-completion-status.md` where relevant;
+- ordering changed → update `roadmap.md`;
+- release acceptance changed → update `beta-acceptance-checklist.md`;
+- hardware probe added → add new dated evidence, never retouch old live evidence;
+- historical audit became stale → keep body historical and record supersession in `history.md`;
+- do not mark feasibility as `IMPLEMENTED` without production code;
+- do not mark source as `TESTED` without executable evidence;
+- do not commit chat/session transcripts, secrets, private runtime dumps, generated ADR bundles or one-off validation trigger files.
