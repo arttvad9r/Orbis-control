@@ -45,7 +45,7 @@ pub(crate) fn legacy_context(kind: i32) -> ActionDialogContext {
 }
 
 /// Wire a dialog from an explicit typed context.
-pub(crate) fn wire(window: &PreviewDialogWindow, context: ActionDialogContext) {
+pub(crate) fn wire_typed(window: &PreviewDialogWindow, context: ActionDialogContext) {
     let action = match context {
         ActionDialogContext::Confirm(action) => {
             window.set_kind(3);
@@ -90,10 +90,10 @@ pub(crate) fn wire(window: &PreviewDialogWindow, context: ActionDialogContext) {
     });
 }
 
-/// Compatibility entry point for existing callers. Legacy kinds can never
-/// create an executable action.
-pub(crate) fn wire_legacy_kind(window: &PreviewDialogWindow, kind: i32) {
-    wire(window, legacy_context(kind));
+/// Compatibility entry point for existing numeric presentation callers.
+/// Legacy kinds can never create an executable action.
+pub(crate) fn wire(window: &PreviewDialogWindow, kind: i32) {
+    wire_typed(window, legacy_context(kind));
 }
 
 #[cfg(test)]
@@ -122,6 +122,7 @@ mod tests {
         assert!(source.contains("UnavailableGeneric"));
         assert!(source.contains("ConfirmedAction::QuitApplication"));
         assert!(source.contains("slint::quit_event_loop()"));
+        assert!(source.contains("wire_typed"));
 
         let forbidden = [
             ["Command", "::new"].concat(),
