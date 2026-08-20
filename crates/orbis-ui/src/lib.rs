@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod automation_execution_guard;
+pub mod automation_serialization;
 pub mod automation_shadow_runtime;
 pub mod composition;
 pub mod diagnostics_dto;
