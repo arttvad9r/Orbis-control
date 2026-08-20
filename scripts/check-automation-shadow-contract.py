@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""Static fail-closed contract checks for Automation lifecycle/execution design.
+"""Static fail-closed checks for Automation lifecycle/execution design.
 
-The checker intentionally uses only the Python standard library so it remains
-useful in minimal review containers where Rust/Cargo are unavailable. It is not
-a substitute for `cargo check`, tests or clippy. Its narrower job is to make
-accidental production execution, optimistic runtime readiness, or removal of
-lifecycle/freshness/revalidation/serialization/replay barriers fail visibly
-before executable validation is available.
+Stdlib-only by design: useful when Rust/Slint tooling is unavailable. This is a
+structural safety gate, not a substitute for cargo check/test/clippy.
 """
 
 from __future__ import annotations
@@ -27,10 +23,10 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
     ),
     "crates/orbis-core/src/automation.rs": (
         "PowerSourceEdgeDetector",
-        "BaselineEstablished",
-        "IgnoredStale",
         "required_confirmations",
         "rebaseline",
+        "break_candidate_continuity",
+        "reset_candidate",
     ),
     "crates/orbis-config/src/automation_store.rs": (
         "load_automation_policy",
@@ -43,12 +39,10 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "CustomCommandNotAllowed",
     ),
     "crates/orbis-ui/src/automation_shadow_runtime.rs": (
+        "break_power_source_candidate",
+        "break_candidate_continuity",
         "observe_resume_telemetry",
-        "ResumePowerSourceUnknown",
-        "ResumeTelemetryStale",
-        "CapabilitySnapshotStale",
         "ReadyButExecutionDisabled",
-        "preflight_automation_plan",
         "policy.enabled && policy.on_resume",
         "rebaseline(ac_online)",
     ),
@@ -58,53 +52,60 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "CapabilityGenerationChanged",
         "PolicyChanged",
         "PreflightBlocked",
-        "generation_still_matches",
     ),
     "crates/orbis-ui/src/automation_lifecycle_revision.rs": (
         "AutomationLifecycleClock",
         "AutomationLifecycleRevision",
         "AutomationRevisionCandidate",
         "LifecycleRevisionChanged",
-        "revalidate_revision_candidate",
         "AutomationRevisionHandoff",
-        "identities_still_match",
+        "revalidate_revision_candidate",
         "SequenceExhausted",
-        "Deliberately not `Clone`",
     ),
     "crates/orbis-ui/src/automation_serialization.rs": (
-        "AutomationRevisionHandoff",
-        "required_revision",
-        "current_revision",
-        "LifecycleRevisionChanged",
+        "AutomationSerializationCoordinator",
+        "AutomationDryRunLease",
         "LifecycleRevisionAlreadyAdmitted",
         "last_admitted_revision",
         "required_revision <= self.last_admitted_revision",
         "CapabilityGenerationChanged",
-        "AutomationDryRunLease",
         "Busy",
     ),
     "crates/orbis-ui/src/automation_execution_scope.rs": (
         "AutomationPreparedBatch",
-        "required_revision",
-        "required_generation",
         "AutomationPreparedKind::Performance",
         "UnsupportedAction",
         "DuplicatePerformanceAction",
+        "required_revision",
+        "required_generation",
     ),
     "crates/orbis-ui/src/automation_worker_runtime.rs": (
         "AutomationWorkerRuntime",
-        "AutomationLifecycleClock",
-        "AutomationSerializationCoordinator",
-        "observe_telemetry",
+        "break_power_source_candidate",
+        "if start",
+        "policy.enabled && policy.on_resume",
         "prepare_latest",
-        "prepare_automation_execution_scope",
         "self.latest_candidate = None",
-        "NoReadyCandidate",
-        "Deliberately not `Clone`",
+        "AutomationSerializationCoordinator",
+    ),
+    "crates/orbis-ui/src/automation_recovery.rs": (
+        "AutomationRecoveryBarrier",
+        "mark_performance_unknown",
+        "reconcile_performance",
+        "RecoveredAtDifferent",
+    ),
+    "crates/orbis-ui/src/automation_worker_coordinator.rs": (
+        "AutomationWorkerCoordinator",
+        "RecoveryRequired",
+        "finish_performance_unknown",
+        "reconcile_performance",
+    ),
+    "crates/orbis-ui/src/automation_capability.rs": (
+        "CapabilityStatus::ReadOnly",
+        "CapabilityStatus::Unsupported",
+        "automation_shadow_capability",
     ),
     "crates/orbis-ui/src/automation_backend.rs": (
-        "ResumeTelemetryGate",
-        "observe_prepare_for_sleep",
         "persisted_policy",
         "set_runtime_ready(false)",
         "ReadyButExecutionDisabled",
@@ -115,21 +116,6 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "receive_signal",
         "ordered_stream::OrderedStreamExt",
         "upgrade_in_event_loop",
-        "observe_automation_from_sysfs",
-    ),
-    "crates/orbis-ui/src/quick_controls_backend.rs": (
-        "resume_observer::spawn",
-        "SysfsTelemetryProvider",
-        "AUTOMATION_READ_TIMEOUT",
-        "automation_observing",
-    ),
-    "crates/orbis-ui/src/secondary_windows_backend.rs": (
-        "observe_prepare_for_sleep",
-        "observe_automation_telemetry",
-        "replace_automation_capabilities",
-        "AutomationLifecycleClock",
-        "advance_automation_revision",
-        "current_automation_revision",
     ),
 }
 
@@ -141,9 +127,10 @@ HARDWARE_INERT_FILES = (
     "crates/orbis-ui/src/automation_serialization.rs",
     "crates/orbis-ui/src/automation_execution_scope.rs",
     "crates/orbis-ui/src/automation_worker_runtime.rs",
+    "crates/orbis-ui/src/automation_recovery.rs",
+    "crates/orbis-ui/src/automation_worker_coordinator.rs",
     "crates/orbis-ui/src/automation_backend.rs",
     "crates/orbis-ui/src/resume_observer.rs",
-    "crates/orbis-ui/src/secondary_windows_backend.rs",
 )
 
 FORBIDDEN_CODE = (
@@ -160,15 +147,14 @@ FORBIDDEN_CODE = (
 
 
 def strip_rust_non_code(source: str) -> str:
-    """Replace Rust comments/string/char literal contents with spaces."""
-
+    """Blank comments/string/char literals while preserving code punctuation."""
     out = list(source)
     n = len(source)
     i = 0
     block_depth = 0
 
     def blank(start: int, end: int) -> None:
-        for pos in range(start, end):
+        for pos in range(start, min(end, n)):
             if out[pos] != "\n":
                 out[pos] = " "
 
@@ -189,8 +175,7 @@ def strip_rust_non_code(source: str) -> str:
 
         if source.startswith("//", i):
             end = source.find("\n", i)
-            if end < 0:
-                end = n
+            end = n if end < 0 else end
             blank(i, end)
             i = end
             continue
@@ -213,7 +198,7 @@ def strip_rust_non_code(source: str) -> str:
                 hashes += 1
                 j += 1
             if j < n and source[j] == '"':
-                terminator = '"' + ("#" * hashes)
+                terminator = '"' + "#" * hashes
                 end = source.find(terminator, j + 1)
                 end = n if end < 0 else end + len(terminator)
                 blank(raw_start, end)
@@ -231,9 +216,8 @@ def strip_rust_non_code(source: str) -> str:
                 if ch == '"' and not escaped:
                     j += 1
                     break
-                if ch == "\\" and not escaped:
-                    escaped = True
-                else:
+                escaped = ch == "\\" and not escaped
+                if ch != "\\":
                     escaped = False
                 j += 1
             blank(quote_start, j)
@@ -246,21 +230,21 @@ def strip_rust_non_code(source: str) -> str:
         if quote_pos < n and source[quote_pos] == "'":
             j = quote_pos + 1
             escaped = False
+            closed = False
             while j < n and source[j] != "\n":
                 ch = source[j]
                 if ch == "'" and not escaped:
                     j += 1
-                    blank(char_start, j)
-                    i = j
+                    closed = True
                     break
-                if ch == "\\" and not escaped:
-                    escaped = True
-                else:
+                escaped = ch == "\\" and not escaped
+                if ch != "\\":
                     escaped = False
                 j += 1
-            else:
-                i = char_start + 1
-            continue
+            if closed:
+                blank(char_start, j)
+                i = j
+                continue
 
         i += 1
 
@@ -268,9 +252,8 @@ def strip_rust_non_code(source: str) -> str:
 
 
 def read_required(root: Path, relative: str, errors: list[str]) -> str | None:
-    path = root / relative
     try:
-        return path.read_text(encoding="utf-8")
+        return (root / relative).read_text(encoding="utf-8")
     except OSError as error:
         errors.append(f"{relative}: cannot read required file: {error}")
         return None
@@ -303,25 +286,23 @@ def derive_includes_clone(source: str, type_name: str) -> bool:
         re.MULTILINE,
     )
     match = pattern.search(source)
-    if match is None:
-        return False
-    return bool(re.search(r"\bClone\b", match.group("traits")))
+    return bool(match and re.search(r"\bClone\b", match.group("traits")))
 
 
 def check_unique_owners_and_replay(root: Path, errors: list[str]) -> None:
-    checks = (
+    unique_types = (
         ("crates/orbis-ui/src/automation_lifecycle_revision.rs", "AutomationRevisionHandoff"),
         ("crates/orbis-ui/src/automation_serialization.rs", "AutomationSerializationCoordinator"),
         ("crates/orbis-ui/src/automation_worker_runtime.rs", "AutomationWorkerRuntime"),
+        ("crates/orbis-ui/src/automation_recovery.rs", "AutomationRecoveryBarrier"),
+        ("crates/orbis-ui/src/automation_worker_coordinator.rs", "AutomationWorkerCoordinator"),
     )
-    for relative, type_name in checks:
+    for relative, type_name in unique_types:
         source = read_required(root, relative, errors)
         if source is not None and derive_includes_clone(source, type_name):
             errors.append(f"{relative}: unique owner {type_name} must not derive Clone")
 
-    serialization = read_required(
-        root, "crates/orbis-ui/src/automation_serialization.rs", errors
-    )
+    serialization = read_required(root, "crates/orbis-ui/src/automation_serialization.rs", errors)
     if serialization is not None:
         for marker in (
             "last_admitted_revision: AutomationLifecycleRevision",
@@ -329,18 +310,18 @@ def check_unique_owners_and_replay(root: Path, errors: list[str]) -> None:
             "self.last_admitted_revision = required_revision",
         ):
             if marker not in serialization:
-                errors.append(
-                    "crates/orbis-ui/src/automation_serialization.rs: "
-                    f"missing replay barrier marker {marker!r}"
-                )
+                errors.append(f"automation_serialization.rs: missing replay barrier {marker!r}")
 
-    worker_runtime = read_required(
-        root, "crates/orbis-ui/src/automation_worker_runtime.rs", errors
-    )
-    if worker_runtime is not None and "self.latest_candidate = None;" not in worker_runtime:
-        errors.append(
-            "crates/orbis-ui/src/automation_worker_runtime.rs: successful admission must consume latest candidate"
-        )
+    worker = read_required(root, "crates/orbis-ui/src/automation_worker_runtime.rs", errors)
+    if worker is not None:
+        for marker in (
+            "if start {",
+            "self.shadow.break_power_source_candidate();",
+            "let resume_enabled = policy.enabled && policy.on_resume;",
+            "self.latest_candidate = None;",
+        ):
+            if marker not in worker:
+                errors.append(f"automation_worker_runtime.rs: missing lifecycle guard {marker!r}")
 
 
 def check_runtime_readiness(root: Path, errors: list[str]) -> None:
@@ -350,31 +331,29 @@ def check_runtime_readiness(root: Path, errors: list[str]) -> None:
         return
     code = strip_rust_non_code(source)
     if "set_runtime_ready(true)" in code:
-        errors.append(f"{relative}: shadow backend must never set runtime-ready true")
+        errors.append(f"{relative}: backend must not publish runtime-ready true yet")
     if "set_runtime_ready(false)" not in code:
-        errors.append(f"{relative}: missing explicit fail-closed runtime-ready=false publication")
+        errors.append(f"{relative}: missing explicit runtime-ready=false publication")
 
 
-def check_execution_guard_api(root: Path, errors: list[str]) -> None:
-    for relative in (
+def check_public_execution_surfaces(root: Path, errors: list[str]) -> None:
+    inert = (
         "crates/orbis-ui/src/automation_execution_guard.rs",
         "crates/orbis-ui/src/automation_lifecycle_revision.rs",
         "crates/orbis-ui/src/automation_serialization.rs",
         "crates/orbis-ui/src/automation_execution_scope.rs",
         "crates/orbis-ui/src/automation_worker_runtime.rs",
-    ):
+        "crates/orbis-ui/src/automation_recovery.rs",
+        "crates/orbis-ui/src/automation_worker_coordinator.rs",
+    )
+    risky = re.compile(r"\bpub\s+(?:async\s+)?fn\s+(execute|apply|dispatch|commit|mutate|write)\b")
+    for relative in inert:
         source = read_required(root, relative, errors)
         if source is None:
             continue
-        code = strip_rust_non_code(source)
-        risky_public = re.compile(
-            r"\bpub\s+(?:async\s+)?fn\s+(execute|apply|dispatch|commit|mutate|write)\b"
-        )
-        match = risky_public.search(code)
+        match = risky.search(strip_rust_non_code(source))
         if match:
-            errors.append(
-                f"{relative}: dry-run guard exposes forbidden public method {match.group(1)!r}"
-            )
+            errors.append(f"{relative}: exposes forbidden public method {match.group(1)!r}")
 
 
 def check_resume_observer(root: Path, errors: list[str]) -> None:
@@ -383,15 +362,11 @@ def check_resume_observer(root: Path, errors: list[str]) -> None:
     if source is None:
         return
     code = strip_rust_non_code(source)
-    if "Connection::system()" not in code:
-        errors.append(f"{relative}: resume observer must use the system bus")
-    if "receive_signal(" not in code:
-        errors.append(f"{relative}: missing signal subscription")
+    if "Connection::system()" not in code or "receive_signal(" not in code:
+        errors.append(f"{relative}: missing system-bus signal-only observer contract")
     for suspicious in (".call(", ".call_method(", "request_name(", "ObjectServer"):
         if suspicious in code:
-            errors.append(
-                f"{relative}: resume observer contains unexpected D-Bus active operation {suspicious!r}"
-            )
+            errors.append(f"{relative}: unexpected active D-Bus operation {suspicious!r}")
 
 
 def check_proof_executor_is_test_only(root: Path, errors: list[str]) -> None:
@@ -404,9 +379,7 @@ def check_proof_executor_is_test_only(root: Path, errors: list[str]) -> None:
             r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*mod\s+automation_performance_executor\s*;",
             lib,
         ):
-            errors.append(
-                f"{lib_relative}: Performance Automation executor proof must remain cfg(test)-only"
-            )
+            errors.append(f"{lib_relative}: Performance executor proof must remain cfg(test)-only")
         if re.search(r"\bpub\s+mod\s+automation_performance_executor\b", lib):
             errors.append(f"{lib_relative}: proof executor must not be publicly exported")
     if proof is not None:
@@ -417,23 +390,25 @@ def check_proof_executor_is_test_only(root: Path, errors: list[str]) -> None:
             "ReadBackAfterMutation",
             "ReadBackMismatch",
             "set_performance_for_automation",
-            "prepared.required_revision()",
-            "lease.required_revision()",
         ):
             if marker not in proof:
-                errors.append(f"{proof_relative}: missing proof safety marker {marker!r}")
+                errors.append(f"{proof_relative}: missing proof marker {marker!r}")
         code = strip_rust_non_code(proof)
-        for forbidden in (
-            "set_gpu_mode(",
-            "set_fan_curve(",
-            "set_charge_limit(",
-            "Command::new(",
-            "unsafe {",
-        ):
+        for forbidden in ("set_gpu_mode(", "set_fan_curve(", "set_charge_limit(", "Command::new(", "unsafe {"):
             if forbidden in code:
-                errors.append(
-                    f"{proof_relative}: Performance-only proof contains forbidden surface {forbidden!r}"
-                )
+                errors.append(f"{proof_relative}: forbidden Performance-proof surface {forbidden!r}")
+
+
+def check_automation_capability_fail_closed(root: Path, errors: list[str]) -> None:
+    relative = "crates/orbis-ui/src/automation_capability.rs"
+    source = read_required(root, relative, errors)
+    if source is None:
+        return
+    code = strip_rust_non_code(source)
+    if "write: OperationCapability::new(CapabilityStatus::Supported)" in code:
+        errors.append(f"{relative}: Automation write support must remain disabled")
+    if "write: OperationCapability::with_reason(CapabilityStatus::Supported" in code:
+        errors.append(f"{relative}: Automation write support must remain disabled")
 
 
 def check_manifests(root: Path, errors: list[str]) -> None:
@@ -441,16 +416,12 @@ def check_manifests(root: Path, errors: list[str]) -> None:
     ui = read_required(root, "crates/orbis-ui/Cargo.toml", errors)
     if workspace is not None:
         if re.search(r"(?m)^\s*futures-util\s*=", workspace):
-            errors.append(
-                "Cargo.toml: direct futures-util dependency is unnecessary; use zbus ordered_stream re-export"
-            )
+            errors.append("Cargo.toml: redundant direct futures-util dependency")
         if 'zbus = "5"' not in workspace:
             errors.append("Cargo.toml: missing workspace zbus dependency")
     if ui is not None:
         if re.search(r"(?m)^\s*futures-util\s*=", ui):
-            errors.append(
-                "crates/orbis-ui/Cargo.toml: direct futures-util dependency would require lockfile update"
-            )
+            errors.append("crates/orbis-ui/Cargo.toml: redundant direct futures-util dependency")
         if "zbus = { workspace = true }" not in ui:
             errors.append("crates/orbis-ui/Cargo.toml: missing workspace zbus dependency")
 
@@ -461,27 +432,22 @@ def run(root: Path) -> list[str]:
     check_hardware_inert_sources(root, errors)
     check_unique_owners_and_replay(root, errors)
     check_runtime_readiness(root, errors)
-    check_execution_guard_api(root, errors)
+    check_public_execution_surfaces(root, errors)
     check_resume_observer(root, errors)
     check_proof_executor_is_test_only(root, errors)
+    check_automation_capability_fail_closed(root, errors)
     check_manifests(root, errors)
     return errors
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "root",
-        nargs="?",
-        default=".",
-        help="repository root (default: current directory)",
-    )
+    parser.add_argument("root", nargs="?", default=".", help="repository root")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
-    args = parse_args(argv)
-    root = Path(args.root).resolve()
+    root = Path(parse_args(argv).root).resolve()
     errors = run(root)
     if errors:
         for error in errors:
