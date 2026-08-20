@@ -1,0 +1,67 @@
+import { Palette } from "../themes/dark.slint";
+
+// Toggle for backend-owned state. A click emits the requested value but never
+// changes `checked` locally; the owner must publish the new authoritative value.
+export component RequestToggleRow inherits Rectangle {
+    in property <string> label;
+    in property <string> description: "";
+    in property <bool> checked: false;
+    in property <bool> disabled: false;
+    callback toggled(bool);
+
+    height: root.description == "" ? 34px : 44px;
+    border-radius: 7px;
+    background: touch.has-hover && !root.disabled ? Palette.surface-hover : transparent;
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 9px;
+        alignment: center;
+
+        VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            Text {
+                text: root.label;
+                font-size: 10px;
+                font-weight: 550;
+                color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if (root.description != "") : Text {
+                text: root.description;
+                font-size: 8px;
+                color: root.disabled ? Palette.text-disabled : Palette.text-secondary;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+
+        Rectangle {
+            width: 34px;
+            height: 18px;
+            border-radius: 9px;
+            border-width: 1px;
+            border-color: root.checked && !root.disabled ? Palette.accent-default : Palette.border-default;
+            background: root.checked && !root.disabled ? Palette.accent-default : Palette.surface-pressed;
+
+            Rectangle {
+                width: 14px;
+                height: 14px;
+                x: root.checked ? 18px : 2px;
+                y: 2px;
+                border-radius: 7px;
+                background: root.disabled ? Palette.text-disabled : Palette.text-on-accent;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.toggled(!root.checked); }
+    }
+}
