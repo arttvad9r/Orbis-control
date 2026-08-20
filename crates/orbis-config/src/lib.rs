@@ -27,6 +27,7 @@ pub use automation_policy::{
 };
 pub use automation_preflight::{
     AutomationPreflight, AutomationPreflightBlock, preflight_automation_plan,
+    preflight_automation_plan_with_display_constraints,
 };
 pub use automation_store::{
     AutomationPolicyLoadError, load_automation_policy, load_automation_policy_from_dir,
