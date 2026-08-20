@@ -6,6 +6,7 @@
 
 #[allow(dead_code)]
 mod controller;
+mod diagnostics_backend;
 mod preferences_backend;
 
 use std::cell::{Cell, OnceCell, RefCell};
@@ -752,12 +753,16 @@ fn show_diagnostics_window(app: &AppWindow) -> Result<(), slint::PlatformError> 
     DIAGNOSTICS_WINDOW.with(|slot| {
         let mut slot = slot.borrow_mut();
         if slot.is_none() {
-            *slot = Some(DiagnosticsWindow::new()?);
+            let window = DiagnosticsWindow::new()?;
+            diagnostics_backend::wire_window(&window);
+            *slot = Some(window);
         }
         let window = slot.as_ref().expect("DiagnosticsWindow initialized");
         window.set_version(app.get_ui_state().version.clone());
         window.global::<ThemeState>().set_mode(current_theme_mode());
-        window.show()
+        window.show()?;
+        diagnostics_backend::refresh(window);
+        Ok(())
     })
 }
 
@@ -1197,6 +1202,9 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
 }
 
 fn handle_worker_event(app: &AppWindow, event: WorkerEvent) {
+    if let WorkerEvent::RegistryChange(Ok((_generation, snapshot))) = &event {
+        diagnostics_backend::replace_capabilities(snapshot.clone());
+    }
     let mut s = from_slint(&app.get_ui_state());
     apply_performance_event(&mut s, event);
     app.set_ui_state(to_slint(&s));
@@ -1726,6 +1734,8 @@ fn main() -> anyhow::Result<()> {
     let system_connection = runtime
         .block_on(zbus::Connection::system())
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
+    let diagnostics_session_connection = session_connection.clone();
+    let diagnostics_system_connection = system_connection.clone();
     let fan_defaults_provider: Arc<dyn FanCurveDefaultsMutationProvider> =
         Arc::new(Hardware1FanDefaultsProvider::new(system_connection.clone()));
     let (application_runtime, _hardware_owner) = runtime.block_on(build_production_runtime(
@@ -1734,6 +1744,15 @@ fn main() -> anyhow::Result<()> {
     ))?;
     state.perf_writable = false;
     state.charge_limit_writable = false;
+
+    let poll_interval = application_runtime.telemetry.poll_interval();
+    diagnostics_backend::initialize(
+        runtime.handle().clone(),
+        diagnostics_session_connection,
+        diagnostics_system_connection,
+        application_runtime.capabilities_arc(),
+        poll_interval.saturating_mul(3),
+    );
 
     let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();
     let fan_defaults = FanDefaultsContext {
@@ -1757,7 +1776,6 @@ fn main() -> anyhow::Result<()> {
             tracing::warn!("не удалось вернуть событие worker-а в event loop: {e:?}");
         }
     };
-    let poll_interval = application_runtime.telemetry.poll_interval();
     runtime.spawn(run_worker_with_polling(
         application_runtime,
         worker_rx,
@@ -1797,6 +1815,7 @@ fn main() -> anyhow::Result<()> {
     DIAGNOSTICS_WINDOW.with(|slot| *slot.borrow_mut() = None);
     UPDATES_WINDOW.with(|slot| *slot.borrow_mut() = None);
     PREVIEW_DIALOG_WINDOW.with(|slot| *slot.borrow_mut() = None);
+    diagnostics_backend::clear();
     drop(app);
     drop(worker_tx);
     drop(runtime);
