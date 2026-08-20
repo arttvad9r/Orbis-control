@@ -23,4 +23,5 @@ pub mod diagnostics_export;
 pub mod diagnostics_metadata;
 pub mod diagnostics_runtime;
 pub mod diagnostics_window_model;
+pub mod display_refresh_service;
 pub mod worker;
