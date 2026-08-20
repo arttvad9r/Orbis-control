@@ -1,15 +1,13 @@
 use std::fmt::Debug;
-use std::future::Future;
 use std::process::ExitCode;
-use std::time::Duration;
 
 use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
+use orbis_providers::bounded_provider_call;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
     BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
-    Provider,
 };
 use orbis_session_client::{
     SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
@@ -129,22 +127,6 @@ impl StatusSnapshot {
     }
 }
 
-async fn bounded_read<T, F>(
-    label: &'static str,
-    timeout: Duration,
-    future: F,
-) -> Result<T, ProviderError>
-where
-    F: Future<Output = Result<T, ProviderError>>,
-{
-    match tokio::time::timeout(timeout, future).await {
-        Ok(result) => result,
-        Err(_) => Err(ProviderError::Timeout(format!(
-            "{label} exceeded provider timeout {timeout:?}"
-        ))),
-    }
-}
-
 fn print_observation<T>(label: &str, observation: &Observation<T>)
 where
     T: Debug,
@@ -186,52 +168,42 @@ async fn collect_status() -> Result<StatusSnapshot, zbus::Error> {
     let gpu_mux = SessionGpuMuxProvider::new(ZbusSessionGpuSource::new(connection.clone()));
     let gpu_access = SessionGpuAccessProvider::new(ZbusSessionGpuSource::new(connection));
 
-    let battery_timeout = battery.timeout();
     let charge_limit = observation_from_result(
-        bounded_read(
+        bounded_provider_call(
+            &battery,
             "battery.charge_limit",
-            battery_timeout,
             battery.charge_limit(),
         )
         .await,
     );
 
-    let performance_timeout = performance.timeout();
     let current = observation_from_result(
-        bounded_read(
+        bounded_provider_call(
+            &performance,
             "performance.current",
-            performance_timeout,
             performance.current_profile(),
         )
         .await,
     );
     let available = observation_from_result(
-        bounded_read(
+        bounded_provider_call(
+            &performance,
             "performance.available",
-            performance_timeout,
             performance.profiles(),
         )
         .await,
     );
 
-    let gpu_power_timeout = gpu_power.timeout();
     let power = observation_from_result(
-        bounded_read("gpu.power", gpu_power_timeout, gpu_power.power_state()).await,
+        bounded_provider_call(&gpu_power, "gpu.power", gpu_power.power_state()).await,
     );
 
-    let gpu_mux_timeout = gpu_mux.timeout();
     let mux = observation_from_result(
-        bounded_read("gpu.mux", gpu_mux_timeout, gpu_mux.mux_state()).await,
+        bounded_provider_call(&gpu_mux, "gpu.mux", gpu_mux.mux_state()).await,
     );
 
-    let gpu_access_timeout = gpu_access.timeout();
     let access = observation_from_result(
-        bounded_read(
-            "gpu.access",
-            gpu_access_timeout,
-            gpu_access.access_policy(),
-        )
-        .await,
+        bounded_provider_call(&gpu_access, "gpu.access", gpu_access.access_policy()).await,
     );
 
     Ok(StatusSnapshot {
