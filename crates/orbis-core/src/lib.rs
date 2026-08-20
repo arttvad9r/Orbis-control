@@ -24,6 +24,7 @@ pub mod desired_observed;
 pub mod diagnostics;
 pub mod display;
 pub mod display_output;
+pub mod display_refresh;
 pub mod error;
 pub mod fan;
 pub mod gpu;
@@ -64,6 +65,10 @@ pub use display::{
 pub use display_output::{
     CurrentDisplayMode, DisplayMode as OutputDisplayMode, DisplayOutputId, DisplayOutputSnapshot,
     DisplayOutputState,
+};
+pub use display_refresh::{
+    DisplayRefreshEvidence, DisplayRefreshPreset, DisplayRefreshPresetTarget,
+    DisplayRefreshTargetId, DisplayRefreshTargetRole,
 };
 pub use error::CoreError;
 pub use fan::{FanCurve, FanCurvePoint, FanId};
