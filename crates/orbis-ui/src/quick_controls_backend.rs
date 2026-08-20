@@ -54,15 +54,31 @@ pub(crate) fn clear() {
 }
 
 pub(crate) fn wire_window(app: &AppWindow) {
+    let runtime_ready = CONTEXT.with(|slot| slot.borrow().is_some());
+
     app.set_display_state_ready(false);
     app.set_display_control_ready(false);
     app.set_display_mode(-1);
-    app.set_display_status("Reading display state…".into());
+    app.set_display_status(
+        if runtime_ready {
+            "Reading display state…"
+        } else {
+            "Display backend unavailable"
+        }
+        .into(),
+    );
 
     app.set_keyboard_state_ready(false);
     app.set_keyboard_control_ready(false);
     app.set_keyboard_brightness(-1);
-    app.set_keyboard_status("Reading keyboard state…".into());
+    app.set_keyboard_status(
+        if runtime_ready {
+            "Reading keyboard state…"
+        } else {
+            "Keyboard backend unavailable"
+        }
+        .into(),
+    );
 
     app.on_display_mode_requested(|mode| {
         tracing::warn!(
