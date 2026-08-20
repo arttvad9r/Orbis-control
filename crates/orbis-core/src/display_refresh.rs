@@ -93,6 +93,53 @@ impl DisplayRefreshPresetTarget {
     }
 }
 
+/// Capability-safe DisplayRefresh constraints without observed current state.
+///
+/// Unlike [`DisplayRefreshEvidence`], this type can live in capability metadata:
+/// it contains only the compositor owner's opaque target identity, proven target
+/// role and exact supported product targets. It deliberately omits the current
+/// display mode so the capability registry remains support metadata rather than
+/// a second observed-state store.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisplayRefreshConstraints {
+    /// Opaque runtime mutation target owned by the compositor backend.
+    pub target: DisplayRefreshTargetId,
+    /// Owner-proven role of the target.
+    pub role: DisplayRefreshTargetRole,
+    /// Exact product preset targets proven for this target.
+    pub targets: Vec<DisplayRefreshPresetTarget>,
+}
+
+impl DisplayRefreshConstraints {
+    /// Project one frozen evidence snapshot into capability-safe constraints.
+    pub fn from_evidence(evidence: &DisplayRefreshEvidence) -> Self {
+        Self {
+            target: evidence.target.clone(),
+            role: evidence.role,
+            targets: evidence.targets.clone(),
+        }
+    }
+
+    /// Return exact evidence for a preset, regardless of target role.
+    pub fn target_for(&self, preset: DisplayRefreshPreset) -> Option<DisplayRefreshPresetTarget> {
+        self.targets
+            .iter()
+            .copied()
+            .find(|target| target.preset() == preset)
+    }
+
+    /// Return a preset target only when internal-panel identity is proven.
+    pub fn writable_target_for(
+        &self,
+        preset: DisplayRefreshPreset,
+    ) -> Option<DisplayRefreshPresetTarget> {
+        if self.role != DisplayRefreshTargetRole::InternalPanelProven {
+            return None;
+        }
+        self.target_for(preset)
+    }
+}
+
 /// One frozen target/evidence snapshot supplied to future Display mutation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DisplayRefreshEvidence {
@@ -170,6 +217,11 @@ impl DisplayRefreshEvidence {
             return None;
         }
         self.target_for(preset)
+    }
+
+    /// Project observed evidence into capability-safe constraints.
+    pub fn constraints(&self) -> DisplayRefreshConstraints {
+        DisplayRefreshConstraints::from_evidence(self)
     }
 }
 
@@ -311,6 +363,30 @@ mod tests {
             Some(DisplayRefreshPresetTarget::Hz60 {
                 refresh: RefreshMilliHz::new(60_010).unwrap(),
             })
+        );
+    }
+
+    #[test]
+    fn constraints_drop_observed_current_state_but_preserve_target_evidence() {
+        let evidence = DisplayRefreshEvidence::from_observed_modes(
+            DisplayRefreshTargetId::new("mutation-owner:panel-0"),
+            DisplayRefreshTargetRole::InternalPanelProven,
+            mode(2560, 1600, 59_940),
+            &[mode(2560, 1600, 119_880)],
+            true,
+        );
+        let constraints = evidence.constraints();
+        assert_eq!(constraints.target.as_str(), "mutation-owner:panel-0");
+        assert_eq!(constraints.role, DisplayRefreshTargetRole::InternalPanelProven);
+        assert_eq!(
+            constraints.writable_target_for(DisplayRefreshPreset::Hz120),
+            Some(DisplayRefreshPresetTarget::Hz120 {
+                refresh: RefreshMilliHz::new(119_880).unwrap(),
+            })
+        );
+        assert_eq!(
+            constraints.writable_target_for(DisplayRefreshPreset::Auto),
+            Some(DisplayRefreshPresetTarget::Auto)
         );
     }
 }
