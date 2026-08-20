@@ -127,7 +127,7 @@ impl AutomationShadowRuntime {
             Ok(_) => {}
         }
 
-        let source = match trigger {
+        let source = match &trigger {
             AutomationTrigger::OnAc => AutomationPowerSource::Ac,
             AutomationTrigger::OnBattery => AutomationPowerSource::Battery,
             // `PowerSourceEdgeDetector` can only emit the two variants above.
