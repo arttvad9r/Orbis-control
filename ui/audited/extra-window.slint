@@ -9,11 +9,19 @@ export component ExtraWindow inherits Window {
     title: "Orbis Control — Extra Controls";
     background: Palette.window-background;
 
-    // Backend owns loaded values. UI edits a draft and commits it only through
-    // apply-requested; Reload discards the draft and requests authoritative data.
+    // backend-ready means a full editable draft/apply backend exists. The
+    // observed read-only properties below are independent: known hardware state
+    // may be shown without enabling a mutation surface.
     in property <bool> backend-ready: false;
     in property <bool> applying: false;
     in property <string> status: "Advanced controls backend unavailable";
+
+    in property <bool> keyboard-state-ready: false;
+    in property <bool> keyboard-control-ready: false;
+    in property <bool> aura-state-ready: false;
+    in property <bool> aura-control-ready: false;
+    in property <bool> panel-overdrive-state-ready: false;
+    in property <bool> panel-overdrive-control-ready: false;
 
     in-out property <int> m1-action: 0;
     in-out property <int> m2-action: 0;
@@ -21,9 +29,9 @@ export component ExtraWindow inherits Window {
     in-out property <int> m4-action: 0;
     in-out property <int> m5-action: 0;
 
-    in-out property <int> keyboard-brightness: 0;
-    in-out property <int> keyboard-effect: 0;
-    in-out property <int> keyboard-speed: 1;
+    in-out property <int> keyboard-brightness: -1;
+    in-out property <int> keyboard-effect: -1;
+    in-out property <int> keyboard-speed: -1;
     in-out property <bool> boot-sound: false;
     in-out property <bool> status-led: false;
     in-out property <bool> panel-overdrive: false;
@@ -38,6 +46,7 @@ export component ExtraWindow inherits Window {
     callback reload-requested;
     callback apply-requested;
 
+    property <bool> any-observed-state: root.keyboard-state-ready || root.aura-state-ready || root.panel-overdrive-state-ready;
     property <[string]> binding-actions: ["Default", "None", "Mute", "Volume Up", "Volume Down", "Mic", "Screen", "Aura", "Performance", "GPU Mode"];
 
     ThemeBridge { }
@@ -47,7 +56,7 @@ export component ExtraWindow inherits Window {
         spacing: 10px;
 
         WindowHeader { title: "Extra Controls"; subtitle: "Bindings, lighting and platform settings"; }
-        LocalStatus { text: root.status; accent: root.backend-ready ? Palette.text-secondary : Palette.warning; }
+        LocalStatus { text: root.status; accent: root.backend-ready || root.any-observed-state ? Palette.text-secondary : Palette.warning; }
 
         scroll := ScrollView {
             vertical-stretch: 1;
@@ -89,20 +98,23 @@ export component ExtraWindow inherits Window {
                     height: 166px;
                     VerticalLayout {
                         padding: 10px; spacing: 7px;
-                        SectionTitle { title: "Keyboard Backlight"; detail: root.backend-ready ? "Hardware draft" : "Unavailable"; }
+                        SectionTitle {
+                            title: "Keyboard Backlight";
+                            detail: root.keyboard-state-ready || root.aura-state-ready ? (root.keyboard-control-ready || root.aura-control-ready ? "Hardware draft" : "Observed · read only") : "Unavailable";
+                        }
                         HorizontalLayout {
                             height: 30px; spacing: 6px; alignment: center;
-                            Text { width: 92px; text: "Brightness"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
-                            ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.backend-ready && root.keyboard-brightness == 0; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 0; } }
-                            ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.backend-ready && root.keyboard-brightness == 1; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 1; } }
-                            ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.backend-ready && root.keyboard-brightness == 2; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 2; } }
-                            ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.backend-ready && root.keyboard-brightness == 3; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 3; } }
+                            Text { width: 92px; text: "Brightness"; font-size: 10px; color: root.keyboard-state-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
+                            ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.keyboard-state-ready && root.keyboard-brightness == 0; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness = 0; } }
+                            ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.keyboard-state-ready && root.keyboard-brightness == 1; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness = 1; } }
+                            ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.keyboard-state-ready && root.keyboard-brightness == 2; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness = 2; } }
+                            ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.keyboard-state-ready && root.keyboard-brightness == 3; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness = 3; } }
                         }
                         HorizontalLayout {
                             height: 30px; spacing: 8px; alignment: center;
-                            Text { width: 92px; text: "Effect"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
-                            ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: ["Static", "Breathing", "Color Cycle", "Strobing"]; current-index <=> root.keyboard-effect; }
-                            ComboBox { width: 122px; enabled: root.backend-ready && !root.applying; model: ["Slow", "Normal", "Fast"]; current-index <=> root.keyboard-speed; }
+                            Text { width: 92px; text: "Effect"; font-size: 10px; color: root.aura-state-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
+                            ComboBox { horizontal-stretch: 1; enabled: root.aura-control-ready && !root.applying; model: ["Static", "Breathing", "Color Cycle", "Strobing"]; current-index <=> root.keyboard-effect; }
+                            ComboBox { width: 122px; enabled: root.aura-control-ready && !root.applying; model: ["Slow", "Normal", "Fast"]; current-index <=> root.keyboard-speed; }
                         }
                         ToggleRow { label: "Boot sound"; checked <=> root.boot-sound; disabled: !root.backend-ready || root.applying; }
                         ToggleRow { label: "Status LEDs"; checked <=> root.status-led; disabled: !root.backend-ready || root.applying; }
@@ -113,8 +125,13 @@ export component ExtraWindow inherits Window {
                     height: 194px;
                     VerticalLayout {
                         padding: 10px; spacing: 3px;
-                        SectionTitle { title: "Platform"; detail: root.backend-ready ? "Hardware draft" : "Unavailable"; }
-                        ToggleRow { label: "Panel overdrive"; description: "Use only when capability evidence allows it"; checked <=> root.panel-overdrive; disabled: !root.backend-ready || root.applying; }
+                        SectionTitle { title: "Platform"; detail: root.panel-overdrive-state-ready ? (root.panel-overdrive-control-ready ? "Hardware draft" : "Partial observation") : (root.backend-ready ? "Hardware draft" : "Unavailable"); }
+                        ToggleRow {
+                            label: "Panel overdrive";
+                            description: root.panel-overdrive-state-ready ? (root.panel-overdrive-control-ready ? "Capability evidence allows editing" : "Observed from asus-armoury · read only") : "State unavailable";
+                            checked <=> root.panel-overdrive;
+                            disabled: !root.panel-overdrive-control-ready || root.applying;
+                        }
                         ToggleRow { label: "Auto clamshell mode"; checked <=> root.auto-clamshell; disabled: !root.backend-ready || root.applying; }
                         ToggleRow { label: "Disable PCIe ASPM when plugged in"; checked <=> root.disable-aspm; disabled: !root.backend-ready || root.applying; }
                         ToggleRow { label: "Disable networking in Modern Standby"; checked <=> root.disable-standby-networking; disabled: !root.backend-ready || root.applying; }
@@ -140,12 +157,12 @@ export component ExtraWindow inherits Window {
             spacing: 6px;
             Text {
                 horizontal-stretch: 1;
-                text: root.backend-ready ? "Edit the draft, then Apply" : "No advanced-control state loaded";
+                text: root.backend-ready ? "Edit the draft, then Apply" : (root.any-observed-state ? "Observed values are read only; unsupported controls stay disabled" : "No advanced-control state loaded");
                 font-size: 9px;
                 color: Palette.text-disabled;
                 vertical-alignment: center;
             }
-            ActionButton { width: 88px; label: "Reload"; disabled: !root.backend-ready || root.applying; clicked => { root.reload-requested(); } }
+            ActionButton { width: 88px; label: "Reload"; disabled: (!root.backend-ready && !root.any-observed-state) || root.applying; clicked => { root.reload-requested(); } }
             ActionButton { width: 96px; label: root.applying ? "Applying…" : "Apply"; accent: true; disabled: !root.backend-ready || root.applying; clicked => { root.apply-requested(); } }
         }
     }
