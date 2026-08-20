@@ -1,8 +1,10 @@
 use std::cell::RefCell;
-use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::fs::File;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 #[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -150,6 +152,10 @@ pub(crate) fn refresh(window: &DiagnosticsWindow) {
 }
 
 fn export_report(window: &DiagnosticsWindow) {
+    if window.get_refresh_pending() {
+        return;
+    }
+
     let context = CONTEXT.with(|slot| slot.borrow().clone());
     let Some(context) = context else {
         window.set_export_enabled(false);
@@ -163,6 +169,9 @@ fn export_report(window: &DiagnosticsWindow) {
         return;
     };
 
+    // Refresh and export are serialized so an older export completion cannot
+    // re-enable actions over a newer pending snapshot.
+    window.set_refresh_enabled(false);
     window.set_export_enabled(false);
     window.set_local_status("Exporting privacy-safe report…".into());
 
@@ -170,6 +179,7 @@ fn export_report(window: &DiagnosticsWindow) {
     context.runtime.spawn(async move {
         let result = tokio::task::spawn_blocking(move || write_report(&dto)).await;
         if let Err(error) = weak.upgrade_in_event_loop(move |window| {
+            window.set_refresh_enabled(true);
             window.set_export_enabled(true);
             match result {
                 Ok(Ok(path)) => {
@@ -300,6 +310,8 @@ pub(crate) fn wire_window(window: &DiagnosticsWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn bridge_source_contains_no_hardware_mutation_commands() {
@@ -345,5 +357,14 @@ mod tests {
         assert!(source.contains("EXPORT_DIR_NAME"));
         assert!(!source.contains("std::env::current_dir"));
         assert!(!source.contains("Command::new"));
+    }
+
+    #[test]
+    fn refresh_and_export_are_mutually_exclusive_in_host_bridge() {
+        let source = include_str!("diagnostics_backend.rs");
+        assert!(source.contains("window.set_refresh_enabled(false);"));
+        assert!(source.contains("window.set_export_enabled(false);"));
+        assert!(source.contains("window.set_refresh_enabled(true);"));
+        assert!(source.contains("if window.get_refresh_pending()"));
     }
 }
