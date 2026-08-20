@@ -3,9 +3,10 @@
 //! This module accepts only a fully revalidated revision-bound Automation
 //! handoff and models exclusive ownership of one future mutation batch. It
 //! deliberately contains no provider, worker, D-Bus, sysfs or process execution
-//! surface. Admission is fail-closed on lifecycle-revision drift,
-//! capability-generation drift, or an already active lease. Completing a lease
-//! only releases the serialization slot.
+//! surface. Admission is fail-closed on lifecycle-revision drift, replay of an
+//! already-admitted lifecycle revision, capability-generation drift, or an
+//! already active lease. Completing a lease only releases the serialization
+//! slot; it never makes that lifecycle revision admissible again.
 
 use orbis_core::automation::{AutomationAction, AutomationTrigger};
 
@@ -23,6 +24,14 @@ pub enum AutomationAdmissionBlock {
         required: AutomationLifecycleRevision,
         /// Lifecycle revision current at admission.
         current: AutomationLifecycleRevision,
+    },
+    /// This lifecycle revision was already admitted once. Finishing or aborting
+    /// its prior lease does not permit replay of the same event.
+    LifecycleRevisionAlreadyAdmitted {
+        /// Revision requested by the handoff.
+        required: AutomationLifecycleRevision,
+        /// Highest lifecycle revision ever admitted by this coordinator.
+        last_admitted: AutomationLifecycleRevision,
     },
     /// Capability generation changed after revalidation and before admission.
     CapabilityGenerationChanged {
@@ -92,14 +101,14 @@ impl AutomationDryRunLease {
 
 /// Single-slot coordinator that models future executor serialization.
 ///
-/// The coordinator performs no asynchronous work. It only ensures at most one
-/// revalidated handoff owns the slot and checks lifecycle + capability identity
-/// again at admission. The real executor will later need to hold the same
-/// serialization ownership across mutation and authoritative read-back.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Deliberately not `Clone`: this value is the unique owner of both active-slot
+/// state and the monotonic replay barrier. Duplicating it would create two
+/// coordinators with divergent admission history.
+#[derive(Debug, PartialEq, Eq)]
 pub struct AutomationSerializationCoordinator {
     next_lease: u64,
     active_lease: Option<u64>,
+    last_admitted_revision: AutomationLifecycleRevision,
 }
 
 impl AutomationSerializationCoordinator {
@@ -108,6 +117,7 @@ impl AutomationSerializationCoordinator {
         Self {
             next_lease: 1,
             active_lease: None,
+            last_admitted_revision: AutomationLifecycleRevision::INITIAL,
         }
     }
 
@@ -116,11 +126,17 @@ impl AutomationSerializationCoordinator {
         self.active_lease.is_some()
     }
 
+    /// Highest lifecycle revision ever admitted. This value never moves
+    /// backwards when a lease finishes or aborts.
+    pub fn last_admitted_revision(&self) -> AutomationLifecycleRevision {
+        self.last_admitted_revision
+    }
+
     /// Admit one already-revalidated handoff into the exclusive dry-run slot.
     ///
     /// Both current identities must be sampled by the future serialization
-    /// owner immediately before this call. Drift or an occupied slot blocks the
-    /// whole batch. No partial admission exists.
+    /// owner immediately before this call. Drift, replay or an occupied slot
+    /// blocks the whole batch. No partial admission exists.
     pub fn admit(
         &mut self,
         handoff: AutomationRevisionHandoff,
@@ -147,10 +163,22 @@ impl AutomationSerializationCoordinator {
             );
         }
 
+        // Busy is checked before replay so a caller holding the newest event can
+        // retain it and retry after the current lease finishes. No revision is
+        // consumed when admission is rejected as Busy.
         if let Some(active_lease) = self.active_lease {
             return AutomationAdmissionOutcome::Blocked(AutomationAdmissionBlock::Busy {
                 active_lease,
             });
+        }
+
+        if required_revision <= self.last_admitted_revision {
+            return AutomationAdmissionOutcome::Blocked(
+                AutomationAdmissionBlock::LifecycleRevisionAlreadyAdmitted {
+                    required: required_revision,
+                    last_admitted: self.last_admitted_revision,
+                },
+            );
         }
 
         if self.next_lease == 0 {
@@ -162,6 +190,7 @@ impl AutomationSerializationCoordinator {
         let id = self.next_lease;
         self.next_lease = self.next_lease.checked_add(1).unwrap_or(0);
         self.active_lease = Some(id);
+        self.last_admitted_revision = required_revision;
 
         AutomationAdmissionOutcome::Admitted(AutomationDryRunLease {
             id,
@@ -175,7 +204,9 @@ impl AutomationSerializationCoordinator {
     /// Release the slot by consuming the exact lease object that owns it.
     ///
     /// Returning `false` means the supplied lease no longer matches the active
-    /// slot. No other state is changed in that case.
+    /// slot. No other state is changed in that case. In particular,
+    /// `last_admitted_revision` is never rolled back, so a finished/aborted
+    /// event cannot be replayed.
     pub fn finish(&mut self, lease: AutomationDryRunLease) -> bool {
         if self.active_lease != Some(lease.id) {
             return false;
@@ -302,6 +333,7 @@ mod tests {
             panic!("expected dry-run lease");
         };
         assert!(coordinator.is_busy());
+        assert_eq!(coordinator.last_admitted_revision(), revision);
         assert_eq!(lease.id(), 1);
         assert_eq!(lease.required_revision(), revision);
         assert_eq!(lease.required_generation(), 7);
@@ -312,17 +344,41 @@ mod tests {
         );
         assert!(coordinator.finish(lease));
         assert!(!coordinator.is_busy());
+        assert_eq!(coordinator.last_admitted_revision(), revision);
+    }
+
+    #[test]
+    fn finished_revision_cannot_be_replayed() {
+        let mut coordinator = AutomationSerializationCoordinator::new();
+        let (revision, first_handoff) = handoff(8);
+        let first = coordinator.admit(first_handoff, revision, 8);
+        let AutomationAdmissionOutcome::Admitted(first_lease) = first else {
+            panic!("expected first lease");
+        };
+        assert!(coordinator.finish(first_lease));
+
+        let (_, replay_handoff) = handoff(8);
+        assert_eq!(
+            coordinator.admit(replay_handoff, revision, 8),
+            AutomationAdmissionOutcome::Blocked(
+                AutomationAdmissionBlock::LifecycleRevisionAlreadyAdmitted {
+                    required: revision,
+                    last_admitted: revision,
+                }
+            )
+        );
+        assert!(!coordinator.is_busy());
     }
 
     #[test]
     fn lifecycle_revision_drift_blocks_before_slot_ownership() {
         let mut coordinator = AutomationSerializationCoordinator::new();
-        let (revision, handoff) = handoff(8);
+        let (revision, handoff) = handoff(9);
         let mut clock = AutomationLifecycleClock::new();
         assert_eq!(clock.advance().unwrap(), revision);
         let newer = clock.advance().unwrap();
         assert_eq!(
-            coordinator.admit(handoff, newer, 8),
+            coordinator.admit(handoff, newer, 9),
             AutomationAdmissionOutcome::Blocked(
                 AutomationAdmissionBlock::LifecycleRevisionChanged {
                     required: revision,
@@ -336,35 +392,74 @@ mod tests {
     #[test]
     fn generation_drift_blocks_before_slot_ownership() {
         let mut coordinator = AutomationSerializationCoordinator::new();
-        let (revision, handoff) = handoff(9);
+        let (revision, handoff) = handoff(10);
         assert_eq!(
-            coordinator.admit(handoff, revision, 10),
+            coordinator.admit(handoff, revision, 11),
             AutomationAdmissionOutcome::Blocked(
                 AutomationAdmissionBlock::CapabilityGenerationChanged {
-                    required: 9,
-                    current: 10,
+                    required: 10,
+                    current: 11,
                 }
             )
         );
         assert!(!coordinator.is_busy());
+        assert_eq!(
+            coordinator.last_admitted_revision(),
+            AutomationLifecycleRevision::INITIAL
+        );
     }
 
     #[test]
-    fn occupied_slot_rejects_second_batch_without_partial_state() {
+    fn occupied_slot_rejects_second_batch_without_consuming_new_revision() {
         let mut coordinator = AutomationSerializationCoordinator::new();
-        let (revision, first_handoff) = handoff(11);
-        let first = coordinator.admit(first_handoff, revision, 11);
+        let (first_revision, first_handoff) = handoff(11);
+        let first = coordinator.admit(first_handoff, first_revision, 11);
         let AutomationAdmissionOutcome::Admitted(first_lease) = first else {
             panic!("expected first lease");
         };
-        let (_, second_handoff) = handoff(11);
+
+        // Build a genuinely newer lifecycle handoff while the first lease is
+        // active. Busy must not consume that revision.
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(200);
+        let snapshot = snapshot(11, base);
+        let policy = policy();
+        let mut shadow = AutomationShadowRuntime::default();
+        shadow.observe_telemetry(&telemetry(true, base), &policy, &snapshot, base);
+        shadow.observe_telemetry(
+            &telemetry(false, base + Duration::from_secs(1)),
+            &policy,
+            &snapshot,
+            base + Duration::from_secs(1),
+        );
+        let outcome = shadow.observe_telemetry(
+            &telemetry(false, base + Duration::from_secs(2)),
+            &policy,
+            &snapshot,
+            base + Duration::from_secs(2),
+        );
+        let mut clock = AutomationLifecycleClock::new();
+        assert_eq!(clock.advance().unwrap(), first_revision);
+        let second_revision = clock.advance().unwrap();
+        let candidate = AutomationRevisionCandidate::from_shadow(&outcome, second_revision).unwrap();
+        let guard = revalidate_revision_candidate(
+            &candidate,
+            second_revision,
+            &policy,
+            &snapshot,
+            base + Duration::from_secs(3),
+            Duration::from_secs(30),
+        );
+        let AutomationRevisionGuardOutcome::Ready(second_handoff) = guard else {
+            panic!("expected second handoff");
+        };
+
         assert_eq!(
-            coordinator.admit(second_handoff, revision, 11),
+            coordinator.admit(second_handoff, second_revision, 11),
             AutomationAdmissionOutcome::Blocked(AutomationAdmissionBlock::Busy {
                 active_lease: first_lease.id(),
             })
         );
-        assert!(coordinator.is_busy());
+        assert_eq!(coordinator.last_admitted_revision(), first_revision);
         assert!(coordinator.finish(first_lease));
     }
 
