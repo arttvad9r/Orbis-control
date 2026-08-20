@@ -1,5 +1,13 @@
 # Orbis Control cloud backlog consolidation — 2026-08-19
 
+> **HISTORICAL SNAPSHOT — backlog topology is superseded.** This file records
+> the Draft-PR stack and priorities as they existed on 2026-08-19. Most PR
+> references below are no longer the current integration topology, Rust 1.85 is
+> no longer the repository toolchain, and the preferences warning redaction
+> source fix now exists. Use GitHub Issues, [`roadmap.md`](roadmap.md),
+> [`current-state.md`](current-state.md) and [`history.md`](history.md) for active
+> work. The original snapshot is retained below for provenance.
+
 Baseline for this snapshot: `chatgpt/production-hardening-20260818` at `f0d610a04a8ff16501a02389568c7a4aee62aac8`.
 
 This document is backlog/status only. Open Draft PRs are **not** treated as part of the baseline until they are reviewed/integrated. `TESTED`, `PACKAGED` and `LIVE-VALIDATED` evidence remain separate.
