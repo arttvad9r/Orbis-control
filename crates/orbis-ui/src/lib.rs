@@ -15,6 +15,7 @@ pub mod automation_lifecycle_revision;
 mod automation_performance_executor;
 pub mod automation_serialization;
 pub mod automation_shadow_runtime;
+pub mod automation_worker_runtime;
 pub mod composition;
 pub mod diagnostics_dto;
 pub mod diagnostics_export;
