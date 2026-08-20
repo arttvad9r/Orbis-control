@@ -5,12 +5,12 @@ import { Palette } from "../themes/dark.slint";
 
 export component ExtraWindow inherits Window {
     width: 560px;
-    height: 700px;
+    height: 680px;
     title: "Orbis Control — Extra Controls";
     background: Palette.window-background;
 
-    // Backend owns the loaded values. The UI edits a draft and commits it only
-    // through apply-requested; no control claims that hardware changed locally.
+    // Backend owns loaded values. UI edits a draft and commits it only through
+    // apply-requested; Reload discards the draft and requests authoritative data.
     in property <bool> backend-ready: false;
     in property <bool> applying: false;
     in property <string> status: "Advanced controls backend unavailable";
@@ -42,88 +42,111 @@ export component ExtraWindow inherits Window {
 
     ThemeBridge { }
 
-    scroll := ScrollView {
-        width: parent.width;
-        height: parent.height;
-        viewport-width: scroll.width - 16px;
-        viewport-height: 942px;
+    VerticalLayout {
+        padding: 12px;
+        spacing: 10px;
 
-        VerticalLayout {
-            width: scroll.width - 16px;
-            height: 942px;
-            padding: 12px;
-            spacing: 10px;
+        WindowHeader { title: "Extra Controls"; subtitle: "Bindings, lighting and platform settings"; }
+        LocalStatus { text: root.status; accent: root.backend-ready ? Palette.text-secondary : Palette.warning; }
 
-            WindowHeader { title: "Extra Controls"; subtitle: "Bindings, lighting and platform settings"; }
-            LocalStatus { text: root.status; accent: root.backend-ready ? Palette.text-secondary : Palette.warning; }
+        scroll := ScrollView {
+            vertical-stretch: 1;
+            viewport-width: scroll.width - 16px;
+            viewport-height: 722px;
 
-            SectionCard {
-                height: 232px;
-                VerticalLayout {
-                    padding: 10px; spacing: 6px;
-                    SectionTitle { title: "Hotkeys"; detail: root.backend-ready ? "Draft" : "Unavailable"; }
-                    HorizontalLayout { height: 30px; spacing: 8px; Text { width: 54px; text: "M1"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m1-action; } }
-                    HorizontalLayout { height: 30px; spacing: 8px; Text { width: 54px; text: "M2"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m2-action; } }
-                    HorizontalLayout { height: 30px; spacing: 8px; Text { width: 54px; text: "M3"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m3-action; } }
-                    HorizontalLayout { height: 30px; spacing: 8px; Text { width: 54px; text: "M4"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m4-action; } }
-                    HorizontalLayout { height: 30px; spacing: 8px; Text { width: 54px; text: "M5"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m5-action; } }
-                }
-            }
+            VerticalLayout {
+                width: scroll.width - 16px;
+                height: 722px;
+                padding-right: 4px;
+                spacing: 10px;
 
-            SectionCard {
-                height: 166px;
-                VerticalLayout {
-                    padding: 10px; spacing: 7px;
-                    SectionTitle { title: "Keyboard Backlight"; detail: root.backend-ready ? "Hardware draft" : "Unavailable"; }
-                    HorizontalLayout {
-                        height: 30px; spacing: 6px; alignment: center;
-                        Text { width: 92px; text: "Brightness"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
-                        ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.backend-ready && root.keyboard-brightness == 0; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 0; } }
-                        ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.backend-ready && root.keyboard-brightness == 1; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 1; } }
-                        ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.backend-ready && root.keyboard-brightness == 2; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 2; } }
-                        ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.backend-ready && root.keyboard-brightness == 3; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 3; } }
+                SectionCard {
+                    height: 154px;
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 6px;
+                        SectionTitle { title: "Hotkeys"; detail: root.backend-ready ? "Draft" : "Unavailable"; }
+
+                        HorizontalLayout {
+                            height: 30px; spacing: 10px;
+                            HorizontalLayout { horizontal-stretch: 1; spacing: 6px; Text { width: 26px; text: "M1"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m1-action; } }
+                            HorizontalLayout { horizontal-stretch: 1; spacing: 6px; Text { width: 26px; text: "M2"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m2-action; } }
+                        }
+                        HorizontalLayout {
+                            height: 30px; spacing: 10px;
+                            HorizontalLayout { horizontal-stretch: 1; spacing: 6px; Text { width: 26px; text: "M3"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m3-action; } }
+                            HorizontalLayout { horizontal-stretch: 1; spacing: 6px; Text { width: 26px; text: "M4"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m4-action; } }
+                        }
+                        HorizontalLayout {
+                            height: 30px; spacing: 10px;
+                            HorizontalLayout { horizontal-stretch: 1; spacing: 6px; Text { width: 26px; text: "M5"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m5-action; } }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                        }
                     }
-                    HorizontalLayout {
-                        height: 30px; spacing: 8px; alignment: center;
-                        Text { width: 92px; text: "Effect"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
-                        ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: ["Static", "Breathing", "Color Cycle", "Strobing"]; current-index <=> root.keyboard-effect; }
-                        ComboBox { width: 122px; enabled: root.backend-ready && !root.applying; model: ["Slow", "Normal", "Fast"]; current-index <=> root.keyboard-speed; }
+                }
+
+                SectionCard {
+                    height: 166px;
+                    VerticalLayout {
+                        padding: 10px; spacing: 7px;
+                        SectionTitle { title: "Keyboard Backlight"; detail: root.backend-ready ? "Hardware draft" : "Unavailable"; }
+                        HorizontalLayout {
+                            height: 30px; spacing: 6px; alignment: center;
+                            Text { width: 92px; text: "Brightness"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
+                            ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.backend-ready && root.keyboard-brightness == 0; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 0; } }
+                            ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.backend-ready && root.keyboard-brightness == 1; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 1; } }
+                            ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.backend-ready && root.keyboard-brightness == 2; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 2; } }
+                            ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.backend-ready && root.keyboard-brightness == 3; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 3; } }
+                        }
+                        HorizontalLayout {
+                            height: 30px; spacing: 8px; alignment: center;
+                            Text { width: 92px; text: "Effect"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
+                            ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: ["Static", "Breathing", "Color Cycle", "Strobing"]; current-index <=> root.keyboard-effect; }
+                            ComboBox { width: 122px; enabled: root.backend-ready && !root.applying; model: ["Slow", "Normal", "Fast"]; current-index <=> root.keyboard-speed; }
+                        }
+                        ToggleRow { label: "Boot sound"; checked <=> root.boot-sound; disabled: !root.backend-ready || root.applying; }
+                        ToggleRow { label: "Status LEDs"; checked <=> root.status-led; disabled: !root.backend-ready || root.applying; }
                     }
-                    ToggleRow { label: "Boot sound"; checked <=> root.boot-sound; disabled: !root.backend-ready || root.applying; }
-                    ToggleRow { label: "Status LEDs"; checked <=> root.status-led; disabled: !root.backend-ready || root.applying; }
+                }
+
+                SectionCard {
+                    height: 194px;
+                    VerticalLayout {
+                        padding: 10px; spacing: 3px;
+                        SectionTitle { title: "Platform"; detail: root.backend-ready ? "Hardware draft" : "Unavailable"; }
+                        ToggleRow { label: "Panel overdrive"; description: "Use only when capability evidence allows it"; checked <=> root.panel-overdrive; disabled: !root.backend-ready || root.applying; }
+                        ToggleRow { label: "Auto clamshell mode"; checked <=> root.auto-clamshell; disabled: !root.backend-ready || root.applying; }
+                        ToggleRow { label: "Disable PCIe ASPM when plugged in"; checked <=> root.disable-aspm; disabled: !root.backend-ready || root.applying; }
+                        ToggleRow { label: "Disable networking in Modern Standby"; checked <=> root.disable-standby-networking; disabled: !root.backend-ready || root.applying; }
+                    }
+                }
+
+                SectionCard {
+                    height: 178px;
+                    VerticalLayout {
+                        padding: 10px; spacing: 7px;
+                        SectionTitle { title: "Power / CPU"; detail: root.backend-ready ? "Draft" : "Unavailable"; }
+                        HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "iGPU memory"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: ["Auto", "512 MB", "1 GB", "2 GB", "4 GB", "8 GB"]; current-index <=> root.igpu-memory; } }
+                        HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Hibernate after"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 0; maximum: 1440; step-size: 5; value <=> root.hibernate-after; } Text { text: "min"; font-size: 9px; color: Palette.text-secondary; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; background: transparent; } }
+                        HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Performance cores"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 1; maximum: 32; value <=> root.p-cores; } Rectangle { horizontal-stretch: 1; background: transparent; } }
+                        HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Efficiency cores"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 0; maximum: 32; value <=> root.e-cores; } Rectangle { horizontal-stretch: 1; background: transparent; } }
+                    }
                 }
             }
+        }
 
-            SectionCard {
-                height: 194px;
-                VerticalLayout {
-                    padding: 10px; spacing: 3px;
-                    SectionTitle { title: "Platform"; }
-                    ToggleRow { label: "Panel overdrive"; description: "Use only when capability evidence allows it"; checked <=> root.panel-overdrive; disabled: !root.backend-ready || root.applying; }
-                    ToggleRow { label: "Auto clamshell mode"; checked <=> root.auto-clamshell; disabled: !root.backend-ready || root.applying; }
-                    ToggleRow { label: "Disable PCIe ASPM when plugged in"; checked <=> root.disable-aspm; disabled: !root.backend-ready || root.applying; }
-                    ToggleRow { label: "Disable networking in Modern Standby"; checked <=> root.disable-standby-networking; disabled: !root.backend-ready || root.applying; }
-                }
+        HorizontalLayout {
+            height: 30px;
+            spacing: 6px;
+            Text {
+                horizontal-stretch: 1;
+                text: root.backend-ready ? "Edit the draft, then Apply" : "No advanced-control state loaded";
+                font-size: 9px;
+                color: Palette.text-disabled;
+                vertical-alignment: center;
             }
-
-            SectionCard {
-                height: 178px;
-                VerticalLayout {
-                    padding: 10px; spacing: 7px;
-                    SectionTitle { title: "Power / CPU"; detail: root.backend-ready ? "Draft" : "Unavailable"; }
-                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "iGPU memory"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: ["Auto", "512 MB", "1 GB", "2 GB", "4 GB", "8 GB"]; current-index <=> root.igpu-memory; } }
-                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Hibernate after"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 0; maximum: 1440; step-size: 5; value <=> root.hibernate-after; } Text { text: "min"; font-size: 9px; color: Palette.text-secondary; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; background: transparent; } }
-                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Performance cores"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 1; maximum: 32; value <=> root.p-cores; } Rectangle { horizontal-stretch: 1; background: transparent; } }
-                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Efficiency cores"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 0; maximum: 32; value <=> root.e-cores; } Rectangle { horizontal-stretch: 1; background: transparent; } }
-                }
-            }
-
-            HorizontalLayout {
-                height: 30px; spacing: 6px;
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                ActionButton { width: 88px; label: "Reload"; disabled: !root.backend-ready || root.applying; clicked => { root.reload-requested(); } }
-                ActionButton { width: 96px; label: root.applying ? "Applying…" : "Apply"; accent: true; disabled: !root.backend-ready || root.applying; clicked => { root.apply-requested(); } }
-            }
+            ActionButton { width: 88px; label: "Reload"; disabled: !root.backend-ready || root.applying; clicked => { root.reload-requested(); } }
+            ActionButton { width: 96px; label: root.applying ? "Applying…" : "Apply"; accent: true; disabled: !root.backend-ready || root.applying; clicked => { root.apply-requested(); } }
         }
     }
 }
