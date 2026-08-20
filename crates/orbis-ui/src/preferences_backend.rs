@@ -112,15 +112,16 @@ pub(crate) fn map_window_preferences(load: PreferencesLoad) -> WindowPreferences
         remember_position: load.preferences.window.remember_position,
         remember_position_writable: position_writable,
         close_action: close_action_index(load.preferences.window.close_action),
-        // The tray bridge overrides this to true only while a real SNI host is
-        // registered and the until-quit event-loop lifecycle is active.
-        close_action_writable: false,
+        // Persisting the safe Quit action does not require a tray host. The
+        // Preferences lifecycle bridge gates HideToTray as a separate runtime
+        // capability while preserving this storage-writability evidence.
+        close_action_writable: !has_warning,
         status: if has_warning {
             "Preferences source preserved · editing disabled"
         } else if position_writable {
-            "Startup and X11 window-position lifecycle connected · tray probing"
+            "Startup and X11 window-position lifecycle connected · tray capability detected separately"
         } else {
-            "Startup connected · window position unavailable on this session · tray probing"
+            "Startup connected · window position unavailable on this session · tray capability detected separately"
         },
     }
 }
@@ -203,6 +204,17 @@ mod tests {
         assert!(!state.start_minimized_writable);
         assert!(!state.remember_position_writable);
         assert!(!state.close_action_writable);
+    }
+
+    #[test]
+    fn healthy_preferences_allow_safe_close_action_persistence_without_tray_evidence() {
+        let load = PreferencesLoad {
+            preferences: PreferencesConfig::default(),
+            source: orbis_config::PreferencesLoadSource::Defaults,
+            warning: None,
+        };
+        let state = map_window_preferences(load);
+        assert!(state.close_action_writable);
     }
 
     #[test]
