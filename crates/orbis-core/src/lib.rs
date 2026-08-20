@@ -6,7 +6,7 @@
 //! - никакого Slint, D-Bus, Tokio, sysfs, platform-specific кода;
 //! - никакого `unsafe` (см. SAFETY.md);
 //! - строгие newtype для процентов, температур, RPM, ватт, частот;
-//! - валидация диапазонов в конструкторах;
+//! - валидацию диапазонов в конструкторах;
 //! - `serde` для сериализации (D-Bus/JSON/TOML).
 //!
 //! Человекочитаемые строки локализации НЕ хранятся в enum-ах модели;
@@ -25,6 +25,7 @@ pub mod diagnostics;
 pub mod display;
 pub mod display_output;
 pub mod display_refresh;
+pub mod display_refresh_request;
 pub mod error;
 pub mod fan;
 pub mod gpu;
@@ -70,6 +71,7 @@ pub use display_refresh::{
     DisplayRefreshConstraints, DisplayRefreshEvidence, DisplayRefreshPreset,
     DisplayRefreshPresetTarget, DisplayRefreshTargetId, DisplayRefreshTargetRole,
 };
+pub use display_refresh_request::DisplayRefreshRequest;
 pub use error::CoreError;
 pub use fan::{FanCurve, FanCurvePoint, FanId};
 pub use gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
