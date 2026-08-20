@@ -5,8 +5,8 @@ The checker intentionally uses only the Python standard library so it remains
 useful in minimal review containers where Rust/Cargo are unavailable. It is not
 a substitute for `cargo check`, tests or clippy. Its narrower job is to make
 accidental production execution, optimistic runtime readiness, or removal of
-lifecycle/freshness/revalidation/serialization barriers fail visibly before
-executable validation is available.
+lifecycle/freshness/revalidation/serialization/replay barriers fail visibly
+before executable validation is available.
 """
 
 from __future__ import annotations
@@ -69,12 +69,16 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "AutomationRevisionHandoff",
         "identities_still_match",
         "SequenceExhausted",
+        "Deliberately not `Clone`",
     ),
     "crates/orbis-ui/src/automation_serialization.rs": (
         "AutomationRevisionHandoff",
         "required_revision",
         "current_revision",
         "LifecycleRevisionChanged",
+        "LifecycleRevisionAlreadyAdmitted",
+        "last_admitted_revision",
+        "required_revision <= self.last_admitted_revision",
         "CapabilityGenerationChanged",
         "AutomationDryRunLease",
         "Busy",
@@ -86,6 +90,17 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "AutomationPreparedKind::Performance",
         "UnsupportedAction",
         "DuplicatePerformanceAction",
+    ),
+    "crates/orbis-ui/src/automation_worker_runtime.rs": (
+        "AutomationWorkerRuntime",
+        "AutomationLifecycleClock",
+        "AutomationSerializationCoordinator",
+        "observe_telemetry",
+        "prepare_latest",
+        "prepare_automation_execution_scope",
+        "self.latest_candidate = None",
+        "NoReadyCandidate",
+        "Deliberately not `Clone`",
     ),
     "crates/orbis-ui/src/automation_backend.rs": (
         "ResumeTelemetryGate",
@@ -125,6 +140,7 @@ HARDWARE_INERT_FILES = (
     "crates/orbis-ui/src/automation_lifecycle_revision.rs",
     "crates/orbis-ui/src/automation_serialization.rs",
     "crates/orbis-ui/src/automation_execution_scope.rs",
+    "crates/orbis-ui/src/automation_worker_runtime.rs",
     "crates/orbis-ui/src/automation_backend.rs",
     "crates/orbis-ui/src/resume_observer.rs",
     "crates/orbis-ui/src/secondary_windows_backend.rs",
@@ -144,14 +160,7 @@ FORBIDDEN_CODE = (
 
 
 def strip_rust_non_code(source: str) -> str:
-    """Replace Rust comments/string/char literal contents with spaces.
-
-    This is deliberately a small lexer, not a parser. It preserves newlines and
-    punctuation outside literals so forbidden executable tokens can be searched
-    without self-scan tests or comments triggering false positives. Raw strings
-    with arbitrary `#` counts are handled because source-level safety tests often
-    contain code-looking text in literals.
-    """
+    """Replace Rust comments/string/char literal contents with spaces."""
 
     out = list(source)
     n = len(source)
@@ -288,6 +297,52 @@ def check_hardware_inert_sources(root: Path, errors: list[str]) -> None:
                 errors.append(f"{relative}: forbidden execution token in code: {token!r}")
 
 
+def derive_includes_clone(source: str, type_name: str) -> bool:
+    pattern = re.compile(
+        rf"#\s*\[\s*derive\s*\((?P<traits>[^\]]*)\)\s*\]\s*pub\s+(?:struct|enum)\s+{re.escape(type_name)}\b",
+        re.MULTILINE,
+    )
+    match = pattern.search(source)
+    if match is None:
+        return False
+    return bool(re.search(r"\bClone\b", match.group("traits")))
+
+
+def check_unique_owners_and_replay(root: Path, errors: list[str]) -> None:
+    checks = (
+        ("crates/orbis-ui/src/automation_lifecycle_revision.rs", "AutomationRevisionHandoff"),
+        ("crates/orbis-ui/src/automation_serialization.rs", "AutomationSerializationCoordinator"),
+        ("crates/orbis-ui/src/automation_worker_runtime.rs", "AutomationWorkerRuntime"),
+    )
+    for relative, type_name in checks:
+        source = read_required(root, relative, errors)
+        if source is not None and derive_includes_clone(source, type_name):
+            errors.append(f"{relative}: unique owner {type_name} must not derive Clone")
+
+    serialization = read_required(
+        root, "crates/orbis-ui/src/automation_serialization.rs", errors
+    )
+    if serialization is not None:
+        for marker in (
+            "last_admitted_revision: AutomationLifecycleRevision",
+            "required_revision <= self.last_admitted_revision",
+            "self.last_admitted_revision = required_revision",
+        ):
+            if marker not in serialization:
+                errors.append(
+                    "crates/orbis-ui/src/automation_serialization.rs: "
+                    f"missing replay barrier marker {marker!r}"
+                )
+
+    worker_runtime = read_required(
+        root, "crates/orbis-ui/src/automation_worker_runtime.rs", errors
+    )
+    if worker_runtime is not None and "self.latest_candidate = None;" not in worker_runtime:
+        errors.append(
+            "crates/orbis-ui/src/automation_worker_runtime.rs: successful admission must consume latest candidate"
+        )
+
+
 def check_runtime_readiness(root: Path, errors: list[str]) -> None:
     relative = "crates/orbis-ui/src/automation_backend.rs"
     source = read_required(root, relative, errors)
@@ -306,6 +361,7 @@ def check_execution_guard_api(root: Path, errors: list[str]) -> None:
         "crates/orbis-ui/src/automation_lifecycle_revision.rs",
         "crates/orbis-ui/src/automation_serialization.rs",
         "crates/orbis-ui/src/automation_execution_scope.rs",
+        "crates/orbis-ui/src/automation_worker_runtime.rs",
     ):
         source = read_required(root, relative, errors)
         if source is None:
@@ -403,6 +459,7 @@ def run(root: Path) -> list[str]:
     errors: list[str] = []
     check_required_markers(root, errors)
     check_hardware_inert_sources(root, errors)
+    check_unique_owners_and_replay(root, errors)
     check_runtime_readiness(root, errors)
     check_execution_guard_api(root, errors)
     check_resume_observer(root, errors)
