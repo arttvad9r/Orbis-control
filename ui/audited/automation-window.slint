@@ -41,9 +41,11 @@ export component AutomationWindow inherits Window {
     title: "Orbis Control — Automation";
     background: Palette.window-background;
 
-    // All values are backend-owned. Selection callbacks update the backend-side
-    // draft only; Save is the explicit persistence boundary.
+    // backend-ready proves typed policy load/save. runtime-ready separately
+    // proves lifecycle subscription + reconciliation execution. Persistence must
+    // never make the Enable control look operational by itself.
     in property <bool> backend-ready: false;
+    in property <bool> runtime-ready: false;
     in property <bool> saving: false;
     in property <bool> enabled: false;
     in property <int> ac-profile: 3;
@@ -87,9 +89,9 @@ export component AutomationWindow inherits Window {
 
         RequestToggleRow {
             label: "Enable automation";
-            description: root.backend-ready ? "Reconcile configured policy on lifecycle events" : "Waiting for automation backend";
+            description: !root.backend-ready ? "Waiting for policy backend" : (root.runtime-ready ? "Reconcile configured policy on lifecycle events" : "Policy persistence ready · runtime reconciliation not connected");
             checked: root.enabled;
-            disabled: !root.backend-ready || root.saving;
+            disabled: !root.backend-ready || !root.runtime-ready || root.saving;
             toggled(value) => { root.enabled-requested(value); }
         }
 
@@ -102,11 +104,11 @@ export component AutomationWindow inherits Window {
                 VerticalLayout {
                     padding: 10px;
                     spacing: 4px;
-                    SectionTitle { title: "AC Power"; detail: root.enabled ? "Policy" : "Paused"; }
-                    PolicyRow { label: "Performance"; disabled: !root.backend-ready || !root.enabled || root.saving; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index: root.ac-profile; changed(i) => { root.ac-profile-requested(i); } }
-                    PolicyRow { label: "GPU"; disabled: !root.backend-ready || !root.enabled || root.saving; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index: root.ac-gpu; changed(i) => { root.ac-gpu-requested(i); } }
-                    PolicyRow { label: "Display"; disabled: !root.backend-ready || !root.enabled || root.saving; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index: root.ac-display; changed(i) => { root.ac-display-requested(i); } }
-                    PolicyRow { label: "Lighting"; disabled: !root.backend-ready || !root.enabled || root.saving; model: ["Off", "Dim", "Normal", "Keep current"]; current-index: root.ac-lighting; changed(i) => { root.ac-lighting-requested(i); } }
+                    SectionTitle { title: "AC Power"; detail: root.runtime-ready && root.enabled ? "Active policy" : "Policy draft"; }
+                    PolicyRow { label: "Performance"; disabled: !root.backend-ready || root.saving; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index: root.ac-profile; changed(i) => { root.ac-profile-requested(i); } }
+                    PolicyRow { label: "GPU"; disabled: !root.backend-ready || root.saving; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index: root.ac-gpu; changed(i) => { root.ac-gpu-requested(i); } }
+                    PolicyRow { label: "Display"; disabled: !root.backend-ready || root.saving; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index: root.ac-display; changed(i) => { root.ac-display_requested(i); } }
+                    PolicyRow { label: "Lighting"; disabled: !root.backend-ready || root.saving; model: ["Off", "Dim", "Normal", "Keep current"]; current-index: root.ac-lighting; changed(i) => { root.ac-lighting-requested(i); } }
                 }
             }
 
@@ -115,11 +117,11 @@ export component AutomationWindow inherits Window {
                 VerticalLayout {
                     padding: 10px;
                     spacing: 4px;
-                    SectionTitle { title: "Battery"; detail: root.enabled ? "Policy" : "Paused"; }
-                    PolicyRow { label: "Performance"; disabled: !root.backend-ready || !root.enabled || root.saving; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index: root.battery-profile; changed(i) => { root.battery-profile-requested(i); } }
-                    PolicyRow { label: "GPU"; disabled: !root.backend-ready || !root.enabled || root.saving; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index: root.battery-gpu; changed(i) => { root.battery-gpu-requested(i); } }
-                    PolicyRow { label: "Display"; disabled: !root.backend-ready || !root.enabled || root.saving; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index: root.battery-display; changed(i) => { root.battery-display-requested(i); } }
-                    PolicyRow { label: "Lighting"; disabled: !root.backend-ready || !root.enabled || root.saving; model: ["Off", "Dim", "Normal", "Keep current"]; current-index: root.battery-lighting; changed(i) => { root.battery-lighting-requested(i); } }
+                    SectionTitle { title: "Battery"; detail: root.runtime-ready && root.enabled ? "Active policy" : "Policy draft"; }
+                    PolicyRow { label: "Performance"; disabled: !root.backend-ready || root.saving; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index: root.battery-profile; changed(i) => { root.battery-profile-requested(i); } }
+                    PolicyRow { label: "GPU"; disabled: !root.backend-ready || root.saving; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index: root.battery-gpu; changed(i) => { root.battery-gpu-requested(i); } }
+                    PolicyRow { label: "Display"; disabled: !root.backend-ready || root.saving; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index: root.battery-display; changed(i) => { root.battery-display-requested(i); } }
+                    PolicyRow { label: "Lighting"; disabled: !root.backend-ready || root.saving; model: ["Off", "Dim", "Normal", "Keep current"]; current-index: root.battery-lighting; changed(i) => { root.battery-lighting-requested(i); } }
                 }
             }
         }
@@ -129,20 +131,20 @@ export component AutomationWindow inherits Window {
             VerticalLayout {
                 padding: 8px;
                 spacing: 2px;
-                SectionTitle { title: "Triggers / Reconciliation"; }
+                SectionTitle { title: "Triggers / Reconciliation"; detail: root.runtime-ready ? "Runtime" : "Saved intent only"; }
                 HorizontalLayout {
                     spacing: 10px;
                     VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 0px;
-                        RequestToggleRow { label: "Apply on AC / battery change"; checked: root.on-ac-change; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.on-ac-change-requested(value); } }
-                        RequestToggleRow { label: "Reconcile after resume"; checked: root.on-resume; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.on-resume-requested(value); } }
+                        RequestToggleRow { label: "Apply on AC / battery change"; checked: root.on-ac-change; disabled: !root.backend-ready || root.saving; toggled(value) => { root.on-ac-change-requested(value); } }
+                        RequestToggleRow { label: "Reconcile after resume"; checked: root.on-resume; disabled: !root.backend-ready || root.saving; toggled(value) => { root.on-resume-requested(value); } }
                     }
                     VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 0px;
-                        RequestToggleRow { label: "Write only when state differs"; checked: root.reconcile-only; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.reconcile-only-requested(value); } }
-                        RequestToggleRow { label: "Notify about transitions"; checked: root.notify-transitions; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.notify-transitions-requested(value); } }
+                        RequestToggleRow { label: "Write only when state differs"; checked: root.reconcile-only; disabled: !root.backend-ready || root.saving; toggled(value) => { root.reconcile-only-requested(value); } }
+                        RequestToggleRow { label: "Notify about transitions"; checked: root.notify-transitions; disabled: !root.backend-ready || root.saving; toggled(value) => { root.notify-transitions-requested(value); } }
                     }
                 }
             }
@@ -155,7 +157,7 @@ export component AutomationWindow inherits Window {
             spacing: 6px;
             Text {
                 horizontal-stretch: 1;
-                text: root.backend-ready ? "Changes remain a draft until Save" : "No automation state loaded";
+                text: root.backend-ready ? (root.runtime-ready ? "Changes remain a draft until Save" : "Policy persistence only · runtime automation inactive") : "No automation policy loaded";
                 font-size: 9px;
                 color: Palette.text-disabled;
                 vertical-alignment: center;
