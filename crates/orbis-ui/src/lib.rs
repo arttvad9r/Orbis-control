@@ -12,6 +12,7 @@ pub mod automation_execution_scope;
 pub mod automation_lifecycle_revision;
 #[cfg(test)]
 mod automation_performance_executor;
+pub mod automation_policy_sync;
 pub mod automation_recovery;
 pub mod automation_registry;
 pub mod automation_retry;
