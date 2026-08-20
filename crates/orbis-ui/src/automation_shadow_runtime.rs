@@ -144,8 +144,15 @@ impl AutomationShadowRuntime {
     /// this function. The shadow runtime independently re-checks telemetry
     /// freshness and requires an explicit AC/Battery observation before choosing
     /// the resume policy branch. No action is executed here.
+    ///
+    /// When persisted Automation is enabled and `on_resume` is configured, the
+    /// accepted post-resume power source also becomes the edge detector's new
+    /// baseline. This coalesces a source change that happened during sleep into
+    /// `OnResume` instead of emitting the same state again as `OnAc`/`OnBattery`
+    /// one poll later. When `on_resume` is disabled, no rebaseline occurs and the
+    /// normal AC/Battery trigger remains eligible to detect the sleeping change.
     pub fn observe_resume_telemetry(
-        &self,
+        &mut self,
         telemetry: &Telemetry,
         policy: &AutomationPolicy,
         capabilities: &CapabilityRegistrySnapshot,
@@ -154,9 +161,8 @@ impl AutomationShadowRuntime {
         let trigger = AutomationTrigger::OnResume;
         let generation = capabilities.generation();
 
-        let source = match telemetry.ac_online {
-            Some(true) => AutomationPowerSource::Ac,
-            Some(false) => AutomationPowerSource::Battery,
+        let ac_online = match telemetry.ac_online {
+            Some(value) => value,
             None => {
                 return AutomationShadowOutcome::Blocked {
                     trigger,
@@ -164,6 +170,11 @@ impl AutomationShadowRuntime {
                     block: AutomationShadowBlock::ResumePowerSourceUnknown,
                 };
             }
+        };
+        let source = if ac_online {
+            AutomationPowerSource::Ac
+        } else {
+            AutomationPowerSource::Battery
         };
 
         match now.duration_since(telemetry.ts) {
@@ -182,6 +193,10 @@ impl AutomationShadowRuntime {
                 };
             }
             Ok(_) => {}
+        }
+
+        if policy.enabled && policy.on_resume {
+            self.power_source.rebaseline(ac_online);
         }
 
         self.evaluate_trigger(trigger, source, policy, capabilities, now)
@@ -369,7 +384,7 @@ mod tests {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let snapshot = ready_snapshot(10, base);
         let policy = resume_policy();
-        let runtime = AutomationShadowRuntime::default();
+        let mut runtime = AutomationShadowRuntime::default();
 
         let outcome = runtime.observe_resume_telemetry(
             &telemetry(Some(true), base + Duration::from_secs(1)),
@@ -394,11 +409,101 @@ mod tests {
     }
 
     #[test]
+    fn enabled_resume_rebaselines_sleeping_power_change_and_avoids_duplicate_edge() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let snapshot = ready_snapshot(14, base);
+        let policy = resume_policy();
+        let mut runtime = AutomationShadowRuntime::default();
+        runtime.observe_telemetry(&telemetry(Some(true), base), &policy, &snapshot, base);
+
+        // First post-resume Battery sample would normally be the first edge
+        // candidate. The configured OnResume path accepts the same authoritative
+        // source and consumes it as the new baseline.
+        assert_eq!(
+            runtime.observe_telemetry(
+                &telemetry(Some(false), base + Duration::from_secs(1)),
+                &policy,
+                &snapshot,
+                base + Duration::from_secs(1),
+            ),
+            AutomationShadowOutcome::Observation(PowerSourceObservationOutcome::Candidate)
+        );
+        let resume = runtime.observe_resume_telemetry(
+            &telemetry(Some(false), base + Duration::from_secs(1)),
+            &policy,
+            &snapshot,
+            base + Duration::from_secs(1),
+        );
+        assert!(matches!(
+            resume,
+            AutomationShadowOutcome::ReadyButExecutionDisabled {
+                trigger: AutomationTrigger::OnResume,
+                ..
+            }
+        ));
+        assert_eq!(
+            runtime.observe_telemetry(
+                &telemetry(Some(false), base + Duration::from_secs(2)),
+                &policy,
+                &snapshot,
+                base + Duration::from_secs(2),
+            ),
+            AutomationShadowOutcome::Observation(PowerSourceObservationOutcome::Stable)
+        );
+    }
+
+    #[test]
+    fn disabled_resume_does_not_consume_ac_battery_change() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let snapshot = ready_snapshot(15, base);
+        let policy = enabled_policy();
+        assert!(!policy.on_resume);
+        let mut runtime = AutomationShadowRuntime::default();
+        runtime.observe_telemetry(&telemetry(Some(true), base), &policy, &snapshot, base);
+
+        let resume = runtime.observe_resume_telemetry(
+            &telemetry(Some(false), base + Duration::from_secs(1)),
+            &policy,
+            &snapshot,
+            base + Duration::from_secs(1),
+        );
+        assert!(matches!(
+            resume,
+            AutomationShadowOutcome::PreflightBlocked {
+                trigger: AutomationTrigger::OnResume,
+                ..
+            }
+        ));
+        assert_eq!(
+            runtime.observe_telemetry(
+                &telemetry(Some(false), base + Duration::from_secs(1)),
+                &policy,
+                &snapshot,
+                base + Duration::from_secs(1),
+            ),
+            AutomationShadowOutcome::Observation(PowerSourceObservationOutcome::Candidate)
+        );
+        let power = runtime.observe_telemetry(
+            &telemetry(Some(false), base + Duration::from_secs(2)),
+            &policy,
+            &snapshot,
+            base + Duration::from_secs(2),
+        );
+        assert!(matches!(
+            power,
+            AutomationShadowOutcome::ReadyButExecutionDisabled {
+                trigger: AutomationTrigger::OnBattery,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn resume_never_guesses_power_source_or_accepts_stale_telemetry() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let snapshot = ready_snapshot(12, base);
         let policy = resume_policy();
-        let runtime = AutomationShadowRuntime::default();
+        let mut runtime = AutomationShadowRuntime::default();
 
         assert_eq!(
             runtime.observe_resume_telemetry(
