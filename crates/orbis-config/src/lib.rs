@@ -12,6 +12,7 @@
 
 pub mod automation_policy;
 pub mod automation_preflight;
+pub mod automation_store;
 pub mod autostart;
 pub mod desired_state;
 pub mod paths;
@@ -26,6 +27,9 @@ pub use automation_policy::{
 };
 pub use automation_preflight::{
     AutomationPreflight, AutomationPreflightBlock, preflight_automation_plan,
+};
+pub use automation_store::{
+    AutomationPolicyLoadError, load_automation_policy, load_automation_policy_from_dir,
 };
 pub use autostart::{
     AUTOSTART_ENTRY, AUTOSTART_FILE_NAME, AutostartError, AutostartPathError, AutostartStatus,
