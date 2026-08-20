@@ -61,9 +61,10 @@ fn gpu_index(value: DesiredGpuPolicy) -> i32 {
         DesiredGpuPolicy::Mode(GpuMode::Standard) => 1,
         DesiredGpuPolicy::Mode(GpuMode::Optimized) => 2,
         DesiredGpuPolicy::KeepCurrent => 3,
-        // Ultimate is intentionally not a policy choice in this UI because it
-        // may require a reboot/confirmation path and must never be synthesized.
-        DesiredGpuPolicy::Mode(GpuMode::Ultimate) => 3,
+        // Ultimate is deliberately not representable in this policy editor.
+        // Returning -1 preserves that fact instead of making persisted Ultimate
+        // look like Keep current.
+        DesiredGpuPolicy::Mode(GpuMode::Ultimate) => -1,
     }
 }
 
@@ -323,14 +324,14 @@ fn save(window: &AutomationWindow) {
                 window.set_saving(false);
                 window.set_backend_ready(false);
                 window.set_runtime_ready(false);
-                window.set_status("Automation policy save failed · reload required".into());
+                window.set_status("Automation policy save failed · reopen to reload".into());
             }
             Err(error) => {
                 tracing::warn!(error = %error, "Automation policy save task failed");
                 window.set_saving(false);
                 window.set_backend_ready(false);
                 window.set_runtime_ready(false);
-                window.set_status("Automation policy save failed · reload required".into());
+                window.set_status("Automation policy save failed · reopen to reload".into());
             }
         }) {
             tracing::warn!(error = ?error, "failed to publish Automation save result");
@@ -362,7 +363,7 @@ pub(crate) fn wire_window(window: &AutomationWindow) {
                     tracing::warn!(index, "invalid Automation policy index ignored");
                     return;
                 };
-                if with_draft(|draft| $field(draft, value)) {
+                if with_draft(|draft| ($field)(draft, value)) {
                     if let Some(window) = weak.upgrade() {
                         republish_draft(&window);
                     }
@@ -439,6 +440,7 @@ mod tests {
             let lighting = lighting_from_index(index).unwrap();
             assert_eq!(lighting_index(lighting), index);
         }
+        assert_eq!(gpu_index(DesiredGpuPolicy::Mode(GpuMode::Ultimate)), -1);
     }
 
     #[test]
