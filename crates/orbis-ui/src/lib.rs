@@ -17,6 +17,7 @@ pub mod automation_retry;
 pub mod automation_serialization;
 pub mod automation_shadow_runtime;
 pub mod automation_worker_coordinator;
+pub mod automation_worker_driver;
 pub mod automation_worker_runtime;
 pub mod composition;
 pub mod diagnostics_dto;
