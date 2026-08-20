@@ -10,6 +10,8 @@
 mod automation_backend;
 #[path = "extra_backend.rs"]
 mod extra_backend;
+#[path = "tray_backend.rs"]
+mod tray_backend;
 #[path = "window_lifecycle_backend.rs"]
 mod window_lifecycle_backend;
 #[path = "window_position_preferences_bridge.rs"]
@@ -57,10 +59,12 @@ fn advance_automation_revision() -> Option<AutomationLifecycleRevision> {
 pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
     reset_automation_lifecycle_clock();
     automation_backend::initialize(runtime.clone());
-    extra_backend::initialize(runtime);
+    extra_backend::initialize(runtime.clone());
+    tray_backend::initialize(runtime);
 }
 
 pub(crate) fn clear() {
+    tray_backend::clear();
     automation_backend::clear();
     extra_backend::clear();
     reset_automation_lifecycle_clock();
@@ -147,9 +151,6 @@ fn show_automation_window() -> Result<(), slint::PlatformError> {
 }
 
 fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
-    // Keep the established theme/autostart/start-minimized bridge in main.rs.
-    // After it has created/shown the window, attach only the new position
-    // callback to the same component instance.
     crate::show_preferences_window(app)?;
     crate::PREFERENCES_WINDOW.with(|slot| {
         if let Some(window) = slot.borrow().as_ref() {
@@ -159,9 +160,8 @@ fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> 
     Ok(())
 }
 
-/// Install secondary-window and safe desktop-lifecycle callbacks after the
-/// legacy callback layer. Hardware command callbacks remain untouched.
 pub(crate) fn wire_window(app: &AppWindow) {
+    tray_backend::wire_app(app);
     window_lifecycle_backend::wire_app_window(app);
 
     app.on_extra_clicked(|| {
@@ -212,6 +212,7 @@ mod tests {
         assert!(source.contains("app.on_extra_clicked"));
         assert!(source.contains("app.on_automation_clicked"));
         assert!(source.contains("app.on_preferences_clicked"));
+        assert!(source.contains("tray_backend::wire_app(app)"));
         assert!(source.contains("wire_app_window(app)"));
         assert!(!source.contains("app.on_perf_clicked"));
         assert!(!source.contains("app.on_charge_changed"));
