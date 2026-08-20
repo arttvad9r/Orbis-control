@@ -1,51 +1,66 @@
-//! Test-only proof of the first Automation mutation executor.
+//! Production-ready Performance-only Automation execution boundary.
 //!
-//! This module is compiled only for tests from `lib.rs`. It exercises the
-//! intended Performance-only execution semantics against the already-existing
-//! application owner contract without making Automation reachable in production.
-//! Promotion to production requires executable Rust tests plus wiring under the
-//! worker/lifecycle/capability serialization owner.
+//! This module contains the only unattended mutation call currently modeled for
+//! Automation. It does not decide whether Automation is enabled: callers must
+//! first obtain a move-only [`AutomationWorkerPreparedEnvelope`] from the
+//! worker-owned driver. Immediately before the owner call this executor checks
+//! persisted-policy revision, lifecycle revision and capability generation again.
+//!
+//! Promotion of `FeatureId::Automation.write` remains a separate release/evidence
+//! decision. Keeping this module compiled in production does not make it
+//! reachable while that capability is `Unsupported`.
 
 use async_trait::async_trait;
-use orbis_application::{
-    CommandError, PerformanceCommandOutcome, SetPerformanceError,
-};
+use orbis_application::{CommandError, PerformanceCommandOutcome, SetPerformanceError};
 use orbis_core::action::ApplyResult;
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
 
-use crate::automation_execution_scope::{AutomationPreparedBatch, AutomationPreparedKind};
+use crate::automation_execution_scope::AutomationPreparedKind;
 use crate::automation_lifecycle_revision::AutomationLifecycleRevision;
-use crate::automation_serialization::AutomationDryRunLease;
+use crate::automation_worker_driver::{
+    AutomationPolicyRevision, AutomationWorkerPreparedEnvelope,
+};
 use crate::composition::PerformanceServiceRuntime;
 
-/// Fail-closed error emitted by the proof executor.
+/// Fail-closed error detected before a mutation or a definite command failure.
 #[derive(Debug)]
-enum AutomationPerformanceExecutionError {
-    /// Prepared metadata does not belong to the supplied serialization lease.
-    LeaseMismatch,
-    /// A newer lifecycle event superseded the lease before the owner call.
+pub enum AutomationPerformanceExecutionError {
+    /// Prepared batch metadata does not match the serialization lease.
+    EnvelopeMetadataMismatch,
+    /// Persisted policy changed after preparation.
+    PolicyRevisionChanged {
+        required: AutomationPolicyRevision,
+        current: AutomationPolicyRevision,
+    },
+    /// A newer lifecycle event superseded the prepared batch.
     LifecycleRevisionChanged {
         required: AutomationLifecycleRevision,
         current: AutomationLifecycleRevision,
     },
-    /// Capability generation changed before the mutation call.
+    /// Capability registry changed after preparation.
     CapabilityGenerationChanged { required: u64, current: u64 },
-    /// Provider mutation failed before a successful command result existed.
+    /// The application owner rejected/failed the command before a successful
+    /// post-mutation read-back result existed.
     Command(ProviderError),
-    /// Provider mutation returned a result, but mandatory authoritative
-    /// read-back failed. Mutation outcome is therefore unknown for automation.
+}
+
+/// Why the worker must enter typed Performance recovery after an owner call.
+#[derive(Debug)]
+pub enum AutomationPerformanceRecoveryReason {
+    /// Mutation returned a result but mandatory authoritative read-back failed.
     ReadBackAfterMutation {
         result: ApplyResult,
         source: ProviderError,
     },
-    /// Application returned a non-Applied result. Unattended automation does
-    /// not accept config-only Accepted or Pending/Failed/RolledBack outcomes.
+    /// Application returned a non-`Applied` result. Unattended Automation never
+    /// treats `Accepted`, `Pending`, `Failed` or `RolledBack` as confirmed.
     UnexpectedApplyResult {
         result: ApplyResult,
         observed: PerformanceProfile,
     },
-    /// Authoritative read-back completed but did not match the requested target.
+    /// Application claimed `Applied`, but authoritative state did not equal the
+    /// requested target.
     ReadBackMismatch {
         requested: PerformanceProfile,
         observed: PerformanceProfile,
@@ -53,12 +68,12 @@ enum AutomationPerformanceExecutionError {
     },
 }
 
-/// Result of the Performance-only proof executor.
+/// Result of one serialized Performance-only execution attempt.
 #[derive(Debug)]
-enum AutomationPerformanceExecutionOutcome {
-    /// No mutation was required.
+pub enum AutomationPerformanceExecutionOutcome {
+    /// Prepared batch intentionally contains no hardware action.
     NoOp,
-    /// Performance mutation was confirmed by `ApplyResult::Applied` and exact
+    /// Exactly one Performance mutation was confirmed by `Applied` plus exact
     /// authoritative read-back.
     Applied {
         lease_id: u64,
@@ -66,12 +81,21 @@ enum AutomationPerformanceExecutionOutcome {
         generation: u64,
         profile: PerformanceProfile,
     },
-    /// Execution was refused or failed without claiming success.
-    Failed(AutomationPerformanceExecutionError),
+    /// No unattended success is claimed and the worker may release the lease as
+    /// a known failure without entering unknown-outcome recovery.
+    DefiniteFailure(AutomationPerformanceExecutionError),
+    /// A mutation call happened and final state is not authoritatively known.
+    /// The worker must call `finish_performance_unknown` and reconcile through a
+    /// fresh typed Performance read before admitting another unattended batch.
+    RecoveryRequired {
+        requested: PerformanceProfile,
+        reason: AutomationPerformanceRecoveryReason,
+    },
 }
 
+/// Narrow application owner required by the Automation executor.
 #[async_trait]
-trait PerformanceAutomationOwner: Send + Sync {
+pub trait PerformanceAutomationOwner: Send + Sync {
     async fn set_performance_for_automation(
         &self,
         profile: PerformanceProfile,
@@ -91,46 +115,60 @@ where
     }
 }
 
-/// Execute one already-scoped Performance-only batch in the proof environment.
+/// Execute one already-prepared Performance-only batch.
 ///
-/// The caller must still own the serialization lease. Lifecycle revision and
-/// capability generation are compared immediately before the owner call. This
-/// proof does not solve the remaining production TOCTOU requirement: lifecycle
-/// admission, capability refresh and this call must later be serialized by the
-/// same worker/runtime owner.
-async fn run_performance_proof<O>(
+/// All identity checks occur synchronously immediately before the first owner
+/// call. The caller must serialize this function with lifecycle observations,
+/// capability replacement and other application mutations under the same worker
+/// owner. This function never performs retries and never executes more than one
+/// hardware mutation.
+pub async fn execute_prepared_performance<O>(
     owner: &O,
-    lease: &AutomationDryRunLease,
-    prepared: &AutomationPreparedBatch,
-    current_revision: AutomationLifecycleRevision,
+    envelope: &AutomationWorkerPreparedEnvelope,
+    current_policy_revision: AutomationPolicyRevision,
+    current_lifecycle_revision: AutomationLifecycleRevision,
     current_generation: u64,
 ) -> AutomationPerformanceExecutionOutcome
 where
     O: PerformanceAutomationOwner + ?Sized,
 {
-    if prepared.lease_id() != lease.id()
-        || prepared.required_revision() != lease.required_revision()
-        || prepared.required_generation() != lease.required_generation()
-        || prepared.trigger() != lease.trigger()
+    let prepared = envelope.prepared();
+    let lease = prepared.lease();
+    let batch = prepared.batch();
+
+    if batch.lease_id() != lease.id()
+        || batch.required_revision() != lease.required_revision()
+        || batch.required_generation() != lease.required_generation()
+        || batch.trigger() != lease.trigger()
     {
-        return AutomationPerformanceExecutionOutcome::Failed(
-            AutomationPerformanceExecutionError::LeaseMismatch,
+        return AutomationPerformanceExecutionOutcome::DefiniteFailure(
+            AutomationPerformanceExecutionError::EnvelopeMetadataMismatch,
+        );
+    }
+
+    let required_policy_revision = envelope.required_policy_revision();
+    if current_policy_revision != required_policy_revision {
+        return AutomationPerformanceExecutionOutcome::DefiniteFailure(
+            AutomationPerformanceExecutionError::PolicyRevisionChanged {
+                required: required_policy_revision,
+                current: current_policy_revision,
+            },
         );
     }
 
     let required_revision = lease.required_revision();
-    if current_revision != required_revision {
-        return AutomationPerformanceExecutionOutcome::Failed(
+    if current_lifecycle_revision != required_revision {
+        return AutomationPerformanceExecutionOutcome::DefiniteFailure(
             AutomationPerformanceExecutionError::LifecycleRevisionChanged {
                 required: required_revision,
-                current: current_revision,
+                current: current_lifecycle_revision,
             },
         );
     }
 
     let required_generation = lease.required_generation();
     if current_generation != required_generation {
-        return AutomationPerformanceExecutionOutcome::Failed(
+        return AutomationPerformanceExecutionOutcome::DefiniteFailure(
             AutomationPerformanceExecutionError::CapabilityGenerationChanged {
                 required: required_generation,
                 current: current_generation,
@@ -138,7 +176,7 @@ where
         );
     }
 
-    let profile = match prepared.kind() {
+    let profile = match batch.kind() {
         AutomationPreparedKind::NoOp => return AutomationPerformanceExecutionOutcome::NoOp,
         AutomationPreparedKind::Performance(profile) => *profile,
     };
@@ -146,34 +184,40 @@ where
     let outcome = match owner.set_performance_for_automation(profile).await {
         Ok(outcome) => outcome,
         Err(CommandError::Command(source)) => {
-            return AutomationPerformanceExecutionOutcome::Failed(
+            return AutomationPerformanceExecutionOutcome::DefiniteFailure(
                 AutomationPerformanceExecutionError::Command(source),
             );
         }
         Err(CommandError::ReadBack { result, source }) => {
-            return AutomationPerformanceExecutionOutcome::Failed(
-                AutomationPerformanceExecutionError::ReadBackAfterMutation { result, source },
-            );
+            return AutomationPerformanceExecutionOutcome::RecoveryRequired {
+                requested: profile,
+                reason: AutomationPerformanceRecoveryReason::ReadBackAfterMutation {
+                    result,
+                    source,
+                },
+            };
         }
     };
 
     if !outcome.result.is_applied() {
-        return AutomationPerformanceExecutionOutcome::Failed(
-            AutomationPerformanceExecutionError::UnexpectedApplyResult {
+        return AutomationPerformanceExecutionOutcome::RecoveryRequired {
+            requested: profile,
+            reason: AutomationPerformanceRecoveryReason::UnexpectedApplyResult {
                 result: outcome.result,
                 observed: outcome.state.current,
             },
-        );
+        };
     }
 
     if outcome.state.current != profile {
-        return AutomationPerformanceExecutionOutcome::Failed(
-            AutomationPerformanceExecutionError::ReadBackMismatch {
+        return AutomationPerformanceExecutionOutcome::RecoveryRequired {
+            requested: profile,
+            reason: AutomationPerformanceRecoveryReason::ReadBackMismatch {
                 requested: profile,
                 observed: outcome.state.current,
                 result: outcome.result,
             },
-        );
+        };
     }
 
     AutomationPerformanceExecutionOutcome::Applied {
@@ -192,21 +236,13 @@ mod tests {
 
     use orbis_capabilities::{CapabilityRegistryBuilder, CapabilityRegistrySnapshot};
     use orbis_config::{AutomationPolicy, DesiredPerformancePolicy};
-    use orbis_core::automation::AutomationAction;
     use orbis_core::capability::{
         Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, FeatureId,
         OperationCapability,
     };
+    use orbis_core::telemetry::Telemetry;
 
-    use crate::automation_execution_scope::prepare_automation_execution_scope;
-    use crate::automation_lifecycle_revision::{
-        AutomationLifecycleClock, AutomationRevisionCandidate, AutomationRevisionGuardOutcome,
-        revalidate_revision_candidate,
-    };
-    use crate::automation_serialization::{
-        AutomationAdmissionOutcome, AutomationSerializationCoordinator,
-    };
-    use crate::automation_shadow_runtime::AutomationShadowRuntime;
+    use crate::automation_worker_driver::AutomationWorkerDriver;
 
     struct FakeOwner {
         calls: Mutex<Vec<PerformanceProfile>>,
@@ -279,63 +315,47 @@ mod tests {
         policy
     }
 
-    fn telemetry(ac_online: bool, ts: SystemTime) -> orbis_core::telemetry::Telemetry {
-        let mut telemetry = orbis_core::telemetry::Telemetry::empty();
+    fn telemetry(ac_online: bool, ts: SystemTime) -> Telemetry {
+        let mut telemetry = Telemetry::empty();
         telemetry.ac_online = Some(ac_online);
         telemetry.ts = ts;
         telemetry
     }
 
-    fn lease_and_prepared(
+    fn prepared(
         generation: u64,
-    ) -> (
-        AutomationSerializationCoordinator,
-        AutomationDryRunLease,
-        AutomationPreparedBatch,
-    ) {
+    ) -> (AutomationWorkerDriver, CapabilityRegistrySnapshot, AutomationWorkerPreparedEnvelope) {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let snapshot = snapshot(generation, base);
-        let policy = policy();
-        let mut shadow = AutomationShadowRuntime::default();
-        shadow.observe_telemetry(&telemetry(true, base), &policy, &snapshot, base);
-        shadow.observe_telemetry(
-            &telemetry(false, base + Duration::from_secs(1)),
-            &policy,
-            &snapshot,
-            base + Duration::from_secs(1),
-        );
-        let outcome = shadow.observe_telemetry(
-            &telemetry(false, base + Duration::from_secs(2)),
-            &policy,
-            &snapshot,
-            base + Duration::from_secs(2),
-        );
-
-        let mut clock = AutomationLifecycleClock::new();
-        let revision = clock.advance().unwrap();
-        let candidate = AutomationRevisionCandidate::from_shadow(&outcome, revision).unwrap();
-        let guard = revalidate_revision_candidate(
-            &candidate,
-            revision,
-            &policy,
-            &snapshot,
-            base + Duration::from_secs(3),
-            Duration::from_secs(30),
-        );
-        let AutomationRevisionGuardOutcome::Ready(handoff) = guard else {
-            panic!("expected revision handoff");
-        };
-        let mut coordinator = AutomationSerializationCoordinator::new();
-        let admission = coordinator.admit(handoff, revision, generation);
-        let AutomationAdmissionOutcome::Admitted(lease) = admission else {
-            panic!("expected lease");
-        };
-        assert_eq!(
-            lease.actions(),
-            &[AutomationAction::SetProfile(PerformanceProfile::Balanced)]
-        );
-        let prepared = prepare_automation_execution_scope(&lease).unwrap();
-        (coordinator, lease, prepared)
+        let mut driver = AutomationWorkerDriver::with_policy(policy());
+        assert!(matches!(
+            driver.observe_telemetry(&telemetry(true, base), &snapshot, base),
+            crate::automation_worker_driver::AutomationWorkerObservation::NoConfirmedEvent
+        ));
+        assert!(matches!(
+            driver.observe_telemetry(
+                &telemetry(false, base + Duration::from_secs(1)),
+                &snapshot,
+                base + Duration::from_secs(1),
+            ),
+            crate::automation_worker_driver::AutomationWorkerObservation::NoConfirmedEvent
+        ));
+        assert!(matches!(
+            driver.observe_telemetry(
+                &telemetry(false, base + Duration::from_secs(2)),
+                &snapshot,
+                base + Duration::from_secs(2),
+            ),
+            crate::automation_worker_driver::AutomationWorkerObservation::Confirmed(_)
+        ));
+        let envelope = driver
+            .prepare_latest_dry_run(
+                &snapshot,
+                base + Duration::from_secs(3),
+                Duration::from_secs(30),
+            )
+            .expect("prepared envelope");
+        (driver, snapshot, envelope)
     }
 
     fn command_outcome(
@@ -352,25 +372,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn applied_requires_exact_authoritative_readback() {
-        let (_coordinator, lease, prepared) = lease_and_prepared(7);
+    async fn exact_applied_readback_is_the_only_success() {
+        let (driver, snapshot, envelope) = prepared(7);
         let owner = FakeOwner::new(Ok(command_outcome(
             ApplyResult::Applied,
             PerformanceProfile::Balanced,
         )));
-
-        let outcome = run_performance_proof(
+        let outcome = execute_prepared_performance(
             &owner,
-            &lease,
-            &prepared,
-            lease.required_revision(),
-            7,
+            &envelope,
+            driver.current_policy_revision(),
+            driver.current_revision(),
+            snapshot.generation(),
         )
         .await;
         assert!(matches!(
             outcome,
             AutomationPerformanceExecutionOutcome::Applied {
-                lease_id: 1,
                 generation: 7,
                 profile: PerformanceProfile::Balanced,
                 ..
@@ -380,131 +398,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn newer_lifecycle_revision_blocks_before_owner_call() {
-        let (_coordinator, lease, prepared) = lease_and_prepared(8);
+    async fn identity_drift_blocks_before_owner_call() {
+        let (driver, snapshot, envelope) = prepared(9);
         let owner = FakeOwner::new(Ok(command_outcome(
             ApplyResult::Applied,
             PerformanceProfile::Balanced,
         )));
-        let mut clock = AutomationLifecycleClock::new();
-        assert_eq!(clock.advance().unwrap(), lease.required_revision());
-        let newer = clock.advance().unwrap();
-
-        let outcome = run_performance_proof(&owner, &lease, &prepared, newer, 8).await;
-        assert!(matches!(
-            outcome,
-            AutomationPerformanceExecutionOutcome::Failed(
-                AutomationPerformanceExecutionError::LifecycleRevisionChanged { .. }
-            )
-        ));
-        assert_eq!(owner.call_count(), 0);
-    }
-
-    #[tokio::test]
-    async fn generation_drift_blocks_before_owner_call() {
-        let (_coordinator, lease, prepared) = lease_and_prepared(9);
-        let owner = FakeOwner::new(Ok(command_outcome(
-            ApplyResult::Applied,
-            PerformanceProfile::Balanced,
-        )));
-        let outcome = run_performance_proof(
+        let outcome = execute_prepared_performance(
             &owner,
-            &lease,
-            &prepared,
-            lease.required_revision(),
-            10,
+            &envelope,
+            AutomationPolicyRevision::INITIAL,
+            driver.current_revision(),
+            snapshot.generation(),
         )
         .await;
         assert!(matches!(
             outcome,
-            AutomationPerformanceExecutionOutcome::Failed(
-                AutomationPerformanceExecutionError::CapabilityGenerationChanged {
-                    required: 9,
-                    current: 10,
-                }
+            AutomationPerformanceExecutionOutcome::DefiniteFailure(
+                AutomationPerformanceExecutionError::PolicyRevisionChanged { .. }
             )
         ));
         assert_eq!(owner.call_count(), 0);
     }
 
     #[tokio::test]
-    async fn accepted_or_mismatched_readback_never_claims_applied() {
-        let (_coordinator, lease, prepared) = lease_and_prepared(11);
-        let accepted = FakeOwner::new(Ok(command_outcome(
-            ApplyResult::Accepted,
-            PerformanceProfile::Balanced,
-        )));
-        assert!(matches!(
-            run_performance_proof(
-                &accepted,
-                &lease,
-                &prepared,
-                lease.required_revision(),
-                11,
-            )
-            .await,
-            AutomationPerformanceExecutionOutcome::Failed(
-                AutomationPerformanceExecutionError::UnexpectedApplyResult { .. }
-            )
-        ));
-
-        let (_coordinator, lease, prepared) = lease_and_prepared(12);
-        let mismatch = FakeOwner::new(Ok(command_outcome(
-            ApplyResult::Applied,
-            PerformanceProfile::Silent,
-        )));
-        assert!(matches!(
-            run_performance_proof(
-                &mismatch,
-                &lease,
-                &prepared,
-                lease.required_revision(),
-                12,
-            )
-            .await,
-            AutomationPerformanceExecutionOutcome::Failed(
-                AutomationPerformanceExecutionError::ReadBackMismatch { .. }
-            )
-        ));
-    }
-
-    #[tokio::test]
-    async fn command_and_post_mutation_readback_failures_remain_distinct() {
-        let (_coordinator, lease, prepared) = lease_and_prepared(13);
-        let command = FakeOwner::new(Err(CommandError::Command(
-            ProviderError::Unsupported("test".into()),
-        )));
-        assert!(matches!(
-            run_performance_proof(
-                &command,
-                &lease,
-                &prepared,
-                lease.required_revision(),
-                13,
-            )
-            .await,
-            AutomationPerformanceExecutionOutcome::Failed(
-                AutomationPerformanceExecutionError::Command(_)
-            )
-        ));
-
-        let (_coordinator, lease, prepared) = lease_and_prepared(14);
-        let readback = FakeOwner::new(Err(CommandError::ReadBack {
+    async fn readback_failure_enters_recovery_classification() {
+        let (driver, snapshot, envelope) = prepared(11);
+        let owner = FakeOwner::new(Err(CommandError::ReadBack {
             result: ApplyResult::Applied,
             source: ProviderError::Timeout("test".into()),
         }));
+        let outcome = execute_prepared_performance(
+            &owner,
+            &envelope,
+            driver.current_policy_revision(),
+            driver.current_revision(),
+            snapshot.generation(),
+        )
+        .await;
         assert!(matches!(
-            run_performance_proof(
-                &readback,
-                &lease,
-                &prepared,
-                lease.required_revision(),
-                14,
-            )
-            .await,
-            AutomationPerformanceExecutionOutcome::Failed(
-                AutomationPerformanceExecutionError::ReadBackAfterMutation { .. }
-            )
+            outcome,
+            AutomationPerformanceExecutionOutcome::RecoveryRequired { .. }
         ));
+        assert_eq!(owner.call_count(), 1);
+    }
+
+    #[test]
+    fn executor_source_has_only_performance_owner_surface() {
+        let source = include_str!("automation_performance_executor.rs");
+        for forbidden in [
+            ["set_", "gpu_mode"].concat(),
+            ["set_", "fan_curve"].concat(),
+            ["set_", "charge_limit"].concat(),
+            ["Command", "::new"].concat(),
+        ] {
+            assert!(!source.contains(&forbidden), "unexpected executor surface: {forbidden}");
+        }
     }
 }
