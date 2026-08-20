@@ -10,7 +10,12 @@ export component UpdatesWindow inherits Window {
     background: Palette.window-background;
 
     in property <string> version: "0.1.0";
+    // Local installation ownership, release-source readiness and installation
+    // mutation ownership are independent capabilities.
     in property <bool> backend-ready: false;
+    in property <bool> source-ready: false;
+    in property <bool> check-enabled: false;
+    in property <bool> install-enabled: false;
     in property <bool> checking: false;
     in property <bool> installing: false;
     in property <int> channel: 0;
@@ -33,7 +38,7 @@ export component UpdatesWindow inherits Window {
         spacing: 10px;
 
         WindowHeader { title: "Updates"; subtitle: "Release and package status"; }
-        LocalStatus { text: root.status; accent: root.backend-ready ? Palette.text-secondary : Palette.warning; }
+        LocalStatus { text: root.status; accent: root.source-ready ? Palette.text-secondary : Palette.warning; }
 
         SectionCard {
             height: 116px;
@@ -42,7 +47,10 @@ export component UpdatesWindow inherits Window {
                 spacing: 7px;
                 SectionTitle {
                     title: "Release";
-                    detail: !root.backend-ready ? "Unknown" : root.update-available ? "Update available" : "Installed";
+                    detail: !root.backend-ready ? "Backend unavailable"
+                        : !root.source-ready ? "Release source unavailable"
+                        : root.update-available ? "Update available"
+                        : "Up to date";
                 }
                 HorizontalLayout {
                     height: 22px;
@@ -55,15 +63,18 @@ export component UpdatesWindow inherits Window {
                     Text { width: 92px; text: "Channel"; font-size: 10px; color: root.channel-enabled ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
                     channel-box := ComboBox {
                         horizontal-stretch: 1;
-                        enabled: root.backend-ready && root.channel-enabled && !root.checking && !root.installing;
+                        enabled: root.backend-ready && root.source-ready && root.channel-enabled && !root.checking && !root.installing;
                         model: ["Stable", "Preview", "Development"];
                         current-index: root.channel;
                         selected(_) => { root.channel-requested(self.current-index); }
                     }
                     StatusBadge {
                         width: 112px;
-                        text: !root.backend-ready ? "Unknown" : root.update-available ? "v" + root.latest-version : "Up to date";
-                        accent: !root.backend-ready ? Palette.text-disabled : root.update-available ? Palette.accent-default : Palette.success;
+                        text: !root.backend-ready ? "Unknown"
+                            : !root.source-ready ? "Not configured"
+                            : root.update-available ? "v" + root.latest-version
+                            : "Up to date";
+                        accent: !root.source-ready ? Palette.text-disabled : root.update-available ? Palette.accent-default : Palette.success;
                     }
                 }
             }
@@ -74,13 +85,14 @@ export component UpdatesWindow inherits Window {
             VerticalLayout {
                 padding: 10px;
                 spacing: 6px;
-                SectionTitle { title: "Release notes"; detail: root.notes-visible ? "Expanded" : "Summary"; }
+                SectionTitle { title: "Release notes"; detail: root.notes-visible ? "Details" : "Summary"; }
                 Text {
                     vertical-stretch: 1;
-                    text: !root.backend-ready ? "Connect the update backend to query releases and package state."
+                    text: !root.backend-ready ? "The local update ownership backend is unavailable."
+                        : !root.source-ready ? root.release-notes
                         : root.notes-visible ? root.release-notes
                         : root.update-available ? "A newer release is available. Open release notes for details."
-                        : "No newer release is currently reported by the backend.";
+                        : "No newer release is currently reported by the configured source.";
                     font-size: 10px;
                     color: Palette.text-secondary;
                     wrap: word-wrap;
@@ -95,12 +107,12 @@ export component UpdatesWindow inherits Window {
                 width: 86px;
                 label: root.checking ? "Checking…" : "Check";
                 accent: true;
-                disabled: !root.backend-ready || root.checking || root.installing;
+                disabled: !root.check-enabled || root.checking || root.installing;
                 clicked => { root.check-requested(); }
             }
             ActionButton {
                 width: 104px;
-                label: root.notes-visible ? "Hide Notes" : "Release Notes";
+                label: root.notes-visible ? "Hide Details" : "Details";
                 disabled: !root.backend-ready;
                 clicked => { root.notes-visible = !root.notes-visible; }
             }
@@ -108,7 +120,7 @@ export component UpdatesWindow inherits Window {
             ActionButton {
                 width: 112px;
                 label: root.installing ? "Installing…" : "Install Update";
-                disabled: !root.backend-ready || !root.update-available || root.checking || root.installing;
+                disabled: !root.install-enabled || !root.update-available || root.checking || root.installing;
                 clicked => { root.install-requested(); }
             }
         }
