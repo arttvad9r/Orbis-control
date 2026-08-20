@@ -20,7 +20,8 @@ use crate::automation_worker_driver::{
     AutomationPolicyRevisionError, AutomationWorkerDriver, AutomationWorkerObservation,
 };
 use crate::composition::{
-    ApplicationRuntime, BatteryServiceRuntime, GpuServicesRuntime, PerformanceServiceRuntime,
+    ApplicationRuntime, BatteryServiceRuntime, FanServiceRuntime, GpuServicesRuntime,
+    PerformanceServiceRuntime,
 };
 use orbis_application::{
     ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome, PerformanceState,
@@ -30,6 +31,7 @@ use orbis_core::action::ApplyResult;
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
+use orbis_providers::bounded_provider_call;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::FanCurvePoints;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -343,7 +345,7 @@ async fn observe_automation_telemetry<R>(
                 tracing::error!(?error, "Automation could not enter recovery barrier");
                 return;
             }
-            match performance.performance_state().await {
+            match bounded_performance_state(performance).await {
                 Ok(state) => {
                     let recovered = driver.reconcile_performance(&state);
                     tracing::warn!(?recovered, "Automation Performance recovery reconciled from fresh read");
@@ -369,6 +371,65 @@ fn reconcile_automation_from_performance_result(
             tracing::warn!(?outcome, "Automation recovery cleared by authoritative Performance refresh");
         }
     }
+}
+
+async fn bounded_performance_state<R>(performance: &R) -> Result<PerformanceState, ProviderError>
+where
+    R: PerformanceServiceRuntime + ?Sized,
+{
+    let provider = performance.provider_performance();
+    let current = bounded_provider_call(
+        provider,
+        "performance.current_profile",
+        provider.current_profile(),
+    )
+    .await?;
+    let available = bounded_provider_call(provider, "performance.profiles", provider.profiles()).await?;
+    Ok(PerformanceState { current, available })
+}
+
+async fn bounded_charge_limit<B>(
+    battery: &B,
+) -> Result<orbis_core::battery::ChargeLimit, ProviderError>
+where
+    B: BatteryServiceRuntime + ?Sized,
+{
+    let provider = battery.provider_battery();
+    bounded_provider_call(provider, "battery.charge_limit", provider.charge_limit()).await
+}
+
+async fn bounded_gpu_capabilities<G>(
+    gpu: &G,
+) -> (
+    Result<GpuPowerState, ProviderError>,
+    Result<GpuMuxState, ProviderError>,
+    Result<GpuAccessPolicy, ProviderError>,
+)
+where
+    G: GpuServicesRuntime + ?Sized,
+{
+    let power = gpu.provider_power();
+    let mux = gpu.provider_mux();
+    let access = gpu.provider_access();
+    tokio::join!(
+        bounded_provider_call(power, "gpu.power_state", power.power_state()),
+        bounded_provider_call(mux, "gpu.mux_state", mux.mux_state()),
+        bounded_provider_call(access, "gpu.access_policy", access.access_policy()),
+    )
+}
+
+async fn bounded_fan_curve(
+    fan_service: &dyn FanServiceRuntime,
+    profile: AsusdFanProfile,
+    fan: &FanId,
+) -> Result<FanCurve, ProviderError> {
+    let provider = fan_service.provider_fan();
+    bounded_provider_call(
+        provider,
+        "fan.fan_curve_for_profile",
+        provider.fan_curve_for_profile(profile, fan),
+    )
+    .await
 }
 
 async fn run_worker_inner<G, B, R, F>(
@@ -454,7 +515,7 @@ async fn run_worker_inner<G, B, R, F>(
                             gpu_refresh_counter += 1;
                             if gpu_refresh_counter >= GPU_REFRESH_INTERVAL {
                                 gpu_refresh_counter = 0;
-                                let (power, mux, access) = runtime.gpu.refresh_gpu_capabilities().await;
+                                let (power, mux, access) = bounded_gpu_capabilities(&runtime.gpu).await;
                                 emit(WorkerEvent::GpuPowerRefresh(power));
                                 emit(WorkerEvent::GpuMuxRefresh(mux));
                                 emit(WorkerEvent::GpuAccessRefresh(access));
@@ -552,17 +613,17 @@ async fn run_worker_inner<G, B, R, F>(
                 WorkerEvent::ChargeLimit(runtime.battery.set_charge_limit(latest_percent).await)
             }
             WorkerCommand::RefreshChargeLimit => {
-                WorkerEvent::ChargeLimitRefresh(runtime.battery.charge_limit().await)
+                WorkerEvent::ChargeLimitRefresh(bounded_charge_limit(&runtime.battery).await)
             }
             WorkerCommand::RefreshGpuCapabilities => {
-                let (power, mux, access) = runtime.gpu.refresh_gpu_capabilities().await;
+                let (power, mux, access) = bounded_gpu_capabilities(&runtime.gpu).await;
                 emit(WorkerEvent::GpuPowerRefresh(power));
                 emit(WorkerEvent::GpuMuxRefresh(mux));
                 emit(WorkerEvent::GpuAccessRefresh(access));
                 continue;
             }
             WorkerCommand::RefreshPerformance => {
-                let result = runtime.performance.performance_state().await;
+                let result = bounded_performance_state(&runtime.performance).await;
                 reconcile_automation_from_performance_result(&mut automation, &result);
                 WorkerEvent::PerformanceRefresh(result)
             }
@@ -573,7 +634,7 @@ async fn run_worker_inner<G, B, R, F>(
             } => WorkerEvent::FanCurve(runtime.fan.set_fan_curve(profile, fan, curve).await),
             WorkerCommand::RefreshFanCurve { profile, fan } => WorkerEvent::FanCurveRefresh {
                 profile,
-                result: runtime.fan.fan_curve_for_profile(profile, fan).await,
+                result: bounded_fan_curve(runtime.fan.as_ref(), profile, &fan).await,
             },
             WorkerCommand::RefreshCapabilities | WorkerCommand::RefreshTelemetry => {
                 unreachable!("handled before service dispatch")
@@ -657,6 +718,19 @@ mod tests {
             "periodic and explicit refresh must use the same helper"
         );
         assert!(!source.contains("run_capability_refresh"));
+    }
+
+    #[test]
+    fn worker_authoritative_reads_use_bounded_helpers_where_provider_identity_exists() {
+        let source = include_str!("worker_runtime.rs");
+        assert!(!source.contains("runtime.gpu.refresh_gpu_capabilities().await"));
+        assert!(!source.contains("runtime.battery.charge_limit().await"));
+        assert!(!source.contains("runtime.performance.performance_state().await"));
+        assert!(!source.contains("runtime.fan.fan_curve_for_profile"));
+        assert!(source.contains("bounded_gpu_capabilities(&runtime.gpu).await"));
+        assert!(source.contains("bounded_charge_limit(&runtime.battery).await"));
+        assert!(source.contains("bounded_performance_state(&runtime.performance).await"));
+        assert!(source.contains("bounded_fan_curve(runtime.fan.as_ref(), profile, &fan).await"));
     }
 
     #[test]
