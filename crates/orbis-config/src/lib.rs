@@ -30,7 +30,9 @@ pub use automation_preflight::{
     preflight_automation_plan_with_display_constraints,
 };
 pub use automation_store::{
-    AutomationPolicyLoadError, load_automation_policy, load_automation_policy_from_dir,
+    AutomationPolicyLoadError, AutomationPolicySourceFingerprint,
+    automation_policy_source_fingerprint, automation_policy_source_fingerprint_from_dir,
+    load_automation_policy, load_automation_policy_from_dir,
 };
 pub use autostart::{
     AUTOSTART_ENTRY, AUTOSTART_FILE_NAME, AutostartError, AutostartPathError, AutostartStatus,
