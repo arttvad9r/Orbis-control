@@ -91,7 +91,7 @@ read-only device may expose status without enabling brightness buttons.
 ### Ещё не подключено
 
 - `remember-position` / `remember-position-changed(bool)` остаются disabled, пока
-  реальный window-state restore/save lifecycle не проверен для активного window system.
+  реальный window-state restore/save lifecycle не проверен для active window system.
 - `close-action` / `close-action-changed(int)` остаются disabled, пока нет
   production tray/reopen lifecycle. Persisted `HideToTray` без работающего tray
   не считается допустимой реализацией.
@@ -170,17 +170,45 @@ it is not proof that every hardware target was immediately reconciled.
 
 ## DiagnosticsWindow
 
-Read-only backend publishes kernel/platform/version/build/capability/service/GPU/
-telemetry/display text and enabled/pending flags.
+### Подключено
 
-Frontend emits:
+`refresh-requested` теперь подключён к существующему production
+`DiagnosticsRuntime` → `DiagnosticsUiDto` → `DiagnosticsWindowModel` pipeline.
+Refresh выполняется на Tokio runtime, а Slint получает только готовую immutable
+presentation model.
 
-- `refresh-requested`
+Один snapshot выполняет только read-only observation:
+
+- application/build metadata;
+- kernel/session/system metadata;
+- privacy-safe DMI hardware identity;
+- D-Bus service presence;
+- canonical capability snapshot;
+- session GPU primitive observations;
+- sysfs telemetry reads;
+- Wayland display/output observation.
+
+Diagnostics использует clone уже открытых session/system bus connections и
+initial immutable capability snapshot из `ApplicationRuntime`. Каждый успешный
+worker `RegistryChange` заменяет snapshot у Diagnostics через
+`replace_capabilities`; само Diagnostics окно capability probes не запускает и
+registry не редактирует.
+
+Во время refresh `refresh-pending=true`; повторный request блокируется. После
+готового snapshot публикуются kernel/platform/version/build/system/capabilities/
+services/GPU/telemetry/display поля и Refresh снова включается.
+
+### Ещё не подключено
+
 - `copy-summary-requested`
 - `open-logs-requested`
 - `export-report-requested`
 
-No diagnostics callback may mutate hardware.
+Соответствующие `copy-enabled/logs-enabled/export-enabled` намеренно остаются
+`false`, даже после успешного Refresh. Read-only snapshot не считается evidence,
+что эти host actions реализованы.
+
+Ни один Diagnostics callback не должен мутировать hardware.
 
 ## UpdatesWindow
 
