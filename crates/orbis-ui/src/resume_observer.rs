@@ -1,10 +1,10 @@
-//! Read-only logind resume signal observer for Automation shadow lifecycle.
+//! Read-only logind resume signal observer for Automation lifecycle.
 //!
 //! This module subscribes only to `org.freedesktop.login1.Manager`'s
 //! `PrepareForSleep(bool)` signal. It acquires no inhibitor, invokes no login1
-//! methods, and performs no hardware mutation. zbus may install the normal bus
-//! match rule required by signal subscription. Signals are returned to the
-//! Slint event loop before touching thread-local UI backend state.
+//! methods, and performs no hardware mutation. Each typed observation is first
+//! published to the process-local sequential worker lifecycle channel; the
+//! existing UI shadow receives the same observation only for diagnostics/status.
 
 use std::time::{Duration, SystemTime};
 
@@ -54,17 +54,27 @@ async fn listen_once(app: &slint::Weak<AppWindow>) -> zbus::Result<()> {
             }
         };
         let observed_at = SystemTime::now();
+
+        // Worker publication is thread-safe, typed and hardware-inert. The
+        // receiver lives inside the same sequential owner as application
+        // mutations/capability replacement. A missing worker fails closed.
+        if !crate::worker::publish_prepare_for_sleep(start, observed_at) {
+            tracing::debug!(start, "Automation worker lifecycle receiver unavailable");
+        }
+
         let weak = app.clone();
         if let Err(error) = weak.upgrade_in_event_loop(move |app| {
+            // Retain the UI shadow observation for user-visible diagnostics. It
+            // is not execution authority and never owns a mutation lease.
             super::secondary_windows_backend::observe_prepare_for_sleep(start, observed_at);
             if !start {
                 // Resume itself is not enough evidence. Force one fresh typed
-                // sysfs read; the resume gate will accept it only if its
-                // provider timestamp is at/after the matching resume signal.
+                // shadow read; the worker independently consumes its next
+                // authoritative telemetry snapshot under its own resume gate.
                 super::observe_automation_from_sysfs(&app);
             }
         }) {
-            tracing::debug!(error = ?error, "failed to deliver logind lifecycle observation");
+            tracing::debug!(error = ?error, "failed to deliver logind UI lifecycle observation");
             return Ok(());
         }
     }
@@ -82,6 +92,7 @@ mod tests {
         assert!(source.contains(LOGIND_SERVICE));
         assert!(source.contains(PREPARE_FOR_SLEEP));
         assert!(source.contains("receive_signal"));
+        assert!(source.contains("publish_prepare_for_sleep"));
         assert!(source.contains("ordered_stream::OrderedStreamExt"));
         let forbidden = [
             ["WorkerCommand::", "Set"].concat(),
