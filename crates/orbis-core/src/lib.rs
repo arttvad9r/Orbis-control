@@ -25,6 +25,7 @@ pub mod diagnostics;
 pub mod display;
 pub mod display_output;
 pub mod display_refresh;
+pub mod display_refresh_identity;
 pub mod display_refresh_request;
 pub mod display_refresh_state;
 pub mod error;
@@ -71,6 +72,11 @@ pub use display_output::{
 pub use display_refresh::{
     DisplayRefreshConstraints, DisplayRefreshEvidence, DisplayRefreshPreset,
     DisplayRefreshPresetTarget, DisplayRefreshTargetId, DisplayRefreshTargetRole,
+};
+pub use display_refresh_identity::{
+    CompositorDisplayHeadEvidence, DisplayPhysicalSizeMm, DisplaySinkIdentity,
+    DisplayTargetIdentityBlock, DisplayTargetIdentityProof, DrmConnectorTypeEvidence,
+    DrmDisplayConnectorEvidence, prove_display_target_identity,
 };
 pub use display_refresh_request::DisplayRefreshRequest;
 pub use display_refresh_state::{DisplayRefreshActivePolicy, DisplayRefreshAppliedState};
