@@ -5,10 +5,15 @@ use slint::ComponentHandle;
 
 use crate::{AppWindow, PreferencesWindow};
 
+fn sync_close_capabilities(window: &PreferencesWindow) {
+    // `close-action-enabled` comes from the hardened preferences source and
+    // controls whether the setting can be persisted at all. Tray availability
+    // is a separate live capability and gates only HideToTray.
+    window.set_hide_to_tray_enabled(super::tray_backend::is_ready());
+}
+
 pub(crate) fn wire(window: &PreferencesWindow, app: &AppWindow) {
-    // Base preferences bridge intentionally reports close-action read-only.
-    // Promote only while a visible StatusNotifier host is actually registered.
-    window.set_close_action_enabled(super::tray_backend::is_ready());
+    sync_close_capabilities(window);
 
     {
         let window_weak = window.as_weak();
@@ -26,7 +31,7 @@ pub(crate) fn wire(window: &PreferencesWindow, app: &AppWindow) {
             {
                 tracing::warn!(enabled, "Remember Position request ignored: positioning unavailable");
                 crate::sync_preferences_window(&window);
-                window.set_close_action_enabled(super::tray_backend::is_ready());
+                sync_close_capabilities(&window);
                 return;
             }
 
@@ -55,7 +60,7 @@ pub(crate) fn wire(window: &PreferencesWindow, app: &AppWindow) {
                     window.set_local_status("Could not save Remember Position".into());
                 }
             }
-            window.set_close_action_enabled(super::tray_backend::is_ready());
+            sync_close_capabilities(&window);
         });
     }
 
@@ -65,30 +70,45 @@ pub(crate) fn wire(window: &PreferencesWindow, app: &AppWindow) {
             let Some(window) = weak.upgrade() else {
                 return;
             };
-            if !super::tray_backend::is_ready() || !window.get_close_action_enabled() {
-                tracing::warn!(index, "Close Action request ignored: tray host unavailable");
+            if !window.get_close_action_enabled() {
+                tracing::warn!(index, "Close Action request ignored: preferences source not writable");
                 crate::sync_preferences_window(&window);
-                window.set_close_action_enabled(false);
+                sync_close_capabilities(&window);
                 return;
             }
 
             let action = match index {
+                // Quit has no tray dependency and must remain available even on
+                // desktops without StatusNotifier support.
                 0 => CloseAction::Quit,
-                1 => CloseAction::HideToTray,
+                1 if super::tray_backend::is_ready() && window.get_hide_to_tray_enabled() => {
+                    CloseAction::HideToTray
+                }
+                1 => {
+                    tracing::warn!("HideToTray request ignored: tray host unavailable");
+                    crate::sync_preferences_window(&window);
+                    sync_close_capabilities(&window);
+                    window.set_local_status("Hide to tray is unavailable on this desktop".into());
+                    return;
+                }
                 other => {
                     tracing::warn!(index = other, "Close Action request ignored: invalid index");
                     return;
                 }
             };
+
             window.set_close_action_enabled(false);
+            window.set_hide_to_tray_enabled(false);
             match crate::preferences_backend::persist_close_action(action) {
                 Ok(preferences) => {
                     window.set_close_action(match preferences.window.close_action {
                         CloseAction::HideToTray => 1,
                         CloseAction::Quit | CloseAction::Ask => 0,
                     });
-                    let ready = super::tray_backend::is_ready();
-                    window.set_close_action_enabled(ready);
+                    // Re-read source writability rather than tying the whole
+                    // setting to a transient tray-host observation.
+                    crate::sync_preferences_window(&window);
+                    sync_close_capabilities(&window);
                     window.set_local_status(
                         match preferences.window.close_action {
                             CloseAction::HideToTray => "Close button will hide Orbis to the tray",
@@ -101,7 +121,7 @@ pub(crate) fn wire(window: &PreferencesWindow, app: &AppWindow) {
                 Err(error) => {
                     tracing::warn!(error = %error, "Close Action preference save failed");
                     crate::sync_preferences_window(&window);
-                    window.set_close_action_enabled(super::tray_backend::is_ready());
+                    sync_close_capabilities(&window);
                     window.set_local_status("Could not save Close Action".into());
                 }
             }
@@ -112,13 +132,15 @@ pub(crate) fn wire(window: &PreferencesWindow, app: &AppWindow) {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn bridge_is_request_only_tray_gated_and_has_no_hardware_surface() {
+    fn bridge_is_request_only_and_gates_only_tray_specific_action() {
         let source = include_str!("window_position_preferences_bridge.rs");
         assert!(source.contains("persist_remember_position"));
         assert!(source.contains("persist_position"));
         assert!(source.contains("position_runtime_supported"));
-        assert!(source.contains("tray_backend::is_ready"));
         assert!(source.contains("persist_close_action"));
+        assert!(source.contains("set_hide_to_tray_enabled"));
+        assert!(source.contains("0 => CloseAction::Quit"));
+        assert!(source.contains("tray_backend::is_ready"));
         assert!(!source.contains("WorkerCommand::Set"));
         assert!(!source.contains("Command::new"));
     }
