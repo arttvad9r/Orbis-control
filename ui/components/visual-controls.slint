@@ -12,11 +12,14 @@ export component PreviewButton inherits Rectangle {
 
     height: root.compact ? 30px : 40px;
     min-width: 72px;
-    border-radius: 4px;
-    border-width: root.selected ? 2px : 1px;
-    border-color: root.selected ? root.accent : Palette.border-default;
+    border-radius: 7px;
+    border-width: root.selected ? 1.5px : 1px;
+    border-color: root.selected ? root.accent
+        : touch.has-hover && !root.disabled ? Palette.border-strong
+        : Palette.border-default;
     background: root.disabled ? Palette.surface-disabled
         : touch.pressed ? Palette.surface-pressed
+        : root.selected ? Palette.surface-selected
         : touch.has-hover ? Palette.surface-hover
         : Palette.surface-default;
 
@@ -29,7 +32,7 @@ export component PreviewButton inherits Rectangle {
         Text {
             text: root.label;
             font-size: root.compact ? 10px : 11px;
-            font-weight: 600;
+            font-weight: root.selected ? 700 : 600;
             color: root.disabled ? Palette.text-disabled : Palette.text-primary;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -57,20 +60,23 @@ export component ChoiceChip inherits Rectangle {
     in property <bool> disabled: false;
     callback clicked;
 
-    height: 28px;
+    height: 30px;
     min-width: 58px;
-    border-radius: 4px;
-    border-width: root.selected ? 2px : 1px;
-    border-color: root.selected ? Palette.accent-default : Palette.border-default;
+    border-radius: 7px;
+    border-width: root.selected ? 1.5px : 1px;
+    border-color: root.selected ? Palette.accent-default
+        : touch.has-hover && !root.disabled ? Palette.border-strong
+        : Palette.border-default;
     background: root.disabled ? Palette.surface-disabled
         : touch.pressed ? Palette.surface-pressed
+        : root.selected ? Palette.surface-selected
         : touch.has-hover ? Palette.surface-hover
         : Palette.surface-default;
 
     Text {
         text: root.label;
         font-size: 10px;
-        font-weight: root.selected ? 600 : 500;
+        font-weight: root.selected ? 700 : 550;
         color: root.disabled ? Palette.text-disabled : Palette.text-primary;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -90,14 +96,14 @@ export component ToggleRow inherits Rectangle {
     in property <bool> disabled: false;
     callback toggled(bool);
 
-    height: root.description == "" ? 32px : 42px;
-    border-radius: 4px;
+    height: root.description == "" ? 34px : 44px;
+    border-radius: 7px;
     background: touch.has-hover && !root.disabled ? Palette.surface-hover : transparent;
 
     HorizontalLayout {
-        padding-left: 5px;
-        padding-right: 5px;
-        spacing: 8px;
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 9px;
         alignment: center;
         VerticalLayout {
             vertical-stretch: 1;
@@ -105,7 +111,7 @@ export component ToggleRow inherits Rectangle {
             Text {
                 text: root.label;
                 font-size: 10px;
-                font-weight: 500;
+                font-weight: 550;
                 color: root.disabled ? Palette.text-disabled : Palette.text-primary;
                 vertical-alignment: center;
                 overflow: elide;
@@ -113,7 +119,7 @@ export component ToggleRow inherits Rectangle {
             if (root.description != "") : Text {
                 text: root.description;
                 font-size: 8px;
-                color: Palette.text-secondary;
+                color: root.disabled ? Palette.text-disabled : Palette.text-secondary;
                 vertical-alignment: center;
                 overflow: elide;
             }
@@ -132,7 +138,7 @@ export component ToggleRow inherits Rectangle {
                 x: root.checked ? 18px : 2px;
                 y: 2px;
                 border-radius: 7px;
-                background: root.disabled ? Palette.text-disabled : Palette.text-primary;
+                background: root.disabled ? Palette.text-disabled : Palette.text-on-accent;
             }
         }
     }
@@ -155,21 +161,21 @@ export component StaticSlider inherits Rectangle {
     height: 34px;
     background: transparent;
     VerticalLayout {
-        spacing: 2px;
+        spacing: 3px;
         HorizontalLayout {
             height: 14px;
             Text { text: root.label; font-size: 9px; color: root.disabled ? Palette.text-disabled : Palette.text-primary; }
             Rectangle { horizontal-stretch: 1; background: transparent; }
-            Text { text: root.value-text; font-size: 9px; font-weight: 600; color: root.disabled ? Palette.text-disabled : Palette.text-primary; }
+            Text { text: root.value-text; font-size: 9px; font-weight: 650; color: root.disabled ? Palette.text-disabled : Palette.text-primary; }
         }
         Rectangle {
-            height: 5px;
-            border-radius: 2.5px;
+            height: 4px;
+            border-radius: 2px;
             background: Palette.surface-pressed;
             Rectangle {
                 width: parent.width * Math.max(0, Math.min(1, root.progress));
                 height: parent.height;
-                border-radius: 2.5px;
+                border-radius: 2px;
                 background: root.disabled ? Palette.text-disabled : Palette.accent-default;
             }
         }
@@ -193,7 +199,7 @@ export component PreviewSliderRow inherits Rectangle {
             height: 15px;
             Text { text: root.label; font-size: 9px; color: root.disabled ? Palette.text-disabled : Palette.text-primary; overflow: elide; }
             Rectangle { horizontal-stretch: 1; background: transparent; }
-            Text { text: Math.round(root.value) + root.unit; font-size: 9px; font-weight: 600; color: root.disabled ? Palette.text-disabled : Palette.text-primary; }
+            Text { text: Math.round(root.value) + root.unit; font-size: 9px; font-weight: 650; color: root.disabled ? Palette.text-disabled : Palette.text-primary; }
         }
         Slider {
             enabled: !root.disabled;
@@ -220,7 +226,7 @@ export component SelectRow inherits Rectangle {
             width: 138px;
             text: root.label;
             font-size: 10px;
-            font-weight: 500;
+            font-weight: 550;
             color: root.disabled ? Palette.text-disabled : Palette.text-primary;
             vertical-alignment: center;
             overflow: elide;
@@ -252,7 +258,7 @@ export component NumericRow inherits Rectangle {
             width: 138px;
             text: root.label;
             font-size: 10px;
-            font-weight: 500;
+            font-weight: 550;
             color: root.disabled ? Palette.text-disabled : Palette.text-primary;
             vertical-alignment: center;
             overflow: elide;
@@ -291,7 +297,7 @@ export component TextInputRow inherits Rectangle {
             width: 138px;
             text: root.label;
             font-size: 10px;
-            font-weight: 500;
+            font-weight: 550;
             color: root.disabled ? Palette.text-disabled : Palette.text-primary;
             vertical-alignment: center;
             overflow: elide;
@@ -321,7 +327,7 @@ export component BindingRow inherits Rectangle {
             width: 66px;
             text: root.key-label;
             font-size: 10px;
-            font-weight: 600;
+            font-weight: 650;
             color: root.disabled ? Palette.text-disabled : Palette.text-primary;
             vertical-alignment: center;
         }
@@ -346,9 +352,9 @@ export component ColorSwatch inherits Rectangle {
     in property <bool> disabled: false;
     callback clicked;
 
-    width: 27px;
-    height: 27px;
-    border-radius: 4px;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
     border-width: root.selected ? 2px : 1px;
     border-color: root.selected ? Palette.text-primary : Palette.border-default;
     background: root.disabled ? Palette.surface-disabled : root.swatch-color;
@@ -364,13 +370,13 @@ export component StatusBadge inherits Rectangle {
     border-radius: 10px;
     border-width: 1px;
     border-color: root.accent;
-    background: Palette.surface-pressed;
+    background: Palette.surface-selected;
     Text {
         x: 7px;
         width: parent.width - 14px;
         text: root.text;
         font-size: 8px;
-        font-weight: 600;
+        font-weight: 650;
         color: root.accent;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -383,17 +389,17 @@ export component MetricTile inherits Rectangle {
     in property <string> value;
     in property <string> detail: "";
 
-    height: 48px;
-    border-radius: 4px;
+    height: 50px;
+    border-radius: 8px;
     border-width: 1px;
     border-color: Palette.border-default;
     background: Palette.surface-default;
     VerticalLayout {
-        padding: 6px;
+        padding: 7px;
         spacing: 1px;
         Text { text: root.label; font-size: 8px; color: Palette.text-secondary; }
         HorizontalLayout {
-            Text { text: root.value; font-size: 11px; font-weight: 600; color: Palette.text-primary; }
+            Text { text: root.value; font-size: 11px; font-weight: 650; color: Palette.text-primary; }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             Text { text: root.detail; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; }
         }
@@ -403,17 +409,17 @@ export component MetricTile inherits Rectangle {
 export component PreviewNotice inherits Rectangle {
     in property <string> text;
 
-    height: 28px;
-    border-radius: 4px;
+    height: 30px;
+    border-radius: 7px;
     border-width: 1px;
     border-color: Palette.warning;
-    background: Palette.surface-pressed;
+    background: Palette.surface-selected;
     Text {
         x: 8px;
         width: parent.width - 16px;
         text: root.text;
         font-size: 8px;
-        color: Palette.warning;
+        color: Palette.text-secondary;
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;
