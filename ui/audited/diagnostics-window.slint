@@ -3,17 +3,17 @@ import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } fr
 import { Palette } from "../themes/dark.slint";
 
 export component DiagnosticsWindow inherits Window {
-    width: 700px;
-    height: 610px;
+    width: 660px;
+    height: 560px;
     title: "Orbis Control — Diagnostics";
     background: Palette.window-background;
 
-    // Compatibility alias retained while Rust lifecycle wiring is migrated.
+    // Compatibility alias retained for current Rust glue.
     in property <string> version: "Unknown";
     in property <string> kernel-value: "Unknown";
     in property <string> platform-value: "Unknown";
     in property <string> version-value: root.version;
-    in property <string> build-detail: "Build metadata not embedded";
+    in property <string> build-detail: "Build metadata unavailable";
     in property <string> system-detail: "";
     in property <string> capabilities-text: "No capability entries";
     in property <string> services-text: "No service observations";
@@ -21,76 +21,80 @@ export component DiagnosticsWindow inherits Window {
     in property <string> telemetry-text: "Unknown";
     in property <string> display-text: "Unknown";
     in property <string> snapshot-meta: "";
+
     in-out property <bool> refresh-enabled: false;
+    in property <bool> refresh-pending: false;
+    in property <bool> copy-enabled: false;
+    in property <bool> logs-enabled: false;
+    in property <bool> export-enabled: false;
     in-out property <string> local-status: "Diagnostics unavailable · lifecycle wiring pending";
+
     callback refresh-requested;
+    callback copy-summary-requested;
+    callback open-logs-requested;
+    callback export-report-requested;
 
     VerticalLayout {
-        padding: 10px; spacing: 7px;
+        padding: 12px;
+        spacing: 10px;
+
         WindowHeader { title: "Diagnostics"; subtitle: "Read-only production snapshot"; }
-        LocalStatus { text: root.local-status; accent: Palette.text-secondary; }
-        HorizontalLayout { height: 52px; spacing: 6px;
+        LocalStatus { text: root.local-status; accent: root.refresh-enabled ? Palette.text-secondary : Palette.warning; }
+
+        HorizontalLayout {
+            height: 54px; spacing: 8px;
             MetricTile { label: "Kernel"; value: root.kernel-value; detail: root.system-detail; }
             MetricTile { label: "Platform"; value: root.platform-value; detail: "privacy-safe DMI"; }
             MetricTile { label: "Orbis"; value: "v" + root.version-value; detail: root.build-detail; }
         }
-        HorizontalLayout { spacing: 10px; height: 260px;
+
+        HorizontalLayout {
+            spacing: 10px;
+            height: 240px;
             SectionCard {
                 horizontal-stretch: 1;
-                VerticalLayout { padding: 10px; spacing: 6px;
-                    SectionTitle { title: "Capability Registry"; detail: root.snapshot-meta; }
-                    Text {
-                        text: root.capabilities-text;
-                        font-size: 9px;
-                        color: Palette.text-primary;
-                        wrap: word-wrap;
-                        vertical-alignment: top;
-                    }
+                VerticalLayout {
+                    padding: 10px; spacing: 6px;
+                    SectionTitle { title: "Capabilities"; detail: root.snapshot-meta; }
+                    Text { text: root.capabilities-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; vertical-alignment: top; }
                 }
             }
             SectionCard {
-                width: 245px;
-                VerticalLayout { padding: 10px; spacing: 6px;
+                width: 224px;
+                VerticalLayout {
+                    padding: 10px; spacing: 6px;
                     SectionTitle { title: "Services"; detail: "presence only"; }
-                    Text {
-                        text: root.services-text;
-                        font-size: 9px;
-                        color: Palette.text-primary;
-                        wrap: word-wrap;
-                        vertical-alignment: top;
-                    }
+                    Text { text: root.services-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; vertical-alignment: top; }
                 }
             }
         }
-        HorizontalLayout { spacing: 8px; height: 145px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            height: 132px;
             SectionCard {
                 horizontal-stretch: 1;
-                VerticalLayout { padding: 9px; spacing: 5px;
-                    SectionTitle { title: "GPU primitives"; }
-                    Text { text: root.gpu-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; }
-                }
+                VerticalLayout { padding: 9px; spacing: 5px; SectionTitle { title: "GPU"; } Text { text: root.gpu-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; } }
             }
             SectionCard {
                 horizontal-stretch: 1;
-                VerticalLayout { padding: 9px; spacing: 5px;
-                    SectionTitle { title: "Telemetry"; }
-                    Text { text: root.telemetry-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; }
-                }
+                VerticalLayout { padding: 9px; spacing: 5px; SectionTitle { title: "Telemetry"; } Text { text: root.telemetry-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; } }
             }
             SectionCard {
                 horizontal-stretch: 1;
-                VerticalLayout { padding: 9px; spacing: 5px;
-                    SectionTitle { title: "Display"; detail: "read-only"; }
-                    Text { text: root.display-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; }
-                }
+                VerticalLayout { padding: 9px; spacing: 5px; SectionTitle { title: "Display"; detail: "read only"; } Text { text: root.display-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; } }
             }
         }
-        HorizontalLayout { height: 28px; spacing: 6px;
-            ActionButton { label: "Refresh"; accent: true; disabled: !root.refresh-enabled; clicked => { root.refresh-requested(); } }
-            ActionButton { label: "Copy Summary"; disabled: true; }
-            ActionButton { label: "Open Logs"; disabled: true; }
+
+        Rectangle { vertical-stretch: 1; background: transparent; }
+
+        HorizontalLayout {
+            height: 30px; spacing: 6px;
+            ActionButton { width: 88px; label: root.refresh-pending ? "Refreshing…" : "Refresh"; accent: true; disabled: !root.refresh-enabled || root.refresh-pending; clicked => { root.refresh-requested(); } }
+            ActionButton { width: 104px; label: "Copy Summary"; disabled: !root.copy-enabled; clicked => { root.copy-summary-requested(); } }
+            ActionButton { width: 86px; label: "Open Logs"; disabled: !root.logs-enabled; clicked => { root.open-logs-requested(); } }
             Rectangle { horizontal-stretch: 1; background: transparent; }
-            ActionButton { label: "Export Report"; disabled: true; }
+            ActionButton { width: 104px; label: "Export Report"; disabled: !root.export-enabled; clicked => { root.export-report-requested(); } }
         }
     }
 }
