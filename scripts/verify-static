@@ -12,6 +12,7 @@ CHECKS = (
     "scripts/check-automation-shadow-contract.py",
     "scripts/check-automation-executor-contract.py",
     "scripts/check-display-refresh-contract.py",
+    "scripts/check-backend-completion-contract.py",
 )
 
 
