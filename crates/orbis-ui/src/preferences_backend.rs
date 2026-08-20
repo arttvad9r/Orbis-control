@@ -88,19 +88,42 @@ fn close_action_index(action: CloseAction) -> i32 {
     }
 }
 
+/// Conservative mirror of the runtime's absolute-position support gate.
+/// Slint cannot request absolute top-level placement on Wayland, so the setting
+/// is editable only on a clearly X11-style session.
+pub(crate) fn position_runtime_supported() -> bool {
+    if std::env::var_os("WAYLAND_DISPLAY")
+        .is_some_and(|value| !value.is_empty())
+    {
+        return false;
+    }
+    if std::env::var("SLINT_BACKEND")
+        .ok()
+        .is_some_and(|value| value.to_ascii_lowercase().contains("wayland"))
+    {
+        return false;
+    }
+    std::env::var_os("DISPLAY").is_some_and(|value| !value.is_empty())
+}
+
 pub(crate) fn map_window_preferences(load: PreferencesLoad) -> WindowPreferencesUiState {
     let has_warning = load.warning.is_some();
+    let position_writable = !has_warning && position_runtime_supported();
     WindowPreferencesUiState {
         start_minimized: load.preferences.window.start_minimized,
         start_minimized_writable: !has_warning,
         remember_position: load.preferences.window.remember_position,
-        remember_position_writable: false,
+        remember_position_writable: position_writable,
         close_action: close_action_index(load.preferences.window.close_action),
+        // Hide-to-tray is not exposed until a real StatusNotifier owner is
+        // registered. Quit remains the conservative runtime default.
         close_action_writable: false,
         status: if has_warning {
             "Preferences source preserved · editing disabled"
+        } else if position_writable {
+            "Startup and X11 window-position lifecycle connected · tray pending"
         } else {
-            "Startup behavior connected · tray/position pending"
+            "Startup connected · window position unavailable on this session · tray pending"
         },
     }
 }
@@ -135,6 +158,17 @@ pub(crate) fn persist_start_minimized(
 ) -> Result<PreferencesConfig, PreferencesMutationError> {
     mutate_preferences_with(load_preferences, save_preferences, |preferences| {
         preferences.window.start_minimized = enabled;
+    })
+}
+
+pub(crate) fn persist_remember_position(
+    enabled: bool,
+) -> Result<PreferencesConfig, PreferencesMutationError> {
+    if !position_runtime_supported() {
+        return mutate_preferences_with(load_preferences, save_preferences, |_preferences| {});
+    }
+    mutate_preferences_with(load_preferences, save_preferences, |preferences| {
+        preferences.window.remember_position = enabled;
     })
 }
 
@@ -185,6 +219,25 @@ mod tests {
         assert!(updated.window.start_minimized);
         assert!(!updated.window.remember_position);
         assert_eq!(updated.window.close_action, CloseAction::Ask);
+        assert_eq!(updated.appearance.theme, orbis_config::ThemePreference::Light);
+    }
+
+    #[test]
+    fn remember_position_mutation_preserves_unrelated_preferences() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let mut preferences = PreferencesConfig::default();
+        preferences.appearance.theme = orbis_config::ThemePreference::Light;
+        preferences.window.start_minimized = true;
+        orbis_config::save_preferences_to_dir(&preferences, td.path()).expect("save fixture");
+
+        let updated = mutate_preferences_with(
+            || orbis_config::load_preferences_from_dir(td.path()),
+            |preferences| orbis_config::save_preferences_to_dir(preferences, td.path()),
+            |preferences| preferences.window.remember_position = false,
+        )
+        .expect("save remember position");
+        assert!(!updated.window.remember_position);
+        assert!(updated.window.start_minimized);
         assert_eq!(updated.appearance.theme, orbis_config::ThemePreference::Light);
     }
 }
