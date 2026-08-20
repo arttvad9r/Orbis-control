@@ -45,7 +45,7 @@ Diagnostics и Updates. До подключения соответствующе
 
 ## Geometry
 
-Target main window: `452 × 548` logical px.
+Target main window: `452 × 526` logical px.
 
 Baseline tokens:
 
@@ -60,11 +60,14 @@ Baseline tokens:
 
 Compact does not mean tiny click targets: interactive rows/buttons keep roughly
 30px height and use surrounding layout whitespace as part of the visual target.
+Secondary-window height budgets are guarded by `scripts/check-ui-contract.py` so
+fixed layouts are not silently compressed below their reviewed content budget.
 
 ## Color system
 
 Color is semantic emphasis, not decoration. Large areas stay neutral; mode colors
-appear mainly as dots, outlines and curve strokes.
+appear mainly as dots, outlines and curve strokes. Unselected mode markers are
+neutral; the concept color becomes prominent only for selected/pending state.
 
 ### Dark
 
@@ -97,6 +100,10 @@ appear mainly as dots, outlines and curve strokes.
 Mode accents remain concept-specific but should not fill entire cards by default.
 Selected state is normally neutral selected surface + accent border/dot.
 
+Standard Slint widgets are compiled with the cross-platform `fluent` style and
+follow `ThemeState` through `ThemeBridge`. This avoids Linux `native` selecting a
+Qt style whose palette may not follow runtime dark/light overrides.
+
 ## Interaction rules
 
 - Hover may change neutral surface/border, not semantic state.
@@ -105,11 +112,15 @@ Selected state is normally neutral selected surface + accent border/dot.
 - Error should be local to the affected section where possible.
 - Slider drag is preview of a draft value only; hardware mutation commits at an
   explicit callback boundary and authoritative read-back remains source of truth.
+- Backend-owned toggles use `RequestToggleRow`: click emits the requested value
+  but never flips `checked` locally. The owner publishes the confirmed value.
 - Fan write safety blocks remain visible and authoritative; redesign must never
   make a blocked mutation look enabled.
 - Settings that naturally form a configuration document may use a local draft,
   but must expose explicit `Reload`/`Apply` boundaries. `Apply` is a request, not
   proof of success.
+- Draft-window action footers stay outside scrollable content so Apply/Reload/Save
+  remain visible at normal window sizes.
 
 ## Secondary windows
 
@@ -118,29 +129,35 @@ Selected state is normally neutral selected surface + accent border/dot.
 Frontend contract includes Theme, Run on Startup, Start Minimized, Remember
 Window Position and Close Action. Each lifecycle setting has its own enabled
 state and request callback. Unsupported window-system behavior stays disabled.
+Backend-owned toggles and close-action choices do not optimistically change their
+presented state before the owner republishes it.
 
 ### Fans + Power
 
 Prioritize CPU/GPU selection, BIOS profile, one authoritative curve, temperature
 points and write-safety status. The frontend includes explicit presentation for
 unknown/enabled/disabled custom-curve state; it must not infer active state from
-curve points alone.
+curve points alone. The safety footer and mutation actions remain visible below
+the editor.
 
 ### Extra Controls
 
 This is an editable draft surface for bindings, keyboard/backlight, platform and
 power/CPU settings. Backend loads the draft, `Reload` requests authoritative
-state again, `Apply` is the single commit boundary.
+state again, `Apply` is the single commit boundary. Hotkeys use a compact
+multi-column layout and Apply/Reload remain fixed outside the scroll view.
 
 ### Automation
 
-All rule values are backend-owned. Combobox/toggle interactions emit request
-callbacks; Save/Reset are explicit backend actions. No local fake persistence.
+All rule values are backend-owned. Named policy rows distinguish Performance,
+GPU, Display and Lighting in both AC/Battery columns. Toggle interactions are
+request-only; Save/Reset are explicit backend actions. No local fake persistence.
 
 ### Diagnostics
 
 Read-only surface with refresh/copy/log/export callbacks and independent enabled
-states. No mutation API.
+states. No mutation API. Capability/service information remains the dominant
+content area; subsystem cards are secondary.
 
 ### Updates
 
@@ -153,9 +170,11 @@ Two layers are required:
 
 1. `scripts/check-ui-contract.py` — standard-library static test for delimiter
    balance, relative imports, production callback markers, fake-success phrases,
-   theme token parity/contrast and compact main geometry;
+   authoritative-toggle usage, reviewed window geometry budgets and theme
+   token parity/contrast;
 2. executable validation — Slint/Rust compile plus dark/light screenshots at the
    exact revision when a Rust/Slint toolchain is available.
 
 The static test is intentionally runnable in minimal containers and is part of
-the production UI contract. It does not replace compilation.
+the production UI contract. It does not replace compilation or live interaction
+checks on Wayland/X11.
