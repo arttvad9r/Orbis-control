@@ -44,7 +44,8 @@ pub use asus_diagnostics::{
 pub use aura::*;
 pub use display_diagnostics::display_diagnostics_snapshot;
 pub use display_refresh_owner::{
-    DisplayRefreshMutationOwner, validate_display_refresh_request,
+    DisplayRefreshMutationOwner, validate_display_refresh_readback,
+    validate_display_refresh_request,
 };
 pub use error::{OperationId, ProviderError, ValidationResult};
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
