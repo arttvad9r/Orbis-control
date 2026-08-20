@@ -1,306 +1,209 @@
 # Verification Contract — Orbis Control
 
-> Роль: **VERIFICATION CONTRACT**. Этот документ определяет, какие evidence
-> нужны для claims о проверке task, feature или milestone. Он не заменяет
-> `AGENTS.md`, `architecture.md`, `current-state.md` или `roadmap.md`.
+> Роль: **VERIFICATION CONTRACT**.
+> Обновлено: 2026-08-20.
+>
+> Этот документ определяет, какой evidence разрешает claims о source, tests, package/runtime и hardware. Operational status — [`current-state.md`](current-state.md), current CI map — [`ci-validation-matrix.md`](ci-validation-matrix.md), release vocabulary — [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 
-## 1. Основной принцип
+## 1. Core rule
 
-Verification status основывается на фактически сохранённом evidence, а не на
-заявлении агента. Фраза «tests pass» без команды, exit status и применимого
-контекста сама по себе не является evidence.
-
-Требуемый объём проверки выбирается по правилу:
+Verification claim должен опираться на сохранённый/наблюдаемый evidence, а не на фразу агента.
 
 ```text
 verification effort ∝ scope + risk + affected boundary
 ```
 
-Изменение README и изменение privileged hardware write path не имеют одинакового
-verification burden. Нельзя ослаблять correctness или safety checks только ради
-получения зелёного результата.
+Docs cleanup, read-only provider change and privileged mutation change require different evidence. Never weaken a safety invariant merely to obtain green output.
 
-Architecture boundaries и hardware invariants определяются в
-[`architecture.md`](architecture.md) и корневом [`AGENTS.md`](../AGENTS.md).
-Фактический baseline находится в [`current-state.md`](current-state.md), а
-порядок будущих работ — в [`roadmap.md`](roadmap.md).
+## 2. Project-status vocabulary
 
-## 2. Verification claims
+Current project docs use:
 
-Claims описывают, какой тип утверждения поддержан evidence. Это независимые
-измерения, а не обязательная линейная лестница: `MANUALLY_ACCEPTED` не является
-автоматически уровнем выше `HARDWARE_VERIFIED`, и отдельной task могут требоваться
-только некоторые claims.
+- `IMPLEMENTED` — source implementation is present/reviewable;
+- `TESTED` — relevant executable tests/checks passed for the exact revision/environment;
+- `PACKAGED` — installed/package behavior was accepted;
+- `LIVE-VALIDATED` — relevant behavior was observed on named live hardware/environment;
+- `BLOCKED` / `UNKNOWN` — required evidence is unavailable or inconclusive.
 
-| Canonical claim | Что означает |
+Source inspection and stdlib static scripts support at most `IMPLEMENTED`. They do not create a green Rust/Nix/Slint claim.
+
+## 3. Check result states
+
+| State | Meaning |
 |---|---|
-| `IMPLEMENTATION_PRESENT` | Требуемая реализация существует в коде или config; correctness не доказана |
-| `STATIC_BUILD_VERIFIED` | Применимые format, compile, build или static checks имеют успешное evidence |
-| `TESTED` | Применимые automated tests имеют успешное evidence |
-| `RUNTIME_VERIFIED` | Требуемое runtime behaviour реально наблюдалось в указанной environment |
-| `HARDWARE_VERIFIED` | Требуемое поведение проверено на соответствующем физическом device |
-| `MANUALLY_ACCEPTED` | Человек явно принял результат там, где automation недостаточна |
+| `PASS` | Check actually ran and the required condition held |
+| `FAIL` | Check ran and the condition did not hold |
+| `BLOCKED` | Required check cannot run because of a named blocker |
+| `DEFERRED` | Check intentionally postponed with an explicit reason |
+| `REQUIRES_USER` | Physical device/manual/privileged/user-only action is required |
+| `NOT_RUN` | No execution evidence exists |
 
-Существующее слово `IMPLEMENTED` в [`current-state.md`](current-state.md) — это
-project-status terminology. Оно не является canonical evidence claim и не
-заменяется массовой миграцией старых документов.
+Queued workflow objects, YAML definitions, source assertions and missing logs are not implicit PASS.
 
-`MOCK-ONLY`, `UNKNOWN`, `PARTIAL` и `NOT IMPLEMENTED` остаются project status
-terms из `current-state.md`, а не заменяют claims. Особенно mock/test backend не
-поддерживает `HARDWARE_VERIFIED`.
+## 4. Layer 0 — stdlib static source contracts
 
-## 3. Check/result status
+Available without Rust/Nix:
 
-Status относится к результату конкретной verification check, а не к claim.
-
-| Status | Что означает |
-|---|---|
-| `PASS` | Check выполнена, и требуемое условие подтверждено |
-| `FAIL` | Check выполнена, но требуемое условие не подтверждено |
-| `DEFERRED` | Check требуется, но сознательно перенесена; обязателен `reason` |
-| `BLOCKED` | Check невозможно завершить из-за blocker; обязателен blocker/reason |
-| `REQUIRES_USER` | Нужны user-only action, physical device, visual assessment или другое человеческое участие; это не `PASS` |
-| `NOT_RUN` | Check ещё не выполнялась |
-
-Связь между категориями имеет вид:
-
-```text
-task acceptance criteria
-        ↓
-required checks
-        ↓
-check status + evidence
-        ↓
-supported verification claims
+```bash
+python3 scripts/verify-static
 ```
 
-Например, `cargo test` со статусом `PASS` может поддержать `TESTED`, но
-`hardware-check` со статусом `DEFERRED` не поддерживает `HARDWARE_VERIFIED`.
-`DEFERRED`, `BLOCKED`, `REQUIRES_USER` и `NOT_RUN` никогда не являются claims.
+Current suite covers source-level invariants for:
 
-## 4. Evidence requirements
+- UI request-only/fake-success boundaries;
+- Automation shadow/executor/recovery contracts;
+- Display Refresh fail-closed contract;
+- cross-surface backend completion markers;
+- provider timeout and canonical capability-refresh ownership;
+- documentation/current-status consistency and repository artifact hygiene.
 
-Для command-based check обычно сохраняются:
+A successful `verify-static` means the checked source markers/invariants are internally consistent. It does **not** prove:
 
-- фактическая команда и релевантные аргументы;
-- фактический exit status;
-- duration;
-- короткий summary результата;
-- relevant failure excerpt при failure;
-- путь к полному log, если он нужен для последующей диагностики;
-- target/environment, включая runtime или device context, когда это важно.
+- Rust compilation;
+- Slint compilation;
+- D-Bus/runtime behavior;
+- Nix packaging;
+- physical hardware behavior.
 
-Для non-command checks сохраняются наблюдение, target/environment и явная
-manual/hardware acceptance. Ссылка на code path, screenshot, raw backend value,
-dated probe или D-Bus baseline добавляется, когда она является частью proof.
+## 5. Rust verification
 
-Evidence должен позволять независимо установить нужные claims, например:
-
-```text
-IMPLEMENTATION_PRESENT
-STATIC_BUILD_VERIFIED
-TESTED
-RUNTIME_VERIFIED
-HARDWARE_VERIFIED
-MANUALLY_ACCEPTED
-```
-
-Это не обязательная последовательность и не означает, что каждый claim нужен
-каждой task. Неподтверждённый claim нельзя молча считать выполненным.
-
-### Минимальная форма будущего evidence record
-
-Окончательная JSON Schema будет отдельной задачей. Сейчас contract требует
-концептуально следующие поля:
-
-```text
-check_id
-profile
-kind
-status
-command                 optional for non-command checks
-exit_code               optional for non-command checks
-duration
-summary
-failure_excerpt         optional
-full_log_path           optional
-target_or_environment   optional when relevant
-reason                  required for DEFERRED/BLOCKED/REQUIRES_USER when applicable
-supported_claims        optional
-```
-
-`status` должен быть явно классифицирован. Нельзя использовать пустой результат,
-отсутствие log или текстовый claim агента как implicit `PASS`.
-
-## 5. Verification profiles
-
-Профиль выбирается по scope и risk конкретной task. Профили — conceptual
-группировка проверок; они не реализуют verifier и не устанавливают controller
-policy.
-
-### `quick`
-
-Дешёвый feedback для ранней итерации и локализации очевидных ошибок. Он может
-включать `git diff --check`, релевантный targeted check или узкий component test.
-`quick` не означает final acceptance и не должен заявляться как full project
-verification.
-
-### `task`
-
-Минимальный набор проверок, покрывающий acceptance criteria конкретной atomic
-task и каждую затронутую boundary. В зависимости от изменения это могут быть:
-
-- docs-only checks;
-- format/static/build check;
-- crate-specific unit/component tests;
-- integration test через private P2P transport;
-- runtime/UI observation;
-- hardware evidence, если task изменяет hardware-sensitive behaviour.
-
-### `full`
-
-Широкая project/milestone verification для scope и risk, которые её требуют.
-Текущий project FULL tier из `AGENTS.md` включает INTEGRATION и, при
-необходимости, Nix checks:
+For repository/release evidence, commands are lockfile-strict:
 
 ```bash
 cargo fmt --all -- --check
-cargo check --workspace --all-targets
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo check --workspace --all-targets --locked
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
 git diff --check
-nix build .#orbis-control --max-jobs 1 --cores 4
+```
+
+For a narrow crate while iterating:
+
+```bash
+python3 scripts/verify-static
+cargo check -p <crate> --all-targets --locked
+cargo test -p <crate> --locked
+cargo clippy -p <crate> --all-targets --locked -- -D warnings
+```
+
+Do not turn an unlocked/local dependency resolution into release evidence.
+
+## 6. Nix/package verification
+
+Relevant package/service/release changes require targeted Nix checks and ultimately:
+
+```bash
 nix flake check --max-jobs 1 --cores 4
 ```
 
-Nix commands выполняются только когда scope их действительно требует, например
-при milestone/release acceptance или Nix/package/module changes.
+Current flake intends to validate workspace/package behavior plus fake-system Hardware1 lifecycle, Performance mutation and Battery mutation VMs. VM/fake-system validation proves software/service/policy properties only; it is not `LIVE-VALIDATED` laptop evidence.
 
-## 6. Project-specific checks
+## 7. GitHub Actions
 
-Для обычного изменения одного crate authoritative FAST tier из `AGENTS.md`:
+Canonical workflow: `.github/workflows/ci.yml`.
+
+Intended order:
+
+1. Checkout;
+2. `python3 scripts/verify-static`;
+3. install Nix;
+4. Nix/Rust/VM checks;
+5. final full flake check.
+
+#106 currently blocks trustworthy Actions execution: earlier jobs did not reach repository steps or fresh pushes produced no run. Until actual steps execute successfully, GitHub-hosted validation remains `BLOCKED`, not `PASS` or `FAIL` for the source itself.
+
+## 8. Runtime and hardware evidence
+
+`PACKAGED`/runtime evidence should record at least:
+
+- exact revision/build;
+- package/environment;
+- command/action performed;
+- observed result;
+- relevant service/policy state;
+- restoration/final state when mutation is involved.
+
+`LIVE-VALIDATED` hardware evidence additionally requires:
+
+- exact device/model/environment;
+- authoritative read/write observation;
+- date/revision;
+- no substitution of mock/default values;
+- clear separation of read support from write support.
+
+Old live evidence remains historical/revision-scoped. It does not automatically validate a changed branch.
+
+## 9. Mutation-specific verification
+
+Privileged/hardware mutation has a stronger burden than read-only code.
+
+Before promotion, verify:
+
+1. typed owner/target identity;
+2. capability-specific authorization;
+3. input validation;
+4. no caller-controlled arbitrary path/shell command;
+5. pre-read when needed;
+6. one deliberate mutation;
+7. authoritative read-back or explicit Pending semantics;
+8. timeout/transport unknown outcome enters recovery/observation, not blind retry;
+9. final/restored state is recorded for destructive/reversible validation.
+
+`Accepted` transport/config confirmation is not enough to claim `Applied` hardware state.
+
+Fan/GPU/Panel/Keyboard/Aura/Display/Automation product gates remain independent. A successful generic Hardware1/service test does not authorize a blocked product control.
+
+## 10. Read-only/evidence verification
+
+Read-only work still needs truthfulness tests:
+
+- structural absence vs transient failure;
+- permission denied vs unsupported;
+- malformed wire/value handling;
+- partial/empty success semantics where applicable;
+- stale/recovery behavior;
+- independent concepts do not infer support from each other.
+
+Examples of current open evidence work:
+
+- #117 telemetry useful/partial/empty freshness;
+- #109 CPU/GPU fan aggregate support;
+- #116 stored fan enabled-state transport;
+- #107 dynamic Battery owner/interface liveness.
+
+## 11. Documentation-only verification
+
+A docs/repository-status task should run at least:
 
 ```bash
-cargo fmt --all -- --check
-cargo check -p <affected-crate> --all-targets
-cargo test -p <affected-crate>
-cargo clippy -p <affected-crate> --all-targets -- -D warnings
+python3 scripts/verify-static
+# plus, when a checkout/tooling environment is available:
 git diff --check
 ```
 
-Для изменений, пересекающих crates или service boundaries, применяется
-INTEGRATION tier:
+The docs contract specifically protects against reintroducing known stale lifecycle claims, stale Draft-PR beta status and one-off `.github` validation artifacts.
 
-```bash
-cargo fmt --all -- --check
-cargo check --workspace --all-targets
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-git diff --check
-```
+## 12. Evidence record minimum
 
-Для документационной task минимальная project policy — `git diff --check` плюс
-релевантная проверка ссылок/терминов. Cargo/Nix checks не обязательны, если
-изменение не затрагивает код, packaging или Nix.
-
-Категории automated checks отражают реальный проект:
-
-- unit tests для domain/provider/application semantics;
-- component/crate-specific checks;
-- integration и protocol checks, включая private P2P D-Bus transport;
-- runtime/UI checks для packaged или подходящего dev environment;
-- live hardware checks только при фактическом обращении к target device.
-
-Не запускать реальные UPower/asusd/supergfxd, system/session bus, hardware writes
-или privileged operations без explicit permission конкретной task. Read-only
-probe и test fixture не являются write или hardware proof.
-
-## 7. Runtime, hardware и manual evidence
-
-`RUNTIME_VERIFIED` требует запуска и наблюдаемого поведения в указанной среде.
-Successful compile, test binary creation или запуск mock path недостаточны.
-
-`HARDWARE_VERIFIED` требует одновременно:
-
-- соответствующего физического device;
-- фактического backend/device observation;
-- dated или иначе идентифицируемого evidence;
-- отсутствия подмены mock/default value вместо hardware fact.
-
-Нельзя повышать `mock test`, unit test, compile или VM execution до
-`HARDWARE_VERIFIED`. VM может подтвердить software/protocol/packaging property,
-но не реальную semantics конкретного ноутбука.
-
-Для UI/UX, pixel analysis и других checks, где автоматического assertion
-недостаточно, используется `MANUALLY ACCEPTED` с описанием того, что именно было
-осмотрено. Manual acceptance не стирает `DEFERRED` checks.
-
-Hardware facts и dated probes подчиняются hierarchy из
-[`docs/README.md`](README.md): live evidence и fixtures имеют приоритет над
-inference, mock values и product defaults. Unknown bounds остаются unknown;
-отсутствие evidence не превращается в `Unsupported` или success.
-
-## 8. Deferred, blocked и requires-user
-
-`DEFERRED` используется, когда check известен и нужен, но сейчас объективно не
-выполнен. Record должен содержать:
-
-- что именно не проверено;
-- почему сейчас это отложено;
-- какие environment, device, permission или manual action нужны далее.
-
-`BLOCKED` используется, когда конкретный blocker не позволяет выполнить
-обязательную проверку. Нужно записать blocker и условие разблокировки.
-
-Если check требует физический device, live session, privileged permission или
-явное человеческое решение, это должно быть обозначено как `REQUIRES_USER` или
-как соответствующий `DEFERRED/BLOCKED` result внешнего workflow. Нельзя
-симулировать отсутствующее evidence и нельзя автоматически объявлять task
-полностью проверенной.
-
-Независимые checks могут продолжаться, если они не требуют заблокированного
-условия. Но итог task должен явно сохранять unresolved status.
-
-## 9. Logs и claims
-
-Большие raw logs не передаются reviewer/LLM по умолчанию. Нормальное evidence:
+For a command-based check record:
 
 ```text
+revision
+environment
 command
 exit status
 short summary
-relevant failure excerpt
-path to complete log
+relevant failure excerpt (if any)
+full log/artifact location (if available)
+supported claim level
 ```
 
-Полный log читается только для необходимой diagnosis/review. Это не заменяет
-сохранение log path или failure excerpt.
+For manual/runtime/hardware checks, replace command fields as appropriate with explicit observations and target identity.
 
-Следующие выводы запрещены без соответствующего evidence:
+## 13. Completion policy
 
-```text
-compiles                  → therefore works
-unit tests pass           → therefore hardware works
-CLI path works            → therefore UI workflow works
-mock succeeds             → therefore real device succeeds
-agent says PASS           → therefore PASS
-```
+A source task may be closed as source-complete when its implementation scope is actually present and remaining execution is tracked by a global validation blocker such as #106. The closure text must not claim executable success that was not observed.
 
-## 10. Task и milestone completion
+A release/milestone cannot use that shortcut. Release acceptance requires the exact candidate to pass the required executable/package/live gates in [`beta-acceptance-checklist.md`](beta-acceptance-checklist.md).
 
-Atomic task может считаться complete только когда:
-
-1. implementation соответствует acceptance criteria;
-2. обязательные для task checks выполнены;
-3. результаты имеют evidence;
-4. оставшиеся checks явно классифицированы как `DEFERRED`, `BLOCKED` или
-   `REQUIRES_USER`, если это допустимо для данной task;
-5. не заявлен более высокий verification level, чем подтверждён evidence.
-
-Milestone может требовать более сильного уровня, чем отдельная task. В Orbis
-roadmap milestone обычно требует не только code/tests, но и integration,
-packaging, runtime или live hardware evidence согласно его Definition of Done.
-Например, `LIVE-VALIDATED` read-only MVP не становится completed только из-за
-unit tests, а Milestone 4 остаётся active, пока fan/telemetry и другие pending
-substeps не закрыты. Состояние roadmap изменяется только в `roadmap.md` и не
-меняется самим verification record.
+Unresolved mandatory checks remain visible as `BLOCKED`, `DEFERRED` or `REQUIRES_USER`; they are never silently promoted to PASS.
