@@ -29,6 +29,7 @@ pub mod native_asus_eco;
 pub mod probes;
 pub mod readiness;
 pub mod service_presence;
+pub mod service_readiness;
 pub mod supergfxd;
 pub mod sysfs_telemetry;
 pub mod system_metadata;
@@ -62,6 +63,7 @@ pub use probes::{
 };
 pub use readiness::{bounded_readiness_probe, join_readiness2};
 pub use service_presence::*;
+pub use service_readiness::readiness_from_service_diagnostics;
 pub use sysfs_telemetry::SysfsTelemetryProvider;
 pub use system_metadata::SystemMetadataProvider;
 pub use telemetry_diagnostics::telemetry_diagnostics_after_attempt;

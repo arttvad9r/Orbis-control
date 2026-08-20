@@ -13,6 +13,7 @@
 pub mod autostart;
 pub mod desired_state;
 pub mod paths;
+pub mod policy_desired;
 pub mod preferences;
 pub mod store;
 pub mod window_state;
@@ -27,6 +28,9 @@ pub use desired_state::{
     DesiredStateLoad, DesiredStateLoadSource, DesiredStatePathError, DesiredStateWarning,
     DesiredStateWarningKind, desired_state_dir, desired_state_dir_with, desired_state_file,
     load_desired_state, load_desired_state_from_dir, save_desired_state, save_desired_state_to_dir,
+};
+pub use policy_desired::{
+    PolicyDesiredState, UnspecifiedPresetFieldPolicy, preset_intent_from_desired,
 };
 pub use preferences::{
     AppearancePreferences, CloseAction, PREFERENCES_FILE, PREFERENCES_SCHEMA_VERSION,
