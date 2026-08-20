@@ -7,7 +7,7 @@ import { Palette } from "../themes/dark.slint";
 
 export component AppWindow inherits Window {
     width: 452px;
-    height: 548px;
+    height: 526px;
     title: "Orbis Control";
     background: Palette.window-background;
 
@@ -62,24 +62,21 @@ export component AppWindow inherits Window {
     }
 
     function perf-label() -> string {
-        if (root.ui-state.perf-state == PerformanceHwState.Loading) { return "Performance Mode"; }
-        if (root.ui-state.perf-state != PerformanceHwState.Ready) { return "Performance Mode · Unavailable"; }
-        if (root.ui-state.perf-selected == 0) { return "Mode: Silent"; }
-        if (root.ui-state.perf-selected == 2) { return "Mode: Turbo"; }
-        return "Mode: Balanced";
+        return root.ui-state.perf-state == PerformanceHwState.Unavailable ? "Performance · Unavailable" : "Performance";
     }
 
     function gpu-label() -> string {
-        if (root.ui-state.gpu-mode-state == GpuModeHwState.Loading) { return "GPU Mode"; }
-        if (root.ui-state.gpu-mode-state != GpuModeHwState.Ready) { return "GPU Mode · Read only"; }
-        if (root.ui-state.gpu-selected == 0) { return "GPU Mode: Eco"; }
-        if (root.ui-state.gpu-selected == 2) { return "GPU Mode: Ultimate"; }
-        if (root.ui-state.gpu-selected == 3) { return "GPU Mode: Optimized"; }
-        return "GPU Mode: Standard";
+        return root.ui-state.gpu-mode-state == GpuModeHwState.Unavailable ? "GPU Mode · Read only" : "GPU Mode";
     }
 
     function perf-detail() -> string { return "CPU " + root.ui-state.cpu-temp + " · Fan " + root.ui-state.cpu-fan-rpm; }
     function gpu-detail() -> string { return "GPU " + root.ui-state.gpu-temp + " · Fan " + root.ui-state.gpu-fan-rpm; }
+    function quick-detail() -> string {
+        if (!root.display-control-ready && !root.keyboard-control-ready) { return "Unavailable"; }
+        if (!root.display-control-ready) { return "Display unavailable · " + root.keyboard-status; }
+        if (!root.keyboard-control-ready) { return root.display-status + " · Keyboard unavailable"; }
+        return root.display-status + " · " + root.keyboard-status;
+    }
     function charge-detail() -> string {
         if (root.ui-state.charge-limit-state == ChargeLimitState.Loading) { return "Loading"; }
         if (root.ui-state.charge-limit-state != ChargeLimitState.Ready) { return "Unavailable"; }
@@ -117,10 +114,7 @@ export component AppWindow inherits Window {
 
         VerticalLayout {
             spacing: 4px;
-            SectionTitle {
-                title: "Quick Controls";
-                detail: root.display-status + " · " + root.keyboard-status;
-            }
+            SectionTitle { title: "Quick Controls"; detail: root.quick-detail(); }
             SectionCard {
                 height: 98px;
                 VerticalLayout {
@@ -177,6 +171,13 @@ export component AppWindow inherits Window {
             ActionButton { width: 86px; label: "Preferences"; clicked => { root.preferences-clicked(); root.more-open = false; } }
             ActionButton { width: 58px; label: "Quit"; clicked => { root.quit-clicked(); } }
         }
+    }
+
+    if (root.more-open) : TouchArea {
+        width: parent.width;
+        height: parent.height;
+        z: 99;
+        clicked => { root.more-open = false; }
     }
 
     if (root.more-open) : Rectangle {
