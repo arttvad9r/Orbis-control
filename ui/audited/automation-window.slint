@@ -1,73 +1,109 @@
-import { SelectRow, ToggleRow } from "../components/visual-controls.slint";
+import { ComboBox } from "std-widgets.slint";
+import { ToggleRow } from "../components/visual-controls.slint";
 import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 
 export component AutomationWindow inherits Window {
-    width: 700px;
-    height: 600px;
+    width: 620px;
+    height: 520px;
     title: "Orbis Control — Automation";
     background: Palette.window-background;
 
-    property <bool> enabled: true;
-    property <int> ac-profile: 2; property <int> battery-profile: 0;
-    property <int> ac-gpu: 1; property <int> battery-gpu: 0;
-    property <int> ac-display: 2; property <int> battery-display: 0;
-    property <int> ac-lighting: 2; property <int> battery-lighting: 1;
-    property <bool> on-resume: true; property <bool> on-ac-change: true; property <bool> reconcile-only: true; property <bool> notify-transitions: true;
-    property <string> local-status: "Visual-only desired-state rules";
+    // All values are backend-owned. The frontend only emits requests.
+    in property <bool> backend-ready: false;
+    in property <bool> saving: false;
+    in property <bool> enabled: false;
+    in property <int> ac-profile: 3;
+    in property <int> battery-profile: 3;
+    in property <int> ac-gpu: 3;
+    in property <int> battery-gpu: 3;
+    in property <int> ac-display: 3;
+    in property <int> battery-display: 3;
+    in property <int> ac-lighting: 3;
+    in property <int> battery-lighting: 3;
+    in property <bool> on-resume: false;
+    in property <bool> on-ac-change: false;
+    in property <bool> reconcile-only: true;
+    in property <bool> notify-transitions: false;
+    in property <string> status: "Automation backend unavailable";
 
-    function reset-values() {
-        root.enabled = true;
-        root.ac-profile = 2; root.battery-profile = 0;
-        root.ac-gpu = 1; root.battery-gpu = 0;
-        root.ac-display = 2; root.battery-display = 0;
-        root.ac-lighting = 2; root.battery-lighting = 1;
-        root.on-resume = true; root.on-ac-change = true; root.reconcile-only = true; root.notify-transitions = true;
-        root.local-status = "Preview rules reset";
-    }
+    callback enabled-requested(bool);
+    callback ac-profile-requested(int);
+    callback battery-profile-requested(int);
+    callback ac-gpu-requested(int);
+    callback battery-gpu-requested(int);
+    callback ac-display-requested(int);
+    callback battery-display-requested(int);
+    callback ac-lighting-requested(int);
+    callback battery-lighting-requested(int);
+    callback on-resume-requested(bool);
+    callback on-ac-change-requested(bool);
+    callback reconcile-only-requested(bool);
+    callback notify-transitions-requested(bool);
+    callback reset-requested;
+    callback save-requested;
 
     VerticalLayout {
-        padding: 10px; spacing: 7px;
-        WindowHeader { title: "Automation"; subtitle: "Desired-state rules"; }
-        LocalStatus { text: root.local-status; accent: Palette.warning; }
-        ToggleRow { label: "Enable automation policies"; description: "Local preview only"; checked <=> root.enabled; }
-        HorizontalLayout { height: 205px; spacing: 10px;
+        padding: 12px;
+        spacing: 10px;
+
+        WindowHeader { title: "Automation"; subtitle: "Desired state for AC and battery sessions"; }
+        LocalStatus { text: root.status; accent: root.backend-ready ? Palette.text-secondary : Palette.warning; }
+
+        ToggleRow {
+            label: "Enable automation";
+            description: root.backend-ready ? "Reconcile configured policy on lifecycle events" : "Waiting for automation backend";
+            checked: root.enabled;
+            disabled: !root.backend-ready || root.saving;
+            toggled(value) => { root.enabled-requested(value); }
+        }
+
+        HorizontalLayout {
+            height: 208px;
+            spacing: 10px;
+
             SectionCard {
                 horizontal-stretch: 1;
-                VerticalLayout { padding: 9px; spacing: 2px;
+                VerticalLayout {
+                    padding: 10px; spacing: 7px;
                     SectionTitle { title: "AC Power"; }
-                    SelectRow { label: "Performance"; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index <=> root.ac-profile; disabled: !root.enabled; }
-                    SelectRow { label: "GPU policy"; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index <=> root.ac-gpu; disabled: !root.enabled; }
-                    SelectRow { label: "Display"; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index <=> root.ac-display; disabled: !root.enabled; }
-                    SelectRow { label: "Lighting"; model: ["Off", "Dim", "Normal", "Keep current"]; current-index <=> root.ac-lighting; disabled: !root.enabled; }
+                    ComboBox { enabled: root.backend-ready && root.enabled && !root.saving; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index: root.ac-profile; selected(_) => { root.ac-profile-requested(self.current-index); } }
+                    ComboBox { enabled: root.backend-ready && root.enabled && !root.saving; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index: root.ac-gpu; selected(_) => { root.ac-gpu-requested(self.current-index); } }
+                    ComboBox { enabled: root.backend-ready && root.enabled && !root.saving; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index: root.ac-display; selected(_) => { root.ac-display-requested(self.current-index); } }
+                    ComboBox { enabled: root.backend-ready && root.enabled && !root.saving; model: ["Off", "Dim", "Normal", "Keep current"]; current-index: root.ac-lighting; selected(_) => { root.ac-lighting-requested(self.current-index); } }
                 }
             }
+
             SectionCard {
                 horizontal-stretch: 1;
-                VerticalLayout { padding: 9px; spacing: 2px;
+                VerticalLayout {
+                    padding: 10px; spacing: 7px;
                     SectionTitle { title: "Battery"; }
-                    SelectRow { label: "Performance"; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index <=> root.battery-profile; disabled: !root.enabled; }
-                    SelectRow { label: "GPU policy"; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index <=> root.battery-gpu; disabled: !root.enabled; }
-                    SelectRow { label: "Display"; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index <=> root.battery-display; disabled: !root.enabled; }
-                    SelectRow { label: "Lighting"; model: ["Off", "Dim", "Normal", "Keep current"]; current-index <=> root.battery-lighting; disabled: !root.enabled; }
+                    ComboBox { enabled: root.backend-ready && root.enabled && !root.saving; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index: root.battery-profile; selected(_) => { root.battery-profile-requested(self.current-index); } }
+                    ComboBox { enabled: root.backend-ready && root.enabled && !root.saving; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index: root.battery-gpu; selected(_) => { root.battery-gpu-requested(self.current-index); } }
+                    ComboBox { enabled: root.backend-ready && root.enabled && !root.saving; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index: root.battery-display; selected(_) => { root.battery-display-requested(self.current-index); } }
+                    ComboBox { enabled: root.backend-ready && root.enabled && !root.saving; model: ["Off", "Dim", "Normal", "Keep current"]; current-index: root.battery-lighting; selected(_) => { root.battery-lighting-requested(self.current-index); } }
                 }
             }
         }
+
         SectionCard {
-            height: 180px;
-            VerticalLayout { padding: 8px; spacing: 1px;
-                SectionTitle { title: "Triggers / Reconciliation"; }
-                ToggleRow { label: "Apply on AC / battery change"; checked <=> root.on-ac-change; disabled: !root.enabled; }
-                ToggleRow { label: "Reconcile after resume"; checked <=> root.on-resume; disabled: !root.enabled; }
-                ToggleRow { label: "Write only when observed state differs"; checked <=> root.reconcile-only; disabled: !root.enabled; }
-                ToggleRow { label: "Notify about staged transitions"; checked <=> root.notify-transitions; disabled: !root.enabled; }
+            height: 146px;
+            VerticalLayout {
+                padding: 8px; spacing: 1px;
+                SectionTitle { title: "Triggers"; }
+                ToggleRow { label: "Apply on AC / battery change"; checked: root.on-ac-change; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.on-ac-change-requested(value); } }
+                ToggleRow { label: "Reconcile after resume"; checked: root.on-resume; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.on-resume-requested(value); } }
+                ToggleRow { label: "Write only when observed state differs"; checked: root.reconcile-only; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.reconcile-only-requested(value); } }
+                ToggleRow { label: "Notify about transitions"; checked: root.notify-transitions; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.notify-transitions-requested(value); } }
             }
         }
-        Rectangle { vertical-stretch: 1; background: transparent; }
-        HorizontalLayout { height: 28px; spacing: 6px;
+
+        HorizontalLayout {
+            height: 30px; spacing: 6px;
             Rectangle { horizontal-stretch: 1; background: transparent; }
-            ActionButton { width: 92px; label: "Reset"; clicked => { root.reset-values(); } }
-            ActionButton { width: 112px; label: "Save Rules"; accent: true; clicked => { root.local-status = "Rules saved locally · no persistence/backend write"; } }
+            ActionButton { width: 84px; label: "Reset"; disabled: !root.backend-ready || root.saving; clicked => { root.reset-requested(); } }
+            ActionButton { width: 96px; label: root.saving ? "Saving…" : "Save"; accent: true; disabled: !root.backend-ready || root.saving; clicked => { root.save-requested(); } }
         }
     }
 }
