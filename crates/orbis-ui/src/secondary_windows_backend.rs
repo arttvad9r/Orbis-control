@@ -18,6 +18,7 @@ use std::time::SystemTime;
 
 use orbis_capabilities::CapabilityRegistrySnapshot;
 use orbis_core::telemetry::Telemetry;
+use orbis_ui::automation_capability::augment_snapshot_with_automation_shadow;
 use orbis_ui::automation_lifecycle_revision::{
     AutomationLifecycleClock, AutomationLifecycleRevision,
 };
@@ -65,9 +66,22 @@ pub(crate) fn clear() {
 }
 
 /// Publish one immutable capability generation to the Automation shadow
-/// runtime. No capability is mutated or synthesized here.
+/// runtime. Until the global production probe owns `FeatureId::Automation`, the
+/// shadow consumer receives a canonical copy augmented with explicit read-only
+/// Automation evidence. No source capability, generation or timestamp is
+/// modified and write support is never upgraded.
 pub(crate) fn replace_automation_capabilities(snapshot: Arc<CapabilityRegistrySnapshot>) {
-    automation_backend::replace_capabilities(snapshot);
+    match augment_snapshot_with_automation_shadow(snapshot.as_ref()) {
+        Ok(augmented) => automation_backend::replace_capabilities(Arc::new(augmented)),
+        Err(error) => {
+            tracing::error!(
+                ?error,
+                generation = snapshot.generation(),
+                "failed to augment Automation shadow capability; using unaugmented snapshot fail-closed"
+            );
+            automation_backend::replace_capabilities(snapshot);
+        }
+    }
 }
 
 /// Feed one logind `PrepareForSleep(bool)` observation into the hardware-inert
@@ -195,11 +209,12 @@ mod tests {
     }
 
     #[test]
-    fn shadow_bridge_is_observation_only_and_revision_bound() {
+    fn shadow_bridge_is_observation_only_revision_bound_and_explicitly_read_only() {
         let source = include_str!("secondary_windows_backend.rs");
         assert!(source.contains("observe_prepare_for_sleep"));
         assert!(source.contains("observe_automation_telemetry"));
         assert!(source.contains("replace_automation_capabilities"));
+        assert!(source.contains("augment_snapshot_with_automation_shadow"));
         assert!(source.contains("AutomationLifecycleClock"));
         assert!(source.contains("advance_automation_revision"));
         assert!(source.contains("set_runtime_ready(false)"));
