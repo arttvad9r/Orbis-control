@@ -18,6 +18,7 @@ pub mod asus_armoury;
 pub mod asus_diagnostics;
 pub mod aura;
 pub mod display_diagnostics;
+pub mod display_refresh_owner;
 pub mod error;
 pub mod fan_defaults;
 pub mod gpu_diagnostics;
@@ -42,6 +43,9 @@ pub use asus_diagnostics::{
 };
 pub use aura::*;
 pub use display_diagnostics::display_diagnostics_snapshot;
+pub use display_refresh_owner::{
+    DisplayRefreshMutationOwner, validate_display_refresh_request,
+};
 pub use error::{OperationId, ProviderError, ValidationResult};
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 pub use gpu_diagnostics::gpu_diagnostics_snapshot;
