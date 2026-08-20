@@ -1,6 +1,6 @@
 import { ComboBox } from "std-widgets.slint";
 import { ToggleRow } from "../components/visual-controls.slint";
-import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
+import { ThemeBridge, WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 
 export component AutomationWindow inherits Window {
@@ -42,6 +42,8 @@ export component AutomationWindow inherits Window {
     callback notify-transitions-requested(bool);
     callback reset-requested;
     callback save-requested;
+
+    ThemeBridge { }
 
     VerticalLayout {
         padding: 12px;
