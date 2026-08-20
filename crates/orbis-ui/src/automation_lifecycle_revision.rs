@@ -138,7 +138,10 @@ pub enum AutomationRevisionGuardBlock {
 }
 
 /// Result of revision + existing execution-guard revalidation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Deliberately not `Clone`: a ready handoff is move-only and can be consumed by
+/// serialization exactly once.
+#[derive(Debug, PartialEq, Eq)]
 pub enum AutomationRevisionGuardOutcome {
     /// Candidate is stale or otherwise blocked.
     Blocked(AutomationRevisionGuardBlock),
@@ -147,7 +150,11 @@ pub enum AutomationRevisionGuardOutcome {
 }
 
 /// Revalidated handoff carrying both lifecycle and capability identities.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Deliberately not `Clone`: callers cannot retain a duplicate before
+/// `AutomationSerializationCoordinator::admit()` and replay the same handoff
+/// after the first lease is released.
+#[derive(Debug, PartialEq, Eq)]
 pub struct AutomationRevisionHandoff {
     revision: AutomationLifecycleRevision,
     inner: AutomationExecutionHandoff,
