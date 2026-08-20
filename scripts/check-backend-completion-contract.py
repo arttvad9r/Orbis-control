@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""Static cross-surface backend completion invariants.
+
+This checker intentionally uses only the Python standard library. It does not
+replace Rust/Slint compilation; it prevents already-proven fail-closed ownership
+and request/read-back contracts from silently regressing while executable
+validation is unavailable.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+def read(root: Path, rel: str, errors: list[str]) -> str:
+    path = root / rel
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        errors.append(f"{rel}: cannot read: {exc}")
+        return ""
+
+
+def require(text: str, marker: str, rel: str, errors: list[str]) -> None:
+    if marker not in text:
+        errors.append(f"{rel}: missing required marker {marker!r}")
+
+
+def forbid(text: str, marker: str, rel: str, errors: list[str]) -> None:
+    if marker in text:
+        errors.append(f"{rel}: forbidden marker present {marker!r}")
+
+
+def run(root: Path) -> list[str]:
+    errors: list[str] = []
+
+    lib_rel = "crates/orbis-ui/src/lib.rs"
+    lib = read(root, lib_rel, errors)
+    require(lib, '#[path = "worker_runtime.rs"]', lib_rel, errors)
+    require(lib, "pub mod worker;", lib_rel, errors)
+
+    worker_rel = "crates/orbis-ui/src/worker_runtime.rs"
+    worker = read(root, worker_rel, errors)
+    require(worker, "AutomationWorkerDriver::new()", worker_rel, errors)
+    require(worker, "publish_prepare_for_sleep", worker_rel, errors)
+    require(worker, "observe_automation_telemetry", worker_rel, errors)
+    require(worker, "execute_prepared_performance", worker_rel, errors)
+    require(worker, "finish_performance_unknown", worker_rel, errors)
+    require(
+        worker,
+        "const AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED: bool = false;",
+        worker_rel,
+        errors,
+    )
+    forbid(worker, "set_gpu_mode_for_automation", worker_rel, errors)
+    forbid(worker, "set_fan_curve_for_automation", worker_rel, errors)
+    forbid(worker, "set_charge_limit_for_automation", worker_rel, errors)
+
+    resume_rel = "crates/orbis-ui/src/resume_observer.rs"
+    resume = read(root, resume_rel, errors)
+    require(resume, "publish_prepare_for_sleep", resume_rel, errors)
+    require(resume, "receive_signal(PREPARE_FOR_SLEEP)", resume_rel, errors)
+
+    extra_ui_rel = "ui/audited/extra-window.slint"
+    extra_ui = read(root, extra_ui_rel, errors)
+    require(extra_ui, "keyboard-brightness-requested", extra_ui_rel, errors)
+    require(extra_ui, "panel-overdrive-requested", extra_ui_rel, errors)
+    require(extra_ui, "RequestToggleRow", extra_ui_rel, errors)
+    require(extra_ui, "enabled: false; model: [\"Static\"", extra_ui_rel, errors)
+
+    extra_rel = "crates/orbis-ui/src/extra_backend.rs"
+    extra = read(root, extra_rel, errors)
+    require(extra, "HardwareProductControlClient", extra_rel, errors)
+    require(extra, "set_keyboard_backlight", extra_rel, errors)
+    require(extra, "set_panel_overdrive", extra_rel, errors)
+    require(extra, "keyboard_status", extra_rel, errors)
+    require(extra, "panel_status", extra_rel, errors)
+    forbid(extra, "set_aura_static_rgb", extra_rel, errors)
+    forbid(extra, "set_gpu_mode", extra_rel, errors)
+    forbid(extra, "set_fan_curve", extra_rel, errors)
+
+    controls_rel = "crates/orbis-ui/src/hardware_controls_backend.rs"
+    controls = read(root, controls_rel, errors)
+    require(controls, "require_supported(self.keyboard_status().await?", controls_rel, errors)
+    require(controls, "require_supported(self.panel_status().await?", controls_rel, errors)
+    require(controls, "read-back mismatch", controls_rel, errors)
+    forbid(controls, "Command::new", controls_rel, errors)
+    forbid(controls, "std::fs::write", controls_rel, errors)
+
+    pref_ui_rel = "ui/audited/preferences-window.slint"
+    pref_ui = read(root, pref_ui_rel, errors)
+    require(pref_ui, "hide-to-tray-enabled", pref_ui_rel, errors)
+    require(pref_ui, "disabled: !root.close-action-enabled;", pref_ui_rel, errors)
+    require(
+        pref_ui,
+        "disabled: !root.close-action-enabled || !root.hide-to-tray-enabled;",
+        pref_ui_rel,
+        errors,
+    )
+
+    lifecycle_rel = "crates/orbis-ui/src/window_lifecycle_backend.rs"
+    lifecycle = read(root, lifecycle_rel, errors)
+    require(lifecycle, "CloseAction::Quit =>", lifecycle_rel, errors)
+    require(lifecycle, "slint::quit_event_loop()", lifecycle_rel, errors)
+    require(lifecycle, "tray_backend::is_ready()", lifecycle_rel, errors)
+    require(lifecycle, "CloseRequestResponse::KeepWindowShown", lifecycle_rel, errors)
+
+    action_rel = "crates/orbis-ui/src/action_dialog_backend.rs"
+    action = read(root, action_rel, errors)
+    require(action, "enum ConfirmedAction", action_rel, errors)
+    require(action, "QuitApplication", action_rel, errors)
+    require(action, "legacy_context", action_rel, errors)
+    require(action, "UnavailableGeneric", action_rel, errors)
+    require(action, "wire_typed", action_rel, errors)
+    forbid(action, "login1.call", action_rel, errors)
+    forbid(action, "WorkerCommand::Set", action_rel, errors)
+
+    updates_rel = "crates/orbis-ui/src/updates_backend.rs"
+    updates = read(root, updates_rel, errors)
+    require(updates, "source_ready: false", updates_rel, errors)
+    require(updates, "check_enabled: false", updates_rel, errors)
+    require(updates, "install_enabled: false", updates_rel, errors)
+    require(updates, "detect_install_owner", updates_rel, errors)
+    forbid(updates, "Command::new", updates_rel, errors)
+    forbid(updates, "reqwest", updates_rel, errors)
+    forbid(updates, "std::fs::write", updates_rel, errors)
+
+    display_rel = "crates/orbis-ui/src/display_refresh_service.rs"
+    display = read(root, display_rel, errors)
+    require(display, "authoritative", display_rel, errors)
+    require(display, "read-back", display_rel, errors)
+
+    return errors
+
+
+def main() -> int:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    errors = run(root)
+    if errors:
+        for error in errors:
+            print(f"BACKEND CONTRACT FAIL: {error}", file=sys.stderr)
+        return 1
+    print("Backend completion contract checks passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
