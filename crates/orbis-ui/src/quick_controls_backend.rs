@@ -416,6 +416,7 @@ mod tests {
         assert!(source.contains("observe_automation_telemetry"));
         assert!(source.contains("SysfsTelemetryProvider"));
         assert!(source.contains("AUTOMATION_READ_TIMEOUT"));
-        assert!(!source.contains("WorkerCommand::Set"));
+        let mutation = ["WorkerCommand::", "Set"].concat();
+        assert!(!source.contains(&mutation));
     }
 }
