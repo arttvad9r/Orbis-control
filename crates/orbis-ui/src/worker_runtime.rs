@@ -463,9 +463,7 @@ async fn run_worker_inner<G, B, R, F>(
                             capability_refresh_counter += 1;
                             if capability_refresh_counter >= CAPABILITY_REFRESH_INTERVAL {
                                 capability_refresh_counter = 0;
-                                runtime.requery_mutation_statuses().await;
-                                let next_generation = runtime.capabilities().generation() + 1;
-                                match run_capability_refresh(&mut runtime, next_generation).await {
+                                match refresh_capability_registry(&mut runtime).await {
                                     Ok(snapshot) => {
                                         let generation = snapshot.generation();
                                         let snapshot = Arc::new(snapshot);
@@ -502,8 +500,7 @@ async fn run_worker_inner<G, B, R, F>(
         };
 
         if matches!(command, WorkerCommand::RefreshCapabilities) {
-            let next_generation = runtime.capabilities().generation() + 1;
-            match run_capability_refresh(&mut runtime, next_generation).await {
+            match refresh_capability_registry(&mut runtime).await {
                 Ok(snapshot) => {
                     let generation = snapshot.generation();
                     let snapshot = Arc::new(snapshot);
@@ -586,15 +583,22 @@ async fn run_worker_inner<G, B, R, F>(
     }
 }
 
-async fn run_capability_refresh<G, B, R>(
+/// Canonical capability refresh path used by both explicit and periodic refresh.
+///
+/// Mutation-owner/status evidence is always re-queried before the next
+/// generation is built. This keeps explicit `RefreshCapabilities` and periodic
+/// refresh semantically identical and prevents publication from stale cached
+/// write evidence.
+async fn refresh_capability_registry<G, B, R>(
     runtime: &mut ApplicationRuntime<G, B, R>,
-    next_generation: u64,
 ) -> Result<orbis_capabilities::CapabilityRegistrySnapshot, orbis_capabilities::ProbeError>
 where
     G: GpuServicesRuntime,
     B: BatteryServiceRuntime,
     R: PerformanceServiceRuntime,
 {
+    runtime.requery_mutation_statuses().await;
+    let next_generation = runtime.capabilities().generation() + 1;
     crate::composition::probe_capability_registry(
         runtime.battery.provider_battery(),
         runtime.performance.provider_performance(),
@@ -633,6 +637,26 @@ mod tests {
         assert!(!source.contains("set_gpu_mode_for_automation"));
         assert!(!source.contains("set_fan_curve_for_automation"));
         assert!(!source.contains("set_charge_limit_for_automation"));
+    }
+
+    #[test]
+    fn capability_refresh_has_one_canonical_status_requery_path() {
+        let source = include_str!("worker_runtime.rs");
+        assert_eq!(
+            source
+                .matches("runtime.requery_mutation_statuses().await")
+                .count(),
+            1,
+            "mutation status re-query must have one canonical owner"
+        );
+        assert_eq!(
+            source
+                .matches("refresh_capability_registry(&mut runtime).await")
+                .count(),
+            2,
+            "periodic and explicit refresh must use the same helper"
+        );
+        assert!(!source.contains("run_capability_refresh"));
     }
 
     #[test]
