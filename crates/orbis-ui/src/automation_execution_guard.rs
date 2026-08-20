@@ -18,7 +18,7 @@ use orbis_config::{
 };
 use orbis_core::automation::{AutomationAction, AutomationTrigger};
 
-use crate::automation_shadow_runtime::{AutomationShadowOutcome, AutomationShadowRuntime};
+use crate::automation_shadow_runtime::AutomationShadowOutcome;
 
 /// Snapshot of one shadow-ready plan that still requires revalidation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,8 +187,9 @@ pub fn revalidate_automation_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::automation_shadow_runtime::AutomationShadowRuntime;
     use orbis_capabilities::CapabilityRegistryBuilder;
-    use orbis_config::{AutomationPowerSource, DesiredPerformancePolicy};
+    use orbis_config::DesiredPerformancePolicy;
     use orbis_core::capability::{
         Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, FeatureId,
         OperationCapability,
