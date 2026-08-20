@@ -135,7 +135,9 @@ impl AutomationWorkerRuntime {
         self.serialization.is_busy()
     }
 
-    /// Last shadow-ready candidate. Any newer confirmed blocked event clears it.
+    /// Last shadow-ready candidate. Any newer confirmed blocked event clears it,
+    /// and successful serialization admission consumes it to prevent replay of
+    /// the same lifecycle event.
     pub fn latest_candidate(&self) -> Option<&AutomationRevisionCandidate> {
         self.latest_candidate.as_ref()
     }
@@ -203,7 +205,11 @@ impl AutomationWorkerRuntime {
     /// Revalidate and admit the latest candidate into the one dry-run slot, then
     /// restrict it to the proven Performance-only execution scope.
     ///
-    /// No mutation occurs. Scope failure releases the lease before returning.
+    /// No mutation occurs. Busy admission preserves the candidate so the newest
+    /// event can be retried after the old lease is released. Successful
+    /// admission consumes the candidate immediately, preventing replay of one
+    /// lifecycle event after the lease is finished. Scope failure also consumes
+    /// the event and releases the just-acquired lease fail-closed.
     pub fn prepare_latest(
         &mut self,
         policy: &AutomationPolicy,
@@ -238,7 +244,10 @@ impl AutomationWorkerRuntime {
             AutomationAdmissionOutcome::Blocked(block) => {
                 return Err(AutomationWorkerPrepareBlock::Admission(block));
             }
-            AutomationAdmissionOutcome::Admitted(lease) => lease,
+            AutomationAdmissionOutcome::Admitted(lease) => {
+                self.latest_candidate = None;
+                lease
+            }
         };
 
         match prepare_automation_execution_scope(&lease) {
@@ -368,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn latest_ready_candidate_prepares_performance_only_dry_run() {
+    fn latest_ready_candidate_prepares_performance_only_dry_run_once() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let policy = policy();
         let snapshot = snapshot(9, base);
@@ -384,6 +393,7 @@ mod tests {
             )
             .expect("prepared dry-run");
         assert!(runtime.is_busy());
+        assert!(runtime.latest_candidate().is_none());
         assert_eq!(prepared.lease().required_revision(), event.revision());
         assert_eq!(prepared.lease().required_generation(), 9);
         assert_eq!(
@@ -392,6 +402,15 @@ mod tests {
         );
         assert!(runtime.finish(prepared));
         assert!(!runtime.is_busy());
+        assert_eq!(
+            runtime.prepare_latest(
+                &policy,
+                &snapshot,
+                base + Duration::from_secs(4),
+                Duration::from_secs(30),
+            ),
+            Err(AutomationWorkerPrepareBlock::NoReadyCandidate)
+        );
     }
 
     #[test]
@@ -403,10 +422,6 @@ mod tests {
         let first = confirm_battery_event(&mut runtime, &policy, &snapshot, base);
         assert!(first.candidate().is_some());
 
-        // Move back to AC while disabling the AC-change trigger. The physical
-        // event remains confirmed and advances revision, but planner/preflight
-        // cannot produce a ready candidate; the previous battery candidate must
-        // therefore be forgotten rather than reused.
         policy.on_ac_change = false;
         assert!(runtime
             .observe_telemetry(
@@ -477,9 +492,6 @@ mod tests {
         assert_ne!(old_revision, newer.revision());
         assert_eq!(runtime.current_revision(), newer.revision());
 
-        // The runtime keeps the old slot busy until its owner explicitly
-        // finishes/aborts it; future executor must compare revision immediately
-        // before mutation and will therefore refuse this prepared lease.
         assert!(runtime.is_busy());
         assert!(runtime.finish(prepared));
     }
