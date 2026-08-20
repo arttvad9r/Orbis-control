@@ -9,20 +9,23 @@ use std::time::{Duration, Instant};
 use orbis_core::display_output::DisplayOutputSnapshot;
 use orbis_core::keyboard_backlight::KeyboardBacklightState;
 use orbis_providers::error::ProviderError;
-use orbis_providers::traits::{DisplayOutputProvider, KeyboardBacklightProvider};
+use orbis_providers::traits::{DisplayOutputProvider, KeyboardBacklightProvider, TelemetryProvider};
 use orbis_providers::{
-    AsusKeyboardBacklightProvider, WaylandCompositorOutputSource, WaylandDisplayOutputProvider,
+    AsusKeyboardBacklightProvider, SysfsTelemetryProvider, WaylandCompositorOutputSource,
+    WaylandDisplayOutputProvider,
 };
 use slint::ComponentHandle;
 
 use crate::AppWindow;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
+const AUTOMATION_READ_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
 struct QuickControlsContext {
     runtime: tokio::runtime::Handle,
     refreshing: Arc<AtomicBool>,
+    automation_observing: Arc<AtomicBool>,
     last_started: Arc<Mutex<Option<Instant>>>,
 }
 
@@ -50,6 +53,7 @@ pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
         *slot.borrow_mut() = Some(QuickControlsContext {
             runtime,
             refreshing: Arc::new(AtomicBool::new(false)),
+            automation_observing: Arc::new(AtomicBool::new(false)),
             last_started: Arc::new(Mutex::new(None)),
         });
     });
@@ -123,11 +127,60 @@ pub(crate) fn wire_window(app: &AppWindow) {
 }
 
 pub(crate) fn force_refresh(app: &AppWindow) {
+    observe_automation_from_sysfs(app);
     refresh(app, None);
 }
 
 pub(crate) fn refresh_if_due(app: &AppWindow, minimum_interval: Duration) {
+    // main.rs invokes this hook for every WorkerEvent::TelemetryRefresh. Keep
+    // Automation observation independent from the slower 10s visual Quick
+    // Controls refresh so the two-sample power-source debounce sees each normal
+    // telemetry cadence. This is a temporary read-only compatibility bridge
+    // until the entrypoint can pass the original WorkerEvent telemetry object.
+    observe_automation_from_sysfs(app);
     refresh(app, Some(minimum_interval));
+}
+
+fn observe_automation_from_sysfs(app: &AppWindow) {
+    let context = CONTEXT.with(|slot| slot.borrow().clone());
+    let Some(context) = context else {
+        return;
+    };
+    let Some(capabilities) = crate::diagnostics_backend::current_capabilities() else {
+        return;
+    };
+    if context.automation_observing.swap(true, Ordering::AcqRel) {
+        return;
+    }
+
+    let completion = context.automation_observing.clone();
+    let weak = app.as_weak();
+    context.runtime.spawn(async move {
+        let provider = SysfsTelemetryProvider::default();
+        let telemetry = tokio::time::timeout(AUTOMATION_READ_TIMEOUT, provider.snapshot()).await;
+        completion.store(false, Ordering::Release);
+
+        match telemetry {
+            Ok(Ok(telemetry)) => {
+                if let Err(error) = weak.upgrade_in_event_loop(move |_app| {
+                    // Diagnostics owns the whole-swap capability snapshot and is
+                    // updated by RegistryChange in main.rs. Clone exactly that
+                    // immutable generation into shadow preflight before feeding
+                    // the fresh typed telemetry sample.
+                    replace_automation_capabilities(capabilities);
+                    observe_automation_telemetry(&telemetry);
+                }) {
+                    tracing::warn!(error = ?error, "failed to publish Automation shadow observation");
+                }
+            }
+            Ok(Err(error)) => {
+                tracing::debug!(error = ?error, "Automation shadow telemetry read unavailable");
+            }
+            Err(_) => {
+                tracing::debug!("Automation shadow telemetry read timed out");
+            }
+        }
+    });
 }
 
 fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
@@ -361,6 +414,8 @@ mod tests {
         let source = include_str!("quick_controls_backend.rs");
         assert!(source.contains("replace_automation_capabilities"));
         assert!(source.contains("observe_automation_telemetry"));
+        assert!(source.contains("SysfsTelemetryProvider"));
+        assert!(source.contains("AUTOMATION_READ_TIMEOUT"));
         assert!(!source.contains("WorkerCommand::Set"));
     }
 }
