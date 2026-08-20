@@ -186,6 +186,11 @@ def check_imports(root: Path, path: Path, text: str, errors: list[str]) -> None:
             fail(errors, f"{path}: unresolved import: {target}")
 
 
+def has_identifier(text: str, marker: str) -> bool:
+    pattern = rf"(?<![A-Za-z0-9_-]){re.escape(marker)}(?![A-Za-z0-9_-])"
+    return re.search(pattern, text) is not None
+
+
 def rgb(hex_color: str) -> tuple[float, float, float]:
     h = hex_color.lstrip("#")
     return tuple(int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4))
@@ -267,7 +272,7 @@ def run(root: Path) -> list[str]:
             if phrase in lowered:
                 fail(errors, f"{rel}: forbidden fake-success/preview phrase: {phrase!r}")
         for marker in required:
-            if marker not in text:
+            if not has_identifier(text, marker):
                 fail(errors, f"{rel}: missing frontend contract marker {marker!r}")
 
     main = read(root / "ui/audited/main-window.slint", errors)
