@@ -34,9 +34,13 @@ rustPlatform.buildRustPackage {
   # - data/** (.desktop + AppStream metadata installed by postInstall)
   # - clippy.toml, rustfmt.toml (конфиги проверок пакета)
   #
-  # Исключены: docs/**, README.md, packaging/**, tools/**,
+  # Исключены: docs/**, README.md, packaging/** (кроме polkit policy), tools/**,
   # flake.nix, flake.lock, LICENSE, .github/**, .opencode/**, deny.toml
   # и прочее, не используемое сборкой/установкой.
+  #
+  # packaging/nix/polkit/ включён: тест polkit_policy_contains_all_mutation_actions
+  # (crates/orbis-hardwared) читает policy-файл через CARGO_MANIFEST_DIR для
+  # проверки, что все mutation action constants присутствуют в установленном policy.
   src = lib.cleanSourceWith {
     src = lib.cleanSource ../..;
     filter = path: type:
@@ -50,7 +54,8 @@ rustPlatform.buildRustPackage {
       in
         rel == "" # корень
         || builtins.elem top [ "crates" "ui" "tests" "data" ]
-        || builtins.elem rel [ "Cargo.toml" "Cargo.lock" "clippy.toml" "rustfmt.toml" ];
+        || builtins.elem rel [ "Cargo.toml" "Cargo.lock" "clippy.toml" "rustfmt.toml" ]
+        || lib.hasPrefix "packaging/nix/polkit/" rel;
   };
 
   cargoLock = {
