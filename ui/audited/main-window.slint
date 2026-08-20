@@ -231,11 +231,6 @@ export component AppWindow inherits Window {
                 clicked => { root.more-open = !root.more-open; }
             }
             ActionButton {
-                width: 72px;
-                label: "Updates";
-                clicked => { root.updates-clicked(); root.more-open = false; }
-            }
-            ActionButton {
                 width: 58px;
                 label: "Quit";
                 clicked => { root.quit-clicked(); }
