@@ -28,6 +28,7 @@ PRODUCTION_SURFACES = {
     ],
     "ui/audited/preferences-window.slint": [
         "ThemeBridge {",
+        "RequestToggleRow",
         "startup-changed",
         "start-minimized-changed",
         "remember-position-changed",
@@ -35,6 +36,7 @@ PRODUCTION_SURFACES = {
     ],
     "ui/audited/automation-window.slint": [
         "ThemeBridge {",
+        "RequestToggleRow",
         "backend-ready",
         "save-requested",
         "reset-requested",
@@ -67,6 +69,9 @@ PRODUCTION_SURFACES = {
     "ui/audited/preview-dialog-window.slint": [
         "confirm-clicked",
         "dismiss-clicked",
+    ],
+    "ui/components/request-toggle-row.slint": [
+        "toggled(!root.checked)",
     ],
 }
 
@@ -106,6 +111,16 @@ THEME_TOKENS = {
     "standard",
     "ultimate",
     "optimized",
+}
+
+SECONDARY_MIN_HEIGHT = {
+    "ui/audited/preferences-window.slint": 450,
+    "ui/audited/automation-window.slint": 530,
+    "ui/audited/extra-window.slint": 620,
+    "ui/audited/diagnostics-window.slint": 560,
+    "ui/audited/fans-window.slint": 540,
+    "ui/audited/updates-window.slint": 340,
+    "ui/audited/preview-dialog-window.slint": 210,
 }
 
 
@@ -197,7 +212,7 @@ def check_imports(root: Path, path: Path, text: str, errors: list[str]) -> None:
 
 
 def has_identifier(text: str, marker: str) -> bool:
-    if " " in marker:
+    if " " in marker or "(" in marker:
         return marker in text
     pattern = rf"(?<![A-Za-z0-9_-]){re.escape(marker)}(?![A-Za-z0-9_-])"
     return re.search(pattern, text) is not None
@@ -252,17 +267,48 @@ def check_themes(root: Path, errors: list[str]) -> None:
                 fail(errors, f"{name} {text_token} contrast {ratio:.2f}:1 < 4.5:1")
 
 
-def check_main_geometry(text: str, errors: list[str]) -> None:
+def declared_geometry(text: str) -> tuple[int, int] | None:
     width = re.search(r"\bwidth:\s*(\d+)px", text)
     height = re.search(r"\bheight:\s*(\d+)px", text)
     if not width or not height:
+        return None
+    return int(width.group(1)), int(height.group(1))
+
+
+def check_main_geometry(text: str, errors: list[str]) -> None:
+    geometry = declared_geometry(text)
+    if geometry is None:
         fail(errors, "main window must declare fixed compact width/height")
         return
-    w, h = int(width.group(1)), int(height.group(1))
+    w, h = geometry
     if w > 500 or h > 600:
         fail(errors, f"main window too large for compact contract: {w}x{h}")
     if w < 400 or h < 400:
         fail(errors, f"main window too small for planned production controls: {w}x{h}")
+
+
+def check_secondary_geometry(root: Path, errors: list[str]) -> None:
+    for rel, minimum_height in SECONDARY_MIN_HEIGHT.items():
+        text = read(root / rel, errors)
+        geometry = declared_geometry(text)
+        if geometry is None:
+            fail(errors, f"{rel}: must declare fixed width/height")
+            continue
+        w, h = geometry
+        if h < minimum_height:
+            fail(errors, f"{rel}: height {h}px below reviewed content budget {minimum_height}px")
+        if w > 760 or h > 760:
+            fail(errors, f"{rel}: window too large for compact secondary-surface contract: {w}x{h}")
+
+
+def check_authoritative_controls(root: Path, errors: list[str]) -> None:
+    for rel in (
+        "ui/audited/preferences-window.slint",
+        "ui/audited/automation-window.slint",
+    ):
+        text = read(root / rel, errors)
+        if re.search(r"\bToggleRow\s*\{", text):
+            fail(errors, f"{rel}: backend-owned toggles must use RequestToggleRow")
 
 
 def run(root: Path) -> list[str]:
@@ -289,6 +335,8 @@ def run(root: Path) -> list[str]:
 
     main = read(root / "ui/audited/main-window.slint", errors)
     check_main_geometry(main, errors)
+    check_secondary_geometry(root, errors)
+    check_authoritative_controls(root, errors)
     check_themes(root, errors)
     return errors
 
