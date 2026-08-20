@@ -12,6 +12,10 @@ mod automation_backend;
 #[path = "extra_backend.rs"]
 mod extra_backend;
 
+use std::sync::Arc;
+
+use orbis_capabilities::CapabilityRegistrySnapshot;
+use orbis_core::telemetry::Telemetry;
 use slint::ComponentHandle;
 
 use crate::{AppWindow, AutomationWindow, ExtraWindow, ThemeState};
@@ -24,6 +28,33 @@ pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
 pub(crate) fn clear() {
     automation_backend::clear();
     extra_backend::clear();
+}
+
+/// Publish one immutable capability generation to the Automation shadow
+/// runtime. No capability is mutated or synthesized here.
+pub(crate) fn replace_automation_capabilities(snapshot: Arc<CapabilityRegistrySnapshot>) {
+    automation_backend::replace_capabilities(snapshot);
+}
+
+/// Feed one successful authoritative telemetry snapshot to Automation shadow
+/// observation. A notice is surfaced only for a confirmed transition that
+/// reached freshness/preflight evaluation; ordinary polling does not churn the
+/// Automation status line.
+pub(crate) fn observe_automation_telemetry(telemetry: &Telemetry) {
+    let Some(status) = automation_backend::observe_telemetry(telemetry) else {
+        return;
+    };
+
+    crate::AUTOMATION_WINDOW.with(|slot| {
+        let slot = slot.borrow();
+        let Some(window) = slot.as_ref() else {
+            return;
+        };
+        if !window.get_saving() {
+            window.set_runtime_ready(false);
+            window.set_status(status.into());
+        }
+    });
 }
 
 fn show_extra_window() -> Result<(), slint::PlatformError> {
@@ -111,5 +142,13 @@ mod tests {
         assert!(!source.contains("app.on_perf_clicked"));
         assert!(!source.contains("app.on_charge_changed"));
         assert!(!source.contains("app.on_fans_clicked"));
+    }
+
+    #[test]
+    fn shadow_bridge_is_observation_only() {
+        let source = include_str!("secondary_windows_backend.rs");
+        assert!(source.contains("observe_automation_telemetry"));
+        assert!(source.contains("replace_automation_capabilities"));
+        assert!(source.contains("set_runtime_ready(false)"));
     }
 }
