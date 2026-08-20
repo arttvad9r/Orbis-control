@@ -103,6 +103,10 @@ fn latest_snapshot(context: &DiagnosticsContext) -> Option<DiagnosticsUiDto> {
     }
 }
 
+fn export_path_available() -> bool {
+    orbis_config::paths::state_dir_checked().is_ok()
+}
+
 pub(crate) fn refresh(window: &DiagnosticsWindow) {
     if window.get_refresh_pending() {
         return;
@@ -132,13 +136,20 @@ pub(crate) fn refresh(window: &DiagnosticsWindow) {
         let snapshot = source.snapshot().await;
         let dto = DiagnosticsUiDto::from_snapshot(&snapshot);
         let model = DiagnosticsWindowModel::from_dto(&dto);
-        let export_ready = store_latest(&publish_context, dto);
+        let export_ready = store_latest(&publish_context, dto) && export_path_available();
 
         if let Err(error) = weak.upgrade_in_event_loop(move |window| {
             apply_model(&window, model);
             window.set_refresh_pending(false);
             window.set_refresh_enabled(true);
-            window.set_local_status("Snapshot refreshed".into());
+            window.set_local_status(
+                if export_ready {
+                    "Snapshot refreshed"
+                } else {
+                    "Snapshot refreshed · export unavailable"
+                }
+                .into(),
+            );
             // Clipboard/log host actions remain unavailable until their own
             // stable host integrations exist. Export uses only the frozen,
             // privacy-reviewed DTO captured above.
@@ -169,6 +180,12 @@ fn export_report(window: &DiagnosticsWindow) {
         return;
     };
 
+    if !export_path_available() {
+        window.set_export_enabled(false);
+        window.set_local_status("Diagnostics export path unavailable".into());
+        return;
+    }
+
     // Refresh and export are serialized so an older export completion cannot
     // re-enable actions over a newer pending snapshot.
     window.set_refresh_enabled(false);
@@ -180,18 +197,20 @@ fn export_report(window: &DiagnosticsWindow) {
         let result = tokio::task::spawn_blocking(move || write_report(&dto)).await;
         if let Err(error) = weak.upgrade_in_event_loop(move |window| {
             window.set_refresh_enabled(true);
-            window.set_export_enabled(true);
             match result {
                 Ok(Ok(path)) => {
+                    window.set_export_enabled(true);
                     window.set_local_status(format!("Exported · {}", path.display()).into());
                 }
                 Ok(Err(error)) => {
                     tracing::warn!(error = %error, "diagnostics report export failed");
-                    window.set_local_status("Report export failed".into());
+                    window.set_export_enabled(false);
+                    window.set_local_status("Report export failed · refresh to retry".into());
                 }
                 Err(error) => {
                     tracing::warn!(error = %error, "diagnostics report export task failed");
-                    window.set_local_status("Report export failed".into());
+                    window.set_export_enabled(false);
+                    window.set_local_status("Report export failed · refresh to retry".into());
                 }
             }
         }) {
@@ -366,5 +385,12 @@ mod tests {
         assert!(source.contains("window.set_export_enabled(false);"));
         assert!(source.contains("window.set_refresh_enabled(true);"));
         assert!(source.contains("if window.get_refresh_pending()"));
+    }
+
+    #[test]
+    fn export_failure_stays_fail_closed_until_refresh() {
+        let source = include_str!("diagnostics_backend.rs");
+        assert!(source.contains("Report export failed · refresh to retry"));
+        assert!(source.contains("export_path_available"));
     }
 }
