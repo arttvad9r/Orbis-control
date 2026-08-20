@@ -16,12 +16,10 @@ async-trait = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 zbus = { workspace = true, features = ["p2p"] }
-# Typed Wayland/KMS evidence stack. Exact compatible versions are already
-# present in Cargo.lock through Slint/Smithay; making them direct dependencies
-# does not introduce a new protocol implementation or generic mutation surface.
+# Mature typed Wayland client binding (уже в дереве зависимостей через
+# slint/winit). Используется только для read-only чтения wl_output; никакого
+# compositor toolkit и никаких writes.
 wayland-client = "0.31"
-wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
-drm = "0.14"
 orbis-core = { workspace = true }
 orbis-capabilities = { workspace = true }
 
