@@ -121,17 +121,18 @@ pub(crate) fn wire_window(window: &DiagnosticsWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
-    fn model_application_is_pure_property_projection_contract() {
-        // Keep this module's production boundary explicit: it depends only on
-        // the read-only DiagnosticsRuntime and presentation projection types.
+    fn bridge_source_contains_no_hardware_mutation_commands() {
         let source = include_str!("diagnostics_backend.rs");
-        assert!(!source.contains("WorkerCommand::Set"));
-        assert!(!source.contains("set_fan_curve"));
-        assert!(!source.contains("set_gpu_mode"));
-        assert!(!source.contains("set_charge_limit"));
-        assert!(!source.contains("set_performance"));
+        let forbidden = [
+            ["WorkerCommand::", "Set"].concat(),
+            ["set_", "fan_curve"].concat(),
+            ["set_", "gpu_mode"].concat(),
+            ["set_", "charge_limit"].concat(),
+            ["set_", "performance"].concat(),
+        ];
+        for needle in forbidden {
+            assert!(!source.contains(&needle), "unexpected mutation token: {needle}");
+        }
     }
 }
