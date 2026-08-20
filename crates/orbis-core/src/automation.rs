@@ -148,6 +148,19 @@ impl PowerSourceEdgeDetector {
         self.stable
     }
 
+    /// Replace the stable source with a separately proven authoritative value.
+    ///
+    /// This does not emit a transition. It exists for lifecycle coalescing:
+    /// when an enabled `OnResume` reconciliation has already accepted a fresh
+    /// post-resume power source, that source becomes the new baseline so the
+    /// same change is not emitted again as `OnAc`/`OnBattery` one poll later.
+    /// Callers must not use this to bypass the detector's normal freshness or
+    /// debounce checks; the supplied value must have been proven elsewhere.
+    pub fn rebaseline(&mut self, ac_online: bool) {
+        self.stable = Some(ac_online);
+        self.reset_candidate();
+    }
+
     /// Consume one observation with an explicit caller-supplied clock value.
     ///
     /// Supplying `now` keeps freshness behavior deterministic in tests and
@@ -270,6 +283,56 @@ mod tests {
             PowerSourceObservationOutcome::Trigger(AutomationTrigger::OnBattery)
         );
         assert_eq!(detector.stable_ac_online(), Some(false));
+    }
+
+    #[test]
+    fn explicit_rebaseline_consumes_pending_edge_without_emitting_transition() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let mut detector = PowerSourceEdgeDetector::default();
+        detector.observe(Some(true), base, base);
+        assert_eq!(
+            detector.observe(
+                Some(false),
+                base + Duration::from_secs(1),
+                base + Duration::from_secs(1),
+            ),
+            PowerSourceObservationOutcome::Candidate
+        );
+
+        detector.rebaseline(false);
+        assert_eq!(detector.stable_ac_online(), Some(false));
+        assert_eq!(
+            detector.observe(
+                Some(false),
+                base + Duration::from_secs(2),
+                base + Duration::from_secs(2),
+            ),
+            PowerSourceObservationOutcome::Stable
+        );
+    }
+
+    #[test]
+    fn rebaseline_does_not_emit_and_future_real_edge_still_debounces_normally() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let mut detector = PowerSourceEdgeDetector::default();
+        detector.rebaseline(false);
+
+        assert_eq!(
+            detector.observe(
+                Some(true),
+                base + Duration::from_secs(1),
+                base + Duration::from_secs(1),
+            ),
+            PowerSourceObservationOutcome::Candidate
+        );
+        assert_eq!(
+            detector.observe(
+                Some(true),
+                base + Duration::from_secs(2),
+                base + Duration::from_secs(2),
+            ),
+            PowerSourceObservationOutcome::Trigger(AutomationTrigger::OnAc)
+        );
     }
 
     #[test]
