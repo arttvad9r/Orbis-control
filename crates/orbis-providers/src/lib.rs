@@ -33,6 +33,7 @@ pub mod system_metadata;
 pub mod telemetry_diagnostics;
 pub mod traits;
 pub mod wayland_output;
+pub mod wayland_output_management;
 
 #[cfg(feature = "mock")]
 pub mod mock;
@@ -64,6 +65,7 @@ pub use system_metadata::SystemMetadataProvider;
 pub use telemetry_diagnostics::telemetry_diagnostics_after_attempt;
 pub use traits::*;
 pub use wayland_output::*;
+pub use wayland_output_management::*;
 
 #[cfg(feature = "mock")]
 pub use mock::{MockErrorMode, MockProvider, MockState, MockStateError};
