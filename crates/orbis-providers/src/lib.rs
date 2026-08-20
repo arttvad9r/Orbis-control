@@ -19,6 +19,7 @@ pub mod asus_diagnostics;
 pub mod aura;
 pub mod display_diagnostics;
 pub mod error;
+pub mod execution;
 pub mod fan_defaults;
 pub mod gpu_diagnostics;
 pub mod hardware_identity;
@@ -43,6 +44,7 @@ pub use asus_diagnostics::{
 pub use aura::*;
 pub use display_diagnostics::display_diagnostics_snapshot;
 pub use error::{OperationId, ProviderError, ValidationResult};
+pub use execution::bounded_provider_call;
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 pub use gpu_diagnostics::gpu_diagnostics_snapshot;
 pub use hardware_identity::HardwareIdentityProvider;
