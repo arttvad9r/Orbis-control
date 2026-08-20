@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 FILES = {
+    "agents": "AGENTS.md",
     "root": "README.md",
     "index": "docs/README.md",
     "state": "docs/current-state.md",
@@ -23,6 +24,15 @@ FILES = {
 }
 
 REQUIRED = {
+    "agents": (
+        "worker_runtime.rs",
+        "read-only CLI",
+        "status --json",
+        "python3 scripts/verify-static",
+        "--locked",
+        "mutation timeout after a request may have been dispatched is an **unknown outcome**",
+        "#125",
+    ),
     "root": (
         "chatgpt/ui-refresh-ghelper-20260820",
         "worker_runtime.rs",
@@ -84,6 +94,10 @@ REQUIRED = {
 }
 
 FORBIDDEN = {
+    "agents": (
+        "current binary remains incomplete",
+        "orbis-ui` — Slint UI (src + `ui/` Slint files)",
+    ),
     "state": (
         "Run on Startup | PARTIAL",
         "Diagnostics | TESTED FOUNDATION / FAIL-CLOSED UI",
