@@ -145,8 +145,9 @@ impl AutomationRecoveryBarrier {
         let Some(record) = self.pending.as_ref() else {
             return AutomationPerformanceRecoveryOutcome::NotRequired;
         };
-        let AutomationRecoveryKind::Performance { requested } = record.kind;
-        let requested = requested;
+        let requested = match &record.kind {
+            AutomationRecoveryKind::Performance { requested } => *requested,
+        };
         let current = state.current;
 
         self.pending = None;
@@ -174,10 +175,7 @@ mod tests {
     };
     use orbis_core::telemetry::Telemetry;
 
-    use crate::automation_execution_guard::{
-        AutomationExecutionCandidate, AutomationExecutionGuardOutcome,
-        revalidate_automation_candidate,
-    };
+    use crate::automation_execution_guard::AutomationExecutionCandidate;
     use crate::automation_lifecycle_revision::{
         AutomationLifecycleClock, AutomationRevisionCandidate, AutomationRevisionGuardOutcome,
         revalidate_revision_candidate,
@@ -322,8 +320,6 @@ mod tests {
         let mut barrier = AutomationRecoveryBarrier::new();
         barrier.mark_performance_unknown(&lease, PerformanceProfile::Balanced);
         let before = barrier.pending().cloned();
-        // The barrier intentionally exposes no lifecycle/policy/capability clear
-        // method. Merely inspecting different numbers cannot change it.
         let _newer_revision = AutomationLifecycleRevision::INITIAL;
         let _newer_generation = 99_u64;
         assert_eq!(barrier.pending(), before.as_ref());
