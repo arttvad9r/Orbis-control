@@ -15,6 +15,11 @@ import sys
 from pathlib import Path
 
 PRODUCTION_SURFACES = {
+    "ui/audited/common.slint": [
+        "WidgetPalette",
+        "color-scheme",
+        "changed observed-mode",
+    ],
     "ui/audited/main-window.slint": [
         "display-mode-requested",
         "keyboard-brightness-requested",
@@ -22,17 +27,20 @@ PRODUCTION_SURFACES = {
         "diagnostics-clicked",
     ],
     "ui/audited/preferences-window.slint": [
+        "ThemeBridge",
         "startup-changed",
         "start-minimized-changed",
         "remember-position-changed",
         "close-action-changed",
     ],
     "ui/audited/automation-window.slint": [
+        "ThemeBridge",
         "backend-ready",
         "save-requested",
         "reset-requested",
     ],
     "ui/audited/extra-window.slint": [
+        "ThemeBridge",
         "backend-ready",
         "reload-requested",
         "apply-requested",
@@ -44,12 +52,14 @@ PRODUCTION_SURFACES = {
         "export-report-requested",
     ],
     "ui/audited/updates-window.slint": [
+        "ThemeBridge",
         "backend-ready",
         "check-requested",
         "install-requested",
         "channel-requested",
     ],
     "ui/audited/fans-window.slint": [
+        "ThemeBridge",
         "mutation-safety-blocked",
         "curve-enabled-known",
         "fan-apply-clicked",
@@ -187,6 +197,8 @@ def check_imports(root: Path, path: Path, text: str, errors: list[str]) -> None:
 
 
 def has_identifier(text: str, marker: str) -> bool:
+    if " " in marker:
+        return marker in text
     pattern = rf"(?<![A-Za-z0-9_-]){re.escape(marker)}(?![A-Za-z0-9_-])"
     return re.search(pattern, text) is not None
 
