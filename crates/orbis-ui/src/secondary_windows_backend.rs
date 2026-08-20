@@ -3,14 +3,17 @@
 //! `main.rs` still owns the native secondary-window handles. The existing
 //! `quick_controls_backend::{initialize,wire_window,clear}` lifecycle hook is
 //! called after the legacy AppWindow callbacks are registered, so this module
-//! uses that hook to replace only Extra/Automation open handlers without a
-//! high-risk full replacement of the large entrypoint. The feature backends
-//! remain separate files and this coordinator contains no hardware mutation.
+//! installs the narrow secondary/lifecycle bridges without duplicating hardware
+//! mutation ownership.
 
 #[path = "automation_backend.rs"]
 mod automation_backend;
 #[path = "extra_backend.rs"]
 mod extra_backend;
+#[path = "window_lifecycle_backend.rs"]
+mod window_lifecycle_backend;
+#[path = "window_position_preferences_bridge.rs"]
+mod window_position_preferences_bridge;
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -37,8 +40,6 @@ fn reset_automation_lifecycle_clock() {
     });
 }
 
-/// Current confirmed lifecycle revision. Revision zero means this process has
-/// not yet admitted any confirmed Automation lifecycle event.
 pub(crate) fn current_automation_revision() -> AutomationLifecycleRevision {
     AUTOMATION_LIFECYCLE_CLOCK.with(|clock| clock.borrow().current())
 }
@@ -65,11 +66,6 @@ pub(crate) fn clear() {
     reset_automation_lifecycle_clock();
 }
 
-/// Publish one immutable capability generation to the Automation shadow
-/// runtime. Until the global production probe owns `FeatureId::Automation`, the
-/// shadow consumer receives a canonical copy augmented with explicit read-only
-/// Automation evidence. No source capability, generation or timestamp is
-/// modified and write support is never upgraded.
 pub(crate) fn replace_automation_capabilities(snapshot: Arc<CapabilityRegistrySnapshot>) {
     match augment_snapshot_with_automation_shadow(snapshot.as_ref()) {
         Ok(augmented) => automation_backend::replace_capabilities(Arc::new(augmented)),
@@ -84,19 +80,11 @@ pub(crate) fn replace_automation_capabilities(snapshot: Arc<CapabilityRegistrySn
     }
 }
 
-/// Feed one logind `PrepareForSleep(bool)` observation into the hardware-inert
-/// resume gate. This signal does not advance lifecycle revision by itself; a
-/// revision exists only after later fresh post-resume telemetry confirms the
-/// lifecycle event and reaches shadow evaluation.
 pub(crate) fn observe_prepare_for_sleep(start: bool, observed_at: SystemTime) {
     let outcome = automation_backend::observe_prepare_for_sleep(start, observed_at);
     tracing::debug!(start, outcome = ?outcome, "Automation resume lifecycle observation");
 }
 
-/// Feed one successful authoritative telemetry snapshot to Automation shadow
-/// observation. Ordinary baseline/stable/candidate polling returns no notice and
-/// therefore does not advance revision. A notice means one confirmed lifecycle
-/// event reached freshness/preflight evaluation; only then is revision advanced.
 pub(crate) fn observe_automation_telemetry(telemetry: &Telemetry) {
     let Some(status) = automation_backend::observe_telemetry(telemetry) else {
         return;
@@ -151,10 +139,6 @@ fn show_automation_window() -> Result<(), slint::PlatformError> {
             .global::<ThemeState>()
             .set_mode(crate::current_theme_mode());
         window.show()?;
-
-        // Preserve an editable unsaved draft while the persistence backend is
-        // healthy. A failed initial load/save can recover on the next open by
-        // reloading authoritative disk state.
         if !window.get_backend_ready() && !window.get_saving() {
             automation_backend::reload(window);
         }
@@ -162,12 +146,24 @@ fn show_automation_window() -> Result<(), slint::PlatformError> {
     })
 }
 
-/// Replace only the legacy Extra/Automation open callbacks.
-///
-/// `quick_controls_backend::wire_window` is called after `wire_callbacks` in
-/// the current entrypoint, so these registrations become the active handlers.
-/// No other AppWindow callback is changed here.
+fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
+    // Keep the established theme/autostart/start-minimized bridge in main.rs.
+    // After it has created/shown the window, attach only the new position
+    // callback to the same component instance.
+    crate::show_preferences_window(app)?;
+    crate::PREFERENCES_WINDOW.with(|slot| {
+        if let Some(window) = slot.borrow().as_ref() {
+            window_position_preferences_bridge::wire(window, app);
+        }
+    });
+    Ok(())
+}
+
+/// Install secondary-window and safe desktop-lifecycle callbacks after the
+/// legacy callback layer. Hardware command callbacks remain untouched.
 pub(crate) fn wire_window(app: &AppWindow) {
+    window_lifecycle_backend::wire_app_window(app);
+
     app.on_extra_clicked(|| {
         if let Err(error) = show_extra_window() {
             tracing::warn!(error = ?error, "failed to open wired ExtraWindow");
@@ -179,6 +175,18 @@ pub(crate) fn wire_window(app: &AppWindow) {
             tracing::warn!(error = ?error, "failed to open wired AutomationWindow");
         }
     });
+
+    {
+        let weak = app.as_weak();
+        app.on_preferences_clicked(move || {
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            if let Err(error) = show_preferences_window(&app) {
+                tracing::warn!(error = ?error, "failed to open wired PreferencesWindow");
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -199,10 +207,12 @@ mod tests {
     }
 
     #[test]
-    fn coordinator_only_replaces_extra_and_automation_app_callbacks() {
+    fn coordinator_replaces_only_secondary_and_desktop_lifecycle_callbacks() {
         let source = include_str!("secondary_windows_backend.rs");
         assert!(source.contains("app.on_extra_clicked"));
         assert!(source.contains("app.on_automation_clicked"));
+        assert!(source.contains("app.on_preferences_clicked"));
+        assert!(source.contains("wire_app_window(app)"));
         assert!(!source.contains("app.on_perf_clicked"));
         assert!(!source.contains("app.on_charge_changed"));
         assert!(!source.contains("app.on_fans_clicked"));
