@@ -107,7 +107,7 @@ export component AutomationWindow inherits Window {
                     SectionTitle { title: "AC Power"; detail: root.runtime-ready && root.enabled ? "Active policy" : "Policy draft"; }
                     PolicyRow { label: "Performance"; disabled: !root.backend-ready || root.saving; model: ["Silent", "Balanced", "Turbo", "Keep current"]; current-index: root.ac-profile; changed(i) => { root.ac-profile-requested(i); } }
                     PolicyRow { label: "GPU"; disabled: !root.backend-ready || root.saving; model: ["Eco", "Standard", "Optimized", "Keep current"]; current-index: root.ac-gpu; changed(i) => { root.ac-gpu-requested(i); } }
-                    PolicyRow { label: "Display"; disabled: !root.backend-ready || root.saving; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index: root.ac-display; changed(i) => { root.ac-display_requested(i); } }
+                    PolicyRow { label: "Display"; disabled: !root.backend-ready || root.saving; model: ["60 Hz", "120 Hz", "Auto", "Keep current"]; current-index: root.ac-display; changed(i) => { root.ac-display-requested(i); } }
                     PolicyRow { label: "Lighting"; disabled: !root.backend-ready || root.saving; model: ["Off", "Dim", "Normal", "Keep current"]; current-index: root.ac-lighting; changed(i) => { root.ac-lighting-requested(i); } }
                 }
             }
