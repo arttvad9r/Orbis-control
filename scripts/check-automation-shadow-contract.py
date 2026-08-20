@@ -30,6 +30,7 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "BaselineEstablished",
         "IgnoredStale",
         "required_confirmations",
+        "rebaseline",
     ),
     "crates/orbis-config/src/automation_store.rs": (
         "load_automation_policy",
@@ -48,6 +49,8 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "CapabilitySnapshotStale",
         "ReadyButExecutionDisabled",
         "preflight_automation_plan",
+        "policy.enabled && policy.on_resume",
+        "rebaseline(ac_online)",
     ),
     "crates/orbis-ui/src/automation_execution_guard.rs": (
         "AutomationExecutionCandidate",
@@ -68,6 +71,7 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "org.freedesktop.login1.Manager",
         "PrepareForSleep",
         "receive_signal",
+        "ordered_stream::OrderedStreamExt",
         "upgrade_in_event_loop",
         "observe_automation_from_sysfs",
     ),
@@ -304,10 +308,20 @@ def check_resume_observer(root: Path, errors: list[str]) -> None:
 def check_manifests(root: Path, errors: list[str]) -> None:
     workspace = read_required(root, "Cargo.toml", errors)
     ui = read_required(root, "crates/orbis-ui/Cargo.toml", errors)
-    if workspace is not None and 'futures-util = "0.3"' not in workspace:
-        errors.append("Cargo.toml: missing pinned workspace futures-util dependency")
-    if ui is not None and "futures-util = { workspace = true }" not in ui:
-        errors.append("crates/orbis-ui/Cargo.toml: missing workspace futures-util dependency")
+    if workspace is not None:
+        if re.search(r"(?m)^\s*futures-util\s*=", workspace):
+            errors.append(
+                "Cargo.toml: direct futures-util dependency is unnecessary; use zbus ordered_stream re-export"
+            )
+        if 'zbus = "5"' not in workspace:
+            errors.append("Cargo.toml: missing workspace zbus dependency")
+    if ui is not None:
+        if re.search(r"(?m)^\s*futures-util\s*=", ui):
+            errors.append(
+                "crates/orbis-ui/Cargo.toml: direct futures-util dependency would require lockfile update"
+            )
+        if "zbus = { workspace = true }" not in ui:
+            errors.append("crates/orbis-ui/Cargo.toml: missing workspace zbus dependency")
 
 
 def run(root: Path) -> list[str]:
