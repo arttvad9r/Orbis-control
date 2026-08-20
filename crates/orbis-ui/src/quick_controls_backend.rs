@@ -1,3 +1,5 @@
+#[path = "hardware_controls_backend.rs"]
+pub(crate) mod hardware_controls_backend;
 #[path = "resume_observer.rs"]
 mod resume_observer;
 #[path = "secondary_windows_backend.rs"]
@@ -8,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use hardware_controls_backend::{HardwareProductControlClient, ProductWriteStatus};
 use orbis_core::display_output::DisplayOutputSnapshot;
 use orbis_core::keyboard_backlight::KeyboardBacklightState;
 use orbis_providers::error::ProviderError;
@@ -46,6 +49,7 @@ struct DisplayUiState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct KeyboardUiState {
     state_ready: bool,
+    control_ready: bool,
     brightness: i32,
     status: String,
 }
@@ -91,7 +95,7 @@ pub(crate) fn wire_window(app: &AppWindow) {
     // can be marshalled back onto the Slint event-loop thread before touching
     // thread-local backend state. Offscreen/test builds without initialize()
     // never attempt a system-bus connection.
-    if let Some(context) = context {
+    if let Some(context) = context.as_ref() {
         if !context.resume_observer_started.swap(true, Ordering::AcqRel) {
             resume_observer::spawn(context.runtime.clone(), app.as_weak());
         }
@@ -127,12 +131,65 @@ pub(crate) fn wire_window(app: &AppWindow) {
             "display mode request ignored: production display backend is read-only"
         );
     });
-    app.on_keyboard_brightness_requested(|level| {
-        tracing::warn!(
-            requested_level = level,
-            "keyboard brightness request ignored: production mutation is product-policy disabled"
-        );
-    });
+
+    {
+        let weak = app.as_weak();
+        let request_context = context.clone();
+        app.on_keyboard_brightness_requested(move |level| {
+            let Some(context) = request_context.clone() else {
+                tracing::warn!(requested_level = level, "keyboard request ignored: runtime absent");
+                return;
+            };
+            let Ok(level) = u8::try_from(level) else {
+                tracing::warn!(requested_level = level, "keyboard request ignored: invalid level");
+                return;
+            };
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            if !app.get_keyboard_control_ready() {
+                tracing::warn!(requested_level = level, "keyboard request ignored: write evidence unavailable");
+                return;
+            }
+
+            // Request-only semantics: disable editing immediately, but retain
+            // the authoritative observed brightness until Hardware1 confirms a
+            // fresh read-back. The client re-checks mutation status just before
+            // the setter, so a stale UI readiness bit cannot authorize a write.
+            app.set_keyboard_control_ready(false);
+            app.set_keyboard_status("Applying keyboard brightness…".into());
+            let weak = app.as_weak();
+            context.runtime.spawn(async move {
+                let result = async {
+                    let client = HardwareProductControlClient::connect_system().await?;
+                    client.set_keyboard_backlight(level).await
+                }
+                .await;
+
+                if let Err(error) = weak.upgrade_in_event_loop(move |app| {
+                    match result {
+                        Ok(observed) => {
+                            app.set_keyboard_brightness(i32::from(observed));
+                            app.set_keyboard_status(
+                                format!("Level {observed} · Hardware1 read-back confirmed").into(),
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = ?error, "keyboard brightness mutation failed");
+                            app.set_keyboard_status(
+                                format!("Keyboard write failed · {}", write_error_label(&error)).into(),
+                            );
+                        }
+                    }
+                    // Re-read both observed state and current mutation evidence;
+                    // no success/readiness is inferred from the request itself.
+                    refresh(&app, None);
+                }) {
+                    tracing::warn!(error = ?error, "failed to publish keyboard mutation result");
+                }
+            });
+        });
+    }
 
     // The current entrypoint invokes this function after legacy AppWindow
     // callbacks are registered. The coordinator replaces only Extra/Automation
@@ -232,11 +289,14 @@ fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
     let weak = app.as_weak();
     let completion = context.refreshing.clone();
     context.runtime.spawn(async move {
-        let (display_result, keyboard_result) =
-            tokio::join!(read_display_state(), read_keyboard_state());
+        let (display_result, keyboard_result, keyboard_write_result) = tokio::join!(
+            read_display_state(),
+            read_keyboard_state(),
+            read_keyboard_write_status(),
+        );
 
         let display = display_state(display_result);
-        let keyboard = keyboard_state(keyboard_result);
+        let keyboard = keyboard_state(keyboard_result, keyboard_write_result);
         completion.store(false, Ordering::Release);
 
         if let Err(error) = weak.upgrade_in_event_loop(move |app| {
@@ -246,10 +306,7 @@ fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
             app.set_display_status(display.status.into());
 
             app.set_keyboard_state_ready(keyboard.state_ready);
-            // Hardware1 has a typed keyboard mutation implementation, but the
-            // production daemon intentionally composes a disabled backend and
-            // reports Unsupported. Keep the UI request surface fail-closed.
-            app.set_keyboard_control_ready(false);
+            app.set_keyboard_control_ready(keyboard.control_ready);
             app.set_keyboard_brightness(keyboard.brightness);
             app.set_keyboard_status(keyboard.status.into());
         }) {
@@ -270,6 +327,11 @@ async fn read_keyboard_state() -> Result<KeyboardBacklightState, ProviderError> 
     tokio::time::timeout(READ_TIMEOUT, provider.keyboard_backlight_state())
         .await
         .map_err(|_| ProviderError::Timeout("quick controls keyboard read timed out".into()))?
+}
+
+async fn read_keyboard_write_status() -> Result<ProductWriteStatus, ProviderError> {
+    let client = HardwareProductControlClient::connect_system().await?;
+    client.keyboard_status().await
 }
 
 fn display_state(result: Result<DisplayOutputSnapshot, ProviderError>) -> DisplayUiState {
@@ -328,19 +390,30 @@ fn refresh_label(refresh_mhz: u32) -> String {
     format!("{:.2} Hz", refresh_mhz as f64 / 1_000.0)
 }
 
-fn keyboard_state(result: Result<KeyboardBacklightState, ProviderError>) -> KeyboardUiState {
+fn keyboard_state(
+    result: Result<KeyboardBacklightState, ProviderError>,
+    write_status: Result<ProductWriteStatus, ProviderError>,
+) -> KeyboardUiState {
     match result {
-        Ok(state) => KeyboardUiState {
-            state_ready: true,
-            brightness: i32::from(state.current.get()),
-            status: format!(
-                "Level {}/{} · write disabled",
-                state.current.get(),
-                state.max.get()
-            ),
-        },
+        Ok(state) => {
+            let (control_ready, write_label) = match write_status {
+                Ok(status) => (status.is_supported(), status.short_label().to_string()),
+                Err(error) => (false, write_error_label(&error).to_string()),
+            };
+            KeyboardUiState {
+                state_ready: true,
+                control_ready,
+                brightness: i32::from(state.current.get()),
+                status: format!(
+                    "Level {}/{} · {write_label}",
+                    state.current.get(),
+                    state.max.get()
+                ),
+            }
+        }
         Err(error) => KeyboardUiState {
             state_ready: false,
+            control_ready: false,
             brightness: -1,
             status: read_error_status("Keyboard", &error),
         },
@@ -354,6 +427,16 @@ fn read_error_status(prefix: &str, error: &ProviderError) -> String {
         ProviderError::BackendUnavailable(_) => format!("{prefix} backend unavailable"),
         ProviderError::Timeout(_) => format!("{prefix} read timed out"),
         _ => format!("{prefix} state unavailable"),
+    }
+}
+
+fn write_error_label(error: &ProviderError) -> &'static str {
+    match error {
+        ProviderError::Unsupported(_) => "write disabled",
+        ProviderError::PermissionDenied(_) => "write denied",
+        ProviderError::BackendUnavailable(_) => "write unavailable",
+        ProviderError::Timeout(_) => "write status timed out",
+        _ => "write status unknown",
     }
 }
 
@@ -413,15 +496,29 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_mapping_preserves_hardware_max_and_never_claims_write() {
-        let state = keyboard_state(Ok(KeyboardBacklightState {
-            current: KeyboardBrightnessLevel::new(2),
-            max: KeyboardBrightnessLevel::new(4),
-        }));
+    fn keyboard_mapping_preserves_hardware_max_and_effective_write_status() {
+        let state = keyboard_state(
+            Ok(KeyboardBacklightState {
+                current: KeyboardBrightnessLevel::new(2),
+                max: KeyboardBrightnessLevel::new(4),
+            }),
+            Ok(ProductWriteStatus::Unsupported),
+        );
         assert!(state.state_ready);
+        assert!(!state.control_ready);
         assert_eq!(state.brightness, 2);
         assert!(state.status.contains("2/4"));
         assert!(state.status.contains("write disabled"));
+
+        let writable = keyboard_state(
+            Ok(KeyboardBacklightState {
+                current: KeyboardBrightnessLevel::new(1),
+                max: KeyboardBrightnessLevel::new(4),
+            }),
+            Ok(ProductWriteStatus::Supported),
+        );
+        assert!(writable.control_ready);
+        assert!(writable.status.contains("write ready"));
     }
 
     #[test]
@@ -434,5 +531,14 @@ mod tests {
         assert!(source.contains("AUTOMATION_READ_TIMEOUT"));
         let mutation = ["WorkerCommand::", "Set"].concat();
         assert!(!source.contains(&mutation));
+    }
+
+    #[test]
+    fn keyboard_mutation_is_status_gated_and_readback_driven() {
+        let source = include_str!("quick_controls_backend.rs");
+        assert!(source.contains("read_keyboard_write_status"));
+        assert!(source.contains("get_keyboard_control_ready"));
+        assert!(source.contains("set_keyboard_backlight(level)"));
+        assert!(source.contains("refresh(&app, None)"));
     }
 }
