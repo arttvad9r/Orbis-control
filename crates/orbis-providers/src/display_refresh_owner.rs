@@ -121,13 +121,13 @@ pub fn validate_display_refresh_readback(
     }
 
     let policy_matches = match request.preset_target() {
-        DisplayRefreshPresetTarget::Auto => {
-            after.policy == DisplayRefreshActivePolicy::Auto
-        }
+        DisplayRefreshPresetTarget::Auto => after.policy == DisplayRefreshActivePolicy::Auto,
         DisplayRefreshPresetTarget::Hz60 { refresh }
         | DisplayRefreshPresetTarget::Hz120 { refresh } => {
-            after.policy == DisplayRefreshActivePolicy::Fixed { refresh }
-                && after.current.refresh == refresh
+            matches!(
+                after.policy,
+                DisplayRefreshActivePolicy::Fixed { refresh: active } if active == refresh
+            ) && after.current.refresh == refresh
         }
     };
     if !policy_matches {
@@ -143,9 +143,7 @@ pub fn validate_display_refresh_readback(
 mod tests {
     use super::*;
     use orbis_core::display_output::DisplayMode;
-    use orbis_core::display_refresh::{
-        DisplayRefreshPreset, DisplayRefreshTargetId,
-    };
+    use orbis_core::display_refresh::{DisplayRefreshPreset, DisplayRefreshTargetId};
     use orbis_core::newtypes::RefreshMilliHz;
 
     fn mode(width: u32, height: u32, refresh: u32) -> DisplayMode {
@@ -156,7 +154,11 @@ mod tests {
         )
     }
 
-    fn evidence(target: &str, role: DisplayRefreshTargetRole, high_refresh: u32) -> DisplayRefreshEvidence {
+    fn evidence(
+        target: &str,
+        role: DisplayRefreshTargetRole,
+        high_refresh: u32,
+    ) -> DisplayRefreshEvidence {
         DisplayRefreshEvidence::from_observed_modes(
             DisplayRefreshTargetId::new(target),
             role,
@@ -345,27 +347,31 @@ mod tests {
             refresh: RefreshMilliHz::new(59_940).unwrap(),
         };
 
-        assert!(validate_display_refresh_readback(
-            &request,
-            &before,
-            &applied(
-                "owner:panel-1",
-                DisplayRefreshTargetRole::InternalPanelProven,
-                59_940,
-                fixed,
-            ),
-        )
-        .is_err());
-        assert!(validate_display_refresh_readback(
-            &request,
-            &before,
-            &applied(
-                "owner:panel-0",
-                DisplayRefreshTargetRole::Unknown,
-                59_940,
-                fixed,
-            ),
-        )
-        .is_err());
+        assert!(
+            validate_display_refresh_readback(
+                &request,
+                &before,
+                &applied(
+                    "owner:panel-1",
+                    DisplayRefreshTargetRole::InternalPanelProven,
+                    59_940,
+                    fixed,
+                ),
+            )
+            .is_err()
+        );
+        assert!(
+            validate_display_refresh_readback(
+                &request,
+                &before,
+                &applied(
+                    "owner:panel-0",
+                    DisplayRefreshTargetRole::Unknown,
+                    59_940,
+                    fixed,
+                ),
+            )
+            .is_err()
+        );
     }
 }
