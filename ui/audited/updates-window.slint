@@ -40,7 +40,10 @@ export component UpdatesWindow inherits Window {
             VerticalLayout {
                 padding: 10px;
                 spacing: 7px;
-                SectionTitle { title: "Release"; detail: root.update-available ? "Update available" : "Installed"; }
+                SectionTitle {
+                    title: "Release";
+                    detail: !root.backend-ready ? "Unknown" : root.update-available ? "Update available" : "Installed";
+                }
                 HorizontalLayout {
                     height: 22px;
                     Text { text: "Installed version"; font-size: 10px; color: Palette.text-secondary; vertical-alignment: center; }
@@ -59,8 +62,8 @@ export component UpdatesWindow inherits Window {
                     }
                     StatusBadge {
                         width: 112px;
-                        text: root.update-available ? "v" + root.latest-version : "Up to date";
-                        accent: root.update-available ? Palette.accent-default : Palette.success;
+                        text: !root.backend-ready ? "Unknown" : root.update-available ? "v" + root.latest-version : "Up to date";
+                        accent: !root.backend-ready ? Palette.text-disabled : root.update-available ? Palette.accent-default : Palette.success;
                     }
                 }
             }
@@ -74,7 +77,10 @@ export component UpdatesWindow inherits Window {
                 SectionTitle { title: "Release notes"; detail: root.notes-visible ? "Expanded" : "Summary"; }
                 Text {
                     vertical-stretch: 1;
-                    text: root.notes-visible ? root.release-notes : (root.update-available ? "A newer release is available. Open release notes for details." : "No newer release is currently reported by the backend.");
+                    text: !root.backend-ready ? "Connect the update backend to query releases and package state."
+                        : root.notes-visible ? root.release-notes
+                        : root.update-available ? "A newer release is available. Open release notes for details."
+                        : "No newer release is currently reported by the backend.";
                     font-size: 10px;
                     color: Palette.text-secondary;
                     wrap: word-wrap;
