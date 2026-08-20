@@ -8,10 +8,12 @@
 mod controller;
 mod diagnostics_backend;
 mod preferences_backend;
+mod quick_controls_backend;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use orbis_application::{
     ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome, PerformanceCommandOutcome,
@@ -331,6 +333,7 @@ fn build_app(
     app.global::<ThemeState>().set_mode(current_theme_mode());
     app.set_ui_state(to_slint(state));
     wire_callbacks(&app, worker_tx, fan_defaults);
+    quick_controls_backend::wire_window(&app);
     Ok(app)
 }
 
@@ -1202,6 +1205,7 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
 }
 
 fn handle_worker_event(app: &AppWindow, event: WorkerEvent) {
+    let refresh_quick_controls = matches!(&event, WorkerEvent::TelemetryRefresh(_));
     if let WorkerEvent::RegistryChange(Ok((_generation, snapshot))) = &event {
         diagnostics_backend::replace_capabilities(snapshot.clone());
     }
@@ -1209,6 +1213,9 @@ fn handle_worker_event(app: &AppWindow, event: WorkerEvent) {
     apply_performance_event(&mut s, event);
     app.set_ui_state(to_slint(&s));
     sync_fans_window(app);
+    if refresh_quick_controls {
+        quick_controls_backend::refresh_if_due(app, Duration::from_secs(10));
+    }
 }
 
 fn wire_callbacks(
@@ -1721,6 +1728,7 @@ fn main() -> anyhow::Result<()> {
     init_tracing();
     let startup_preferences = initialize_runtime_preferences();
     let runtime = tokio::runtime::Runtime::new()?;
+    quick_controls_backend::initialize(runtime.handle().clone());
 
     state.charge_limit_state = controller::ChargeLimitState::Loading;
     state.perf_state = controller::PerformanceHwState::Loading;
@@ -1762,6 +1770,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let app = build_app(&state, Some(worker_tx.clone()), Some(fan_defaults))?;
+    quick_controls_backend::force_refresh(&app);
     app.window().set_size(LogicalSize::new(500.0, 680.0));
     apply_start_minimized(startup_preferences.start_minimized, |minimized| {
         app.window().set_minimized(minimized);
@@ -1816,6 +1825,7 @@ fn main() -> anyhow::Result<()> {
     UPDATES_WINDOW.with(|slot| *slot.borrow_mut() = None);
     PREVIEW_DIALOG_WINDOW.with(|slot| *slot.borrow_mut() = None);
     diagnostics_backend::clear();
+    quick_controls_backend::clear();
     drop(app);
     drop(worker_tx);
     drop(runtime);
