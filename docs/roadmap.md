@@ -25,7 +25,9 @@ Completed in the active integration branch:
 - removal of obsolete/private/generated documentation artifacts;
 - removal of the remaining `.github/keyboard-backlight-probe-validation-trigger` one-off artifact;
 - current UI/backend status normalized into `current-state.md` and `backend-completion-status.md`;
-- source-complete Autostart (#110), Diagnostics (#111) and Window/Tray lifecycle (#121) issues closed.
+- source-complete Autostart (#110), Diagnostics (#111) and Window/Tray lifecycle (#121) issues closed;
+- effective product write-truth consumer/support-matrix audit and policy decision completed (#120 closed);
+- Draft PR #129 created as the explicit integration checkpoint for the active branch.
 
 Remaining:
 
@@ -33,7 +35,7 @@ Remaining:
 2. #114 — after #106, protect `main` with the real required check names;
 3. #118 — prune obsolete `agent/*` refs when delete-ref access exists;
 4. #124 — decide permanent `io.github.orbiscontrol.*` identity before stable release;
-5. integrate the active branch into `main` only after executable validation.
+5. integrate Draft PR #129 only after executable validation and merge blockers are resolved.
 
 ## Milestone 1 — Runtime reliability and security
 
@@ -47,7 +49,6 @@ Remaining:
    - no blind retries.
 3. **#107 Battery owner/interface liveness** — dynamic bounded non-mutating evidence across daemon restart/disappearance.
 4. **#117 telemetry coverage/freshness** — useful observation vs empty/partial/field-local failures.
-5. **#120 effective policy truth** — every consumer/support snapshot must reflect shipped product blocks rather than implementation existence.
 
 #112 is source-complete: explicit and periodic capability refresh share the same canonical mutation-status requery path. It remains validation-only work until executable CI returns.
 
@@ -61,9 +62,10 @@ Before any fan write promotion:
 2. #116 — carry stored `FanCurveData.enabled` through typed Session1/client/UI evidence.
 3. #104 — dormant custom-write path must preserve authoritative `enabled` on write/read-back.
 4. #105 — Factory Defaults must restore original platform profile on every success/failure path or avoid temporary profile switching.
-5. #120 — UI/diagnostics/support evidence must show the current safety/product block honestly.
-6. executable tests on exact revision.
-7. controlled hardware validation with final fan/profile state proof.
+5. executable tests on exact revision.
+6. controlled hardware validation with final fan/profile state proof.
+
+The product-policy/UI/Diagnostics write-truth audit is complete under #120; future fan work must preserve those operation-level gating rules.
 
 No fan write should be enabled to “test” these contracts.
 
@@ -102,7 +104,8 @@ Completed source slices:
 - Autostart (#110 closed);
 - Diagnostics Refresh/Export/Copy (#111 closed; Open Logs intentionally disabled);
 - Start Minimized / X11-style position / Wayland fail-closed / tray-close semantics (#121 closed);
-- read-only CLI including versioned JSON.
+- read-only CLI including versioned JSON;
+- operation-level capability write truth through UI/Diagnostics plus support-matrix evidence contract (#120 closed).
 
 Remaining:
 
