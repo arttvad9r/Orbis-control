@@ -33,25 +33,23 @@ static repository review не должны называться green CI.
 
 ## Repository status
 
-- `main` остаётся интеграционной базой и пока не защищён required checks (#114),
-  потому что executable CI #106 недоступен.
-- Draft PR #127 содержит offline-safe repository/documentation cleanup. Пока он
-  не merged, его изменения не являются частью `main`.
-- Cleanup branch удаляет четыре устаревших targeted/self-publishing workflow,
-  private session transcript и stray binary ADR archive; canonical `ci.yml`
-  остаётся единственным intended general-purpose workflow.
-- Dated audit snapshots теперь имеют отдельный historical index и не должны
-  использоваться как current truth.
+- `main` — интеграционная база; required checks пока не включены из-за #106/#114.
+- Канонический general-purpose workflow — `.github/workflows/ci.yml`. Старые
+  одноразовые targeted/self-publishing validation workflows удалены.
+- Private session transcript и stray binary ADR archive удалены из рабочего
+  документационного дерева.
+- Canonical documentation hierarchy определена в `docs/README.md`; dated audits
+  и superseded engineering records отделены через `docs/history.md`.
 - Obsolete remote `agent/*` branches остаются отдельной cleanup-задачей #118.
 
 ## Current areas
 
 | Area | Status | Current fact |
 |---|---|---|
-| Repository baseline | IMPLEMENTED / CLEANUP IN REVIEW | Production hardening интегрирован; offline repository/docs cleanup находится в draft PR #127. |
+| Repository baseline | CLEANED / IMPLEMENTED | Production hardening интегрирован; obsolete validation workflows и private/generated documentation artifacts удалены. |
 | Rust/build contract | IMPLEMENTED | Workspace/toolchain MSRV закреплён на Rust 1.87. Старые audit claims про Rust 1.85 исторические. |
 | Remote branches | CLEANUP PENDING — #118 | Obsolete `agent/*` refs ещё существуют. |
-| Documentation | NORMALIZED IN PR #127 | Canonical hierarchy определена; historical snapshots отделены через `history.md`; session transcript и ADR archive удаляются. |
+| Documentation | NORMALIZED | Canonical hierarchy определена; historical snapshots отделены через `history.md`; session transcript и ADR archive удалены. |
 | Core/domain | IMPLEMENTED | Typed state/invariants, capability evidence, Desired/Observed/Pending и lifecycle values. |
 | Preferences/config | HARDENED / COMPAT CLEANUP OPEN — #113 | Legacy defaults hardware-inert, writes durable/atomic, checked XDG resolvers fail closed; deprecated compatibility symbols ещё требуют removal после executable compatibility validation. |
 | Preferences logging/privacy | IMPLEMENTED | `PreferencesWarningKind` production `Debug` выводит фиксированный `log_category()` и не раскрывает embedded parser/schema payload. Historical privacy audit описывает pre-fix state. |
