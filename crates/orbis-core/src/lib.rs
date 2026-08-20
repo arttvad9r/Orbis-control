@@ -26,6 +26,7 @@ pub mod display;
 pub mod display_output;
 pub mod display_refresh;
 pub mod display_refresh_request;
+pub mod display_refresh_state;
 pub mod error;
 pub mod fan;
 pub mod gpu;
@@ -72,6 +73,7 @@ pub use display_refresh::{
     DisplayRefreshPresetTarget, DisplayRefreshTargetId, DisplayRefreshTargetRole,
 };
 pub use display_refresh_request::DisplayRefreshRequest;
+pub use display_refresh_state::{DisplayRefreshActivePolicy, DisplayRefreshAppliedState};
 pub use error::CoreError;
 pub use fan::{FanCurve, FanCurvePoint, FanId};
 pub use gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
