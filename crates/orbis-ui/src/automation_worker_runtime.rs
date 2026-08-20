@@ -131,7 +131,10 @@ impl AutomationWorkerRuntime {
     }
 
     /// Consume one authoritative telemetry snapshot under the worker owner.
-    /// Resume has precedence when the same fresh sample closes a paired wake.
+    ///
+    /// A paired resume has precedence only when the persisted policy actually
+    /// enables OnResume. Otherwise the wake closes the resume gate but the same
+    /// telemetry remains eligible for normal AC/Battery debounce.
     pub fn observe_telemetry(
         &mut self,
         telemetry: &Telemetry,
@@ -146,7 +149,8 @@ impl AutomationWorkerRuntime {
             .resume
             .observe_telemetry(telemetry.ac_online, telemetry.ts, now);
 
-        let selected = if matches!(resume_gate, ResumeGateOutcome::Ready { .. }) {
+        let resume_enabled = policy.enabled && policy.on_resume;
+        let selected = if resume_enabled && matches!(resume_gate, ResumeGateOutcome::Ready { .. }) {
             self.shadow
                 .observe_resume_telemetry(telemetry, policy, capabilities, now)
         } else {
@@ -163,8 +167,6 @@ impl AutomationWorkerRuntime {
             .map_err(AutomationWorkerObservationError::LifecycleRevision)?;
         let candidate = AutomationRevisionCandidate::from_shadow(&selected, revision);
 
-        // Every confirmed event supersedes the previous candidate, including a
-        // newer event that is itself blocked by policy/capability evidence.
         self.latest_candidate = candidate.clone();
 
         Ok(Some(AutomationConfirmedEvent {
@@ -337,9 +339,10 @@ mod tests {
     }
 
     #[test]
-    fn suspend_breaks_pre_sleep_candidate_continuity() {
+    fn suspend_breaks_pre_sleep_candidate_continuity_when_resume_trigger_is_disabled() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let policy = policy();
+        assert!(!policy.on_resume);
         let snapshot = snapshot(8, base);
         let mut runtime = AutomationWorkerRuntime::new();
         assert!(runtime
@@ -359,9 +362,6 @@ mod tests {
         runtime.observe_prepare_for_sleep(true, base + Duration::from_secs(2));
         runtime.observe_prepare_for_sleep(false, base + Duration::from_secs(3));
 
-        // OnResume is disabled in this policy, so the first post-resume Battery
-        // sample starts a new power candidate rather than completing the one
-        // observed before suspend.
         assert!(runtime
             .observe_telemetry(
                 &telemetry(false, base + Duration::from_secs(3)),
