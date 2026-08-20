@@ -1,3 +1,6 @@
+#[path = "secondary_windows_backend.rs"]
+mod secondary_windows_backend;
+
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -42,6 +45,7 @@ struct KeyboardUiState {
 }
 
 pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
+    secondary_windows_backend::initialize(runtime.clone());
     CONTEXT.with(|slot| {
         *slot.borrow_mut() = Some(QuickControlsContext {
             runtime,
@@ -52,6 +56,7 @@ pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
 }
 
 pub(crate) fn clear() {
+    secondary_windows_backend::clear();
     CONTEXT.with(|slot| *slot.borrow_mut() = None);
 }
 
@@ -94,6 +99,12 @@ pub(crate) fn wire_window(app: &AppWindow) {
             "keyboard brightness request ignored: production mutation is product-policy disabled"
         );
     });
+
+    // The current entrypoint invokes this function after legacy AppWindow
+    // callbacks are registered. The coordinator replaces only Extra/Automation
+    // open handlers, allowing their backend bridges to be wired without a
+    // high-risk full rewrite of main.rs.
+    secondary_windows_backend::wire_window(app);
 }
 
 pub(crate) fn force_refresh(app: &AppWindow) {
