@@ -83,9 +83,11 @@ pub(crate) fn refresh(window: &DiagnosticsWindow) {
     window.set_refresh_pending(true);
     window.set_local_status("Collecting read-only snapshot…".into());
 
+    let runtime = context.runtime.clone();
+    let source = context.source.clone();
     let weak = window.as_weak();
-    context.runtime.spawn(async move {
-        let snapshot = context.source.snapshot().await;
+    runtime.spawn(async move {
+        let snapshot = source.snapshot().await;
         let dto = DiagnosticsUiDto::from_snapshot(&snapshot);
         let model = DiagnosticsWindowModel::from_dto(&dto);
 
