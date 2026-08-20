@@ -596,15 +596,16 @@ mod tests {
     #[test]
     fn persistence_backend_contains_no_reconciliation_or_provider_commands() {
         let source = include_str!("automation_backend.rs");
-        for needle in [
-            "WorkerCommand::Set",
-            "set_profile(",
-            "set_mode(",
-            "set_refresh_rate(",
-            "set_keyboard_backlight(",
-            "set_fan_curve(",
-        ] {
-            assert!(!source.contains(needle), "unexpected execution token: {needle}");
+        let forbidden = [
+            ["WorkerCommand::", "Set"].concat(),
+            ["set_", "profile("].concat(),
+            ["set_", "mode("].concat(),
+            ["set_", "refresh_rate("].concat(),
+            ["set_", "keyboard_backlight("].concat(),
+            ["set_", "fan_curve("].concat(),
+        ];
+        for needle in forbidden {
+            assert!(!source.contains(&needle), "unexpected execution token: {needle}");
         }
         assert!(source.contains("set_runtime_ready(false)"));
         assert!(source.contains("ReadyButExecutionDisabled"));
