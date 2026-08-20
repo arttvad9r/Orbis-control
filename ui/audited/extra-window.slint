@@ -61,7 +61,7 @@ export component ExtraWindow inherits Window {
                 height: 232px;
                 VerticalLayout {
                     padding: 10px; spacing: 6px;
-                    SectionTitle { title: "Hotkeys"; detail: "Draft"; }
+                    SectionTitle { title: "Hotkeys"; detail: root.backend-ready ? "Draft" : "Unavailable"; }
                     HorizontalLayout { height: 30px; spacing: 8px; Text { width: 54px; text: "M1"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m1-action; } }
                     HorizontalLayout { height: 30px; spacing: 8px; Text { width: 54px; text: "M2"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m2-action; } }
                     HorizontalLayout { height: 30px; spacing: 8px; Text { width: 54px; text: "M3"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: root.binding-actions; current-index <=> root.m3-action; } }
@@ -77,15 +77,15 @@ export component ExtraWindow inherits Window {
                     SectionTitle { title: "Keyboard Backlight"; detail: root.backend-ready ? "Hardware draft" : "Unavailable"; }
                     HorizontalLayout {
                         height: 30px; spacing: 6px; alignment: center;
-                        Text { width: 92px; text: "Brightness"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; }
-                        ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.keyboard-brightness == 0; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 0; } }
-                        ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.keyboard-brightness == 1; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 1; } }
-                        ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.keyboard-brightness == 2; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 2; } }
-                        ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.keyboard-brightness == 3; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 3; } }
+                        Text { width: 92px; text: "Brightness"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
+                        ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.backend-ready && root.keyboard-brightness == 0; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 0; } }
+                        ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.backend-ready && root.keyboard-brightness == 1; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 1; } }
+                        ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.backend-ready && root.keyboard-brightness == 2; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 2; } }
+                        ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.backend-ready && root.keyboard-brightness == 3; disabled: !root.backend-ready || root.applying; clicked => { root.keyboard-brightness = 3; } }
                     }
                     HorizontalLayout {
                         height: 30px; spacing: 8px; alignment: center;
-                        Text { width: 92px; text: "Effect"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; }
+                        Text { width: 92px; text: "Effect"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
                         ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: ["Static", "Breathing", "Color Cycle", "Strobing"]; current-index <=> root.keyboard-effect; }
                         ComboBox { width: 122px; enabled: root.backend-ready && !root.applying; model: ["Slow", "Normal", "Fast"]; current-index <=> root.keyboard-speed; }
                     }
@@ -110,11 +110,11 @@ export component ExtraWindow inherits Window {
                 height: 178px;
                 VerticalLayout {
                     padding: 10px; spacing: 7px;
-                    SectionTitle { title: "Power / CPU"; detail: "Draft"; }
-                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "iGPU memory"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: ["Auto", "512 MB", "1 GB", "2 GB", "4 GB", "8 GB"]; current-index <=> root.igpu-memory; } }
-                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Hibernate after"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 0; maximum: 1440; step-size: 5; value <=> root.hibernate-after; } Text { text: "min"; font-size: 9px; color: Palette.text-secondary; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; background: transparent; } }
-                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Performance cores"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 1; maximum: 32; value <=> root.p-cores; } Rectangle { horizontal-stretch: 1; background: transparent; } }
-                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Efficiency cores"; font-size: 10px; color: Palette.text-primary; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 0; maximum: 32; value <=> root.e-cores; } Rectangle { horizontal-stretch: 1; background: transparent; } }
+                    SectionTitle { title: "Power / CPU"; detail: root.backend-ready ? "Draft" : "Unavailable"; }
+                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "iGPU memory"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } ComboBox { horizontal-stretch: 1; enabled: root.backend-ready && !root.applying; model: ["Auto", "512 MB", "1 GB", "2 GB", "4 GB", "8 GB"]; current-index <=> root.igpu-memory; } }
+                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Hibernate after"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 0; maximum: 1440; step-size: 5; value <=> root.hibernate-after; } Text { text: "min"; font-size: 9px; color: Palette.text-secondary; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; background: transparent; } }
+                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Performance cores"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 1; maximum: 32; value <=> root.p-cores; } Rectangle { horizontal-stretch: 1; background: transparent; } }
+                    HorizontalLayout { height: 30px; spacing: 8px; alignment: center; Text { width: 142px; text: "Efficiency cores"; font-size: 10px; color: root.backend-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; } SpinBox { width: 120px; enabled: root.backend-ready && !root.applying; minimum: 0; maximum: 32; value <=> root.e-cores; } Rectangle { horizontal-stretch: 1; background: transparent; } }
                 }
             }
 
