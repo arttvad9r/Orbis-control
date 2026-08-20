@@ -34,6 +34,7 @@ pub mod telemetry_diagnostics;
 pub mod traits;
 pub mod wayland_output;
 pub mod wayland_output_management;
+pub mod wlr_output_head;
 
 #[cfg(feature = "mock")]
 pub mod mock;
@@ -66,6 +67,7 @@ pub use telemetry_diagnostics::telemetry_diagnostics_after_attempt;
 pub use traits::*;
 pub use wayland_output::*;
 pub use wayland_output_management::*;
+pub use wlr_output_head::*;
 
 #[cfg(feature = "mock")]
 pub use mock::{MockErrorMode, MockProvider, MockState, MockStateError};
