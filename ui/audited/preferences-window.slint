@@ -1,18 +1,33 @@
+import { ComboBox } from "std-widgets.slint";
 import { ToggleRow, ChoiceChip } from "../components/visual-controls.slint";
 import { WindowHeader, SectionCard, SectionTitle, LocalStatus } from "common.slint";
 import { Palette, ThemeState, ThemeMode } from "../themes/dark.slint";
 
 export component PreferencesWindow inherits Window {
     width: 452px;
-    height: 286px;
+    height: 390px;
     title: "Orbis Control — Preferences";
     background: Palette.window-background;
 
     callback theme-changed(bool);
     callback startup-changed(bool);
+    callback start-minimized-changed(bool);
+    callback remember-position-changed(bool);
+    callback close-action-changed(int);
 
+    // Backend-owned state. Disabled means the corresponding lifecycle backend
+    // has not supplied authoritative state yet.
     in-out property <bool> startup: false;
     in-out property <bool> startup-enabled: false;
+    in property <string> startup-status: "Unavailable";
+
+    in property <bool> start-minimized: false;
+    in property <bool> start-minimized-enabled: false;
+    in property <bool> remember-position: false;
+    in property <bool> remember-position-enabled: false;
+    in property <int> close-action: 0; // 0 Quit, 1 Hide to tray
+    in property <bool> close-action-enabled: false;
+
     in-out property <string> local-status: "Theme changes are saved immediately";
 
     function set-theme(light: bool) {
@@ -27,7 +42,7 @@ export component PreferencesWindow inherits Window {
 
         WindowHeader {
             title: "Preferences";
-            subtitle: "Only settings backed by current runtime behavior are shown";
+            subtitle: "Application behavior and appearance";
         }
 
         SectionCard {
@@ -37,51 +52,67 @@ export component PreferencesWindow inherits Window {
                 spacing: 8px;
                 SectionTitle { title: "Appearance"; detail: "Saved immediately"; }
                 HorizontalLayout {
-                    height: 30px;
-                    spacing: 6px;
-                    Text {
-                        width: 116px;
-                        text: "Theme";
-                        font-size: 10px;
-                        font-weight: 550;
-                        color: Palette.text-primary;
-                        vertical-alignment: center;
-                    }
-                    ChoiceChip {
-                        horizontal-stretch: 1;
-                        label: "Dark";
-                        selected: ThemeState.mode == ThemeMode.Dark;
-                        clicked => { root.set-theme(false); }
-                    }
-                    ChoiceChip {
-                        horizontal-stretch: 1;
-                        label: "Light";
-                        selected: ThemeState.mode == ThemeMode.Light;
-                        clicked => { root.set-theme(true); }
-                    }
+                    height: 30px; spacing: 6px;
+                    Text { width: 116px; text: "Theme"; font-size: 10px; font-weight: 550; color: Palette.text-primary; vertical-alignment: center; }
+                    ChoiceChip { horizontal-stretch: 1; label: "Dark"; selected: ThemeState.mode == ThemeMode.Dark; clicked => { root.set-theme(false); } }
+                    ChoiceChip { horizontal-stretch: 1; label: "Light"; selected: ThemeState.mode == ThemeMode.Light; clicked => { root.set-theme(true); } }
                 }
             }
         }
 
         SectionCard {
-            height: 78px;
+            height: 120px;
             VerticalLayout {
                 padding: 8px;
                 spacing: 2px;
-                SectionTitle { title: "Startup"; }
+                SectionTitle { title: "Startup"; detail: root.startup-status; }
                 ToggleRow {
                     label: "Run on startup";
-                    description: root.startup-enabled ? "Start Orbis with the user session" : "Not connected to runtime lifecycle yet";
-                    checked <=> root.startup;
+                    description: root.startup-enabled ? "Start Orbis with the user session" : "Waiting for autostart backend";
+                    checked: root.startup;
                     disabled: !root.startup-enabled;
                     toggled(value) => { root.startup-changed(value); }
+                }
+                ToggleRow {
+                    label: "Start minimized";
+                    description: root.start-minimized-enabled ? "Open without focusing the main window" : "Waiting for preferences lifecycle";
+                    checked: root.start-minimized;
+                    disabled: !root.start-minimized-enabled;
+                    toggled(value) => { root.start-minimized-changed(value); }
+                }
+            }
+        }
+
+        SectionCard {
+            height: 104px;
+            VerticalLayout {
+                padding: 8px;
+                spacing: 4px;
+                SectionTitle { title: "Window behavior"; }
+                ToggleRow {
+                    label: "Remember window position";
+                    description: root.remember-position-enabled ? "Restore only when the active window system supports it" : "Unavailable on current lifecycle/backend";
+                    checked: root.remember-position;
+                    disabled: !root.remember-position-enabled;
+                    toggled(value) => { root.remember-position-changed(value); }
+                }
+                HorizontalLayout {
+                    height: 32px; spacing: 8px; alignment: center;
+                    Text { width: 148px; text: "Close button"; font-size: 10px; color: root.close-action-enabled ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
+                    close-box := ComboBox {
+                        horizontal-stretch: 1;
+                        enabled: root.close-action-enabled;
+                        model: ["Quit", "Hide to tray"];
+                        current-index: root.close-action;
+                        selected(_) => { root.close-action-changed(self.current-index); }
+                    }
                 }
             }
         }
 
         LocalStatus {
-            text: root.startup-enabled ? root.local-status : root.local-status + " · Startup remains unavailable";
-            accent: root.startup-enabled ? Palette.success : Palette.text-secondary;
+            text: root.local-status;
+            accent: Palette.text-secondary;
         }
 
         Rectangle { vertical-stretch: 1; background: transparent; }
