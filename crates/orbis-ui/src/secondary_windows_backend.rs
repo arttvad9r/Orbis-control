@@ -123,14 +123,15 @@ mod tests {
     #[test]
     fn coordinator_contains_no_hardware_mutation_surface() {
         let source = include_str!("secondary_windows_backend.rs");
-        for needle in [
-            "WorkerCommand::Set",
-            "set_fan_curve(",
-            "set_gpu_mode(",
-            "set_charge_limit(",
-            "set_keyboard_backlight(",
-        ] {
-            assert!(!source.contains(needle), "unexpected mutation token: {needle}");
+        let forbidden = [
+            ["WorkerCommand::", "Set"].concat(),
+            ["set_", "fan_curve("].concat(),
+            ["set_", "gpu_mode("].concat(),
+            ["set_", "charge_limit("].concat(),
+            ["set_", "keyboard_backlight("].concat(),
+        ];
+        for needle in forbidden {
+            assert!(!source.contains(&needle), "unexpected mutation token: {needle}");
         }
     }
 
