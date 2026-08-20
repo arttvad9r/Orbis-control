@@ -1,128 +1,128 @@
 # Backend Completion Status
 
 > Status date: 2026-08-20.
+> Source snapshot: `chatgpt/ui-refresh-ghelper-20260820`.
 >
-> This file is the concise current-state companion to `ui-backend-contract.md`.
-> The older contract remains useful for invariant details; where its historical
-> "not connected" wording conflicts with this file, this status file describes
-> the current branch implementation.
+> Concise companion to [`current-state.md`](current-state.md) and [`architecture.md`](architecture.md). Source-level `IMPLEMENTED` does not imply executable validation.
 
-## Production-connected
+## Production-connected source slices
 
-- Performance: sequential worker → application owner → provider mutation →
-  authoritative read-back.
-- Battery charge limit: sequential worker → Hardware1/application path → fresh
-  read-back; UI commits the slider only at the request boundary.
-- Theme persistence.
-- XDG user autostart read/write/read-back.
-- Start Minimized persistence and next-launch lifecycle.
-- Diagnostics Refresh and privacy-bounded JSON Export.
-- Diagnostics Copy Summary through Slint's clipboard-capable `TextEdit` path.
-- Fan selection/profile/curve reads. Fan writes remain safety-blocked.
-- Display Quick Control authoritative read-only compositor observation.
-- Keyboard Quick Control authoritative state plus Hardware1 mutation-status
-  gating. The current production daemon reports the product write Unsupported,
-  so the control remains disabled without a UI code change.
-- Extra Keyboard brightness and Panel Overdrive have independent request-only
-  Hardware1 status/set/read-back wiring. The current daemon reports both product
-  writes Unsupported.
-- Extra Aura mode/speed observation remains read-only because the existing Aura
-  writer is Static RGB, not the same UI contract.
-- Extra Boot sound now has a strict read-only `asus-armoury` firmware-attribute
-  provider; mutation is not exposed.
-- Remember Window Position is connected on X11-style positioning backends and
-  fail-closed on Wayland.
-- StatusNotifierItem tray backend is connected. HideToTray is available only
-  while a real host is registered; Quit remains independently writable and
-  terminates the Slint event loop.
-- Typed confirmation-dialog context exists. Legacy numeric dialog kinds never
-  authorize a side effect; only an explicit closed typed action may do so.
+- **Performance** — worker → application/provider mutation → authoritative read-back.
+- **Battery charge limit** — Session1 read + Hardware1/application mutation + fresh read-back.
+- **GPU primitives** — independent power / physical MUX / access-policy reads.
+- **Telemetry** — read-only sysfs snapshot polling; coverage/freshness semantics still need #117.
+- **Fan reads** — profile/fan-specific Session1 reads plus active-curve reads; fan writes remain hard-blocked.
+- **Theme** — runtime + persistence.
+- **Autostart** — owned XDG desktop-entry read/write/read-back (#110 source-complete/closed).
+- **Start Minimized** — persisted and applied at launch.
+- **Remember Window Position** — supported on X11-style positioning sessions, explicitly unavailable on Wayland.
+- **Close/tray** — StatusNotifier host gating; HideToTray only with a live host; Quit terminates the Slint event loop (#121 closed).
+- **Diagnostics** — runtime initialization, capability-generation replacement, Refresh, privacy-bounded JSON Export and Copy Summary (#111 closed). Open Logs remains disabled.
+- **CLI** — `orbisctl status` plus versioned `status --json`; read-only only.
+- **Display Quick Control** — authoritative read-only observation; no concrete mutation owner.
+- **Keyboard/Panel product controls** — typed Hardware1 status/request/read-back surfaces exist but current production backend status remains Unsupported.
+- **Aura** — observation/config-level typed surfaces exist; no promoted unattended hardware write.
+- **Boot sound** — strict read-only firmware-attribute provider.
+- **Updates** — installation-owner/blocker classification only; no fabricated feed/downloader/installer.
+
+## Provider execution hardening
+
+Canonical source primitive:
+
+```text
+bounded_provider_call(provider, operation, future)
+→ Provider::timeout()
+→ result/error unchanged, or ProviderError::Timeout
+→ no retry
+```
+
+Current bounded coverage:
+
+- public capability probes;
+- `orbisctl` Battery/Performance/GPU reads;
+- worker Battery refresh;
+- worker Performance refresh and Automation recovery read;
+- worker Fan curve refresh;
+- worker GPU power/MUX/access refreshes.
+
+GPU primitive reads run independently via `tokio::join!`, each with its own provider deadline.
+
+Capability refresh now has one canonical explicit/periodic path: mutation statuses are re-queried before the next whole-swap registry generation is built (#112 source-complete).
+
+Still open under #123:
+
+- telemetry deadline ownership;
+- bounded Hardware1 mutation-status requery;
+- mutation timeout must enter explicit unknown-outcome recovery rather than generic failure/retry;
+- executable Rust validation.
 
 ## Automation
 
-Production `orbis_ui::worker` is `worker_runtime.rs`. It owns:
+Production worker is `crates/orbis-ui/src/worker_runtime.rs`. It owns:
 
-- hardened persisted policy synchronization and policy revision;
-- raw worker telemetry observations;
-- logind `PrepareForSleep(bool)` lifecycle observations;
-- debounce/freshness/resume coalescing;
-- lifecycle revision and supersession;
+- persisted Automation policy + policy revision;
+- raw telemetry/lifecycle observations;
+- AC/Battery debounce and resume freshness/coalescing;
+- lifecycle revision/supersession;
 - capability-generation preflight/revalidation;
 - replay-resistant single-slot serialization;
 - Performance unknown-outcome recovery;
-- compiled Performance-only executor semantics with mandatory authoritative
-  read-back.
+- Performance-only executor semantics with authoritative read-back.
 
-Unattended mutation is still deliberately unreachable because
-`AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED` is `false`. This exact branch has not
-passed executable Cargo/Clippy/Slint validation in the available environment.
-GPU/Fan/Battery/Display/Lighting automation executors are not enabled.
+`AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED` remains `false`. Unattended mutation is deliberately unreachable until executable validation of the exact branch. GPU/Fan/Battery/Display/Lighting automation execution remains disabled.
 
-## Release/product-gated typed writers
+## Fan read/evidence status
 
-Typed Hardware1 implementations already exist for Panel Overdrive, Keyboard
-Backlight and Aura Static RGB, but production hardwared deliberately composes
-Unsupported backends for them. The UI reads the effective mutation-status rather
-than inferring support from implementation existence.
+Per-fan profile reads are now concrete: a requested CPU curve no longer requires a GPU curve in the same response, and the client strict-decodes returned fan/profile identity.
 
-`product_mutation_promotion.rs` models promotion evidence independently:
+Remaining:
 
-- closed typed backend;
+- #109 — aggregate `FeatureId::FanCurves` is still published from a CPU-only probe and can overstate GPU availability;
+- #116 — stored `FanCurveData.enabled` is not carried end-to-end;
+- #104/#105 — dormant write/reset safety defects remain mandatory before any future write promotion.
+
+## Product/release-gated writers
+
+Typed writer code does not equal product support. Current production Hardware1 deliberately reports disabled/Unsupported for raw GPU, Fan, Panel, Keyboard and Aura writes. This remains defense-in-depth with UI gating and packaged policy/sandbox restrictions.
+
+Promotion requires all relevant evidence:
+
+- exact typed owner;
 - capability-specific authorization;
 - non-mutating readiness preflight;
-- authoritative hardware read-back, or config read-back only for an explicitly
-  interactive Accepted operation;
+- authoritative read-back appropriate to the concept;
+- explicit product-policy approval;
 - executable validation of the exact build;
-- explicit product-policy approval.
+- live hardware validation where a hardware claim is made.
 
-Aura has no authoritative hardware RGB read-back, so config confirmation cannot
-qualify it for unattended execution.
+`Accepted` config confirmation alone cannot authorize unattended execution.
 
-## Completed fail-closed boundaries
-
-### Application updates
-
-The Updates backend detects the local installation owner but does not invent an
-update source. There is no repository-defined canonical signed Orbis release
-feed and no proven universal installer owner. Typed blockers distinguish Nix,
-AppImage, system-prefix, development and unknown installations. Network check,
-channel mutation and install remain disabled; no shell/package-manager/self-
-replacement path exists.
+## Fail-closed boundaries
 
 ### Display Refresh
 
-The typed domain/provider/application contract is implemented: stable target
-identity, exact refresh presets, fresh preflight, owner-side revalidation,
-mutation result and mandatory exact applied-state read-back. The missing piece is
-one concrete compositor configuration owner. Current dependencies contain
-`wayland-client` but not a WLR output-management protocol binding dependency, so
-no shell fallback or unverifiable lockfile change is introduced on this branch.
+Typed target/request/preflight/read-back semantics exist. No concrete compositor configuration owner is enabled. No shell fallback is accepted.
 
-### Remaining ambiguous Extra fields
+### Updates
 
-Status LEDs, auto-clamshell, ASPM, Modern Standby networking, iGPU memory, CPU
-core controls and hotkey mappings stay disabled until an exact upstream/domain
-owner is proven. Similar-looking ASUS controls are not treated as equivalent by
-name alone.
+No canonical signed release feed or universal installer owner is defined. Network check/install/channel actions remain disabled rather than inventing package-manager/self-replacement behavior.
 
-## Safety gates that remain intentional
+### Ambiguous Extra controls
 
-- Fan mutation stays blocked until the existing enabled-state/factory-restore
-  safety issues are resolved.
-- GPU product-mode mutation stays policy-blocked.
-- Panel/Keyboard/Aura production writes stay product/release-gated.
-- Automation execution promotion stays false until executable validation.
-- Updates has no network/install surface without an explicit signed source and
-  installer owner.
-- Display has no modeset write without a typed compositor owner.
+Status LEDs, clamshell/ASPM/standby-networking/iGPU-memory/CPU-core/hotkey concepts stay disabled until exact domain ownership and semantics are proven. Similar ASUS names are not treated as equivalent automatically.
+
+## Remaining high-value source blockers
+
+- #125 — early interactive GUI euid-0 rejection;
+- #123 — remaining timeout/unknown-outcome contract;
+- #107 — dynamic Battery mutation owner/interface liveness;
+- #117 — telemetry useful/partial/empty evidence;
+- #120 — consumer/support-matrix product-policy truth;
+- #109/#116 — fan read evidence;
+- #115 — production-native UiState and removal of normal `orbis-test-support` GUI dependency.
 
 ## Validation state
 
-Repository stdlib static contracts cover UI request-only semantics, Automation
-shadow/executor invariants, Display Refresh contracts and cross-surface backend
-completion invariants. They do not replace compilation.
+`scripts/verify-static` provides standard-library source contracts for UI, Automation, Display, backend completion and provider-timeout invariants. It is a fail-fast safety net only.
 
-The current execution environment does not provide Rust/Cargo/Slint binaries or
-a vendored Cargo registry, and outbound package/toolchain download is blocked.
-Therefore `cargo check --locked`, tests, clippy and the Slint compiler are not
-claimed as passing for this branch.
+The available environment cannot run Rust/Cargo/Slint and GitHub Actions remains blocked by #106. Therefore this branch is not claimed as passing `cargo check/test/clippy`, Slint compile or final Nix/package acceptance.
