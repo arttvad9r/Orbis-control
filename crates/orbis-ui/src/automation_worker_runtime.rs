@@ -100,7 +100,11 @@ impl AutomationWorkerPrepared {
 }
 
 /// Worker-owned hardware-inert Automation state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Deliberately not `Clone`: duplicating this value would duplicate the
+/// serialization owner and could make two copies believe they own the same
+/// lifecycle/capability state.
+#[derive(Debug, PartialEq, Eq)]
 pub struct AutomationWorkerRuntime {
     shadow: AutomationShadowRuntime,
     resume: ResumeTelemetryGate,
