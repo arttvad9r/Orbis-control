@@ -1,6 +1,6 @@
 import { ComboBox } from "std-widgets.slint";
 import { ToggleRow, ChoiceChip } from "../components/visual-controls.slint";
-import { WindowHeader, SectionCard, SectionTitle, LocalStatus } from "common.slint";
+import { ThemeBridge, WindowHeader, SectionCard, SectionTitle, LocalStatus } from "common.slint";
 import { Palette, ThemeState, ThemeMode } from "../themes/dark.slint";
 
 export component PreferencesWindow inherits Window {
@@ -35,6 +35,8 @@ export component PreferencesWindow inherits Window {
         root.local-status = light ? "Light theme active" : "Dark theme active";
         root.theme-changed(light);
     }
+
+    ThemeBridge { }
 
     VerticalLayout {
         padding: 12px;
