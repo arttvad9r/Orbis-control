@@ -1,8 +1,10 @@
 //! Hardware-inert Automation runtime observation.
 //!
-//! This module connects three already-typed pieces without crossing the
-//! mutation boundary:
-//! - debounced authoritative power-source observations from `Telemetry`;
+//! This module connects already-typed pieces without crossing the mutation
+//! boundary:
+//! - debounced authoritative AC/Battery observations from `Telemetry`;
+//! - matched resume lifecycle observations that are paired with fresh
+//!   post-resume telemetry by a higher-layer gate;
 //! - persisted Automation policy planning;
 //! - immutable capability preflight.
 //!
@@ -21,6 +23,8 @@ use orbis_core::automation::{
 };
 use orbis_core::telemetry::Telemetry;
 
+const RESUME_TELEMETRY_MAX_AGE: Duration = Duration::from_secs(3);
+
 /// Why a confirmed lifecycle transition cannot proceed even to an executor
 /// handoff candidate.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,23 +34,32 @@ pub enum AutomationShadowBlock {
     /// Capability metadata appears to come from the future relative to the
     /// caller-supplied clock and therefore cannot be trusted for execution.
     CapabilitySnapshotFromFuture,
+    /// A resume was reported, but the post-resume telemetry sample did not carry
+    /// an authoritative AC/Battery source needed to choose the policy branch.
+    ResumePowerSourceUnknown,
+    /// A resume was reported, but the supplied telemetry sample was older than
+    /// the shadow runtime's resume freshness ceiling.
+    ResumeTelemetryStale,
+    /// A resume was reported, but the telemetry timestamp was in the future
+    /// relative to the caller-supplied clock.
+    ResumeTelemetryFromFuture,
 }
 
-/// Result of consuming one telemetry sample in the hardware-inert shadow
+/// Result of consuming one lifecycle observation in the hardware-inert shadow
 /// runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AutomationShadowOutcome {
-    /// No confirmed transition was produced. This includes baseline, stable,
-    /// candidate, unknown and stale telemetry outcomes.
+    /// No confirmed AC/Battery transition was produced. This includes baseline,
+    /// stable, candidate, unknown and stale telemetry outcomes.
     Observation(PowerSourceObservationOutcome),
-    /// A transition was proven, but capability snapshot freshness failed before
+    /// A transition was proven, but freshness/evidence failed before
     /// planning/preflight could be considered executable.
     Blocked {
         /// Confirmed lifecycle trigger.
         trigger: AutomationTrigger,
         /// Capability generation used for the decision.
         generation: u64,
-        /// Freshness blocker.
+        /// Freshness/evidence blocker.
         block: AutomationShadowBlock,
     },
     /// A transition was proven and planned, but typed plan/capability preflight
@@ -88,7 +101,8 @@ impl AutomationShadowRuntime {
         }
     }
 
-    /// Consume one authoritative telemetry sample.
+    /// Consume one authoritative telemetry sample for AC/Battery transition
+    /// detection.
     ///
     /// `now` is supplied by the caller so freshness behavior remains
     /// deterministic in tests. The capability snapshot is immutable and one
@@ -108,6 +122,79 @@ impl AutomationShadowRuntime {
             _ => return AutomationShadowOutcome::Observation(observation),
         };
 
+        let source = match &trigger {
+            AutomationTrigger::OnAc => AutomationPowerSource::Ac,
+            AutomationTrigger::OnBattery => AutomationPowerSource::Battery,
+            // `PowerSourceEdgeDetector` can only emit the two variants above.
+            // Keep this fallback fail-closed if its contract ever expands.
+            _ => {
+                return AutomationShadowOutcome::Observation(
+                    PowerSourceObservationOutcome::IgnoredUnknown,
+                );
+            }
+        };
+
+        self.evaluate_trigger(trigger, source, policy, capabilities, now)
+    }
+
+    /// Evaluate a previously matched resume cycle using one fresh authoritative
+    /// post-resume telemetry sample.
+    ///
+    /// The higher layer must pair `PrepareForSleep(true/false)` before calling
+    /// this function. The shadow runtime independently re-checks telemetry
+    /// freshness and requires an explicit AC/Battery observation before choosing
+    /// the resume policy branch. No action is executed here.
+    pub fn observe_resume_telemetry(
+        &self,
+        telemetry: &Telemetry,
+        policy: &AutomationPolicy,
+        capabilities: &CapabilityRegistrySnapshot,
+        now: SystemTime,
+    ) -> AutomationShadowOutcome {
+        let trigger = AutomationTrigger::OnResume;
+        let generation = capabilities.generation();
+
+        let source = match telemetry.ac_online {
+            Some(true) => AutomationPowerSource::Ac,
+            Some(false) => AutomationPowerSource::Battery,
+            None => {
+                return AutomationShadowOutcome::Blocked {
+                    trigger,
+                    generation,
+                    block: AutomationShadowBlock::ResumePowerSourceUnknown,
+                };
+            }
+        };
+
+        match now.duration_since(telemetry.ts) {
+            Err(_) => {
+                return AutomationShadowOutcome::Blocked {
+                    trigger,
+                    generation,
+                    block: AutomationShadowBlock::ResumeTelemetryFromFuture,
+                };
+            }
+            Ok(age) if age > RESUME_TELEMETRY_MAX_AGE => {
+                return AutomationShadowOutcome::Blocked {
+                    trigger,
+                    generation,
+                    block: AutomationShadowBlock::ResumeTelemetryStale,
+                };
+            }
+            Ok(_) => {}
+        }
+
+        self.evaluate_trigger(trigger, source, policy, capabilities, now)
+    }
+
+    fn evaluate_trigger(
+        &self,
+        trigger: AutomationTrigger,
+        source: AutomationPowerSource,
+        policy: &AutomationPolicy,
+        capabilities: &CapabilityRegistrySnapshot,
+        now: SystemTime,
+    ) -> AutomationShadowOutcome {
         let generation = capabilities.generation();
         match now.duration_since(capabilities.checked_at()) {
             Err(_) => {
@@ -126,18 +213,6 @@ impl AutomationShadowRuntime {
             }
             Ok(_) => {}
         }
-
-        let source = match &trigger {
-            AutomationTrigger::OnAc => AutomationPowerSource::Ac,
-            AutomationTrigger::OnBattery => AutomationPowerSource::Battery,
-            // `PowerSourceEdgeDetector` can only emit the two variants above.
-            // Keep this fallback fail-closed if its contract ever expands.
-            _ => {
-                return AutomationShadowOutcome::Observation(
-                    PowerSourceObservationOutcome::IgnoredUnknown,
-                );
-            }
-        };
 
         let plan = policy.plan_for(trigger.clone(), source);
         let preflight =
@@ -222,6 +297,14 @@ mod tests {
         policy
     }
 
+    fn resume_policy() -> AutomationPolicy {
+        let mut policy = enabled_policy();
+        policy.on_resume = true;
+        policy.ac.performance =
+            DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
+        policy
+    }
+
     fn telemetry(ac_online: Option<bool>, ts: SystemTime) -> Telemetry {
         let mut telemetry = Telemetry::empty();
         telemetry.ac_online = ac_online;
@@ -278,6 +361,70 @@ mod tests {
         assert_eq!(
             preflight.actions_if_ready(),
             Some(&[AutomationAction::SetProfile(PerformanceProfile::Balanced)][..])
+        );
+    }
+
+    #[test]
+    fn matched_resume_uses_fresh_post_resume_power_source_and_stays_execution_disabled() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let snapshot = ready_snapshot(10, base);
+        let policy = resume_policy();
+        let runtime = AutomationShadowRuntime::default();
+
+        let outcome = runtime.observe_resume_telemetry(
+            &telemetry(Some(true), base + Duration::from_secs(1)),
+            &policy,
+            &snapshot,
+            base + Duration::from_secs(1),
+        );
+        let AutomationShadowOutcome::ReadyButExecutionDisabled {
+            trigger,
+            generation,
+            preflight,
+        } = outcome
+        else {
+            panic!("expected ready-but-disabled resume outcome");
+        };
+        assert_eq!(trigger, AutomationTrigger::OnResume);
+        assert_eq!(generation, 10);
+        assert_eq!(
+            preflight.actions_if_ready(),
+            Some(&[AutomationAction::SetProfile(PerformanceProfile::Balanced)][..])
+        );
+    }
+
+    #[test]
+    fn resume_never_guesses_power_source_or_accepts_stale_telemetry() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let snapshot = ready_snapshot(12, base);
+        let policy = resume_policy();
+        let runtime = AutomationShadowRuntime::default();
+
+        assert_eq!(
+            runtime.observe_resume_telemetry(
+                &telemetry(None, base + Duration::from_secs(1)),
+                &policy,
+                &snapshot,
+                base + Duration::from_secs(1),
+            ),
+            AutomationShadowOutcome::Blocked {
+                trigger: AutomationTrigger::OnResume,
+                generation: 12,
+                block: AutomationShadowBlock::ResumePowerSourceUnknown,
+            }
+        );
+        assert_eq!(
+            runtime.observe_resume_telemetry(
+                &telemetry(Some(false), base),
+                &policy,
+                &snapshot,
+                base + Duration::from_secs(4),
+            ),
+            AutomationShadowOutcome::Blocked {
+                trigger: AutomationTrigger::OnResume,
+                generation: 12,
+                block: AutomationShadowBlock::ResumeTelemetryStale,
+            }
         );
     }
 
