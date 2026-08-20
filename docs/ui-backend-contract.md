@@ -22,6 +22,11 @@
 request handler ещё не зарегистрирован или backend не может вернуть
 authoritative state после операции.
 
+Для Quick Controls отдельно различаются **read readiness** (`*-state-ready`) и
+**mutation readiness** (`*-control-ready`). Read-only backend может показывать
+реальное наблюдаемое значение при `state-ready=true`, но control остаётся
+некликабельным, пока write capability не доказана.
+
 Локальный draft разрешён только для конфигурационных окон с явным `Apply`/`Save`.
 Draft controls могут меняться локально, но это не является hardware/system
 success. Backend-owned toggles используют request-only presentation и не меняют
@@ -37,39 +42,83 @@ success. Backend-owned toggles используют request-only presentation и
   product/policy disabled; UI должен оставаться read-only/disabled по evidence.
 - Fans window navigation, fan selection/profile refresh and existing fan callbacks.
 - Theme and secondary-window navigation.
+- Display и Keyboard Quick Controls: authoritative observed state подключён;
+  mutation остаётся fail-closed по текущим backend/product contracts.
 
 ### Display quick control
 
+#### Подключено
+
 Backend publishes:
 
-- `display-control-ready: bool`
+- `display-state-ready: bool`
 - `display-mode: int`
-  - `0` Auto
-  - `1` 60 Hz
-  - `2` 120 Hz
+  - `-1` — current mode не соответствует быстрому preset или target неоднозначен
+  - `1` — observed refresh около 60 Hz
+  - `2` — observed refresh около 120 Hz
 - `display-status: string`
+- `display-control-ready: false` в текущем production composition
 
-Backend handles:
+Observed state читается через существующий read-only
+`WaylandDisplayOutputProvider<WaylandCompositorOutputSource>` из compositor
+`wl_output` current mode. Refresh хранится lossless в mHz; UI только группирует
+59–61 Hz и 118–122 Hz для подсветки соответствующего preset, не переписывая
+source state.
 
-- `display-mode-requested(int)`
+Если compositor показывает несколько outputs, backend не угадывает внутреннюю
+панель: `display-mode=-1`, status сообщает `target ambiguous`. Пустой output list
+также не превращается в fake internal display.
 
-Do not set `display-mode` from the click itself. Update it only from observed
-state after the display provider confirms the transition.
+`display-mode-requested(int)` зарегистрирован, но текущий handler fail-closed и
+не выполняет mutation. Существующий production `DisplayOutputProvider`
+намеренно read-only и не содержит modeset API. Значение `0` (`Auto`) остаётся
+зарезервированным frontend preset для будущего product-level DisplayRefresh
+contract и не выводится из `wl_output` observation.
+
+Initial read выполняется при запуске приложения; затем observed state
+переопрашивается не чаще чем раз в 10 секунд на telemetry lifecycle events.
+Каждый provider read ограничен 2-секундным timeout.
+
+#### Для включения write
+
+Нужен отдельный typed DisplayRefresh mutation owner с однозначным target
+selection, capability evidence и authoritative compositor read-back. Только
+после этого допустимо выставлять `display-control-ready=true`.
 
 ### Keyboard quick control
 
+#### Подключено
+
 Backend publishes:
 
-- `keyboard-control-ready: bool`
-- `keyboard-brightness: int` (`0..3`)
-- `keyboard-status: string`
+- `keyboard-state-ready: bool`
+- `keyboard-brightness: int` — фактический raw hardware level
+- `keyboard-status: string` — включает observed `current/max`
+- `keyboard-control-ready: false` в текущем production composition
 
-Backend handles:
+Read path использует существующий `AsusKeyboardBacklightProvider`, который
+читает `/sys/class/leds/asus::kbd_backlight/{brightness,max_brightness}`. Max
+level определяется hardware и не hardcode-ится как `3`; если устройство
+сообщляет, например, `4`, UI сохраняет это в status и не подделывает выбранный
+preset.
 
-- `keyboard-brightness-requested(int)`
+В `orbis-hardwared` уже существует typed keyboard mutation implementation с
+validation, отдельным polkit action и fresh read-back. Однако production daemon
+намеренно компонует `DisabledKeyboardBacklightMutationBackend`, который
+сообщает `Unsupported`; packaged policy также не разрешает считать этот write
+production-ready. Поэтому `keyboard-brightness-requested(int)` зарегистрирован,
+но handler только отклоняет request, а `keyboard-control-ready` остаётся
+`false`.
 
-The keyboard read capability and write capability must remain distinct. A
-read-only device may expose status without enabling brightness buttons.
+Initial/periodic read lifecycle и 2-секундный timeout совпадают с Display.
+
+#### Для включения write
+
+Сначала должно быть принято отдельное product-policy решение и capability
+registry должен получить effective write evidence от production Hardware1.
+После mutation UI обязан принять только fresh read-back observed level; наличие
+typed writer implementation само по себе не является разрешением включить
+кнопки.
 
 ## PreferencesWindow
 
