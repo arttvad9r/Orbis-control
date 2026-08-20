@@ -15,6 +15,7 @@
 #![warn(missing_docs)]
 
 pub mod asus_armoury;
+pub mod asus_boot_sound;
 pub mod asus_diagnostics;
 pub mod aura;
 pub mod display_diagnostics;
@@ -40,6 +41,7 @@ pub mod wlr_output_head;
 pub mod mock;
 
 pub use asus_armoury::*;
+pub use asus_boot_sound::*;
 pub use asus_diagnostics::{
     probe_asus_diagnostics_capabilities, probe_aura, probe_keyboard_backlight,
 };
