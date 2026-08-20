@@ -56,6 +56,18 @@ Still open under #123:
 - mutation timeout must enter explicit unknown-outcome recovery rather than generic failure/retry;
 - executable Rust validation.
 
+## Effective product write truth (#120 complete)
+
+Main source consumers now use operation-level/equivalent typed write evidence:
+
+- Performance/Battery/Fan UI writability comes from `cap.operations.write.status`;
+- disabled reasons come from the same write status;
+- Diagnostics copies and renders read/write states independently;
+- Panel/Keyboard request paths require explicit `ProductWriteStatus::Supported`;
+- `scripts/check-backend-completion-contract.py` protects these mappings.
+
+The support-matrix schema requires separate read/write evidence. Current repository fixtures are only `empty`/`unknown` examples, so there is no optimistic generated model table to reconcile. The product decision is to keep deliberately disabled/unvalidated writes effective `Unsupported` with a reason. A generic `DisabledByPolicy` status is not added because it could imply underlying hardware support has already been proven.
+
 ## Automation
 
 Production worker is `crates/orbis-ui/src/worker_runtime.rs`. It owns:
@@ -117,12 +129,11 @@ Status LEDs, clamshell/ASPM/standby-networking/iGPU-memory/CPU-core/hotkey conce
 - #123 — remaining timeout/unknown-outcome contract;
 - #107 — dynamic Battery mutation owner/interface liveness;
 - #117 — telemetry useful/partial/empty evidence;
-- #120 — consumer/support-matrix product-policy truth;
 - #109/#116 — fan read evidence;
 - #115 — production-native UiState and removal of normal `orbis-test-support` GUI dependency.
 
 ## Validation state
 
-`scripts/verify-static` provides standard-library source contracts for UI, Automation, Display, backend completion and provider-timeout invariants. It is a fail-fast safety net only.
+`scripts/verify-static` provides standard-library source contracts for UI, Automation, Display, backend completion, provider-timeout and documentation-status invariants. It is a fail-fast safety net only.
 
-The available environment cannot run Rust/Cargo/Slint and GitHub Actions remains blocked by #106. Therefore this branch is not claimed as passing `cargo check/test/clippy`, Slint compile or final Nix/package acceptance.
+A fresh Draft PR #129 CI run again failed before repository steps (`steps=null`), so #106 remains an external Actions execution blocker. The available environment also cannot run Rust/Cargo/Slint locally. Therefore this branch is not claimed as passing `cargo check/test/clippy`, Slint compile or final Nix/package acceptance.
