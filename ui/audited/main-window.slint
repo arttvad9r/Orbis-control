@@ -43,8 +43,6 @@ export component AppWindow inherits Window {
     callback preview-dialog-clicked(int);
     callback quit-clicked;
 
-    property <bool> more-open: false;
-
     function bit-set(mask: int, bit: int) -> bool {
         let shifted = Math.floor(mask / bit);
         return shifted - 2 * Math.floor(shifted / 2) == 1;
@@ -225,44 +223,15 @@ export component AppWindow inherits Window {
             }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             ActionButton {
-                width: 66px;
-                label: "More";
-                accent: root.more-open;
-                clicked => { root.more-open = !root.more-open; }
+                width: 86px;
+                label: "Preferences";
+                clicked => { root.preferences-clicked(); }
             }
             ActionButton {
                 width: 58px;
                 label: "Quit";
                 clicked => { root.quit-clicked(); }
             }
-        }
-    }
-
-    if (root.more-open) : TouchArea {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
-        z: 99;
-        clicked => { root.more-open = false; }
-    }
-
-    if (root.more-open) : Rectangle {
-        x: parent.width - 190px;
-        y: parent.height - 114px;
-        width: 176px;
-        height: 78px;
-        z: 100;
-        border-radius: 9px;
-        border-width: 1px;
-        border-color: Palette.border-default;
-        background: Palette.surface-default;
-
-        VerticalLayout {
-            padding: 8px;
-            spacing: 5px;
-            ActionButton { label: "Preferences"; clicked => { root.preferences-clicked(); root.more-open = false; } }
-            ActionButton { label: "Diagnostics"; clicked => { root.diagnostics-clicked(); root.more-open = false; } }
         }
     }
 }
