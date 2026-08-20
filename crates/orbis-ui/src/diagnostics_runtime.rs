@@ -68,6 +68,18 @@ impl DiagnosticsRuntime {
             .expect("diagnostics capability lock poisoned") = snapshot;
     }
 
+    /// Clone the current immutable capability snapshot handle.
+    ///
+    /// This is a read-only sharing point for other UI-side observers that must
+    /// make a decision against the same whole-swap registry generation as
+    /// Diagnostics. It never probes or edits capabilities.
+    pub fn capabilities_arc(&self) -> Arc<CapabilityRegistrySnapshot> {
+        self.capabilities
+            .read()
+            .expect("diagnostics capability lock poisoned")
+            .clone()
+    }
+
     /// Collect one immutable production diagnostics snapshot using read-only
     /// sources only.
     pub async fn snapshot(&self) -> DiagnosticsSnapshot {
@@ -112,11 +124,7 @@ impl DiagnosticsRuntime {
                 .await,
         ];
 
-        let registry = self
-            .capabilities
-            .read()
-            .expect("diagnostics capability lock poisoned")
-            .clone();
+        let registry = self.capabilities_arc();
         let capabilities =
             orbis_capabilities::diagnostics::capability_snapshot_diagnostics(&registry);
 
