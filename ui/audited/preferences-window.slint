@@ -1,5 +1,5 @@
-import { ComboBox } from "std-widgets.slint";
-import { ToggleRow, ChoiceChip } from "../components/visual-controls.slint";
+import { RequestToggleRow } from "../components/request-toggle-row.slint";
+import { ChoiceChip } from "../components/visual-controls.slint";
 import { ThemeBridge, WindowHeader, SectionCard, SectionTitle, LocalStatus } from "common.slint";
 import { Palette, ThemeState, ThemeMode } from "../themes/dark.slint";
 
@@ -69,14 +69,14 @@ export component PreferencesWindow inherits Window {
                 padding: 8px;
                 spacing: 2px;
                 SectionTitle { title: "Startup"; detail: root.startup-status; }
-                ToggleRow {
+                RequestToggleRow {
                     label: "Run on startup";
                     description: root.startup-enabled ? "Start Orbis with the user session" : "Waiting for autostart backend";
                     checked: root.startup;
                     disabled: !root.startup-enabled;
                     toggled(value) => { root.startup-changed(value); }
                 }
-                ToggleRow {
+                RequestToggleRow {
                     label: "Start minimized";
                     description: root.start-minimized-enabled ? "Open without focusing the main window" : "Waiting for preferences lifecycle";
                     checked: root.start-minimized;
@@ -92,7 +92,7 @@ export component PreferencesWindow inherits Window {
                 padding: 8px;
                 spacing: 4px;
                 SectionTitle { title: "Window behavior"; }
-                ToggleRow {
+                RequestToggleRow {
                     label: "Remember window position";
                     description: root.remember-position-enabled ? "Restore only when the active window system supports it" : "Unavailable on current lifecycle/backend";
                     checked: root.remember-position;
@@ -100,16 +100,23 @@ export component PreferencesWindow inherits Window {
                     toggled(value) => { root.remember-position-changed(value); }
                 }
                 HorizontalLayout {
-                    height: 32px;
-                    spacing: 8px;
+                    height: 30px;
+                    spacing: 6px;
                     alignment: center;
                     Text { width: 148px; text: "Close button"; font-size: 10px; color: root.close-action-enabled ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
-                    close-box := ComboBox {
+                    ChoiceChip {
                         horizontal-stretch: 1;
-                        enabled: root.close-action-enabled;
-                        model: ["Quit", "Hide to tray"];
-                        current-index: root.close-action;
-                        selected(_) => { root.close-action-changed(self.current-index); }
+                        label: "Quit";
+                        selected: root.close-action-enabled && root.close-action == 0;
+                        disabled: !root.close-action-enabled;
+                        clicked => { root.close-action-changed(0); }
+                    }
+                    ChoiceChip {
+                        horizontal-stretch: 1;
+                        label: "Hide to tray";
+                        selected: root.close-action-enabled && root.close-action == 1;
+                        disabled: !root.close-action-enabled;
+                        clicked => { root.close-action-changed(1); }
                     }
                 }
             }
