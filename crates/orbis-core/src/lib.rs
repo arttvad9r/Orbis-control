@@ -19,8 +19,10 @@ pub mod action;
 pub mod alerts;
 pub mod aura;
 pub mod automation;
+pub mod automation_policy;
 pub mod battery;
 pub mod capability;
+pub mod control_flow;
 pub mod desired_observed;
 pub mod diagnostics;
 pub mod display;
@@ -33,6 +35,7 @@ pub mod keyboard_backlight;
 pub mod lifecycle;
 pub mod lighting;
 pub mod limits;
+pub mod mutation_audit;
 pub mod newtypes;
 pub mod power;
 pub mod preset;
@@ -42,6 +45,7 @@ pub mod readiness;
 pub mod reconciliation;
 pub mod telemetry;
 pub mod telemetry_history;
+pub mod telemetry_stats;
 pub mod thermal_control;
 pub mod transaction;
 pub mod validation;
@@ -56,9 +60,16 @@ pub use aura::{
     AuraBrightness, AuraDirection, AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraState, AuraZone,
 };
 pub use automation::{AutomationAction, AutomationRule, AutomationTrigger};
+pub use automation_policy::{
+    PolicyCondition, PolicyContext, PolicyEvent, PolicyRule, PolicySelection, PolicyTrigger,
+    select_policy_preset,
+};
 pub use battery::ChargeLimit;
 pub use capability::{
     Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId,
+};
+pub use control_flow::{
+    ControlFlowEdge, ControlFlowError, ControlFlowGraph, ControlFlowNode, ControlFlowNodeKind,
 };
 pub use desired_observed::{DesiredObservedState, DesiredValue, ObservedValue, PendingValue};
 pub use diagnostics::{
@@ -85,6 +96,10 @@ pub use keyboard_backlight::{KeyboardBacklightState, KeyboardBrightnessLevel};
 pub use lifecycle::LifecycleEvent;
 pub use lighting::LightingMode;
 pub use limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
+pub use mutation_audit::{
+    LastMutationAudit, MutationAuditEntry, MutationAuditOutcome, outcome_from_apply_result,
+    outcome_from_phase,
+};
 pub use newtypes::{EnergyMWh, FanPwm, MilliWatt, Percent, PowerW, RefreshHz, Rpm, TemperatureC};
 pub use power::PowerSource;
 pub use preset::{PowerPresetPolicy, Preset, PresetIntent};
@@ -97,6 +112,7 @@ pub use readiness::{
 pub use reconciliation::{ReconcileDecision, decide_reconciliation};
 pub use telemetry::{BatteryTelemetry, FanTelemetry, HardwareSnapshot, PowerTelemetry, Telemetry};
 pub use telemetry_history::{BoundedHistory, HistoryError, HistorySample};
+pub use telemetry_stats::{IntegerStats, integer_stats};
 pub use thermal_control::{
     EmaFilter, HysteresisGate, PwmRateLimiter, ThermalControlError, average_temperature,
     max_temperature, min_temperature, weighted_temperature,

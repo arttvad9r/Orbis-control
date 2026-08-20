@@ -30,6 +30,14 @@ where
     F: Future<Output = Result<T, ProviderError>>,
 {
     let id = id.into();
+    let permission_unknown = || {
+        if permission_required {
+            PermissionState::Unknown
+        } else {
+            PermissionState::NotRequired
+        }
+    };
+
     match bounded_provider_call(provider, operation, future).await {
         Ok(value) => ReadinessItem {
             id,
@@ -54,48 +62,38 @@ where
             state: ReadinessState::NotAvailable,
             required_for,
             evidence: vec![detail],
-            permission: if permission_required {
-                PermissionState::Unknown
-            } else {
-                PermissionState::NotRequired
-            },
+            permission: permission_unknown(),
         },
         Err(ProviderError::BackendUnavailable(detail)) => ReadinessItem {
             id,
             state: ReadinessState::Inactive,
             required_for,
             evidence: vec![detail],
-            permission: if permission_required {
-                PermissionState::Unknown
-            } else {
-                PermissionState::NotRequired
-            },
+            permission: permission_unknown(),
         },
-        Err(ProviderError::Timeout(detail))
-        | Err(ProviderError::Dbus(detail))
-        | Err(ProviderError::Internal(detail))
-        | Err(ProviderError::InvalidRequest(detail)) => ReadinessItem {
+        Err(ProviderError::Timeout(detail)) | Err(ProviderError::Dbus(detail)) => ReadinessItem {
             id,
             state: ReadinessState::Unreachable,
             required_for,
             evidence: vec![detail],
-            permission: if permission_required {
-                PermissionState::Unknown
-            } else {
-                PermissionState::NotRequired
-            },
+            permission: permission_unknown(),
         },
         Err(ProviderError::Io(error)) => ReadinessItem {
             id,
             state: ReadinessState::Unreachable,
             required_for,
             evidence: vec![error.to_string()],
-            permission: if permission_required {
-                PermissionState::Unknown
-            } else {
-                PermissionState::NotRequired
-            },
+            permission: permission_unknown(),
         },
+        Err(ProviderError::Internal(detail)) | Err(ProviderError::InvalidRequest(detail)) => {
+            ReadinessItem {
+                id,
+                state: ReadinessState::Unknown,
+                required_for,
+                evidence: vec![detail],
+                permission: permission_unknown(),
+            }
+        }
     }
 }
 
@@ -179,6 +177,20 @@ mod tests {
         .await;
         assert_eq!(item.state, ReadinessState::Ready);
         assert_eq!(item.permission, PermissionState::Denied);
+    }
+
+    #[tokio::test]
+    async fn internal_contract_failure_is_unknown_not_unreachable() {
+        let item = bounded_readiness_probe(
+            &TestProvider,
+            "hardware1",
+            "status",
+            vec![FeatureId::ChargeLimit],
+            false,
+            async { Err::<(), _>(ProviderError::Internal("malformed payload".into())) },
+        )
+        .await;
+        assert_eq!(item.state, ReadinessState::Unknown);
     }
 
     #[tokio::test]
