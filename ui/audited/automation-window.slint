@@ -1,5 +1,5 @@
 import { ComboBox } from "std-widgets.slint";
-import { ToggleRow } from "../components/visual-controls.slint";
+import { RequestToggleRow } from "../components/request-toggle-row.slint";
 import { ThemeBridge, WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 
@@ -85,7 +85,7 @@ export component AutomationWindow inherits Window {
         WindowHeader { title: "Automation"; subtitle: "Desired state for AC and battery sessions"; }
         LocalStatus { text: root.status; accent: root.backend-ready ? Palette.text-secondary : Palette.warning; }
 
-        ToggleRow {
+        RequestToggleRow {
             label: "Enable automation";
             description: root.backend-ready ? "Reconcile configured policy on lifecycle events" : "Waiting for automation backend";
             checked: root.enabled;
@@ -135,14 +135,14 @@ export component AutomationWindow inherits Window {
                     VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 0px;
-                        ToggleRow { label: "Apply on AC / battery change"; checked: root.on-ac-change; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.on-ac-change-requested(value); } }
-                        ToggleRow { label: "Reconcile after resume"; checked: root.on-resume; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.on-resume-requested(value); } }
+                        RequestToggleRow { label: "Apply on AC / battery change"; checked: root.on-ac-change; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.on-ac-change-requested(value); } }
+                        RequestToggleRow { label: "Reconcile after resume"; checked: root.on-resume; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.on-resume-requested(value); } }
                     }
                     VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 0px;
-                        ToggleRow { label: "Write only when state differs"; checked: root.reconcile-only; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.reconcile-only-requested(value); } }
-                        ToggleRow { label: "Notify about transitions"; checked: root.notify-transitions; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.notify-transitions-requested(value); } }
+                        RequestToggleRow { label: "Write only when state differs"; checked: root.reconcile-only; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.reconcile-only-requested(value); } }
+                        RequestToggleRow { label: "Notify about transitions"; checked: root.notify-transitions; disabled: !root.backend-ready || !root.enabled || root.saving; toggled(value) => { root.notify-transitions-requested(value); } }
                     }
                 }
             }
