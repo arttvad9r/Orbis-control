@@ -24,6 +24,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Run stdlib static contracts
+        run: python3 scripts/verify-static
+
       - name: Install Nix
         uses: cachix/install-nix-action@v31
         with:
