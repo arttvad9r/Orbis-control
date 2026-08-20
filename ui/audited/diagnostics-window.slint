@@ -4,7 +4,7 @@ import { Palette } from "../themes/dark.slint";
 
 export component DiagnosticsWindow inherits Window {
     width: 660px;
-    height: 560px;
+    height: 574px;
     title: "Orbis Control — Diagnostics";
     background: Palette.window-background;
 
@@ -42,7 +42,8 @@ export component DiagnosticsWindow inherits Window {
         LocalStatus { text: root.local-status; accent: root.refresh-enabled ? Palette.text-secondary : Palette.warning; }
 
         HorizontalLayout {
-            height: 54px; spacing: 8px;
+            height: 54px;
+            spacing: 8px;
             MetricTile { label: "Kernel"; value: root.kernel-value; detail: root.system-detail; }
             MetricTile { label: "Platform"; value: root.platform-value; detail: "privacy-safe DMI"; }
             MetricTile { label: "Orbis"; value: "v" + root.version-value; detail: root.build-detail; }
@@ -50,50 +51,90 @@ export component DiagnosticsWindow inherits Window {
 
         HorizontalLayout {
             spacing: 10px;
-            height: 240px;
+            height: 214px;
             SectionCard {
                 horizontal-stretch: 1;
                 VerticalLayout {
-                    padding: 10px; spacing: 6px;
+                    padding: 10px;
+                    spacing: 6px;
                     SectionTitle { title: "Capabilities"; detail: root.snapshot-meta; }
-                    Text { text: root.capabilities-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; vertical-alignment: top; }
+                    Text {
+                        vertical-stretch: 1;
+                        text: root.capabilities-text;
+                        font-size: 9px;
+                        color: Palette.text-primary;
+                        wrap: word-wrap;
+                        vertical-alignment: top;
+                    }
                 }
             }
             SectionCard {
                 width: 224px;
                 VerticalLayout {
-                    padding: 10px; spacing: 6px;
-                    SectionTitle { title: "Services"; detail: "presence only"; }
-                    Text { text: root.services-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; vertical-alignment: top; }
+                    padding: 10px;
+                    spacing: 6px;
+                    SectionTitle { title: "Services"; detail: "Presence only"; }
+                    Text {
+                        vertical-stretch: 1;
+                        text: root.services-text;
+                        font-size: 9px;
+                        color: Palette.text-primary;
+                        wrap: word-wrap;
+                        vertical-alignment: top;
+                    }
                 }
             }
         }
 
         HorizontalLayout {
             spacing: 8px;
-            height: 132px;
+            height: 116px;
             SectionCard {
                 horizontal-stretch: 1;
-                VerticalLayout { padding: 9px; spacing: 5px; SectionTitle { title: "GPU"; } Text { text: root.gpu-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; } }
+                VerticalLayout {
+                    padding: 9px;
+                    spacing: 5px;
+                    SectionTitle { title: "GPU"; }
+                    Text { vertical-stretch: 1; text: root.gpu-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; vertical-alignment: top; }
+                }
             }
             SectionCard {
                 horizontal-stretch: 1;
-                VerticalLayout { padding: 9px; spacing: 5px; SectionTitle { title: "Telemetry"; } Text { text: root.telemetry-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; } }
+                VerticalLayout {
+                    padding: 9px;
+                    spacing: 5px;
+                    SectionTitle { title: "Telemetry"; }
+                    Text { vertical-stretch: 1; text: root.telemetry-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; vertical-alignment: top; }
+                }
             }
             SectionCard {
                 horizontal-stretch: 1;
-                VerticalLayout { padding: 9px; spacing: 5px; SectionTitle { title: "Display"; detail: "read only"; } Text { text: root.display-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; } }
+                VerticalLayout {
+                    padding: 9px;
+                    spacing: 5px;
+                    SectionTitle { title: "Display"; detail: "Read-only"; }
+                    Text { vertical-stretch: 1; text: root.display-text; font-size: 9px; color: Palette.text-primary; wrap: word-wrap; vertical-alignment: top; }
+                }
             }
         }
 
         Rectangle { vertical-stretch: 1; background: transparent; }
 
         HorizontalLayout {
-            height: 30px; spacing: 6px;
+            height: 30px;
+            spacing: 6px;
             ActionButton { width: 88px; label: root.refresh-pending ? "Refreshing…" : "Refresh"; accent: true; disabled: !root.refresh-enabled || root.refresh-pending; clicked => { root.refresh-requested(); } }
             ActionButton { width: 104px; label: "Copy Summary"; disabled: !root.copy-enabled; clicked => { root.copy-summary-requested(); } }
             ActionButton { width: 86px; label: "Open Logs"; disabled: !root.logs-enabled; clicked => { root.open-logs-requested(); } }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text {
+                horizontal-stretch: 1;
+                text: "Snapshot actions never mutate hardware";
+                font-size: 9px;
+                color: Palette.text-disabled;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                overflow: elide;
+            }
             ActionButton { width: 104px; label: "Export Report"; disabled: !root.export-enabled; clicked => { root.export-report-requested(); } }
         }
     }
