@@ -7,9 +7,10 @@
 
 use std::time::SystemTime;
 
+use orbis_capabilities::{CapabilityRegistryBuilder, RegistryError};
 use orbis_core::capability::{
     Capability, CapabilityConstraints, CapabilityOperations, CapabilityReason, CapabilityStatus,
-    OperationCapability, RiskLevel,
+    FeatureId, OperationCapability, RiskLevel,
 };
 
 /// Build capability evidence for the current hardware-inert Automation runtime.
@@ -50,11 +51,24 @@ pub fn automation_shadow_capability(checked_at: SystemTime) -> Capability {
         .with_constraints(CapabilityConstraints::None)
 }
 
+/// Add the canonical hardware-inert Automation entry to one registry builder.
+///
+/// Callers must pass the same `checked_at` used to construct the surrounding
+/// registry generation. Duplicate insertion remains a `RegistryError`; this
+/// helper never overwrites an independently assembled Automation capability.
+pub fn add_automation_shadow_capability(
+    builder: &mut CapabilityRegistryBuilder,
+    checked_at: SystemTime,
+) -> Result<(), RegistryError> {
+    builder.add(
+        FeatureId::Automation,
+        automation_shadow_capability(checked_at),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orbis_capabilities::CapabilityRegistryBuilder;
-    use orbis_core::capability::FeatureId;
 
     #[test]
     fn shadow_capability_is_explicitly_read_only() {
@@ -90,11 +104,7 @@ mod tests {
     fn canonical_registry_accepts_shadow_capability_without_write_support() {
         let checked_at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(77);
         let mut builder = CapabilityRegistryBuilder::new(5, checked_at);
-        builder
-            .add(
-                FeatureId::Automation,
-                automation_shadow_capability(checked_at),
-            )
+        add_automation_shadow_capability(&mut builder, checked_at)
             .expect("read-only Automation capability must satisfy registry invariants");
         let snapshot = builder.build().expect("snapshot");
         let capability = snapshot.capability(FeatureId::Automation).unwrap();
@@ -103,6 +113,19 @@ mod tests {
         assert_eq!(
             capability.operations.write.status,
             CapabilityStatus::Unsupported
+        );
+    }
+
+    #[test]
+    fn duplicate_automation_entry_is_rejected_instead_of_overwritten() {
+        let checked_at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(91);
+        let mut builder = CapabilityRegistryBuilder::new(6, checked_at);
+        add_automation_shadow_capability(&mut builder, checked_at).unwrap();
+        assert_eq!(
+            add_automation_shadow_capability(&mut builder, checked_at),
+            Err(RegistryError::DuplicateCapability {
+                feature: FeatureId::Automation,
+            })
         );
     }
 
