@@ -1,11 +1,11 @@
 import { UiState } from "model.slint";
 import { FanCurveEditor } from "fan-curve-editor-v3.slint";
-import { ThemeBridge, ActionButton, LocalStatus } from "common.slint";
+import { ThemeBridge, WindowHeader, ActionButton, LocalStatus } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 
 export component FansWindow inherits Window {
     width: 700px;
-    height: 540px;
+    height: 568px;
     title: "Orbis Control — Fans + Power";
     background: Palette.window-background;
 
@@ -49,8 +49,13 @@ export component FansWindow inherits Window {
         padding: 12px;
         spacing: 10px;
 
+        WindowHeader {
+            title: "Fans + Power";
+            subtitle: "Authoritative fan curve, BIOS profile and write-safety state";
+        }
+
         FanCurveEditor {
-            height: 438px;
+            height: 430px;
             state: root.ui-state.fan-curve-state;
             writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked;
             error-state: root.ui-state.fan-curve-error;
@@ -72,7 +77,11 @@ export component FansWindow inherits Window {
             spacing: 8px;
             alignment: center;
 
-            LocalStatus { horizontal-stretch: 1; text: root.status-text(); accent: root.status-color(); }
+            LocalStatus {
+                horizontal-stretch: 1;
+                text: root.status-text();
+                accent: root.status-color();
+            }
 
             ActionButton {
                 width: 116px;
