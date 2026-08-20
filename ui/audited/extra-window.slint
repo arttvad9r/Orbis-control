@@ -1,5 +1,6 @@
 import { ScrollView, ComboBox, SpinBox } from "std-widgets.slint";
 import { ToggleRow, ChoiceChip } from "../components/visual-controls.slint";
+import { RequestToggleRow } from "../components/request-toggle-row.slint";
 import { ThemeBridge, WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 
@@ -9,9 +10,9 @@ export component ExtraWindow inherits Window {
     title: "Orbis Control — Extra Controls";
     background: Palette.window-background;
 
-    // backend-ready means a full editable draft/apply backend exists. The
-    // observed read-only properties below are independent: known hardware state
-    // may be shown without enabling a mutation surface.
+    // backend-ready means the remaining multi-field editable draft/apply
+    // backend exists. Proven independent hardware controls below may be writable
+    // without enabling that unrelated draft surface.
     in property <bool> backend-ready: false;
     in property <bool> applying: false;
     in property <string> status: "Advanced controls backend unavailable";
@@ -29,6 +30,9 @@ export component ExtraWindow inherits Window {
     in-out property <int> m4-action: 0;
     in-out property <int> m5-action: 0;
 
+    // These values are authoritative observations when their state-ready flag
+    // is set. Known direct controls emit a request and are replaced only by
+    // backend read-back; they are not optimistic drafts.
     in-out property <int> keyboard-brightness: -1;
     in-out property <int> keyboard-effect: -1;
     in-out property <int> keyboard-speed: -1;
@@ -45,8 +49,11 @@ export component ExtraWindow inherits Window {
 
     callback reload-requested;
     callback apply-requested;
+    callback keyboard-brightness-requested(int);
+    callback panel-overdrive-requested(bool);
 
     property <bool> any-observed-state: root.keyboard-state-ready || root.aura-state-ready || root.panel-overdrive-state-ready;
+    property <bool> any-direct-write: root.keyboard-control-ready || root.panel-overdrive-control-ready;
     property <[string]> binding-actions: ["Default", "None", "Mute", "Volume Up", "Volume Down", "Mic", "Screen", "Aura", "Performance", "GPU Mode"];
 
     ThemeBridge { }
@@ -100,21 +107,24 @@ export component ExtraWindow inherits Window {
                         padding: 10px; spacing: 7px;
                         SectionTitle {
                             title: "Keyboard Backlight";
-                            detail: root.keyboard-state-ready || root.aura-state-ready ? (root.keyboard-control-ready || root.aura-control-ready ? "Hardware draft" : "Observed · read only") : "Unavailable";
+                            detail: root.keyboard-state-ready || root.aura-state-ready ? (root.keyboard-control-ready ? "Hardware1 write ready" : "Observed · read only") : "Unavailable";
                         }
                         HorizontalLayout {
                             height: 30px; spacing: 6px; alignment: center;
                             Text { width: 92px; text: "Brightness"; font-size: 10px; color: root.keyboard-state-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
-                            ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.keyboard-state-ready && root.keyboard-brightness == 0; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness = 0; } }
-                            ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.keyboard-state-ready && root.keyboard-brightness == 1; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness = 1; } }
-                            ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.keyboard-state-ready && root.keyboard-brightness == 2; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness = 2; } }
-                            ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.keyboard-state-ready && root.keyboard-brightness == 3; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness = 3; } }
+                            ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.keyboard-state-ready && root.keyboard-brightness == 0; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness-requested(0); } }
+                            ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.keyboard-state-ready && root.keyboard-brightness == 1; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness-requested(1); } }
+                            ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.keyboard-state-ready && root.keyboard-brightness == 2; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness-requested(2); } }
+                            ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.keyboard-state-ready && root.keyboard-brightness == 3; disabled: !root.keyboard-control-ready || root.applying; clicked => { root.keyboard-brightness-requested(3); } }
                         }
                         HorizontalLayout {
                             height: 30px; spacing: 8px; alignment: center;
                             Text { width: 92px; text: "Effect"; font-size: 10px; color: root.aura-state-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
-                            ComboBox { horizontal-stretch: 1; enabled: root.aura-control-ready && !root.applying; model: ["Static", "Breathing", "Color Cycle", "Strobing"]; current-index <=> root.keyboard-effect; }
-                            ComboBox { width: 122px; enabled: root.aura-control-ready && !root.applying; model: ["Slow", "Normal", "Fast"]; current-index <=> root.keyboard-speed; }
+                            // The existing privileged Aura writer is Static RGB,
+                            // not mode/speed. Keep these fields read-only until a
+                            // typed effect mutation contract exists.
+                            ComboBox { horizontal-stretch: 1; enabled: false; model: ["Static", "Breathing", "Color Cycle", "Strobing"]; current-index <=> root.keyboard-effect; }
+                            ComboBox { width: 122px; enabled: false; model: ["Slow", "Normal", "Fast"]; current-index <=> root.keyboard-speed; }
                         }
                         ToggleRow { label: "Boot sound"; checked <=> root.boot-sound; disabled: !root.backend-ready || root.applying; }
                         ToggleRow { label: "Status LEDs"; checked <=> root.status-led; disabled: !root.backend-ready || root.applying; }
@@ -125,12 +135,13 @@ export component ExtraWindow inherits Window {
                     height: 194px;
                     VerticalLayout {
                         padding: 10px; spacing: 3px;
-                        SectionTitle { title: "Platform"; detail: root.panel-overdrive-state-ready ? (root.panel-overdrive-control-ready ? "Hardware draft" : "Partial observation") : (root.backend-ready ? "Hardware draft" : "Unavailable"); }
-                        ToggleRow {
+                        SectionTitle { title: "Platform"; detail: root.panel-overdrive-state-ready ? (root.panel-overdrive-control-ready ? "Hardware1 write ready" : "Partial observation") : (root.backend-ready ? "Hardware draft" : "Unavailable"); }
+                        RequestToggleRow {
                             label: "Panel overdrive";
-                            description: root.panel-overdrive-state-ready ? (root.panel-overdrive-control-ready ? "Capability evidence allows editing" : "Observed from asus-armoury · read only") : "State unavailable";
-                            checked <=> root.panel-overdrive;
+                            description: root.panel-overdrive-state-ready ? (root.panel-overdrive-control-ready ? "Request is committed only after authoritative read-back" : "Observed from asus-armoury · read only") : "State unavailable";
+                            checked: root.panel-overdrive;
                             disabled: !root.panel-overdrive-control-ready || root.applying;
+                            toggled(value) => { root.panel-overdrive-requested(value); }
                         }
                         ToggleRow { label: "Auto clamshell mode"; checked <=> root.auto-clamshell; disabled: !root.backend-ready || root.applying; }
                         ToggleRow { label: "Disable PCIe ASPM when plugged in"; checked <=> root.disable-aspm; disabled: !root.backend-ready || root.applying; }
@@ -157,7 +168,7 @@ export component ExtraWindow inherits Window {
             spacing: 6px;
             Text {
                 horizontal-stretch: 1;
-                text: root.backend-ready ? "Edit the draft, then Apply" : (root.any-observed-state ? "Observed values are read only; unsupported controls stay disabled" : "No advanced-control state loaded");
+                text: root.backend-ready ? "Edit the remaining draft, then Apply" : (root.any-direct-write ? "Proven hardware controls apply individually after read-back" : (root.any-observed-state ? "Observed values are read only; unsupported controls stay disabled" : "No advanced-control state loaded"));
                 font-size: 9px;
                 color: Palette.text-disabled;
                 vertical-alignment: center;
