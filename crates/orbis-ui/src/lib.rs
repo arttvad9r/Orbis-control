@@ -27,5 +27,6 @@ pub mod diagnostics_metadata;
 pub mod diagnostics_runtime;
 pub mod diagnostics_window_model;
 pub mod display_refresh_service;
+pub mod product_mutation_promotion;
 #[path = "worker_runtime.rs"]
 pub mod worker;
