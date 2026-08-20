@@ -62,6 +62,17 @@ pub(crate) fn replace_capabilities(snapshot: Arc<CapabilityRegistrySnapshot>) {
     });
 }
 
+/// Clone the same immutable whole-swap capability generation currently owned by
+/// Diagnostics. This is a read-only compatibility handoff for other UI-side
+/// observers; callers cannot mutate registry entries through the returned Arc.
+pub(crate) fn current_capabilities() -> Option<Arc<CapabilityRegistrySnapshot>> {
+    CONTEXT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|context| context.source.capabilities_arc())
+    })
+}
+
 pub(crate) fn clear() {
     CONTEXT.with(|slot| *slot.borrow_mut() = None);
 }
@@ -392,5 +403,13 @@ mod tests {
         let source = include_str!("diagnostics_backend.rs");
         assert!(source.contains("Report export failed · refresh to retry"));
         assert!(source.contains("export_path_available"));
+    }
+
+    #[test]
+    fn current_capabilities_is_read_only_snapshot_sharing() {
+        let source = include_str!("diagnostics_backend.rs");
+        assert!(source.contains("current_capabilities"));
+        assert!(source.contains("capabilities_arc()"));
+        assert!(!source.contains("CapabilityRegistryBuilder"));
     }
 }
