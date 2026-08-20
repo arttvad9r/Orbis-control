@@ -7,7 +7,7 @@ Status: AC/Battery and resume shadow observation plus executor handoff guards ar
 A saved policy is intent, not proof that automation is active. The production design is deliberately split into seven stages:
 
 1. **Policy persistence** — hardened, user-owned `desired-state.toml`.
-2. **Lifecycle observation** — authoritative power-source telemetry and paired logind resume signals with explicit freshness semantics.
+2. **Lifecycle observation** — authoritative power-source telemetry and paired logind resume signals with explicit freshness/coalescing semantics.
 3. **Pure planning** — convert one confirmed lifecycle event + observed power source into typed `orbis_core::automation::AutomationAction` values.
 4. **Capability preflight** — evaluate the entire immutable plan against one immutable capability generation.
 5. **Execution revalidation** — rebuild the plan from current persisted policy and re-check generation/freshness/preflight immediately before any future executor handoff.
@@ -42,6 +42,7 @@ The UI keeps unsaved draft state separate from the last successfully loaded/save
 - first fresh sample establishes a baseline and emits no transition;
 - `None`, stale or future-dated telemetry cannot create a transition;
 - a source change requires two consecutive fresh samples before emitting `OnAc` or `OnBattery`;
+- `rebaseline()` changes the stable source without emitting an event and is reserved for a separately proven lifecycle handoff;
 - observation itself has no mutation API.
 
 ### Resume
@@ -56,9 +57,22 @@ The UI keeps unsaved draft state separate from the last successfully loaded/save
 - unknown, stale, future-dated or pre-resume samples cannot create `OnResume`;
 - the pending resume expires after a bounded wait rather than accepting late state.
 
-The production transport is `resume_observer.rs`. It opens a system-bus connection and subscribes only to `org.freedesktop.login1.Manager.PrepareForSleep`. It acquires no inhibitor and invokes no login1 mutation method. zbus internally installs/removes the normal signal match rule required for subscription. Signals are marshalled back to the Slint event-loop thread before touching thread-local Automation state.
+The production transport is `resume_observer.rs`. It opens a system-bus connection and subscribes only to `org.freedesktop.login1.Manager.PrepareForSleep`. It acquires no inhibitor and invokes no login1 mutation method. zbus internally installs/removes the normal signal match rule required for subscription. The observer uses zbus' own public `ordered_stream` re-export rather than adding a new direct futures dependency, so the existing lockfile remains authoritative. Signals are marshalled back to the Slint event-loop thread before touching thread-local Automation state.
 
 On the matched `PrepareForSleep(false)` observation the bridge requests a fresh bounded `SysfsTelemetryProvider` read. The resume signal by itself does not plan anything. `AutomationShadowRuntime::observe_resume_telemetry()` independently re-checks sample freshness and AC/Battery presence before selecting the AC or Battery resume policy branch.
+
+### Resume / power-source coalescing
+
+A source can change while the machine is asleep. Without an explicit rule the first post-resume Battery sample could satisfy `OnResume`, then the next poll could emit a redundant `OnBattery` for the same physical change.
+
+The shadow lifecycle now handles this deterministically:
+
+- if persisted Automation is enabled **and** `on_resume=true`, the accepted fresh post-resume source becomes the `PowerSourceEdgeDetector` baseline after resume validation;
+- the same sleeping source change therefore cannot immediately reappear as `OnAc`/`OnBattery`;
+- if `on_resume=false`, no rebaseline occurs, so `on_ac_change=true` retains the opportunity to detect a source change that happened during sleep;
+- future genuinely distinct source changes after wake still require the normal two-sample debounce.
+
+This is lifecycle coalescing only. It does not execute or mark a plan applied.
 
 ### Shadow result boundary
 
@@ -148,11 +162,11 @@ The future serialized executor must still compare `required_generation()` with t
 
 ### Automation capability
 
-`FeatureId::Automation` must remain non-writable until the executor, lifecycle ownership, serialization/coalescing semantics and read-back semantics are production-wired and executable tests pass. Individual Performance/GPU support alone is insufficient.
+`FeatureId::Automation` must remain non-writable until the executor, lifecycle ownership, serialization semantics and read-back semantics are production-wired and executable tests pass. Individual Performance/GPU support alone is insufficient.
 
-### Lifecycle coalescing
+### Lifecycle serialization
 
-AC/Battery and Resume are now independently observable in shadow mode. A future executor still needs an explicit policy for collisions, for example a power-source transition that occurred while suspended and is confirmed shortly after `OnResume`. Shadow mode may report both; hardware execution must not race or partially interleave them.
+The sleeping power-source duplication case is now coalesced in shadow mode. A future executor must still serialize genuinely distinct lifecycle events that occur close together after wake and explicitly supersede stale handoff candidates rather than racing or partially interleaving them.
 
 ### Display refresh
 
@@ -184,16 +198,18 @@ When executor development begins, it must preserve these invariants:
 - run under one serialized owner together with capability-generation changes;
 - consume only a revalidated `AutomationExecutionHandoff`;
 - compare the handoff generation immediately before the first mutation;
-- define deterministic coalescing/precedence when resume and power-source events overlap;
+- preserve the established resume/power-source coalescing rule;
+- serialize and explicitly supersede genuinely distinct lifecycle events;
 - perform no partial batch when planning/preflight/revalidation failed;
 - use typed existing mutation owners only;
 - do not route around provider/polkit policy;
 - treat unknown mutation outcome as failure, not success;
 - read back every mutated feature;
 - publish success only from authoritative read-back;
-- cancel/supersede stale lifecycle plans explicitly;
 - keep fan-curve mutation outside the first automation scope while fan safety blocks remain open.
 
 ## Local validation status
 
-The repository requires Rust >= 1.87 and currently resolves Slint 1.13.1. The sandbox can execute native build tools, but it currently contains neither Rust/Cargo nor Slint tooling and outbound network access is blocked, so Rust/Slint semantic compilation has not yet run here. Source review and static safety checks are not substitutes for `cargo check`, `cargo test`, clippy and `slint-viewer --check`; those remain mandatory before enabling execution.
+The repository requires Rust >= 1.87 and currently resolves Slint 1.13.1. The sandbox can execute native build tools, but it currently contains neither Rust/Cargo nor Slint tooling and outbound network access is blocked, so Rust/Slint semantic compilation has not yet run here.
+
+`check-automation-shadow-contract.py` provides an additional stdlib-only fail-closed check in this environment. Its positive fixture passes, and mutation tests correctly fail when a hardware setter is introduced, `runtime-ready=true` is published, the resume gate is removed, the `policy.enabled && policy.on_resume` coalescing condition is weakened, or a redundant direct `futures-util` dependency is added. It is also registered in `scripts/verify` for normal toolchain-equipped runs. These static checks are not substitutes for `cargo check`, `cargo test`, clippy and Slint validation; those remain mandatory before enabling execution.
