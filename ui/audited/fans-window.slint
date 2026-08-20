@@ -1,12 +1,11 @@
 import { UiState } from "model.slint";
 import { FanCurveEditor } from "fan-curve-editor-v3.slint";
-import { ToggleRow, PreviewSliderRow } from "../components/visual-controls.slint";
-import { SectionCard, ActionButton } from "common.slint";
+import { SectionCard, ActionButton, LocalStatus } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 
 export component FansWindow inherits Window {
-    width: 760px;
-    height: 590px;
+    width: 700px;
+    height: 540px;
     title: "Orbis Control — Fans + Power";
     background: Palette.window-background;
 
@@ -16,10 +15,6 @@ export component FansWindow inherits Window {
     // custom/default mutation until that contract is fixed and revalidated.
     property <bool> mutation-safety-blocked: true;
     property <bool> factory-reset-pending: false;
-    property <bool> fan-clamp-preview: true;
-    property <float> hysteresis-up-preview: 3;
-    property <float> hysteresis-down-preview: 3;
-    property <string> calibration-status: "Calibrate";
 
     callback fan-changed(int);
     callback fan-profile-changed(int);
@@ -27,11 +22,27 @@ export component FansWindow inherits Window {
     callback fan-pwm-point-changed(int, int);
     callback fan-apply-clicked(bool);
 
+    function status-text() -> string {
+        if (root.mutation-safety-blocked) { return "Read only · fan writes remain safety-blocked"; }
+        if (root.ui-state.fan-curve-error) { return "Fan curve operation failed"; }
+        if (root.factory-reset-pending) { return "Factory defaults selected · not applied yet"; }
+        if (!root.ui-state.fan-curve-writable) { return "Read only"; }
+        if (root.ui-state.fan-curve-dirty) { return "Custom curve modified · not applied yet"; }
+        return "Current curve";
+    }
+
+    function status-color() -> color {
+        if (root.ui-state.fan-curve-error) { return Palette.error; }
+        if (root.mutation-safety-blocked || root.factory-reset-pending || root.ui-state.fan-curve-dirty) { return Palette.warning; }
+        return Palette.success;
+    }
+
     VerticalLayout {
-        padding: 10px;
-        spacing: 7px;
+        padding: 12px;
+        spacing: 10px;
+
         FanCurveEditor {
-            height: 460px;
+            height: 438px;
             state: root.ui-state.fan-curve-state;
             writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked;
             error-state: root.ui-state.fan-curve-error;
@@ -48,32 +59,33 @@ export component FansWindow inherits Window {
             pwm-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-pwm-point-changed(i, v); }
         }
 
-        SectionCard {
-            height: 62px;
-            HorizontalLayout { padding: 7px; spacing: 9px; alignment: center;
-                ToggleRow { width: 145px; label: "Clamp to Grid"; checked <=> root.fan-clamp-preview; }
-                PreviewSliderRow { horizontal-stretch: 1; label: "Hysteresis up"; unit: "°"; minimum: 0; maximum: 10; value <=> root.hysteresis-up-preview; }
-                PreviewSliderRow { horizontal-stretch: 1; label: "Hysteresis down"; unit: "°"; minimum: 0; maximum: 10; value <=> root.hysteresis-down-preview; }
-                ActionButton { width: 104px; label: root.calibration-status; clicked => { root.calibration-status = root.calibration-status == "Calibrated preview" ? "Calibrate" : "Calibrated preview"; } }
-            }
-        }
+        HorizontalLayout {
+            height: 32px;
+            spacing: 8px;
+            alignment: center;
 
-        HorizontalLayout { height: 32px; spacing: 8px; alignment: center;
-            Rectangle { width: 3px; height: 16px; border-radius: 1.5px; background: root.mutation-safety-blocked ? Palette.warning : root.ui-state.fan-curve-error ? Palette.error : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning : Palette.success; }
-            Text {
-                text: root.mutation-safety-blocked ? "Write disabled · preserving fan enabled-state is not fixed yet" : root.ui-state.fan-curve-error ? "Apply failed" : root.factory-reset-pending ? "Factory defaults pending · no hardware write yet" : !root.ui-state.fan-curve-writable ? "Read only" : root.ui-state.fan-curve-dirty ? "Modified" : "Current";
-                font-size: 9px;
-                color: root.mutation-safety-blocked ? Palette.warning : root.ui-state.fan-curve-error ? Palette.error : (root.factory-reset-pending || root.ui-state.fan-curve-dirty) ? Palette.warning : Palette.text-secondary;
-                vertical-alignment: center;
+            LocalStatus {
+                horizontal-stretch: 1;
+                text: root.status-text();
+                accent: root.status-color();
             }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-            ActionButton { width: 116px; label: "Factory Defaults"; disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error; clicked => { root.factory-reset-pending = true; } }
+
             ActionButton {
-                width: 166px;
-                label: root.factory-reset-pending ? "Apply Factory Defaults" : "Apply Custom Fan Curve";
-                accent: true;
+                width: 116px;
+                label: "Factory Defaults";
+                disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error;
+                clicked => { root.factory-reset-pending = true; }
+            }
+            ActionButton {
+                width: 136px;
+                label: root.factory-reset-pending ? "Apply Defaults" : "Apply Curve";
+                accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
                 disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
-                clicked => { let reset = root.factory-reset-pending; root.fan-apply-clicked(reset); if (reset) { root.factory-reset-pending = false; } }
+                clicked => {
+                    let reset = root.factory-reset-pending;
+                    root.fan-apply-clicked(reset);
+                    if (reset) { root.factory-reset-pending = false; }
+                }
             }
         }
     }
