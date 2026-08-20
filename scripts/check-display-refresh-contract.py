@@ -2,9 +2,9 @@
 """Static fail-closed checks for the developing DisplayRefresh backend contract.
 
 This checker does not prove a compositor implementation. It protects the current
-boundary: `wl_output` is observation-only, product refresh targets use an opaque
-future owner identity, and production UI/Automation remain write-disabled until
-that owner supplies typed target evidence.
+boundary: `wl_output` is observation-only, mutation target identity is owned by a
+future compositor adapter, validated requests cannot be forged from output names,
+and production UI/Automation remain write-disabled until that owner is proven.
 """
 
 from __future__ import annotations
@@ -16,12 +16,23 @@ from pathlib import Path
 
 FILES = {
     "core": "crates/orbis-core/src/display_refresh.rs",
+    "request": "crates/orbis-core/src/display_refresh_request.rs",
     "output": "crates/orbis-core/src/display_output.rs",
     "provider": "crates/orbis-providers/src/wayland_output.rs",
+    "owner": "crates/orbis-providers/src/display_refresh_owner.rs",
     "preflight": "crates/orbis-config/src/automation_preflight.rs",
     "quick": "crates/orbis-ui/src/quick_controls_backend.rs",
     "composition": "crates/orbis-ui/src/composition.rs",
 }
+
+SHELL_FALLBACKS = (
+    "std::process::Command",
+    "Command::new(",
+    "wlr-randr",
+    "kscreen-doctor",
+    "xrandr",
+    "/bin/sh",
+)
 
 
 def read(root: Path, relative: str, errors: list[str]) -> str | None:
@@ -59,6 +70,7 @@ def run(root: Path) -> list[str]:
                 "writable_target_for",
                 "same hardware width/height",
                 "auto_supported",
+                "closest_refresh",
             ),
             errors,
         )
@@ -66,6 +78,27 @@ def run(root: Path) -> list[str]:
             errors.append(
                 f"{FILES['core']}: compositor wl_output identity must not become mutation target identity"
             )
+
+    request = sources.get("request")
+    if request is not None:
+        require(
+            request,
+            FILES["request"],
+            (
+                "pub struct DisplayRefreshRequest",
+                "target: DisplayRefreshTargetId",
+                "preset_target: DisplayRefreshPresetTarget",
+                "pub fn from_constraints",
+                "constraints.writable_target_for(preset)?",
+            ),
+            errors,
+        )
+        if re.search(r"pub\s+target\s*:\s*DisplayRefreshTargetId", request):
+            errors.append(f"{FILES['request']}: request target field must remain private")
+        if re.search(r"pub\s+preset_target\s*:\s*DisplayRefreshPresetTarget", request):
+            errors.append(f"{FILES['request']}: request preset target field must remain private")
+        if "DisplayOutputId" in request:
+            errors.append(f"{FILES['request']}: wl_output identity must not enter mutation request")
 
     output = sources.get("output")
     if output is not None:
@@ -95,6 +128,27 @@ def run(root: Path) -> list[str]:
             if token in provider:
                 errors.append(
                     f"{FILES['provider']}: read-only wl_output provider contains unexpected mutation token {token!r}"
+                )
+
+    owner = sources.get("owner")
+    if owner is not None:
+        require(
+            owner,
+            FILES["owner"],
+            (
+                "pub trait DisplayRefreshMutationOwner",
+                "display_refresh_evidence",
+                "set_display_refresh",
+                "validate_display_refresh_request",
+                "DisplayRefreshTargetRole::InternalPanelProven",
+                "fresh.writable_target_for(request.preset())",
+            ),
+            errors,
+        )
+        for token in SHELL_FALLBACKS:
+            if token in owner:
+                errors.append(
+                    f"{FILES['owner']}: typed owner contract contains shell/process fallback {token!r}"
                 )
 
     preflight = sources.get("preflight")
@@ -130,6 +184,21 @@ def run(root: Path) -> list[str]:
         if re.search(r"\.add\(\s*(?:orbis_core::)?FeatureId::DisplayRefresh", composition):
             errors.append(
                 f"{FILES['composition']}: production registry must not expose DisplayRefresh before owner validation"
+            )
+
+    # No concrete implementation may enter production while this contract says
+    # the feature is write-disabled. Test fixtures should stay local to tests;
+    # the current tree intentionally has no `impl DisplayRefreshMutationOwner`.
+    for path in (root / "crates").rglob("*.rs"):
+        if path.name == "display_refresh_owner.rs":
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if re.search(r"impl(?:<[^>]*>)?\s+DisplayRefreshMutationOwner\s+for\b", source):
+            errors.append(
+                f"{path.relative_to(root)}: concrete DisplayRefresh owner appeared before promotion gate update"
             )
 
     return errors
