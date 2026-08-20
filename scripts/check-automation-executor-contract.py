@@ -8,7 +8,10 @@ Cargo/Clippy are unavailable in the review sandbox:
 - every execution candidate is bound to a monotonic lifecycle revision;
 - serialization checks lifecycle revision and capability generation and blocks
   replay of an already-admitted event;
-- worker preparation/serialization/recovery state is unique and hardware-inert;
+- worker-facing prepared envelopes are additionally bound to a monotonic
+  persisted-policy revision, so Save/reload invalidates older work;
+- worker preparation/serialization/recovery/policy state is unique and
+  hardware-inert;
 - an unknown post-mutation outcome blocks further unattended preparation until
   typed authoritative reconciliation succeeds;
 - the first mutation proof remains Performance-only and `cfg(test)`;
@@ -26,8 +29,10 @@ REVISION = "crates/orbis-ui/src/automation_lifecycle_revision.rs"
 SERIALIZATION = "crates/orbis-ui/src/automation_serialization.rs"
 SCOPE = "crates/orbis-ui/src/automation_execution_scope.rs"
 RECOVERY = "crates/orbis-ui/src/automation_recovery.rs"
+RETRY = "crates/orbis-ui/src/automation_retry.rs"
 WORKER_RUNTIME = "crates/orbis-ui/src/automation_worker_runtime.rs"
 WORKER_COORDINATOR = "crates/orbis-ui/src/automation_worker_coordinator.rs"
+WORKER_DRIVER = "crates/orbis-ui/src/automation_worker_driver.rs"
 PROOF = "crates/orbis-ui/src/automation_performance_executor.rs"
 CAPABILITY = "crates/orbis-ui/src/automation_capability.rs"
 LIB = "crates/orbis-ui/src/lib.rs"
@@ -75,6 +80,14 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "RecoveredAtDifferent",
         "pending.is_some()",
     ),
+    RETRY: (
+        "AutomationRetryDisposition",
+        "AfterCapabilityRefresh",
+        "Terminal",
+        "classify_automation_retry",
+        "CapabilitySnapshotStale",
+        "PermissionDenied",
+    ),
     WORKER_RUNTIME: (
         "AutomationLifecycleClock",
         "AutomationSerializationCoordinator",
@@ -93,6 +106,22 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "finish_performance_unknown",
         "mark_performance_unknown(prepared.lease(), requested)",
         "reconcile_performance",
+    ),
+    WORKER_DRIVER: (
+        "AutomationWorkerDriver",
+        "AutomationPolicyRevision",
+        "AutomationPolicyRevisionError",
+        "SequenceExhausted",
+        "AutomationWorkerPreparedEnvelope",
+        "required_policy_revision",
+        "policy_revision_still_matches",
+        "policy_revision_exhausted",
+        "reload_persisted_policy",
+        "replace_persisted_policy",
+        "clear_persisted_policy",
+        "prepare_latest_dry_run",
+        "finish_performance_unknown",
+        "load_automation_policy",
     ),
     PROOF: (
         "Test-only proof",
@@ -120,8 +149,10 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "pub mod automation_execution_scope;",
         "pub mod automation_lifecycle_revision;",
         "pub mod automation_recovery;",
+        "pub mod automation_retry;",
         "pub mod automation_serialization;",
         "pub mod automation_worker_coordinator;",
+        "pub mod automation_worker_driver;",
         "pub mod automation_worker_runtime;",
         "mod automation_performance_executor;",
     ),
@@ -132,8 +163,10 @@ INERT_FILES = (
     SERIALIZATION,
     SCOPE,
     RECOVERY,
+    RETRY,
     WORKER_RUNTIME,
     WORKER_COORDINATOR,
+    WORKER_DRIVER,
     CAPABILITY,
 )
 FORBIDDEN_INERT = tuple(
@@ -180,6 +213,16 @@ RECOVERY_DERIVE = re.compile(
 WORKER_COORDINATOR_DERIVE = re.compile(
     r"#\s*\[\s*derive\((?P<traits>[^\)]*)\)\s*\]\s*"
     r"pub\s+struct\s+AutomationWorkerCoordinator\b",
+    re.S,
+)
+WORKER_DRIVER_DERIVE = re.compile(
+    r"#\s*\[\s*derive\((?P<traits>[^\)]*)\)\s*\]\s*"
+    r"pub\s+struct\s+AutomationWorkerDriver\b",
+    re.S,
+)
+PREPARED_ENVELOPE_DERIVE = re.compile(
+    r"#\s*\[\s*derive\((?P<traits>[^\)]*)\)\s*\]\s*"
+    r"pub\s+struct\s+AutomationWorkerPreparedEnvelope\b",
     re.S,
 )
 ADMIT_SIGNATURE = re.compile(
@@ -285,6 +328,10 @@ def run(root: Path) -> list[str]:
             errors.append(
                 f"{WORKER_RUNTIME}: every confirmed event must replace/supersede previous candidate"
             )
+        if "self.latest_candidate = None;" not in worker_runtime:
+            errors.append(
+                f"{WORKER_RUNTIME}: successful admission must consume the latest candidate"
+            )
 
     recovery = sources.get(RECOVERY)
     if recovery is not None:
@@ -320,6 +367,38 @@ def run(root: Path) -> list[str]:
             errors.append(
                 f"{WORKER_COORDINATOR}: unknown outcome must mark recovery before releasing lease"
             )
+
+    driver = sources.get(WORKER_DRIVER)
+    if driver is not None:
+        require_nonclone(
+            WORKER_DRIVER,
+            driver,
+            WORKER_DRIVER_DERIVE,
+            "worker policy driver",
+            errors,
+        )
+        require_nonclone(
+            WORKER_DRIVER,
+            driver,
+            PREPARED_ENVELOPE_DERIVE,
+            "worker prepared envelope",
+            errors,
+        )
+        for marker in (
+            "checked_add(1)",
+            "self.policy_revision_exhausted = true",
+            "self.persisted_policy = None",
+            "required_policy_revision: self.policy_revision",
+            "self.required_policy_revision == current",
+            "finish_known(envelope.prepared)",
+            "finish_performance_unknown(envelope.prepared)",
+        ):
+            if marker not in driver:
+                errors.append(
+                    f"{WORKER_DRIVER}: missing policy-revision/ownership invariant {marker!r}"
+                )
+        if "slint::" in driver:
+            errors.append(f"{WORKER_DRIVER}: worker-facing driver must not depend on Slint")
 
     lib = sources.get(LIB)
     if lib is not None:
@@ -362,19 +441,25 @@ def run(root: Path) -> list[str]:
         "crates/orbis-ui/src/automation_backend.rs",
         WORKER_RUNTIME,
         WORKER_COORDINATOR,
+        WORKER_DRIVER,
         "crates/orbis-ui/src/quick_controls_backend.rs",
     ):
         source = read(root, relative, errors)
         if source is not None and "automation_performance_executor" in source:
             errors.append(f"{relative}: test-only Performance proof is wired into production")
 
-    # When production worker wiring begins, it must use the recovery-aware
-    # coordinator rather than directly owning the lower-level runtime.
+    # When production worker wiring begins, it must own the worker-facing driver,
+    # not bypass policy revision/recovery by directly owning lower layers.
     worker = read(root, "crates/orbis-ui/src/worker.rs", errors)
-    if worker is not None and "AutomationWorkerRuntime" in worker:
-        errors.append(
-            "crates/orbis-ui/src/worker.rs: production worker must own AutomationWorkerCoordinator, not bypass recovery with AutomationWorkerRuntime"
-        )
+    if worker is not None:
+        if "AutomationWorkerRuntime" in worker:
+            errors.append(
+                "crates/orbis-ui/src/worker.rs: production worker must not bypass driver/recovery with AutomationWorkerRuntime"
+            )
+        if "AutomationWorkerCoordinator" in worker:
+            errors.append(
+                "crates/orbis-ui/src/worker.rs: production worker must own AutomationWorkerDriver, not bypass policy revision with AutomationWorkerCoordinator"
+            )
 
     return errors
 
