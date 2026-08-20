@@ -6,7 +6,9 @@
 
 use std::time::SystemTime;
 
-use orbis_capabilities::{CapabilityRegistryBuilder, RegistryError};
+use orbis_capabilities::{
+    CapabilityRegistryBuilder, CapabilityRegistrySnapshot, RegistryError,
+};
 use orbis_core::capability::{
     Capability, CapabilityConstraints, CapabilityOperations, CapabilityReason, CapabilityStatus,
     FeatureId, OperationCapability, RiskLevel,
@@ -118,9 +120,42 @@ pub fn add_automation_shadow_capability(
     )
 }
 
+/// Return an immutable snapshot that contains explicit Automation shadow
+/// evidence while preserving every authoritative entry, generation and
+/// `checked_at` value from the source snapshot.
+///
+/// This is an adapter for consumers that need to reason about the already-real
+/// Automation read/shadow stack before the global production probe owns that
+/// feature. It never upgrades write support. If the source snapshot already
+/// contains `FeatureId::Automation`, that authoritative entry is preserved
+/// verbatim instead of being overwritten.
+pub fn augment_snapshot_with_automation_shadow(
+    snapshot: &CapabilityRegistrySnapshot,
+) -> Result<CapabilityRegistrySnapshot, RegistryError> {
+    if snapshot.contains(FeatureId::Automation) {
+        return Ok(snapshot.clone());
+    }
+
+    let mut builder = CapabilityRegistryBuilder::new(snapshot.generation(), snapshot.checked_at());
+    for (feature, capability) in snapshot.iter() {
+        builder.add(*feature, capability.clone())?;
+    }
+    add_automation_shadow_capability(&mut builder, snapshot.checked_at())?;
+    builder.build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn supported_read_only_capability() -> Capability {
+        Capability::new(CapabilityStatus::ReadOnly)
+            .with_operations(CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::Supported),
+                write: OperationCapability::new(CapabilityStatus::Unsupported),
+            })
+            .with_constraints(CapabilityConstraints::None)
+    }
 
     #[test]
     fn default_promotion_evidence_fails_every_gate() {
@@ -190,6 +225,41 @@ mod tests {
         let capability = snapshot.capability(FeatureId::Automation).unwrap();
         assert_eq!(capability.status, CapabilityStatus::ReadOnly);
         assert_eq!(capability.operations.write.status, CapabilityStatus::Unsupported);
+    }
+
+    #[test]
+    fn augmentation_preserves_generation_time_and_existing_entries() {
+        let checked_at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(88);
+        let mut builder = CapabilityRegistryBuilder::new(17, checked_at);
+        builder
+            .add(FeatureId::DisplayOutput, supported_read_only_capability())
+            .unwrap();
+        let source = builder.build().unwrap();
+
+        let augmented = augment_snapshot_with_automation_shadow(&source).unwrap();
+        assert_eq!(augmented.generation(), 17);
+        assert_eq!(augmented.checked_at(), checked_at);
+        assert_eq!(augmented.len(), source.len() + 1);
+        assert_eq!(
+            augmented.capability(FeatureId::DisplayOutput),
+            source.capability(FeatureId::DisplayOutput)
+        );
+        let automation = augmented.capability(FeatureId::Automation).unwrap();
+        assert_eq!(automation.status, CapabilityStatus::ReadOnly);
+        assert_eq!(automation.operations.write.status, CapabilityStatus::Unsupported);
+    }
+
+    #[test]
+    fn augmentation_never_overwrites_existing_automation_evidence() {
+        let checked_at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(90);
+        let mut builder = CapabilityRegistryBuilder::new(18, checked_at);
+        let existing = supported_read_only_capability();
+        builder.add(FeatureId::Automation, existing.clone()).unwrap();
+        let source = builder.build().unwrap();
+
+        let augmented = augment_snapshot_with_automation_shadow(&source).unwrap();
+        assert_eq!(augmented, source);
+        assert_eq!(augmented.capability(FeatureId::Automation), Some(&existing));
     }
 
     #[test]
