@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod automation_capability;
 pub mod automation_execution_guard;
 pub mod automation_execution_scope;
 pub mod automation_lifecycle_revision;
