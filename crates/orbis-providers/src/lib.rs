@@ -18,6 +18,7 @@ pub mod asus_armoury;
 pub mod asus_boot_sound;
 pub mod asus_diagnostics;
 pub mod aura;
+pub mod bounded_probes;
 pub mod display_diagnostics;
 pub mod display_refresh_owner;
 pub mod error;
@@ -47,6 +48,11 @@ pub use asus_diagnostics::{
     probe_asus_diagnostics_capabilities, probe_aura, probe_keyboard_backlight,
 };
 pub use aura::*;
+pub use bounded_probes::{
+    probe_charge_limit, probe_display_output, probe_fan_curve, probe_gpu_access, probe_gpu_mux,
+    probe_gpu_power, probe_mini_led_mode, probe_panel_overdrive, probe_performance,
+    probe_screen_auto_brightness,
+};
 pub use display_diagnostics::display_diagnostics_snapshot;
 pub use display_refresh_owner::{
     DisplayRefreshMutationOwner, validate_display_refresh_readback,
@@ -59,11 +65,6 @@ pub use gpu_diagnostics::gpu_diagnostics_snapshot;
 pub use hardware_identity::HardwareIdentityProvider;
 pub use keyboard_backlight::*;
 pub use native_asus_eco::*;
-pub use probes::{
-    probe_charge_limit, probe_display_output, probe_fan_curve, probe_gpu_access, probe_gpu_mux,
-    probe_gpu_power, probe_mini_led_mode, probe_panel_overdrive, probe_performance,
-    probe_screen_auto_brightness,
-};
 pub use service_presence::*;
 pub use sysfs_telemetry::SysfsTelemetryProvider;
 pub use system_metadata::SystemMetadataProvider;
