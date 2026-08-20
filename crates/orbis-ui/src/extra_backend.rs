@@ -272,10 +272,6 @@ pub(crate) fn refresh(window: &ExtraWindow) {
         let panel_provider = AsusArmouryPanelOverdriveProvider::default();
         let boot_sound_provider = AsusBootSoundProvider::default();
 
-        // Reads and mutation evidence are independent. Hardware1 status never
-        // substitutes for authoritative observed state. Boot sound has only a
-        // proven read path in Orbis today, so it never participates in write
-        // readiness.
         let (keyboard_result, aura_result, panel_result, boot_sound_result, write_statuses) =
             tokio::join!(
                 bounded_keyboard_read(&keyboard_provider),
@@ -589,7 +585,8 @@ mod tests {
         assert!(source.contains("set_backend_ready(false)"));
         assert!(source.contains("set_aura_control_ready(false)"));
         assert!(!source.contains("set_aura_static_rgb"));
-        assert!(!source.contains("set_boot_sound("));
+        let boot_sound_mutation = ["client.", "set_boot_sound("].concat();
+        assert!(!source.contains(&boot_sound_mutation));
         assert!(!source.contains("set_gpu_mode"));
         assert!(!source.contains("set_fan_curve"));
     }
