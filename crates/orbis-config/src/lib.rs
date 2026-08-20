@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod automation_dry_run_preflight;
 pub mod automation_policy;
 pub mod automation_preflight;
 pub mod automation_store;
@@ -20,6 +21,7 @@ pub mod preferences;
 pub mod store;
 pub mod window_state;
 
+pub use automation_dry_run_preflight::preflight_automation_plan_for_dry_run;
 pub use automation_policy::{
     AutomationPlan, AutomationPlanBlock, AutomationPolicy, AutomationPowerSource,
     DesiredDisplayPolicy, DesiredGpuPolicy, DesiredLightingPolicy, DesiredPerformancePolicy,
