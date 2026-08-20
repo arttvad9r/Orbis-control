@@ -8,7 +8,9 @@ Cargo/Clippy are unavailable in the review sandbox:
 - every execution candidate is bound to a monotonic lifecycle revision;
 - serialization checks lifecycle revision and capability generation and blocks
   replay of an already-admitted event;
-- worker-owned preparation state is unique/non-cloneable and hardware-inert;
+- worker preparation/serialization/recovery state is unique and hardware-inert;
+- an unknown post-mutation outcome blocks further unattended preparation until
+  typed authoritative reconciliation succeeds;
 - the first mutation proof remains Performance-only and `cfg(test)`;
 - Automation capability may advertise shadow/read support but never write.
 """
@@ -23,7 +25,9 @@ from pathlib import Path
 REVISION = "crates/orbis-ui/src/automation_lifecycle_revision.rs"
 SERIALIZATION = "crates/orbis-ui/src/automation_serialization.rs"
 SCOPE = "crates/orbis-ui/src/automation_execution_scope.rs"
+RECOVERY = "crates/orbis-ui/src/automation_recovery.rs"
 WORKER_RUNTIME = "crates/orbis-ui/src/automation_worker_runtime.rs"
+WORKER_COORDINATOR = "crates/orbis-ui/src/automation_worker_coordinator.rs"
 PROOF = "crates/orbis-ui/src/automation_performance_executor.rs"
 CAPABILITY = "crates/orbis-ui/src/automation_capability.rs"
 LIB = "crates/orbis-ui/src/lib.rs"
@@ -61,6 +65,16 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "required_revision",
         "required_generation",
     ),
+    RECOVERY: (
+        "AutomationRecoveryBarrier",
+        "AutomationRecoveryRecord",
+        "AutomationRecoveryKind::Performance",
+        "mark_performance_unknown",
+        "reconcile_performance",
+        "RecoveredAtRequested",
+        "RecoveredAtDifferent",
+        "pending.is_some()",
+    ),
     WORKER_RUNTIME: (
         "AutomationLifecycleClock",
         "AutomationSerializationCoordinator",
@@ -69,6 +83,16 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "current_revision",
         "required_revision",
         "NoReadyCandidate",
+    ),
+    WORKER_COORDINATOR: (
+        "AutomationWorkerCoordinator",
+        "AutomationRecoveryBarrier",
+        "RecoveryRequired",
+        "prepare_latest",
+        "finish_known",
+        "finish_performance_unknown",
+        "mark_performance_unknown(prepared.lease(), requested)",
+        "reconcile_performance",
     ),
     PROOF: (
         "Test-only proof",
@@ -89,18 +113,29 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "read: OperationCapability::new(CapabilityStatus::Supported)",
         "CapabilityStatus::Unsupported",
         "CapabilityConstraints::None",
+        "add_automation_shadow_capability",
     ),
     LIB: (
         "pub mod automation_capability;",
         "pub mod automation_execution_scope;",
         "pub mod automation_lifecycle_revision;",
+        "pub mod automation_recovery;",
         "pub mod automation_serialization;",
+        "pub mod automation_worker_coordinator;",
         "pub mod automation_worker_runtime;",
         "mod automation_performance_executor;",
     ),
 }
 
-INERT_FILES = (REVISION, SERIALIZATION, SCOPE, WORKER_RUNTIME, CAPABILITY)
+INERT_FILES = (
+    REVISION,
+    SERIALIZATION,
+    SCOPE,
+    RECOVERY,
+    WORKER_RUNTIME,
+    WORKER_COORDINATOR,
+    CAPABILITY,
+)
 FORBIDDEN_INERT = tuple(
     "".join(parts)
     for parts in (
@@ -137,6 +172,16 @@ WORKER_RUNTIME_DERIVE = re.compile(
     r"pub\s+struct\s+AutomationWorkerRuntime\b",
     re.S,
 )
+RECOVERY_DERIVE = re.compile(
+    r"#\s*\[\s*derive\((?P<traits>[^\)]*)\)\s*\]\s*"
+    r"pub\s+struct\s+AutomationRecoveryBarrier\b",
+    re.S,
+)
+WORKER_COORDINATOR_DERIVE = re.compile(
+    r"#\s*\[\s*derive\((?P<traits>[^\)]*)\)\s*\]\s*"
+    r"pub\s+struct\s+AutomationWorkerCoordinator\b",
+    re.S,
+)
 ADMIT_SIGNATURE = re.compile(
     r"pub\s+fn\s+admit\s*\(\s*&mut\s+self\s*,\s*"
     r"handoff\s*:\s*AutomationRevisionHandoff\s*,\s*"
@@ -159,6 +204,20 @@ def traits_from(pattern: re.Pattern[str], source: str) -> set[str] | None:
     if not match:
         return None
     return {item.strip() for item in match.group("traits").split(",")}
+
+
+def require_nonclone(
+    relative: str,
+    source: str,
+    pattern: re.Pattern[str],
+    label: str,
+    errors: list[str],
+) -> None:
+    traits = traits_from(pattern, source)
+    if traits is None:
+        errors.append(f"{relative}: cannot locate {label} derive")
+    elif {"Clone", "Copy"} & traits:
+        errors.append(f"{relative}: {label} must not be Clone/Copy")
 
 
 def run(root: Path) -> list[str]:
@@ -184,20 +243,20 @@ def run(root: Path) -> list[str]:
 
     serialization = sources.get(SERIALIZATION)
     if serialization is not None:
-        lease_traits = traits_from(DRY_LEASE_DERIVE, serialization)
-        if lease_traits is None:
-            errors.append(f"{SERIALIZATION}: cannot locate AutomationDryRunLease derive")
-        elif {"Clone", "Copy"} & lease_traits:
-            errors.append(f"{SERIALIZATION}: dry-run lease must not be Clone/Copy")
-
-        owner_traits = traits_from(SERIALIZATION_DERIVE, serialization)
-        if owner_traits is None:
-            errors.append(
-                f"{SERIALIZATION}: cannot locate AutomationSerializationCoordinator derive"
-            )
-        elif {"Clone", "Copy"} & owner_traits:
-            errors.append(f"{SERIALIZATION}: serialization owner must not be Clone/Copy")
-
+        require_nonclone(
+            SERIALIZATION,
+            serialization,
+            DRY_LEASE_DERIVE,
+            "dry-run lease",
+            errors,
+        )
+        require_nonclone(
+            SERIALIZATION,
+            serialization,
+            SERIALIZATION_DERIVE,
+            "serialization owner",
+            errors,
+        )
         if not ADMIT_SIGNATURE.search(serialization):
             errors.append(
                 f"{SERIALIZATION}: admit must consume revision handoff and take both current identities"
@@ -215,14 +274,51 @@ def run(root: Path) -> list[str]:
 
     worker_runtime = sources.get(WORKER_RUNTIME)
     if worker_runtime is not None:
-        runtime_traits = traits_from(WORKER_RUNTIME_DERIVE, worker_runtime)
-        if runtime_traits is None:
-            errors.append(f"{WORKER_RUNTIME}: cannot locate AutomationWorkerRuntime derive")
-        elif {"Clone", "Copy"} & runtime_traits:
-            errors.append(f"{WORKER_RUNTIME}: unique worker-owned runtime must not be Clone/Copy")
+        require_nonclone(
+            WORKER_RUNTIME,
+            worker_runtime,
+            WORKER_RUNTIME_DERIVE,
+            "worker runtime",
+            errors,
+        )
         if "self.latest_candidate = candidate.clone()" not in worker_runtime:
             errors.append(
                 f"{WORKER_RUNTIME}: every confirmed event must replace/supersede previous candidate"
+            )
+
+    recovery = sources.get(RECOVERY)
+    if recovery is not None:
+        require_nonclone(RECOVERY, recovery, RECOVERY_DERIVE, "recovery barrier", errors)
+        for forbidden_clear in ("pub fn clear(", "pub fn reset("):
+            if forbidden_clear in recovery:
+                errors.append(
+                    f"{RECOVERY}: unknown outcome must not expose generic clear/reset API"
+                )
+        if "self.pending = None" not in recovery or "reconcile_performance" not in recovery:
+            errors.append(
+                f"{RECOVERY}: pending recovery may clear only through typed Performance reconciliation"
+            )
+
+    coordinator = sources.get(WORKER_COORDINATOR)
+    if coordinator is not None:
+        require_nonclone(
+            WORKER_COORDINATOR,
+            coordinator,
+            WORKER_COORDINATOR_DERIVE,
+            "worker recovery coordinator",
+            errors,
+        )
+        recovery_check = coordinator.find("if let Some(record) = self.recovery.pending()")
+        runtime_prepare = coordinator.find("self.runtime\n            .prepare_latest")
+        if recovery_check < 0 or runtime_prepare < 0 or recovery_check > runtime_prepare:
+            errors.append(
+                f"{WORKER_COORDINATOR}: recovery barrier must be checked before runtime preparation"
+            )
+        mark = coordinator.find("mark_performance_unknown(prepared.lease(), requested)")
+        release = coordinator.find("self.runtime.finish(prepared)", mark if mark >= 0 else 0)
+        if mark < 0 or release < 0 or mark > release:
+            errors.append(
+                f"{WORKER_COORDINATOR}: unknown outcome must mark recovery before releasing lease"
             )
 
     lib = sources.get(LIB)
@@ -247,6 +343,8 @@ def run(root: Path) -> list[str]:
             errors.append(f"{PROOF}: missing final lifecycle revision comparison")
         if "current_generation != required_generation" not in proof:
             errors.append(f"{PROOF}: missing final capability generation comparison")
+        if "CommandError::ReadBack" not in proof:
+            errors.append(f"{PROOF}: proof must preserve unknown post-mutation read-back failure")
 
     capability = sources.get(CAPABILITY)
     if capability is not None:
@@ -262,12 +360,21 @@ def run(root: Path) -> list[str]:
         "crates/orbis-ui/src/main.rs",
         "crates/orbis-ui/src/worker.rs",
         "crates/orbis-ui/src/automation_backend.rs",
-        "crates/orbis-ui/src/automation_worker_runtime.rs",
+        WORKER_RUNTIME,
+        WORKER_COORDINATOR,
         "crates/orbis-ui/src/quick_controls_backend.rs",
     ):
         source = read(root, relative, errors)
         if source is not None and "automation_performance_executor" in source:
             errors.append(f"{relative}: test-only Performance proof is wired into production")
+
+    # When production worker wiring begins, it must use the recovery-aware
+    # coordinator rather than directly owning the lower-level runtime.
+    worker = read(root, "crates/orbis-ui/src/worker.rs", errors)
+    if worker is not None and "AutomationWorkerRuntime" in worker:
+        errors.append(
+            "crates/orbis-ui/src/worker.rs: production worker must own AutomationWorkerCoordinator, not bypass recovery with AutomationWorkerRuntime"
+        )
 
     return errors
 
