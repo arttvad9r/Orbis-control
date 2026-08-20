@@ -67,6 +67,9 @@ def run(root: Path) -> list[str]:
     require(extra_ui, "keyboard-brightness-requested", extra_ui_rel, errors)
     require(extra_ui, "panel-overdrive-requested", extra_ui_rel, errors)
     require(extra_ui, "RequestToggleRow", extra_ui_rel, errors)
+    require(extra_ui, "boot-sound-state-ready", extra_ui_rel, errors)
+    require(extra_ui, 'ToggleRow { label: "Boot sound";', extra_ui_rel, errors)
+    require(extra_ui, "disabled: true;", extra_ui_rel, errors)
     require(extra_ui, "enabled: false; model: [\"Static\"", extra_ui_rel, errors)
 
     extra_rel = "crates/orbis-ui/src/extra_backend.rs"
@@ -76,9 +79,20 @@ def run(root: Path) -> list[str]:
     require(extra, "set_panel_overdrive", extra_rel, errors)
     require(extra, "keyboard_status", extra_rel, errors)
     require(extra, "panel_status", extra_rel, errors)
+    require(extra, "AsusBootSoundProvider", extra_rel, errors)
+    require(extra, "set_boot_sound_state_ready", extra_rel, errors)
     forbid(extra, "set_aura_static_rgb", extra_rel, errors)
+    forbid(extra, "client.set_boot_sound(", extra_rel, errors)
     forbid(extra, "set_gpu_mode", extra_rel, errors)
     forbid(extra, "set_fan_curve", extra_rel, errors)
+
+    boot_provider_rel = "crates/orbis-providers/src/asus_boot_sound.rs"
+    boot_provider = read(root, boot_provider_rel, errors)
+    require(boot_provider, "ASUS_ARMOURY_BOOT_SOUND_RELATIVE_PATH", boot_provider_rel, errors)
+    require(boot_provider, "boot_sound_state", boot_provider_rel, errors)
+    require(boot_provider, "BootSoundState::from_kernel_value", boot_provider_rel, errors)
+    forbid(boot_provider, "set_boot_sound", boot_provider_rel, errors)
+    forbid(boot_provider, "Command::new", boot_provider_rel, errors)
 
     controls_rel = "crates/orbis-ui/src/hardware_controls_backend.rs"
     controls = read(root, controls_rel, errors)
@@ -99,6 +113,16 @@ def run(root: Path) -> list[str]:
         errors,
     )
 
+    pref_rel = "crates/orbis-ui/src/preferences_backend.rs"
+    pref = read(root, pref_rel, errors)
+    require(pref, "close_action_writable: !has_warning", pref_rel, errors)
+
+    pref_bridge_rel = "crates/orbis-ui/src/window_position_preferences_bridge.rs"
+    pref_bridge = read(root, pref_bridge_rel, errors)
+    require(pref_bridge, "set_hide_to_tray_enabled", pref_bridge_rel, errors)
+    require(pref_bridge, "0 => CloseAction::Quit", pref_bridge_rel, errors)
+    require(pref_bridge, "tray_backend::is_ready", pref_bridge_rel, errors)
+
     lifecycle_rel = "crates/orbis-ui/src/window_lifecycle_backend.rs"
     lifecycle = read(root, lifecycle_rel, errors)
     require(lifecycle, "CloseAction::Quit =>", lifecycle_rel, errors)
@@ -118,9 +142,13 @@ def run(root: Path) -> list[str]:
 
     updates_rel = "crates/orbis-ui/src/updates_backend.rs"
     updates = read(root, updates_rel, errors)
-    require(updates, "source_ready: false", updates_rel, errors)
-    require(updates, "check_enabled: false", updates_rel, errors)
-    require(updates, "install_enabled: false", updates_rel, errors)
+    require(updates, "ReleaseSourceBlocker::CanonicalSourceMissing", updates_rel, errors)
+    require(updates, "enum InstallBlocker", updates_rel, errors)
+    require(updates, "fn can_check", updates_rel, errors)
+    require(updates, "fn can_install", updates_rel, errors)
+    require(updates, "source_ready: assessment.can_check()", updates_rel, errors)
+    require(updates, "check_enabled: assessment.can_check()", updates_rel, errors)
+    require(updates, "install_enabled: assessment.can_install()", updates_rel, errors)
     require(updates, "detect_install_owner", updates_rel, errors)
     forbid(updates, "Command::new", updates_rel, errors)
     forbid(updates, "reqwest", updates_rel, errors)
