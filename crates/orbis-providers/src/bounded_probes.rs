@@ -1,10 +1,11 @@
 //! Provider-timeout enforcement for public read-only capability probes.
 //!
 //! The existing probe implementations own capability classification semantics.
-//! This module adds one outer provider-declared deadline around each complete
-//! read-only probe. If the deadline expires, only that capability becomes
-//! `TemporarilyUnavailable`; the timeout never becomes `Unsupported`, never
-//! aborts unrelated capability discovery, and never triggers a retry or write.
+//! Single-read probes receive one provider-declared deadline around that read.
+//! Performance uses a read-only adapter so its `profiles` and `current_profile`
+//! operations each receive their own deadline instead of sharing one aggregate
+//! budget. Timeouts stay local, become `TemporarilyUnavailable`, never become
+//! `Unsupported`, and never trigger a retry or write.
 
 use std::future::Future;
 
@@ -19,7 +20,7 @@ use crate::error::ProviderError;
 use crate::traits::{
     BatteryProvider, DisplayOutputProvider, FanProvider, GpuAccessProvider, GpuMuxProvider,
     GpuPowerProvider, MiniLedModeProvider, PanelOverdriveProvider, PerformanceProvider, Provider,
-    ScreenAutoBrightnessProvider,
+    ProviderHealth, ScreenAutoBrightnessProvider,
 };
 
 fn operation(status: CapabilityStatus, reason: String) -> OperationCapability {
@@ -53,7 +54,7 @@ fn timeout_capability(detail: String, write_status: CapabilityStatus) -> Capabil
     )
 }
 
-async fn bounded_probe<P, F>(
+async fn bounded_single_read_probe<P, F>(
     provider: &P,
     operation: &'static str,
     timeout_write_status: CapabilityStatus,
@@ -75,7 +76,96 @@ where
     }
 }
 
-/// Bounded Performance capability probe.
+/// Read-only Performance adapter that enforces the provider timeout separately
+/// for every read operation and refuses to expose mutation through the probe.
+struct BoundedPerformance<'a, P: ?Sized>(&'a P);
+
+impl<P> Provider for BoundedPerformance<'_, P>
+where
+    P: PerformanceProvider + ?Sized,
+{
+    fn id(&self) -> &'static str {
+        self.0.id()
+    }
+
+    fn backend(&self) -> orbis_core::identity::BackendIdentity {
+        self.0.backend()
+    }
+
+    fn timeout(&self) -> std::time::Duration {
+        self.0.timeout()
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        self.0.explain_unsupported(feature)
+    }
+
+    fn health(&self) -> ProviderHealth {
+        self.0.health()
+    }
+
+    fn diagnostics(&self) -> Vec<orbis_core::diagnostics::DiagnosticEntry> {
+        self.0.diagnostics()
+    }
+}
+
+#[async_trait::async_trait]
+impl<P> PerformanceProvider for BoundedPerformance<'_, P>
+where
+    P: PerformanceProvider + ?Sized,
+{
+    async fn profiles(
+        &self,
+    ) -> Result<Vec<orbis_core::profile::PerformanceProfile>, ProviderError> {
+        bounded_provider_call(self.0, "performance.profiles", self.0.profiles()).await
+    }
+
+    async fn current_profile(
+        &self,
+    ) -> Result<orbis_core::profile::PerformanceProfile, ProviderError> {
+        bounded_provider_call(
+            self.0,
+            "performance.current_profile",
+            self.0.current_profile(),
+        )
+        .await
+    }
+
+    async fn set_profile(
+        &self,
+        _profile: orbis_core::profile::PerformanceProfile,
+    ) -> Result<orbis_core::action::ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "read-only bounded Performance probe adapter does not expose mutation".into(),
+        ))
+    }
+
+    async fn profile_on_ac(
+        &self,
+    ) -> Result<Option<orbis_core::profile::PerformanceProfile>, ProviderError> {
+        bounded_provider_call(self.0, "performance.profile_on_ac", self.0.profile_on_ac()).await
+    }
+
+    async fn profile_on_battery(
+        &self,
+    ) -> Result<Option<orbis_core::profile::PerformanceProfile>, ProviderError> {
+        bounded_provider_call(
+            self.0,
+            "performance.profile_on_battery",
+            self.0.profile_on_battery(),
+        )
+        .await
+    }
+
+    fn validate_set_profile(
+        &self,
+        profile: orbis_core::profile::PerformanceProfile,
+    ) -> crate::error::ValidationResult {
+        self.0.validate_set_profile(profile)
+    }
+}
+
+/// Bounded Performance capability probe with a deadline per provider read.
 pub async fn probe_performance<P>(
     provider: &P,
     mutation_status: CapabilityStatus,
@@ -83,13 +173,8 @@ pub async fn probe_performance<P>(
 where
     P: PerformanceProvider + ?Sized,
 {
-    bounded_probe(
-        provider,
-        "probe_performance",
-        CapabilityStatus::TemporarilyUnavailable,
-        crate::probes::probe_performance(provider, mutation_status),
-    )
-    .await
+    let bounded = BoundedPerformance(provider);
+    crate::probes::probe_performance(&bounded, mutation_status).await
 }
 
 /// Bounded Battery charge-limit capability probe.
@@ -100,7 +185,7 @@ pub async fn probe_charge_limit<P>(
 where
     P: BatteryProvider + ?Sized,
 {
-    bounded_probe(
+    bounded_single_read_probe(
         provider,
         "probe_charge_limit",
         CapabilityStatus::TemporarilyUnavailable,
@@ -118,7 +203,7 @@ pub async fn probe_fan_curve<P>(
 where
     P: FanProvider + ?Sized,
 {
-    bounded_probe(
+    bounded_single_read_probe(
         provider,
         "probe_fan_curve",
         CapabilityStatus::TemporarilyUnavailable,
@@ -132,7 +217,7 @@ pub async fn probe_gpu_power<P>(provider: &P) -> Result<Capability, ProbeError>
 where
     P: GpuPowerProvider + ?Sized,
 {
-    bounded_probe(
+    bounded_single_read_probe(
         provider,
         "probe_gpu_power",
         CapabilityStatus::Unsupported,
@@ -146,7 +231,7 @@ pub async fn probe_gpu_mux<P>(provider: &P) -> Result<Capability, ProbeError>
 where
     P: GpuMuxProvider + ?Sized,
 {
-    bounded_probe(
+    bounded_single_read_probe(
         provider,
         "probe_gpu_mux",
         CapabilityStatus::Unsupported,
@@ -160,7 +245,7 @@ pub async fn probe_gpu_access<P>(provider: &P) -> Result<Capability, ProbeError>
 where
     P: GpuAccessProvider + ?Sized,
 {
-    bounded_probe(
+    bounded_single_read_probe(
         provider,
         "probe_gpu_access",
         CapabilityStatus::Unsupported,
@@ -177,7 +262,7 @@ pub async fn probe_panel_overdrive<P>(
 where
     P: PanelOverdriveProvider + ?Sized,
 {
-    bounded_probe(
+    bounded_single_read_probe(
         provider,
         "probe_panel_overdrive",
         CapabilityStatus::TemporarilyUnavailable,
@@ -191,7 +276,7 @@ pub async fn probe_mini_led_mode<P>(provider: &P) -> Result<Capability, ProbeErr
 where
     P: MiniLedModeProvider + ?Sized,
 {
-    bounded_probe(
+    bounded_single_read_probe(
         provider,
         "probe_mini_led_mode",
         CapabilityStatus::ReadOnly,
@@ -205,7 +290,7 @@ pub async fn probe_screen_auto_brightness<P>(provider: &P) -> Result<Capability,
 where
     P: ScreenAutoBrightnessProvider + ?Sized,
 {
-    bounded_probe(
+    bounded_single_read_probe(
         provider,
         "probe_screen_auto_brightness",
         CapabilityStatus::ReadOnly,
@@ -219,7 +304,7 @@ pub async fn probe_display_output<P>(provider: &P) -> Result<Capability, ProbeEr
 where
     P: DisplayOutputProvider + ?Sized,
 {
-    bounded_probe(
+    bounded_single_read_probe(
         provider,
         "probe_display_output",
         CapabilityStatus::ReadOnly,
@@ -237,8 +322,10 @@ mod tests {
     use orbis_core::diagnostics::DiagnosticEntry;
     use orbis_core::gpu::GpuPowerState;
     use orbis_core::identity::BackendIdentity;
+    use orbis_core::profile::PerformanceProfile;
 
     use super::*;
+    use crate::error::ValidationResult;
     use crate::traits::{Provider, ProviderHealth};
 
     struct HangingGpuPowerProvider;
@@ -277,7 +364,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn timed_out_probe_is_temporarily_unavailable_not_unsupported() {
+    async fn timed_out_single_read_probe_is_temporarily_unavailable_not_unsupported() {
         let capability = probe_gpu_power(&HangingGpuPowerProvider)
             .await
             .expect("timeout is capability evidence, not a probe abort");
@@ -297,5 +384,90 @@ mod tests {
             .expect("timeout reason must be preserved");
         assert!(reason.reason.contains("hanging-gpu-power"));
         assert!(reason.reason.contains("probe_gpu_power"));
+    }
+
+    struct HangingPerformanceProvider;
+
+    impl Provider for HangingPerformanceProvider {
+        fn id(&self) -> &'static str {
+            "hanging-performance"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("hanging-performance")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_millis(75)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("unsupported: {feature}")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl PerformanceProvider for HangingPerformanceProvider {
+        async fn profiles(&self) -> Result<Vec<PerformanceProfile>, ProviderError> {
+            pending::<Result<Vec<PerformanceProfile>, ProviderError>>().await
+        }
+
+        async fn current_profile(&self) -> Result<PerformanceProfile, ProviderError> {
+            Ok(PerformanceProfile::Balanced)
+        }
+
+        async fn set_profile(
+            &self,
+            _profile: PerformanceProfile,
+        ) -> Result<orbis_core::action::ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("test read-only provider".into()))
+        }
+
+        async fn profile_on_ac(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+            Ok(None)
+        }
+
+        async fn profile_on_battery(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+            Ok(None)
+        }
+
+        fn validate_set_profile(&self, _profile: PerformanceProfile) -> ValidationResult {
+            ValidationResult::invalid("test read-only provider")
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn performance_timeout_is_per_read_and_classified_locally() {
+        let capability = probe_performance(
+            &HangingPerformanceProvider,
+            CapabilityStatus::Supported,
+        )
+        .await
+        .expect("provider timeout must become capability evidence");
+
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::TemporarilyUnavailable
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::TemporarilyUnavailable,
+            "positive mutation evidence must not override a timed-out read contract"
+        );
+        let reason = capability
+            .operations
+            .read
+            .reason
+            .expect("timeout reason must be preserved");
+        assert!(reason.reason.contains("performance.profiles"));
+        assert!(reason.reason.contains("hanging-performance"));
     }
 }
