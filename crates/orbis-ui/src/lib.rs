@@ -10,6 +10,8 @@
 
 pub mod automation_execution_guard;
 pub mod automation_execution_scope;
+#[cfg(test)]
+mod automation_performance_executor;
 pub mod automation_serialization;
 pub mod automation_shadow_runtime;
 pub mod composition;
