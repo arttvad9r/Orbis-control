@@ -118,7 +118,16 @@ pub(crate) fn wire_close_request(app: &AppWindow) {
         };
 
         match action {
-            CloseAction::Quit => CloseRequestResponse::HideWindow,
+            CloseAction::Quit => {
+                // `HideWindow` alone would keep the process/event loop alive.
+                // Explicitly terminate the Slint loop; HideWindow is returned
+                // only as the close-request disposition while shutdown begins.
+                if let Err(error) = slint::quit_event_loop() {
+                    tracing::warn!(error = ?error, "close-action Quit could not terminate Slint event loop");
+                    return CloseRequestResponse::KeepWindowShown;
+                }
+                CloseRequestResponse::HideWindow
+            }
             CloseAction::HideToTray if super::tray_backend::is_ready() => {
                 tracing::debug!("main window closing to registered StatusNotifier tray");
                 CloseRequestResponse::HideWindow
@@ -150,6 +159,7 @@ mod tests {
         assert!(source.contains("KeepWindowShown"));
         assert!(source.contains("load_window_state"));
         assert!(source.contains("save_window_state"));
+        assert!(source.contains("slint::quit_event_loop()"));
         assert!(!source.contains("Command::new"));
     }
 }
