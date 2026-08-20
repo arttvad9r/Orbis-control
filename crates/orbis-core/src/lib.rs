@@ -41,13 +41,16 @@ pub mod newtypes;
 pub mod pending_transitions;
 pub mod power;
 pub mod preset;
+pub mod preset_bundle;
 pub mod profile;
 pub mod provider;
 pub mod readiness;
 pub mod reconcile_schedule;
 pub mod reconciliation;
 pub mod restoration;
+pub mod system_telemetry;
 pub mod telemetry;
+pub mod telemetry_export;
 pub mod telemetry_history;
 pub mod telemetry_stats;
 pub mod thermal_control;
@@ -109,6 +112,9 @@ pub use newtypes::{EnergyMWh, FanPwm, MilliWatt, Percent, PowerW, RefreshHz, Rpm
 pub use pending_transitions::{PendingTransition, PendingTransitionRegistry};
 pub use power::PowerSource;
 pub use preset::{PowerPresetPolicy, Preset, PresetIntent};
+pub use preset_bundle::{
+    PRESET_BUNDLE_SCHEMA_VERSION, PresetBundle, PresetBundleError,
+};
 pub use profile::{AsusdFanProfile, PerformanceProfile, PlatformProfile};
 pub use provider::ProviderStatus;
 pub use readiness::{
@@ -121,12 +127,16 @@ pub use reconcile_schedule::{
 };
 pub use reconciliation::{ReconcileDecision, decide_reconciliation};
 pub use restoration::{RestorationPlan, RestorationState};
+pub use system_telemetry::{
+    MemoryPressureTelemetry, PsiPressureLine, SystemMemoryTelemetry, ZramTelemetry, ZswapTelemetry,
+};
 pub use telemetry::{BatteryTelemetry, FanTelemetry, HardwareSnapshot, PowerTelemetry, Telemetry};
+pub use telemetry_export::{MetricExportRow, MetricFreshness, metric_rows_to_csv};
 pub use telemetry_history::{BoundedHistory, HistoryError, HistorySample};
 pub use telemetry_stats::{IntegerStats, integer_stats};
 pub use thermal_control::{
     EmaFilter, HysteresisGate, PwmRateLimiter, ThermalControlError, average_temperature,
-    max_temperature, min_temperature, weighted_temperature,
+    max_temperature, min_temperature, offset_temperature, temperature_delta, weighted_temperature,
 };
 pub use transaction::{MutationPhase, MutationTransaction};
 pub use validation::{HardwareValidationEvidence, HardwareValidationStage};

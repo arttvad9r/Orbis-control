@@ -187,6 +187,24 @@ pub fn weighted_temperature(values: &[(TemperatureC, u16)]) -> Option<Temperatur
     TemperatureC::new(average as i16).ok()
 }
 
+/// Signed delta between two temperatures in degrees Celsius.
+///
+/// Delta is intentionally an integer scalar rather than `TemperatureC`: a
+/// difference is not an absolute sensor temperature and may be negative.
+pub fn temperature_delta(left: TemperatureC, right: TemperatureC) -> i16 {
+    left.get().saturating_sub(right.get())
+}
+
+/// Apply a signed offset to an absolute temperature.
+///
+/// Out-of-range results return `None` rather than wrapping or clamping, so a
+/// derived sensor cannot silently fabricate an in-range value.
+pub fn offset_temperature(value: TemperatureC, offset_c: i16) -> Option<TemperatureC> {
+    let shifted = i32::from(value.get()) + i32::from(offset_c);
+    let shifted = i16::try_from(shifted).ok()?;
+    TemperatureC::new(shifted).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,5 +258,20 @@ mod tests {
         );
         assert_eq!(average_temperature(&[]), None);
         assert_eq!(weighted_temperature(&[(cpu, 0)]), None);
+    }
+
+    #[test]
+    fn delta_and_offset_are_explicit_derived_values() {
+        let cpu = TemperatureC::new(80).unwrap();
+        let gpu = TemperatureC::new(65).unwrap();
+        assert_eq!(temperature_delta(cpu, gpu), 15);
+        assert_eq!(temperature_delta(gpu, cpu), -15);
+        assert_eq!(offset_temperature(gpu, 5).unwrap().get(), 70);
+    }
+
+    #[test]
+    fn offset_does_not_clamp_out_of_range() {
+        let high = TemperatureC::new(150).unwrap();
+        assert_eq!(offset_temperature(high, 20), None);
     }
 }

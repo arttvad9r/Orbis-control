@@ -24,6 +24,7 @@ pub mod fan_defaults;
 pub mod gpu_diagnostics;
 pub mod hardware_identity;
 pub mod keyboard_backlight;
+pub mod linux_memory;
 pub mod native_asus_eco;
 pub mod probes;
 pub mod readiness;
@@ -50,6 +51,9 @@ pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsPro
 pub use gpu_diagnostics::gpu_diagnostics_snapshot;
 pub use hardware_identity::HardwareIdentityProvider;
 pub use keyboard_backlight::*;
+pub use linux_memory::{
+    LinuxSystemMemoryProvider, SystemMemoryProvider, parse_meminfo, parse_memory_pressure,
+};
 pub use native_asus_eco::*;
 pub use probes::{
     probe_charge_limit, probe_display_output, probe_fan_curve, probe_gpu_access, probe_gpu_mux,
