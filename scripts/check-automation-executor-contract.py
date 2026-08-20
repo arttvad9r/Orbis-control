@@ -3,8 +3,9 @@
 
 This checker intentionally uses only the Python standard library. It does not
 claim Rust type correctness; it protects the architectural boundary while the
-sandbox lacks Cargo: revalidated handoffs may enter only one hardware-inert
-serialization lease, and no execution/provider surface may appear here yet.
+sandbox lacks Cargo. Serialization/scope code must remain hardware-inert, and
+the first real Performance mutation proof must stay test-only until executable
+validation and worker-generation serialization are available.
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ import sys
 from pathlib import Path
 
 SERIALIZATION = "crates/orbis-ui/src/automation_serialization.rs"
+SCOPE = "crates/orbis-ui/src/automation_execution_scope.rs"
+PROOF = "crates/orbis-ui/src/automation_performance_executor.rs"
 GUARD = "crates/orbis-ui/src/automation_execution_guard.rs"
 LIB = "crates/orbis-ui/src/lib.rs"
 
@@ -31,16 +34,38 @@ REQUIRED = {
         "pub fn admit",
         "pub fn finish",
     ),
+    SCOPE: (
+        "AutomationPreparedKind",
+        "AutomationPreparedBatch",
+        "DuplicatePerformanceAction",
+        "UnsupportedAction",
+        "prepare_automation_execution_scope",
+        "AutomationAction::SetProfile",
+    ),
+    PROOF: (
+        "Test-only proof",
+        "PerformanceAutomationOwner",
+        "run_performance_proof",
+        "CommandError::ReadBack",
+        "ReadBackAfterMutation",
+        "UnexpectedApplyResult",
+        "ReadBackMismatch",
+        "outcome.result.is_applied()",
+    ),
     GUARD: (
         "AutomationExecutionCandidate",
         "revalidate_automation_candidate",
         "generation_still_matches",
     ),
-    LIB: ("pub mod automation_serialization;",),
+    LIB: (
+        "pub mod automation_serialization;",
+        "pub mod automation_execution_scope;",
+        "mod automation_performance_executor;",
+    ),
 }
 
 # Build dangerous spellings from fragments so this file does not self-match.
-FORBIDDEN = tuple(
+FORBIDDEN_INERT = tuple(
     "".join(parts)
     for parts in (
         ("WorkerCommand::", "Set"),
@@ -75,6 +100,11 @@ FINISH_SIGNATURE = re.compile(
     r"lease\s*:\s*AutomationDryRunLease\s*\)",
     re.S,
 )
+TEST_ONLY_PROOF = re.compile(
+    r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*"
+    r"mod\s+automation_performance_executor\s*;",
+    re.S,
+)
 
 
 def read(root: Path, relative: str, errors: list[str]) -> str | None:
@@ -98,47 +128,70 @@ def run(root: Path) -> list[str]:
             if marker not in source:
                 errors.append(f"{relative}: missing required marker {marker!r}")
 
-    serialization = sources.get(SERIALIZATION)
-    if serialization is None:
-        return errors
-
-    for token in FORBIDDEN:
-        if token in serialization:
-            errors.append(f"{SERIALIZATION}: forbidden execution token {token!r}")
-
-    risky = RISKY_PUBLIC.search(serialization)
-    if risky:
-        errors.append(
-            f"{SERIALIZATION}: forbidden public execution method {risky.group(1)!r}"
-        )
-
-    derive = LEASE_DERIVE.search(serialization)
-    if not derive:
-        errors.append(f"{SERIALIZATION}: cannot locate AutomationDryRunLease derive")
-    else:
-        traits = {item.strip() for item in derive.group("traits").split(",")}
-        if "Clone" in traits or "Copy" in traits:
+    for relative in (SERIALIZATION, SCOPE):
+        source = sources.get(relative)
+        if source is None:
+            continue
+        for token in FORBIDDEN_INERT:
+            if token in source:
+                errors.append(f"{relative}: forbidden execution token {token!r}")
+        risky = RISKY_PUBLIC.search(source)
+        if risky:
             errors.append(
-                f"{SERIALIZATION}: dry-run lease must not be Clone/Copy"
+                f"{relative}: forbidden public execution method {risky.group(1)!r}"
             )
 
-    if not ADMIT_SIGNATURE.search(serialization):
-        errors.append(
-            f"{SERIALIZATION}: admit must consume AutomationExecutionHandoff and take current generation"
-        )
-    if not FINISH_SIGNATURE.search(serialization):
-        errors.append(
-            f"{SERIALIZATION}: finish must consume the exact AutomationDryRunLease"
-        )
+    serialization = sources.get(SERIALIZATION)
+    if serialization is not None:
+        derive = LEASE_DERIVE.search(serialization)
+        if not derive:
+            errors.append(f"{SERIALIZATION}: cannot locate AutomationDryRunLease derive")
+        else:
+            traits = {item.strip() for item in derive.group("traits").split(",")}
+            if "Clone" in traits or "Copy" in traits:
+                errors.append(f"{SERIALIZATION}: dry-run lease must not be Clone/Copy")
 
-    if "required != current_generation" not in serialization:
-        errors.append(
-            f"{SERIALIZATION}: missing final generation comparison before slot ownership"
-        )
-    if "self.active_lease = Some(id)" not in serialization:
-        errors.append(f"{SERIALIZATION}: missing exclusive slot ownership marker")
-    if "self.active_lease = None" not in serialization:
-        errors.append(f"{SERIALIZATION}: missing explicit lease release marker")
+        if not ADMIT_SIGNATURE.search(serialization):
+            errors.append(
+                f"{SERIALIZATION}: admit must consume AutomationExecutionHandoff and take current generation"
+            )
+        if not FINISH_SIGNATURE.search(serialization):
+            errors.append(
+                f"{SERIALIZATION}: finish must consume the exact AutomationDryRunLease"
+            )
+        if "required != current_generation" not in serialization:
+            errors.append(
+                f"{SERIALIZATION}: missing final generation comparison before slot ownership"
+            )
+        if "self.active_lease = Some(id)" not in serialization:
+            errors.append(f"{SERIALIZATION}: missing exclusive slot ownership marker")
+        if "self.active_lease = None" not in serialization:
+            errors.append(f"{SERIALIZATION}: missing explicit lease release marker")
+
+    lib = sources.get(LIB)
+    if lib is not None:
+        if not TEST_ONLY_PROOF.search(lib):
+            errors.append(
+                f"{LIB}: Performance executor proof must remain behind #[cfg(test)]"
+            )
+        if "pub mod automation_performance_executor" in lib:
+            errors.append(
+                f"{LIB}: Performance executor proof must not be publicly exported"
+            )
+
+    # Until promotion, production runtime owners must not reference the proof
+    # module at all. Reading these files is cheap and catches accidental wiring.
+    for relative in (
+        "crates/orbis-ui/src/main.rs",
+        "crates/orbis-ui/src/worker.rs",
+        "crates/orbis-ui/src/automation_backend.rs",
+        "crates/orbis-ui/src/quick_controls_backend.rs",
+    ):
+        source = read(root, relative, errors)
+        if source is not None and "automation_performance_executor" in source:
+            errors.append(
+                f"{relative}: test-only Performance executor proof is wired into production"
+            )
 
     return errors
 
