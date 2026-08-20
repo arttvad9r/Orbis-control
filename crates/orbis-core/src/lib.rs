@@ -70,7 +70,7 @@ pub use fan::{FanCurve, FanCurvePoint, FanId};
 pub use gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 pub use identity::{BackendIdentity, DeviceIdentity};
 pub use keyboard_backlight::{KeyboardBacklightState, KeyboardBrightnessLevel};
-pub use lifecycle::LifecycleEvent;
+pub use lifecycle::{LifecycleEvent, ResumeGateOutcome, ResumeTelemetryGate};
 pub use lighting::LightingMode;
 pub use limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
 pub use newtypes::{EnergyMWh, FanPwm, MilliWatt, Percent, PowerW, RefreshHz, Rpm, TemperatureC};
