@@ -26,7 +26,11 @@ export component PreferencesWindow inherits Window {
     in property <bool> remember-position: false;
     in property <bool> remember-position-enabled: false;
     in property <int> close-action: 0; // 0 Quit, 1 Hide to tray
+    // Persistence/readiness of the close-action setting itself.
     in property <bool> close-action-enabled: false;
+    // Runtime capability for the tray-specific option only. Quit remains a
+    // safe selectable action whenever close-action-enabled is true.
+    in property <bool> hide-to-tray-enabled: false;
 
     in-out property <string> local-status: "Theme changes are saved immediately";
 
@@ -107,15 +111,15 @@ export component PreferencesWindow inherits Window {
                     ChoiceChip {
                         horizontal-stretch: 1;
                         label: "Quit";
-                        selected: root.close-action-enabled && root.close-action == 0;
+                        selected: root.close-action == 0;
                         disabled: !root.close-action-enabled;
                         clicked => { root.close-action-changed(0); }
                     }
                     ChoiceChip {
                         horizontal-stretch: 1;
                         label: "Hide to tray";
-                        selected: root.close-action-enabled && root.close-action == 1;
-                        disabled: !root.close-action-enabled;
+                        selected: root.close-action == 1;
+                        disabled: !root.close-action-enabled || !root.hide-to-tray-enabled;
                         clicked => { root.close-action-changed(1); }
                     }
                 }
