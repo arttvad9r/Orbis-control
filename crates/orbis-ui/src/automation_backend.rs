@@ -1,22 +1,35 @@
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use anyhow::Context;
+use orbis_capabilities::CapabilityRegistrySnapshot;
 use orbis_config::{
     AutomationPolicy, DesiredDisplayPolicy, DesiredGpuPolicy, DesiredLightingPolicy,
-    DesiredPerformancePolicy, DesiredStateDocument, OrbisDesiredState, load_desired_state,
-    save_desired_state,
+    DesiredPerformancePolicy, DesiredStateDocument, OrbisDesiredState, load_automation_policy,
+    load_desired_state, save_desired_state,
 };
 use orbis_core::gpu::GpuMode;
 use orbis_core::profile::PerformanceProfile;
+use orbis_core::telemetry::Telemetry;
+use orbis_ui::automation_shadow_runtime::{
+    AutomationShadowBlock, AutomationShadowOutcome, AutomationShadowRuntime,
+};
 use slint::ComponentHandle;
 
 use crate::AutomationWindow;
+
+struct AutomationShadowState {
+    runtime: AutomationShadowRuntime,
+    capabilities: Option<Arc<CapabilityRegistrySnapshot>>,
+    persisted_policy: Option<AutomationPolicy>,
+}
 
 #[derive(Clone)]
 struct AutomationContext {
     runtime: tokio::runtime::Handle,
     draft: Arc<Mutex<AutomationPolicy>>,
+    shadow: Arc<Mutex<AutomationShadowState>>,
 }
 
 thread_local! {
@@ -24,16 +37,122 @@ thread_local! {
 }
 
 pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
+    let persisted_policy = match load_policy() {
+        Ok(policy) => Some(policy),
+        Err(error) => {
+            tracing::warn!(error = %error, "Automation shadow policy unavailable at startup");
+            None
+        }
+    };
+    let initial_draft = persisted_policy.clone().unwrap_or_default();
+
     CONTEXT.with(|slot| {
         *slot.borrow_mut() = Some(AutomationContext {
             runtime,
-            draft: Arc::new(Mutex::new(AutomationPolicy::default())),
+            draft: Arc::new(Mutex::new(initial_draft)),
+            shadow: Arc::new(Mutex::new(AutomationShadowState {
+                runtime: AutomationShadowRuntime::default(),
+                capabilities: None,
+                persisted_policy,
+            })),
         });
     });
 }
 
 pub(crate) fn clear() {
     CONTEXT.with(|slot| *slot.borrow_mut() = None);
+}
+
+pub(crate) fn replace_capabilities(snapshot: Arc<CapabilityRegistrySnapshot>) {
+    CONTEXT.with(|slot| {
+        let Some(context) = slot.borrow().as_ref().cloned() else {
+            return;
+        };
+        match context.shadow.lock() {
+            Ok(mut shadow) => shadow.capabilities = Some(snapshot),
+            Err(_) => tracing::warn!("Automation shadow state lock poisoned"),
+        }
+    });
+}
+
+/// Feed one successful authoritative telemetry snapshot into the hardware-inert
+/// Automation shadow runtime.
+///
+/// Only the last successfully loaded/saved policy is considered. Unsaved UI
+/// draft changes are deliberately invisible here. The function never invokes a
+/// worker/provider setter and returns a user-facing notice only for confirmed
+/// transitions that reached freshness/preflight evaluation.
+pub(crate) fn observe_telemetry(telemetry: &Telemetry) -> Option<String> {
+    let context = CONTEXT.with(|slot| slot.borrow().clone())?;
+    let outcome = {
+        let mut shadow = match context.shadow.lock() {
+            Ok(shadow) => shadow,
+            Err(_) => {
+                tracing::warn!("Automation shadow state lock poisoned");
+                return Some("Automation shadow runtime unavailable".to_string());
+            }
+        };
+        let policy = shadow.persisted_policy.clone()?;
+        let capabilities = shadow.capabilities.clone()?;
+        shadow.runtime.observe_telemetry(
+            telemetry,
+            &policy,
+            capabilities.as_ref(),
+            SystemTime::now(),
+        )
+    };
+
+    let notice = shadow_notice(&outcome);
+    if let Some(ref notice) = notice {
+        tracing::info!(outcome = ?outcome, "Automation shadow transition: {notice}");
+    }
+    notice
+}
+
+fn shadow_notice(outcome: &AutomationShadowOutcome) -> Option<String> {
+    match outcome {
+        AutomationShadowOutcome::Observation(_) => None,
+        AutomationShadowOutcome::Blocked {
+            trigger,
+            generation,
+            block,
+        } => {
+            let reason = match block {
+                AutomationShadowBlock::CapabilitySnapshotStale => "capability snapshot stale",
+                AutomationShadowBlock::CapabilitySnapshotFromFuture => {
+                    "capability snapshot timestamp invalid"
+                }
+            };
+            Some(format!(
+                "Shadow runtime · {trigger:?} · blocked: {reason} · generation {generation}"
+            ))
+        }
+        AutomationShadowOutcome::PreflightBlocked {
+            trigger,
+            generation,
+            preflight,
+        } => Some(format!(
+            "Shadow runtime · {trigger:?} · preflight blocked ({} reason{}) · generation {generation}",
+            preflight.blocks.len(),
+            if preflight.blocks.len() == 1 { "" } else { "s" }
+        )),
+        AutomationShadowOutcome::ReadyButExecutionDisabled {
+            trigger,
+            generation,
+            preflight,
+        } => Some(format!(
+            "Shadow runtime · {trigger:?} · {} action{} ready · execution disabled · generation {generation}",
+            preflight.plan.actions.len(),
+            if preflight.plan.actions.len() == 1 { "" } else { "s" }
+        )),
+    }
+}
+
+fn set_persisted_policy(shadow: &Arc<Mutex<AutomationShadowState>>, policy: Option<AutomationPolicy>) {
+    match shadow.lock() {
+        Ok(mut state) => state.persisted_policy = policy,
+        Err(_) => tracing::warn!("Automation shadow state lock poisoned"),
+    }
 }
 
 fn performance_index(value: DesiredPerformancePolicy) -> i32 {
@@ -137,16 +256,7 @@ fn publish_policy(window: &AutomationWindow, policy: &AutomationPolicy, status: 
 }
 
 fn load_policy() -> anyhow::Result<AutomationPolicy> {
-    let load = load_desired_state::<OrbisDesiredState>()
-        .context("load typed desired state for Automation")?;
-    if let Some(warning) = load.warning {
-        anyhow::bail!(
-            "preserved desired-state source {:?} ({:?}); refusing editable Automation state",
-            warning.path,
-            warning.kind
-        );
-    }
-    Ok(load.state.into_desired().automation)
+    load_automation_policy().context("load hardened Automation policy")
 }
 
 fn save_policy(policy: AutomationPolicy) -> anyhow::Result<AutomationPolicy> {
@@ -229,6 +339,7 @@ pub(crate) fn reload(window: &AutomationWindow) {
 
     let weak = window.as_weak();
     let draft_store = context.draft.clone();
+    let shadow_store = context.shadow.clone();
     context.runtime.spawn(async move {
         let result = tokio::task::spawn_blocking(load_policy).await;
         if let Err(error) = weak.upgrade_in_event_loop(move |window| match result {
@@ -241,10 +352,11 @@ pub(crate) fn reload(window: &AutomationWindow) {
                     Err(_) => false,
                 };
                 if stored {
+                    set_persisted_policy(&shadow_store, Some(policy.clone()));
                     publish_policy(
                         &window,
                         &policy,
-                        "Policy loaded · persistence ready · runtime reconciliation unavailable",
+                        "Policy loaded · persistence ready · shadow runtime observing · execution disabled",
                     );
                 } else {
                     window.set_saving(false);
@@ -255,13 +367,15 @@ pub(crate) fn reload(window: &AutomationWindow) {
             }
             Ok(Err(error)) => {
                 tracing::warn!(error = %error, "Automation policy load failed");
+                set_persisted_policy(&shadow_store, None);
                 window.set_saving(false);
                 window.set_backend_ready(false);
                 window.set_runtime_ready(false);
-                window.set_status("Automation policy preserved/unavailable · editing disabled".into());
+                window.set_status("Automation policy preserved/unavailable · editing and shadow execution disabled".into());
             }
             Err(error) => {
                 tracing::warn!(error = %error, "Automation policy load task failed");
+                set_persisted_policy(&shadow_store, None);
                 window.set_saving(false);
                 window.set_backend_ready(false);
                 window.set_runtime_ready(false);
@@ -295,6 +409,7 @@ fn save(window: &AutomationWindow) {
     window.set_status("Saving policy draft…".into());
     let weak = window.as_weak();
     let draft_store = context.draft.clone();
+    let shadow_store = context.shadow.clone();
     context.runtime.spawn(async move {
         let result = tokio::task::spawn_blocking(move || save_policy(policy)).await;
         if let Err(error) = weak.upgrade_in_event_loop(move |window| match result {
@@ -307,10 +422,11 @@ fn save(window: &AutomationWindow) {
                     Err(_) => false,
                 };
                 if stored {
+                    set_persisted_policy(&shadow_store, Some(read_back.clone()));
                     publish_policy(
                         &window,
                         &read_back,
-                        "Policy saved and read back · runtime reconciliation unavailable",
+                        "Policy saved and read back · shadow runtime observing · execution disabled",
                     );
                 } else {
                     window.set_saving(false);
@@ -324,14 +440,14 @@ fn save(window: &AutomationWindow) {
                 window.set_saving(false);
                 window.set_backend_ready(false);
                 window.set_runtime_ready(false);
-                window.set_status("Automation policy save failed · reopen to reload".into());
+                window.set_status("Automation policy save failed · previous persisted policy remains shadow-observed".into());
             }
             Err(error) => {
                 tracing::warn!(error = %error, "Automation policy save task failed");
                 window.set_saving(false);
                 window.set_backend_ready(false);
                 window.set_runtime_ready(false);
-                window.set_status("Automation policy save failed · reopen to reload".into());
+                window.set_status("Automation policy save failed · previous persisted policy remains shadow-observed".into());
             }
         }) {
             tracing::warn!(error = ?error, "failed to publish Automation save result");
@@ -351,7 +467,7 @@ pub(crate) fn wire_window(window: &AutomationWindow) {
     window.on_enabled_requested(|requested| {
         tracing::warn!(
             requested,
-            "Automation enable request ignored: runtime reconciliation is not connected"
+            "Automation enable request ignored: execution is not connected"
         );
     });
 
@@ -423,6 +539,7 @@ pub(crate) fn wire_window(window: &AutomationWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbis_core::automation::{AutomationTrigger, PowerSourceObservationOutcome};
 
     #[test]
     fn ui_index_roundtrips_are_exact_and_ultimate_is_never_generated() {
@@ -444,6 +561,39 @@ mod tests {
     }
 
     #[test]
+    fn observation_only_outcomes_do_not_replace_policy_status() {
+        assert_eq!(
+            shadow_notice(&AutomationShadowOutcome::Observation(
+                PowerSourceObservationOutcome::BaselineEstablished
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn ready_shadow_notice_explicitly_says_execution_disabled() {
+        use orbis_config::{AutomationPlan, AutomationPowerSource, AutomationPreflight};
+        let outcome = AutomationShadowOutcome::ReadyButExecutionDisabled {
+            trigger: AutomationTrigger::OnBattery,
+            generation: 7,
+            preflight: AutomationPreflight {
+                plan: AutomationPlan {
+                    trigger: AutomationTrigger::OnBattery,
+                    power_source: AutomationPowerSource::Battery,
+                    actions: Vec::new(),
+                    blocks: Vec::new(),
+                    reconcile_only: true,
+                    notify_transitions: false,
+                },
+                blocks: Vec::new(),
+            },
+        };
+        let notice = shadow_notice(&outcome).unwrap();
+        assert!(notice.contains("execution disabled"));
+        assert!(!notice.contains("Applied"));
+    }
+
+    #[test]
     fn persistence_backend_contains_no_reconciliation_or_provider_commands() {
         let source = include_str!("automation_backend.rs");
         for needle in [
@@ -457,5 +607,6 @@ mod tests {
             assert!(!source.contains(needle), "unexpected execution token: {needle}");
         }
         assert!(source.contains("set_runtime_ready(false)"));
+        assert!(source.contains("ReadyButExecutionDisabled"));
     }
 }
