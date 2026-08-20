@@ -1,15 +1,15 @@
 //! Read-only logind resume signal observer for Automation shadow lifecycle.
 //!
 //! This module subscribes only to `org.freedesktop.login1.Manager`'s
-//! `PrepareForSleep(bool)` signal. It acquires no inhibitor, calls no D-Bus
-//! methods after proxy construction, and performs no hardware mutation. Signals
-//! are returned to the Slint event loop before touching thread-local UI backend
-//! state.
+//! `PrepareForSleep(bool)` signal. It acquires no inhibitor, invokes no login1
+//! methods, and performs no hardware mutation. zbus may install the normal bus
+//! match rule required by signal subscription. Signals are returned to the
+//! Slint event loop before touching thread-local UI backend state.
 
 use std::time::{Duration, SystemTime};
 
-use futures_util::StreamExt;
 use slint::ComponentHandle;
+use zbus::export::ordered_stream::OrderedStreamExt;
 
 use crate::AppWindow;
 
@@ -82,6 +82,7 @@ mod tests {
         assert!(source.contains(LOGIND_SERVICE));
         assert!(source.contains(PREPARE_FOR_SLEEP));
         assert!(source.contains("receive_signal"));
+        assert!(source.contains("ordered_stream::OrderedStreamExt"));
         let forbidden = [
             ["WorkerCommand::", "Set"].concat(),
             ["set_", "profile("].concat(),
