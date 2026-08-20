@@ -10,6 +10,7 @@
 use orbis_core::automation::{AutomationAction, AutomationTrigger};
 use orbis_core::profile::PerformanceProfile;
 
+use crate::automation_lifecycle_revision::AutomationLifecycleRevision;
 use crate::automation_serialization::AutomationDryRunLease;
 
 /// First-version executor scope after all earlier lifecycle/capability guards.
@@ -25,6 +26,7 @@ pub enum AutomationPreparedKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AutomationPreparedBatch {
     lease_id: u64,
+    required_revision: AutomationLifecycleRevision,
     required_generation: u64,
     trigger: AutomationTrigger,
     kind: AutomationPreparedKind,
@@ -34,6 +36,11 @@ impl AutomationPreparedBatch {
     /// Serialization lease identifier retained for audit/result correlation.
     pub fn lease_id(&self) -> u64 {
         self.lease_id
+    }
+
+    /// Lifecycle revision that must remain current through future execution.
+    pub fn required_revision(&self) -> AutomationLifecycleRevision {
+        self.required_revision
     }
 
     /// Capability generation that must remain current through future execution.
@@ -75,6 +82,7 @@ pub fn prepare_automation_execution_scope(
     let kind = classify_actions(lease.actions())?;
     Ok(AutomationPreparedBatch {
         lease_id: lease.id(),
+        required_revision: lease.required_revision(),
         required_generation: lease.required_generation(),
         trigger: lease.trigger().clone(),
         kind,
