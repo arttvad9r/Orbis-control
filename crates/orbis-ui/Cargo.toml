@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Orbis Control: GUI на Slint (только представление)"
+description = "Orbis Control: Slint GUI, UI runtime and production composition"
 
 [[bin]]
 name = "orbis-control"
