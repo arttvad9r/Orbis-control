@@ -2,20 +2,22 @@
 
 > Роль: **FUTURE PLAN**. Очередность работ без календарных обещаний.
 > Фактическое состояние и evidence — в [`current-state.md`](current-state.md).
-> Обновлено: **2026-08-19**.
+> Обновлено: **2026-08-20**.
 
 ## Principles
 
-1. Сначала safety blockers, runtime reliability и executable green CI, затем новые функции.
-2. Support определяется typed probes/evidence, не названием модели.
-3. Read/write evidence хранится раздельно.
-4. `Accepted` не считается `Applied`.
-5. Live claims revision-scoped.
-6. Неполный/conflicting control остаётся fail-closed до исправления контракта.
+1. Сначала safety blockers и runtime reliability, затем новые функции.
+2. Пока executable GitHub Actions недоступен (#106), разрешён offline-safe cleanup и narrow source work, но он не считается green CI или release evidence.
+3. Support определяется typed probes/evidence, не названием модели.
+4. Read/write evidence хранится раздельно.
+5. `Accepted` не считается `Applied`.
+6. Live claims revision-scoped.
+7. Неполный/conflicting control остаётся fail-closed до исправления контракта.
+8. Dated audits и старые remediation plans не являются backlog source of truth; активная работа должна быть отражена в Issues и этом roadmap.
 
 ## Milestone 0 — Repository/release baseline
 
-**Status: CONSOLIDATED; RELEASE CI BLOCKED**
+**Status: CONSOLIDATED; EXECUTABLE CI EXTERNALLY BLOCKED**
 
 Completed:
 
@@ -25,18 +27,37 @@ Completed:
 - preferences/window/desired-state/lifecycle foundations integrated;
 - diagnostics foundations integrated;
 - desktop/AppStream/Nix packaging and support-matrix tooling integrated;
-- stale PR stack normalized; open PR count is zero;
-- top-level product/architecture/security/status docs normalized;
-- historical broken sessiond `mockDevice` / `readOnlyEmpty` Nix options removed (#122 resolved).
+- historical broken sessiond `mockDevice` / `readOnlyEmpty` options removed (#122 resolved);
+- obsolete self-publishing/targeted validation workflows removed;
+- private session transcript removed from the repository;
+- stray binary ADR archive removed; ADR directory contains reviewable Markdown decisions;
+- documentation hierarchy normalized with explicit canonical vs historical classification.
 
 Remaining:
 
-- restore executable GitHub Actions and obtain green current-main checks (#106);
-- after CI recovery, protect `main` with required real checks (#114);
-- prune obsolete `agent/*` refs when delete-ref access exists (#118);
-- confirm permanent reverse-DNS identity before stable release (#124).
+- #106: restore executable GitHub Actions when repository/account infrastructure permits it; until then do not manufacture substitute CI evidence;
+- #114: after a real executable check exists, protect `main` with required checks;
+- #118: prune obsolete `agent/*` refs when delete-ref access/workflow is available;
+- #124: confirm permanent reverse-DNS identity before stable release.
 
-## Milestone 1 — Stable production capabilities
+## Milestone 1 — Runtime reliability and truthful capability state
+
+**Status: HIGHEST-VALUE SOURCE WORK WHILE CI IS BLOCKED**
+
+Priority order:
+
+1. #125 — reject raw GUI execution as euid 0 before user config/runtime/bus setup;
+2. #123 — enforce bounded provider/status execution in the sequential application path without unsafe mutation retry semantics;
+3. #112 — make explicit capability refresh use the same mutation-status re-query path as periodic refresh;
+4. #117 — distinguish useful fresh telemetry from empty/partial successful calls;
+5. #107 — prove Battery mutation owner/interface liveness dynamically;
+6. #120 — make effective write capability include product/policy safety blocks.
+
+Source patches may be prepared without Actions if they remain narrow and reviewable,
+but runtime-sensitive changes should stay unclaimed/unreleased until executable tests
+and package validation return.
+
+## Milestone 2 — Stable production capabilities
 
 **Status: CORE READ PATHS STABLE; WRITE EVIDENCE HARDENING ACTIVE**
 
@@ -49,117 +70,113 @@ Historical revision-scoped validated areas:
 
 Hardening required:
 
-- prove Battery/Panel/Aura real mutation owners/interfaces before reporting write Supported (#107);
-- preserve Battery discovery permission/transient failures (#108);
-- explicit capability refresh must re-query mutation status (#112);
-- effective write evidence must include product/policy safety blocks (#120);
-- enforce bounded provider/status execution (#123);
-- validate standalone hardwared sandbox/capability parity on an executable system (#126).
+- #108 — execute validation for the already-integrated Battery discovery classification fix;
+- #126 — validate standalone hardwared sandbox/capability parity on an executable system;
+- retain GPU/Panel/Keyboard/Aura disabled until concept-specific mutation ownership and product policy are proven.
 
-## Milestone 2 — Lifecycle and desired state
+## Milestone 3 — Lifecycle and desired state
 
 **Status: FOUNDATIONS INTEGRATED; RECONCILIATION NOT IMPLEMENTED**
 
 Completed:
 
-- Session1 startup is capability-local;
-- Desired / Observed / Pending domain foundations exist;
+- Session1 startup capability-local;
+- Desired / Observed / Pending foundations exist;
 - inert lifecycle event values exist;
 - versioned `desired-state.toml` exists and applies nothing automatically;
-- misleading historical sessiond dev-mode options were removed (#122).
+- misleading historical sessiond dev-mode options removed.
 
 Before reconciliation:
 
-- retire/harden legacy AppConfig/path APIs and CWD fallbacks (#113);
+- #113 — retire remaining legacy AppConfig/path compatibility symbols after executable compatibility validation;
 - compare authoritative Observed state before proposing any action;
 - preserve `Accepted != Applied` and explicit Pending semantics;
-- add integration tests before lifecycle events trigger execution;
+- add integration evidence before lifecycle events trigger execution;
 - missing/default/corrupt config must never synthesize hardware actions.
 
-## Milestone 3 — Preferences and desktop integration
+## Milestone 4 — Preferences and desktop integration
 
 **Status: PARTIAL / FAIL-CLOSED WHERE UNWIRED**
 
 Next:
 
-- finish XDG Run on Startup current-main lifecycle wiring (#110);
-- finish Start Minimized UI editing plus honest window-state/close behavior (#121);
+- #110 — finish XDG Run on Startup lifecycle wiring;
+- #121 — finish window-state, close and tray semantics;
 - keep automation policy and desired hardware state separate from UI preferences;
+- retain redacted preferences warning logging as a privacy invariant;
 - repeat packaged metadata validation on final release revision.
 
-## Milestone 4 — Fans and telemetry
+## Milestone 5 — Fans and telemetry
 
-**Status: FAN READS AVAILABLE; FAN WRITES BLOCKED**
+**Status: FAN READS AVAILABLE; FAN WRITES HARD-BLOCKED**
 
-Telemetry:
-
-- distinguish useful fresh telemetry from empty/partial successful calls while preserving field-local evidence (#117).
+Telemetry work is #117 under Milestone 1 because it affects runtime truth globally.
 
 Mandatory before fan writes are re-enabled:
 
-1. preserve authoritative `CurveData.enabled` on custom writes and read-back (#104);
-2. guarantee Factory Defaults restores previous performance profile on failure (#105);
-3. remove CPU/GPU support cross-inference (#109);
-4. carry stored `enabled` state through Session1/UI (#116);
-5. represent current safety/polkit block in effective write evidence (#120);
-6. require `FanCurveHwState::Ready` in the application mutation guard (#104);
-7. obtain executable green tests/CI on the exact revision;
-8. perform controlled dated hardware validation and confirm final fan/profile state.
+1. #109 — stop CPU/GPU support cross-inference;
+2. #116 — carry stored `enabled` state through Session1/UI;
+3. #104 — preserve authoritative `CurveData.enabled` on custom writes and require Ready state in mutation guard;
+4. #105 — make Factory Defaults restore the previous performance profile on every failure path;
+5. #120 — expose effective safety/policy block honestly;
+6. executable green tests/CI on exact revision;
+7. controlled dated hardware validation with final fan/profile state proof.
 
-## Milestone 5 — Diagnostics/supportability
+Do not reorder this milestone by implementing write enablement before the read/evidence
+model is correct.
+
+## Milestone 6 — Diagnostics/supportability
 
 **Status: TESTED FOUNDATIONS; LIFECYCLE WIRING FAIL-CLOSED**
 
 Next:
 
-- finish Diagnostics open/refresh lifecycle wiring (#111);
+- #111 — finish Diagnostics open/refresh lifecycle wiring;
 - keep exports allowlisted/privacy-bounded;
 - carry capability/telemetry evidence distinctions without fake defaults.
 
-## Milestone 6 — GPU product policy
+## Milestone 7 — Release graph and CLI
+
+**Status: IMPLEMENTED FOUNDATIONS / VALIDATION OPEN**
+
+Next:
+
+- #115 — remove mock/test-support from the default release dependency graph and replace fixture-derived production initial state/version;
+- #119 — executable workspace/integration validation and CLI polish;
+- #124 — finalize application identity;
+- final package/AppStream/desktop acceptance after executable validation returns.
+
+## Milestone 8 — GPU product policy
 
 **Status: BLOCKED**
 
-Eco / Standard / Ultimate / Optimized are product policy, not aliases for one backend enum. Production raw GPU mutation remains disabled until mapping, ownership, pending restart/reboot requirements and confirmation semantics are proven.
+Eco / Standard / Ultimate / Optimized are product policy, not aliases for one
+backend enum. Production raw GPU mutation remains disabled until mapping,
+ownership, restart/reboot requirements and confirmation semantics are proven.
 
-## Milestone 7 — Extended ASUS controls
+## Milestone 9 — Extended ASUS controls
 
 **Status: BLOCKED / UNKNOWN BY CONCEPT**
 
-Power limits, display/lighting and other extended controls remain evidence-gated. Preview UI stays disabled until a production capability/backend is connected. Do not infer support from DMI model names or unrelated firmware attributes.
-
-## Milestone 8 — CLI and release packaging
-
-**Status: PARTIAL IMPLEMENTATION**
-
-Completed:
-
-- desktop/AppStream metadata and Nix installation wiring;
-- support-matrix schema/evidence tooling;
-- repository/homepage metadata normalization;
-- `orbisctl --help` / `--version`;
-- **read-only `orbisctl status`** using existing Session1 providers for Battery, Performance and GPU power/MUX/access; no Hardware1 mutation path.
-
-Remaining:
-
-- executable workspace/integration validation and final CLI polish (#119);
-- remove mock/test-support from default release graph and replace fixture-derived production initial state/version (#115);
-- enforce raw GUI euid-0 rejection (#125);
-- obtain green executable CI (#106);
-- perform final package/metadata acceptance.
+Power limits, display/lighting and other extended controls remain evidence-gated.
+Preview UI stays disabled until a production capability/backend is connected. Do
+not infer support from DMI model names or unrelated firmware attributes.
 
 ## Release gate
 
 A release candidate requires:
 
-- intended baseline in `main`;
+- intended baseline integrated in `main`;
 - no known unsafe write enabled by default;
 - provider/status operations bounded against hangs (#123);
+- GUI user-session boundary enforced (#125);
 - relevant Cargo tests/clippy executed and green;
 - `nix flake check` executed and green;
 - package/metadata acceptance complete;
 - dated evidence for device-specific claims;
 - unsupported/incomplete controls shown honestly;
 - application identity decision recorded (#124);
-- GUI user-session boundary enforced (#125);
 - `main` protected by required real checks after CI recovery (#114).
+
+Until #106 is executable again, repository cleanup, documentation normalization and
+narrow source remediation may continue, but the release gate remains **BLOCKED**.

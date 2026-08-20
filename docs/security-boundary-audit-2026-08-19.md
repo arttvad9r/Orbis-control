@@ -1,5 +1,14 @@
 # Orbis Control security boundary audit — 2026-08-19
 
+> **HISTORICAL SNAPSHOT — production surface has narrowed since this audit.**
+> In current production composition/policy, Performance and conditionally Battery
+> are the only enabled mutation paths; GPU/Fan/Panel/Keyboard/Aura are disabled
+> and packaged polkit is default-deny for them. The keyboard sysfs path is no
+> longer part of the current writable root-service surface. Use
+> [`current-state.md`](current-state.md), [`architecture.md`](architecture.md)
+> and [`history.md`](history.md) for current boundaries. The original audit is
+> retained below as provenance.
+
 Scope: read-only audit of the current `chatgpt/production-hardening-20260818` security boundary. No runtime, policy, service, package or hardware behavior is changed by this document.
 
 ## Result

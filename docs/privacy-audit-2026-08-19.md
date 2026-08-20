@@ -1,5 +1,12 @@
 # Orbis Control privacy audit — 2026-08-19
 
+> **HISTORICAL SNAPSHOT — key finding remediated.** The preferences logging leak
+> described below was valid for the audited state, but current code implements
+> fixed `PreferencesWarningKind::log_category()` values and a redacted `Debug`
+> representation. Use [`current-state.md`](current-state.md) and
+> [`history.md`](history.md) for current privacy status. The original finding is
+> preserved below as the rationale for that invariant.
+
 Scope: backlog item #76. Read-only review of diagnostics Draft sources plus current preferences/config logging. This document does not claim export functionality that does not yet exist.
 
 ## Result

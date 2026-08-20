@@ -2,13 +2,13 @@
 
 Orbis Control — нативное Rust + Slint приложение для управления и наблюдения за
 возможностями ASUS-ноутбуков на Linux. Проект Wayland-first; X11 поддерживается
-как compatibility mode. GUI работает без root; privileged hardware mutations
-проходят только через отдельный typed `Hardware1` boundary с polkit.
+как compatibility mode. Privileged hardware mutations проходят только через
+отдельный typed `Hardware1` boundary с polkit.
 
 ## Текущий статус
 
-Проект находится в ранней development стадии (`0.1.0`). `main` является текущей
-интеграционной линией после production-hardening pass.
+Проект находится в ранней development стадии (`0.1.0`). `main` — текущая
+интеграционная линия после production-hardening pass.
 
 Подтверждённые production-направления включают:
 
@@ -21,20 +21,25 @@ Orbis Control — нативное Rust + Slint приложение для уп
 - profile-specific fan reads через asusd и active-curve reads через sysfs;
 - runtime capability registry с отдельным read/write evidence;
 - versioned XDG preferences, window state и desired-state foundations;
-- typed privacy-bounded diagnostics/export foundations;
+- typed privacy-bounded diagnostics foundations;
+- read-only `orbisctl status` поверх Session1 providers;
 - NixOS package/module, desktop/AppStream metadata и support-matrix tooling.
 
-Некоторые функции намеренно остаются fail-closed. В частности, product GPU mode
+Некоторые функции намеренно fail-closed. Product GPU mode
 (Eco/Standard/Ultimate/Optimized), power limits и неподтверждённые ASUS controls
-не включаются без concept-specific evidence. Fan mutation/reset code существует,
-но сейчас заблокирован в UI и packaged polkit policy из-за открытых safety-contract
-дефектов; fan reads остаются доступны.
+не включаются без concept-specific evidence. Fan mutation/reset implementation
+остаётся недоступной через текущий production product path: UI/policy/backend
+composition блокируют writes до исправления открытых safety-contract defects.
+Fan reads остаются доступны.
 
-Release также заблокирован до восстановления исполняемого GitHub Actions CI и
-успешного `nix flake check` на точном `main` revision.
+Release заблокирован #106: GitHub Actions сейчас не предоставляет trustworthy
+executable validation текущего `main`. Пока blocker существует, static review и
+source inspection не считаются green CI. Final release также требует успешно
+выполненных Cargo checks/tests/clippy, `nix flake check` и packaged acceptance на
+точной release revision.
 
-Точный фактический статус и список blockers: [`docs/current-state.md`](docs/current-state.md).
-План работ: [`docs/roadmap.md`](docs/roadmap.md).
+Точный operational status: [`docs/current-state.md`](docs/current-state.md).
+Порядок работ: [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Архитектура
 
@@ -44,7 +49,7 @@ Read path:
 UPower / kernel / supergfxd / ASUS firmware attributes / asusd
 → orbis-sessiond → Session1
 → orbis-session-client / providers
-→ application worker → GUI
+→ application worker → GUI / read-only CLI
 ```
 
 Privileged mutation path:
@@ -59,14 +64,16 @@ GUI/application original caller
 
 Основные правила:
 
-- GUI не запускается от root и не имеет generic privileged proxy;
+- production GUI должен работать как обычный user-session process; raw euid-0
+  rejection ещё не enforced и отслеживается в #125;
 - `sessiond` остаётся read/session boundary и не является mutation deputy;
-- `Unsupported`, `Unavailable`, `PermissionDenied` и `Unknown` не подменяют друг
-  друга;
+- `Unsupported`, `Unavailable`, `PermissionDenied` и `Unknown` не подменяют друг друга;
 - read/write evidence хранится раздельно;
 - `ApplyResult::Accepted` не считается `Applied`;
 - model-name tables не заменяют runtime probes;
-- device-specific/live claims всегда revision-scoped.
+- device-specific/live claims всегда revision-scoped;
+- отключённый product/backend не должен рекламироваться как writable только из-за
+  существования ABI или provider implementation.
 
 Подробнее: [`docs/architecture.md`](docs/architecture.md) и ADRs в
 [`docs/adr/`](docs/adr/).
@@ -83,8 +90,8 @@ GUI/application original caller
 - `orbis-session-protocol`, `orbis-session-client`, `orbis-sessiond` — read/session D-Bus path;
 - `orbis-hardwared` — narrow privileged Hardware1 service;
 - `orbis-ui` — Slint GUI + worker/composition;
-- `orbis-cli` — CLI crate (currently incomplete);
-- `orbis-test-support` — test/demo fixtures.
+- `orbis-cli` — read-only CLI surface; runtime validation/polish tracked by #119;
+- `orbis-test-support` — test/demo fixtures; removal from default release graph tracked by #115.
 
 ## Development
 
@@ -96,22 +103,27 @@ Dev environment:
 nix develop
 ```
 
-Основные проверки:
+Canonical repository verification entrypoint:
+
+```bash
+scripts/verify quick
+scripts/verify task
+scripts/verify full
+```
+
+Underlying Rust checks include:
 
 ```bash
 cargo fmt --all -- --check
-cargo check --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo check --workspace --all-targets --locked
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
 git diff --check
 ```
 
-Nix:
-
-```bash
-nix flake check
-nix build .#orbis-control
-```
+Full verification additionally includes Nix build/flake checks. Пока #106
+недоступен, эти команды должны быть реально выполнены в доверенной executable
+environment прежде чем результат можно будет назвать `TESTED`/green.
 
 Не используйте наличие UI control, provider object или файла в sysfs как
 доказательство write support. Для release/evidence правил см.
@@ -119,9 +131,17 @@ nix build .#orbis-control
 
 ## Документация
 
-Начните с [`docs/README.md`](docs/README.md): там определены роли current,
-architecture, ADR и historical документов. Operational source of truth —
-[`docs/current-state.md`](docs/current-state.md).
+Начните с [`docs/README.md`](docs/README.md). Он определяет canonical hierarchy и
+отделяет current source of truth от dated audits/remediation snapshots.
+
+- operational baseline: [`docs/current-state.md`](docs/current-state.md);
+- architecture: [`docs/architecture.md`](docs/architecture.md);
+- verification/evidence: [`docs/verification.md`](docs/verification.md);
+- active plan: [`docs/roadmap.md`](docs/roadmap.md);
+- historical/superseded records: [`docs/history.md`](docs/history.md).
+
+Chat/session transcripts, local runtime handoffs, secrets и одноразовые generated
+archives не должны храниться как project documentation.
 
 ## Лицензия
 
