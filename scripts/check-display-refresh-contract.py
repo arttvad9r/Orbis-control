@@ -4,7 +4,8 @@
 This checker does not prove a compositor implementation. It protects the current
 boundary: `wl_output` is observation-only, mutation target identity is owned by a
 future compositor adapter, validated requests cannot be forged from output names,
-and production UI/Automation remain write-disabled until that owner is proven.
+post-write success requires an authoritative active-policy read, and production
+UI/Automation remain write-disabled until that owner is proven.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from pathlib import Path
 FILES = {
     "core": "crates/orbis-core/src/display_refresh.rs",
     "request": "crates/orbis-core/src/display_refresh_request.rs",
+    "state": "crates/orbis-core/src/display_refresh_state.rs",
     "output": "crates/orbis-core/src/display_output.rs",
     "provider": "crates/orbis-providers/src/wayland_output.rs",
     "owner": "crates/orbis-providers/src/display_refresh_owner.rs",
@@ -100,6 +102,26 @@ def run(root: Path) -> list[str]:
         if "DisplayOutputId" in request:
             errors.append(f"{FILES['request']}: wl_output identity must not enter mutation request")
 
+    state = sources.get("state")
+    if state is not None:
+        require(
+            state,
+            FILES["state"],
+            (
+                "DisplayRefreshActivePolicy",
+                "Auto",
+                "Fixed",
+                "Unknown",
+                "DisplayRefreshAppliedState",
+                "internal_panel_is_proven",
+            ),
+            errors,
+        )
+        if "Unknown` never confirms mutation" not in state:
+            errors.append(
+                f"{FILES['state']}: Unknown active policy must be documented as non-confirming"
+            )
+
     output = sources.get("output")
     if output is not None:
         require(
@@ -138,13 +160,28 @@ def run(root: Path) -> list[str]:
             (
                 "pub trait DisplayRefreshMutationOwner",
                 "display_refresh_evidence",
+                "display_refresh_applied_state",
                 "set_display_refresh",
+                "request: &DisplayRefreshRequest",
                 "validate_display_refresh_request",
+                "validate_display_refresh_readback",
                 "DisplayRefreshTargetRole::InternalPanelProven",
                 "fresh.writable_target_for(request.preset())",
+                "DisplayRefreshActivePolicy::Auto",
+                "DisplayRefreshActivePolicy::Fixed",
+                "after.current.width != before.current.width",
+                "after.current.height != before.current.height",
             ),
             errors,
         )
+        if re.search(
+            r"async\s+fn\s+set_display_refresh\s*\([^\)]*request\s*:\s*DisplayRefreshRequest",
+            owner,
+            re.S,
+        ):
+            errors.append(
+                f"{FILES['owner']}: setter must borrow the exact request so post-write validation can reuse it"
+            )
         for token in SHELL_FALLBACKS:
             if token in owner:
                 errors.append(
