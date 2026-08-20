@@ -39,6 +39,7 @@ def run(root: Path) -> list[str]:
     lib = read(root, lib_rel, errors)
     require(lib, '#[path = "worker_runtime.rs"]', lib_rel, errors)
     require(lib, "pub mod worker;", lib_rel, errors)
+    require(lib, "pub mod product_mutation_promotion;", lib_rel, errors)
 
     worker_rel = "crates/orbis-ui/src/worker_runtime.rs"
     worker = read(root, worker_rel, errors)
@@ -101,6 +102,22 @@ def run(root: Path) -> list[str]:
     require(controls, "read-back mismatch", controls_rel, errors)
     forbid(controls, "Command::new", controls_rel, errors)
     forbid(controls, "std::fs::write", controls_rel, errors)
+
+    promotion_rel = "crates/orbis-ui/src/product_mutation_promotion.rs"
+    promotion = read(root, promotion_rel, errors)
+    require(promotion, "ExecutableValidationMissing", promotion_rel, errors)
+    require(promotion, "ProductPolicyNotApproved", promotion_rel, errors)
+    require(promotion, "NonMutatingPreflightMissing", promotion_rel, errors)
+    require(
+        promotion,
+        "HardwareReadBackRequiredForUnattended",
+        promotion_rel,
+        errors,
+    )
+    require(promotion, "executable_validation: false", promotion_rel, errors)
+    require(promotion, "product_policy_approved: false", promotion_rel, errors)
+    forbid(promotion, "CapabilityStatus::Supported", promotion_rel, errors)
+    forbid(promotion, "Command::new", promotion_rel, errors)
 
     pref_ui_rel = "ui/audited/preferences-window.slint"
     pref_ui = read(root, pref_ui_rel, errors)
