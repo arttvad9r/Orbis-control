@@ -6,12 +6,16 @@
 //! installs the narrow secondary/lifecycle bridges without duplicating hardware
 //! mutation ownership.
 
+#[path = "action_dialog_backend.rs"]
+mod action_dialog_backend;
 #[path = "automation_backend.rs"]
 mod automation_backend;
 #[path = "extra_backend.rs"]
 mod extra_backend;
 #[path = "tray_backend.rs"]
 mod tray_backend;
+#[path = "updates_backend.rs"]
+mod updates_backend;
 #[path = "window_lifecycle_backend.rs"]
 mod window_lifecycle_backend;
 #[path = "window_position_preferences_bridge.rs"]
@@ -29,7 +33,7 @@ use orbis_ui::automation_lifecycle_revision::{
 };
 use slint::ComponentHandle;
 
-use crate::{AppWindow, AutomationWindow, ExtraWindow, ThemeState};
+use crate::{AppWindow, AutomationWindow, ExtraWindow, ThemeState, UpdatesWindow};
 
 thread_local! {
     static AUTOMATION_LIFECYCLE_CLOCK: RefCell<AutomationLifecycleClock> =
@@ -160,6 +164,34 @@ fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> 
     Ok(())
 }
 
+fn show_updates_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
+    crate::UPDATES_WINDOW.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            let window = UpdatesWindow::new()?;
+            updates_backend::wire(&window);
+            *slot = Some(window);
+        }
+        let window = slot.as_ref().expect("UpdatesWindow initialized");
+        window.set_version(app.get_ui_state().version.clone());
+        window
+            .global::<ThemeState>()
+            .set_mode(crate::current_theme_mode());
+        updates_backend::refresh(window);
+        window.show()
+    })
+}
+
+fn show_preview_dialog(kind: i32) -> Result<(), slint::PlatformError> {
+    crate::show_preview_dialog(kind)?;
+    crate::PREVIEW_DIALOG_WINDOW.with(|slot| {
+        if let Some(window) = slot.borrow().as_ref() {
+            action_dialog_backend::wire(window, kind.clamp(0, 3));
+        }
+    });
+    Ok(())
+}
+
 pub(crate) fn wire_window(app: &AppWindow) {
     tray_backend::wire_app(app);
     window_lifecycle_backend::wire_app_window(app);
@@ -187,6 +219,24 @@ pub(crate) fn wire_window(app: &AppWindow) {
             }
         });
     }
+
+    {
+        let weak = app.as_weak();
+        app.on_updates_clicked(move || {
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            if let Err(error) = show_updates_window(&app) {
+                tracing::warn!(error = ?error, "failed to open wired UpdatesWindow");
+            }
+        });
+    }
+
+    app.on_preview_dialog_clicked(|kind| {
+        if let Err(error) = show_preview_dialog(kind) {
+            tracing::warn!(error = ?error, "failed to open fail-closed action dialog");
+        }
+    });
 
     // Explicit Quit is never reinterpreted as CloseAction::HideToTray. It
     // persists position best-effort and terminates even when a tray host exists.
@@ -221,12 +271,16 @@ mod tests {
     }
 
     #[test]
-    fn coordinator_replaces_only_secondary_and_desktop_lifecycle_callbacks() {
+    fn coordinator_replaces_secondary_and_desktop_lifecycle_callbacks() {
         let source = include_str!("secondary_windows_backend.rs");
         assert!(source.contains("app.on_extra_clicked"));
         assert!(source.contains("app.on_automation_clicked"));
         assert!(source.contains("app.on_preferences_clicked"));
+        assert!(source.contains("app.on_updates_clicked"));
+        assert!(source.contains("app.on_preview_dialog_clicked"));
         assert!(source.contains("app.on_quit_clicked"));
+        assert!(source.contains("updates_backend::wire"));
+        assert!(source.contains("action_dialog_backend::wire"));
         assert!(source.contains("slint::quit_event_loop()"));
         assert!(source.contains("tray_backend::wire_app(app)"));
         assert!(source.contains("wire_app_window(app)"));
