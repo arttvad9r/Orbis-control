@@ -330,5 +330,5 @@ For each surface before setting readiness true:
 6. publish confirmed state or explicit error;
 7. test unavailable/read-only/pending/error paths as well as success.
 
-When these steps are complete, no UI redesign should be required; backend work is
+When эти шаги complete, no UI redesign should be required; backend work is
 property publication, callback handling, lifecycle/persistence, and evidence.
