@@ -1,11 +1,12 @@
 //! Orbis Control — GUI entry point.
 //!
-//! Existing hardware-backed controls keep their worker/provider paths. The
-//! additional visual windows are local UI prototypes only and never perform
-//! hardware, D-Bus, sysfs, or persistence operations.
+//! Hardware-backed controls keep their worker/provider paths. Secondary UI
+//! surfaces are enabled only when their corresponding production backend or
+//! lifecycle contract is wired and can publish authoritative state.
 
 #[allow(dead_code)]
 mod controller;
+mod preferences_backend;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
@@ -619,6 +620,54 @@ fn show_automation_window() -> Result<(), slint::PlatformError> {
     })
 }
 
+fn apply_autostart_state_to_window(
+    window: &PreferencesWindow,
+    state: &preferences_backend::AutostartUiState,
+) {
+    window.set_startup(state.enabled);
+    window.set_startup_enabled(state.writable);
+    window.set_startup_status(state.status.into());
+}
+
+fn apply_window_preferences_state_to_window(
+    window: &PreferencesWindow,
+    state: &preferences_backend::WindowPreferencesUiState,
+) {
+    window.set_start_minimized(state.start_minimized);
+    window.set_start_minimized_enabled(state.start_minimized_writable);
+    window.set_remember_position(state.remember_position);
+    window.set_remember_position_enabled(state.remember_position_writable);
+    window.set_close_action(state.close_action);
+    window.set_close_action_enabled(state.close_action_writable);
+    window.set_local_status(state.status.into());
+}
+
+fn sync_preferences_window(window: &PreferencesWindow) {
+    match preferences_backend::read_autostart_state() {
+        Ok(state) => apply_autostart_state_to_window(window, &state),
+        Err(error) => {
+            tracing::warn!(error = %error, "failed to read user autostart state");
+            window.set_startup(false);
+            window.set_startup_enabled(false);
+            window.set_startup_status("Autostart unavailable".into());
+        }
+    }
+
+    match preferences_backend::read_window_preferences_state() {
+        Ok(state) => apply_window_preferences_state_to_window(window, &state),
+        Err(error) => {
+            tracing::warn!(error = %error, "failed to read window preferences state");
+            window.set_start_minimized(false);
+            window.set_start_minimized_enabled(false);
+            window.set_remember_position(false);
+            window.set_remember_position_enabled(false);
+            window.set_close_action(0);
+            window.set_close_action_enabled(false);
+            window.set_local_status("Preferences backend unavailable".into());
+        }
+    }
+}
+
 fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
     PREFERENCES_WINDOW.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -638,10 +687,63 @@ fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> 
                     );
                 }
             });
+
+            {
+                let weak = window.as_weak();
+                window.on_startup_changed(move |enabled| {
+                    let Some(window) = weak.upgrade() else {
+                        return;
+                    };
+                    window.set_startup_enabled(false);
+                    window.set_startup_status("Applying…".into());
+                    match preferences_backend::set_autostart(enabled) {
+                        Ok(state) => {
+                            apply_autostart_state_to_window(&window, &state);
+                            window.set_local_status(
+                                if state.enabled {
+                                    "Autostart enabled"
+                                } else {
+                                    "Autostart disabled"
+                                }
+                                .into(),
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "autostart change failed");
+                            sync_preferences_window(&window);
+                            window.set_local_status("Autostart change failed".into());
+                        }
+                    }
+                });
+            }
+
+            {
+                let weak = window.as_weak();
+                window.on_start_minimized_changed(move |enabled| {
+                    let Some(window) = weak.upgrade() else {
+                        return;
+                    };
+                    window.set_start_minimized_enabled(false);
+                    match preferences_backend::persist_start_minimized(enabled) {
+                        Ok(preferences) => {
+                            window.set_start_minimized(preferences.window.start_minimized);
+                            window.set_start_minimized_enabled(true);
+                            window.set_local_status("Saved · applies on next launch".into());
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "start-minimized preference save failed");
+                            sync_preferences_window(&window);
+                            window.set_local_status("Could not save Start Minimized".into());
+                        }
+                    }
+                });
+            }
+
             *slot = Some(window);
         }
         let window = slot.as_ref().expect("PreferencesWindow initialized");
         window.global::<ThemeState>().set_mode(current_theme_mode());
+        sync_preferences_window(window);
         window.show()
     })
 }
@@ -1486,7 +1588,7 @@ fn wire_callbacks(
                 tracing::warn!("fan-apply rejected: not writable, not dirty, error, or invalid curve");
                 return;
             }
-let Some(profile) = controller::UiState::asusd_profile_from_index(s.fan_profile_selected)
+            let Some(profile) = controller::UiState::asusd_profile_from_index(s.fan_profile_selected)
             else {
                 tracing::warn!("fan-apply: invalid profile index {}", s.fan_profile_selected);
                 return;
