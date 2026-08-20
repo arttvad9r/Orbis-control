@@ -311,6 +311,12 @@ def check_authoritative_controls(root: Path, errors: list[str]) -> None:
             fail(errors, f"{rel}: backend-owned toggles must use RequestToggleRow")
 
 
+def check_widget_style(root: Path, errors: list[str]) -> None:
+    build = read(root / "crates/orbis-ui/build.rs", errors)
+    if '.with_style("fluent".into())' not in build:
+        fail(errors, "crates/orbis-ui/build.rs: standard widget style must stay pinned to fluent")
+
+
 def run(root: Path) -> list[str]:
     errors: list[str] = []
     ui_root = root / "ui"
@@ -337,6 +343,7 @@ def run(root: Path) -> list[str]:
     check_main_geometry(main, errors)
     check_secondary_geometry(root, errors)
     check_authoritative_controls(root, errors)
+    check_widget_style(root, errors)
     check_themes(root, errors)
     return errors
 
