@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod automation_shadow_runtime;
 pub mod composition;
 pub mod diagnostics_dto;
 pub mod diagnostics_export;
