@@ -141,6 +141,9 @@ typed writer implementation само по себе не является раз�
 
 - `remember-position` / `remember-position-changed(bool)` остаются disabled, пока
   реальный window-state restore/save lifecycle не проверен для active window system.
+  Hardened `window_state` store уже существует, но Slint window positioning может
+  быть unavailable на Wayland, поэтому наличие store само по себе не является
+  runtime capability evidence.
 - `close-action` / `close-action-changed(int)` остаются disabled, пока нет
   production tray/reopen lifecycle. Persisted `HideToTray` без работающего tray
   не считается допустимой реализацией.
@@ -221,7 +224,7 @@ it is not proof that every hardware target was immediately reconciled.
 
 ### Подключено
 
-`refresh-requested` теперь подключён к существующему production
+`refresh-requested` подключён к существующему production
 `DiagnosticsRuntime` → `DiagnosticsUiDto` → `DiagnosticsWindowModel` pipeline.
 Refresh выполняется на Tokio runtime, а Slint получает только готовую immutable
 presentation model.
@@ -247,15 +250,33 @@ registry не редактирует.
 готового snapshot публикуются kernel/platform/version/build/system/capabilities/
 services/GPU/telemetry/display поля и Refresh снова включается.
 
+`export-report-requested` теперь использует только последний frozen
+`DiagnosticsUiDto` и существующий privacy-bounded `diagnostics_export::report_json`.
+Экспорт выполняется через blocking worker, не на Slint callback thread. Файл:
+
+- создаётся только под fail-closed `XDG_STATE_HOME/orbis-control/diagnostics`
+  (с documented home fallback через `state_dir_checked()`);
+- получает уникальное имя `orbis-diagnostics-<snapshot-unix-seconds>[-N].json`;
+- создаётся через `create_new`, поэтому существующий report не перезаписывается;
+- на Unix создаётся с mode `0600`;
+- flush/sync выполняются до публикации success в UI;
+- использует allowlisted JSON projection без serial/UUID/asset-tag/journal/
+  environment/raw telemetry surfaces.
+
+`export-enabled` становится `true` только после первого frozen snapshot и
+временно выключается на refresh/export. Export failure публикуется как явный
+error status, без optimistic success.
+
 ### Ещё не подключено
 
 - `copy-summary-requested`
 - `open-logs-requested`
-- `export-report-requested`
 
-Соответствующие `copy-enabled/logs-enabled/export-enabled` намеренно остаются
-`false`, даже после успешного Refresh. Read-only snapshot не считается evidence,
-что эти host actions реализованы.
+`copy-enabled` и `logs-enabled` остаются `false`. Clipboard API Slint доступен
+через platform abstraction, но текущая application composition не владеет
+public platform handle для стабильного host clipboard action; shell helper
+fallback не вводится. Logs также не открываются через journal/shell из
+Diagnostics bridge.
 
 Ни один Diagnostics callback не должен мутировать hardware.
 
