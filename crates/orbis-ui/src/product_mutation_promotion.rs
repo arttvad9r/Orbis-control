@@ -123,15 +123,16 @@ pub fn assess_product_mutation_promotion(
 
 /// Evidence already present in source for the three gated Hardware1 paths.
 ///
-/// These helpers deliberately leave executable validation and product approval
-/// false. They also keep preflight false until production composition has an
-/// explicit non-mutating construction/probe path for the concrete backend.
+/// Panel and Aura now have explicit non-activating/read-only startup preflight
+/// in `orbis-hardwared::product_preflight`; Keyboard has its structural LED ABI
+/// probe. Executable validation and product approval deliberately remain false,
+/// so none of these helpers can promote production mutation on this revision.
 pub fn current_source_evidence(mutation: ProductMutation) -> ProductMutationEvidence {
     match mutation {
         ProductMutation::PanelOverdrive => ProductMutationEvidence {
             typed_backend: true,
             authorization_boundary: true,
-            non_mutating_preflight: false,
+            non_mutating_preflight: true,
             authoritative_hardware_readback: true,
             configuration_readback: true,
             executable_validation: false,
@@ -149,7 +150,7 @@ pub fn current_source_evidence(mutation: ProductMutation) -> ProductMutationEvid
         ProductMutation::AuraStaticRgb => ProductMutationEvidence {
             typed_backend: true,
             authorization_boundary: true,
-            non_mutating_preflight: false,
+            non_mutating_preflight: true,
             authoritative_hardware_readback: false,
             configuration_readback: true,
             executable_validation: false,
@@ -163,12 +164,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_panel_and_keyboard_remain_blocked_without_release_evidence() {
-        for mutation in [ProductMutation::PanelOverdrive, ProductMutation::KeyboardBacklight] {
+    fn current_interactive_paths_have_source_preflight_but_remain_release_blocked() {
+        for mutation in [
+            ProductMutation::PanelOverdrive,
+            ProductMutation::KeyboardBacklight,
+            ProductMutation::AuraStaticRgb,
+        ] {
+            let evidence = current_source_evidence(mutation);
+            assert!(evidence.non_mutating_preflight);
             let assessment = assess_product_mutation_promotion(
                 mutation,
                 PromotionScope::Interactive,
-                current_source_evidence(mutation),
+                evidence,
             );
             assert!(!assessment.promotable());
             assert!(assessment
@@ -177,6 +184,9 @@ mod tests {
             assert!(assessment
                 .blockers
                 .contains(&ProductMutationPromotionBlocker::ProductPolicyNotApproved));
+            assert!(!assessment
+                .blockers
+                .contains(&ProductMutationPromotionBlocker::NonMutatingPreflightMissing));
         }
     }
 
