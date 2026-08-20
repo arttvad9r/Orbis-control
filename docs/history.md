@@ -15,9 +15,9 @@
 повторной проверки**.
 
 Не обновляйте старые snapshots так, чтобы они выглядели как будто были написаны
-про сегодняшнее состояние. Если старое утверждение больше не верно, фиксируйте
-актуальный факт в `current-state.md` и при необходимости отмечайте supersession
-в этом индексе.
+про сегодняшнее состояние. Допустимо добавить в начало короткий supersession
+banner, не переписывая исходный historical body. Если старое утверждение больше
+не верно, фиксируйте актуальный факт в `current-state.md`.
 
 ## Dated audit snapshots
 
@@ -28,6 +28,10 @@
 | [`privacy-audit-2026-08-19.md`](privacy-audit-2026-08-19.md) | Privacy/logging audit | Preferences warning payload redaction уже внедрена: production `Debug` выдаёт фиксированный `log_category()` |
 | [`security-boundary-audit-2026-08-19.md`](security-boundary-audit-2026-08-19.md) | Privilege/polkit snapshot | Текущая production mutation surface уже: Performance и условно Battery; GPU/Fan/Panel/Keyboard/Aura fail-closed/default-deny |
 | [`test-gap-audit-2026-08-19.md`](test-gap-audit-2026-08-19.md) | Test-gap snapshot | Toolchain blocker Rust 1.85 больше не актуален; executable GitHub Actions остаётся отдельным blocker #106 |
+
+Для этих пяти snapshots добавлены supersession banners. Их original body
+намеренно сохранён: historical claims внутри body следует читать в контексте
+даты и banner, а не как current instructions.
 
 ## Historical implementation / remediation snapshots
 
