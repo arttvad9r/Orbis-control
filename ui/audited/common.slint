@@ -1,4 +1,25 @@
-import { Palette } from "../themes/dark.slint";
+import { Palette as WidgetPalette } from "std-widgets.slint";
+import { Palette, ThemeState, ThemeMode } from "../themes/dark.slint";
+
+// Standard Slint widgets (ComboBox/SpinBox/etc.) have their own style palette.
+// Every top-level Orbis window instantiates this zero-size bridge so the native
+// widget color scheme follows the application theme rather than the OS theme.
+export component ThemeBridge inherits Rectangle {
+    width: 0px;
+    height: 0px;
+    background: transparent;
+
+    property <ThemeMode> observed-mode: ThemeState.mode;
+
+    function sync-widget-theme() {
+        WidgetPalette.color-scheme = root.observed-mode == ThemeMode.Light
+            ? ColorScheme.light
+            : ColorScheme.dark;
+    }
+
+    init => { root.sync-widget-theme(); }
+    changed observed-mode => { root.sync-widget-theme(); }
+}
 
 export component WindowHeader inherits Rectangle {
     in property <string> title;
