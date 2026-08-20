@@ -243,11 +243,20 @@ export component AppWindow inherits Window {
         }
     }
 
+    if (root.more-open) : TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        z: 99;
+        clicked => { root.more-open = false; }
+    }
+
     if (root.more-open) : Rectangle {
         x: parent.width - 190px;
-        y: parent.height - 188px;
+        y: parent.height - 114px;
         width: 176px;
-        height: 146px;
+        height: 78px;
         z: 100;
         border-radius: 9px;
         border-width: 1px;
@@ -257,8 +266,6 @@ export component AppWindow inherits Window {
         VerticalLayout {
             padding: 8px;
             spacing: 5px;
-            ActionButton { label: "Extra controls"; clicked => { root.extra-clicked(); root.more-open = false; } }
-            ActionButton { label: "Automation"; clicked => { root.automation-clicked(); root.more-open = false; } }
             ActionButton { label: "Preferences"; clicked => { root.preferences-clicked(); root.more-open = false; } }
             ActionButton { label: "Diagnostics"; clicked => { root.diagnostics-clicked(); root.more-open = false; } }
         }
