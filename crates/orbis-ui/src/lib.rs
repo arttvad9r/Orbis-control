@@ -10,6 +10,7 @@
 
 pub mod automation_execution_guard;
 pub mod automation_execution_scope;
+pub mod automation_lifecycle_revision;
 #[cfg(test)]
 mod automation_performance_executor;
 pub mod automation_serialization;
