@@ -14,12 +14,6 @@ use slint::{CloseRequestResponse, ComponentHandle, PhysicalPosition};
 
 use crate::AppWindow;
 
-/// Conservative runtime evidence for absolute position restore.
-///
-/// Slint documents that `Window::set_position` is unavailable on windowing
-/// systems such as Wayland. We therefore enable the preference only when the
-/// process is clearly using an X11-style display and no Wayland display is
-/// present. An explicit Slint Wayland backend also fails closed.
 pub(crate) fn position_runtime_supported() -> bool {
     if std::env::var_os("WAYLAND_DISPLAY")
         .is_some_and(|value| !value.is_empty())
@@ -49,12 +43,10 @@ fn remember_position_enabled() -> bool {
     }
 }
 
-/// Restore the last stored physical position before the first normal show.
 pub(crate) fn restore_position(app: &AppWindow) {
     if !position_runtime_supported() || !remember_position_enabled() {
         return;
     }
-
     match load_window_state() {
         Ok(load) if load.warning.is_none() => {
             if let Some(position) = load.state.position() {
@@ -63,23 +55,15 @@ pub(crate) fn restore_position(app: &AppWindow) {
                 tracing::debug!(x = position.x, y = position.y, "restored main window position");
             }
         }
-        Ok(load) => {
-            tracing::warn!(warning = ?load.warning, "invalid window-state source preserved; position not restored");
-        }
-        Err(error) => {
-            tracing::warn!(error = %error, "window-state load failed; position not restored");
-        }
+        Ok(load) => tracing::warn!(warning = ?load.warning, "invalid window-state source preserved; position not restored"),
+        Err(error) => tracing::warn!(error = %error, "window-state load failed; position not restored"),
     }
 }
 
-/// Persist the current physical position when the setting and backend support
-/// are both authoritative. Invalid existing state is preserved rather than
-/// silently replaced.
 pub(crate) fn persist_position(app: &AppWindow) -> bool {
     if !position_runtime_supported() || !remember_position_enabled() {
         return false;
     }
-
     match load_window_state() {
         Ok(load) if load.warning.is_none() => {}
         Ok(load) => {
@@ -109,11 +93,10 @@ pub(crate) fn persist_position(app: &AppWindow) -> bool {
     }
 }
 
-/// Install the window-manager close policy.
-///
-/// Quit is fully supported. HideToTray is intentionally rejected until a tray
-/// owner is registered; disappearing with no activation path would strand the
-/// process. Ask also stays visible until a typed action context is available.
+/// Install the window-manager close policy. HideToTray is honored only while a
+/// real StatusNotifier host has accepted our item registration. If the desktop
+/// loses its tray host, close-to-tray immediately fails closed by keeping the
+/// main window visible.
 pub(crate) fn wire_close_request(app: &AppWindow) {
     let weak = app.as_weak();
     app.window().on_close_requested(move || {
@@ -136,19 +119,22 @@ pub(crate) fn wire_close_request(app: &AppWindow) {
 
         match action {
             CloseAction::Quit => CloseRequestResponse::HideWindow,
+            CloseAction::HideToTray if super::tray_backend::is_ready() => {
+                tracing::debug!("main window closing to registered StatusNotifier tray");
+                CloseRequestResponse::HideWindow
+            }
             CloseAction::HideToTray => {
-                tracing::warn!("HideToTray requested without registered tray owner; keeping window shown");
+                tracing::warn!("HideToTray requested but no StatusNotifier host is registered; keeping window shown");
                 CloseRequestResponse::KeepWindowShown
             }
             CloseAction::Ask => {
-                tracing::warn!("CloseAction::Ask requested without typed close confirmation context; keeping window shown");
+                tracing::warn!("CloseAction::Ask has no typed close-confirmation context; keeping window shown");
                 CloseRequestResponse::KeepWindowShown
             }
         }
     });
 }
 
-/// Lifecycle wiring invoked after the legacy AppWindow callbacks exist.
 pub(crate) fn wire_app_window(app: &AppWindow) {
     restore_position(app);
     wire_close_request(app);
@@ -156,13 +142,11 @@ pub(crate) fn wire_app_window(app: &AppWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
-    fn source_keeps_wayland_and_tray_fail_closed() {
+    fn position_and_tray_lifecycle_fail_closed() {
         let source = include_str!("window_lifecycle_backend.rs");
         assert!(source.contains("WAYLAND_DISPLAY"));
-        assert!(source.contains("CloseAction::HideToTray"));
+        assert!(source.contains("tray_backend::is_ready"));
         assert!(source.contains("KeepWindowShown"));
         assert!(source.contains("load_window_state"));
         assert!(source.contains("save_window_state"));
