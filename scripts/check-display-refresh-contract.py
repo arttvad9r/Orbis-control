@@ -2,10 +2,11 @@
 """Static fail-closed checks for the developing DisplayRefresh backend contract.
 
 This checker does not prove a compositor implementation. It protects the current
-boundary: `wl_output` is observation-only, mutation target identity is owned by a
-future compositor adapter, validated requests cannot be forged from output names,
-post-write success requires an authoritative active-policy read, and production
-UI/Automation remain write-disabled until that owner is proven.
+boundary: `wl_output` is observation-only; `zwlr_output_manager_v1` discovery is
+transport evidence only; mutation target identity is owned by a future concrete
+compositor adapter; validated requests cannot be forged from output names; and
+post-write success requires authoritative active-policy read-back. Production
+UI/Automation remain write-disabled until that owner is executable-validated.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ FILES = {
     "state": "crates/orbis-core/src/display_refresh_state.rs",
     "output": "crates/orbis-core/src/display_output.rs",
     "provider": "crates/orbis-providers/src/wayland_output.rs",
+    "transport": "crates/orbis-providers/src/wayland_output_management.rs",
+    "provider_lib": "crates/orbis-providers/src/lib.rs",
     "owner": "crates/orbis-providers/src/display_refresh_owner.rs",
     "service": "crates/orbis-ui/src/display_refresh_service.rs",
     "preflight": "crates/orbis-config/src/automation_preflight.rs",
@@ -35,6 +38,20 @@ SHELL_FALLBACKS = (
     "kscreen-doctor",
     "xrandr",
     "/bin/sh",
+)
+
+TRANSPORT_MUTATION_TOKENS = (
+    "create_configuration(",
+    "enable_head(",
+    "disable_head(",
+    "set_mode(",
+    "set_custom_mode(",
+    "set_position(",
+    "set_transform(",
+    "set_scale(",
+    "set_adaptive_sync(",
+    ".apply(",
+    ".test(",
 )
 
 
@@ -53,12 +70,7 @@ def require(source: str, relative: str, markers: tuple[str, ...], errors: list[s
 
 
 def production_prefix(source: str) -> str:
-    """Return code before the conventional trailing `#[cfg(test)]` module.
-
-    Current Orbis modules keep test fixtures at the end of the file. This is a
-    deliberately narrow helper, not a Rust parser: it prevents test-only fake
-    owners from being mistaken for production compositor implementations.
-    """
+    """Return code before the conventional trailing `#[cfg(test)]` module."""
 
     return source.split("#[cfg(test)]", 1)[0]
 
@@ -158,11 +170,56 @@ def run(root: Path) -> list[str]:
             ),
             errors,
         )
+        production = production_prefix(provider)
         for token in ("set_mode(", "set_refresh(", "apply_mode(", "wlr_output_manager"):
-            if token in provider:
+            if token in production:
                 errors.append(
                     f"{FILES['provider']}: read-only wl_output provider contains unexpected mutation token {token!r}"
                 )
+
+    transport = sources.get("transport")
+    if transport is not None:
+        require(
+            transport,
+            FILES["transport"],
+            (
+                "WLR_OUTPUT_MANAGER_INTERFACE",
+                '"zwlr_output_manager_v1"',
+                "WLR_OUTPUT_MANAGER_CLIENT_MAX_VERSION",
+                "WaylandRegistryGlobal",
+                "WlrOutputManagementSupport",
+                "classify_wlr_output_management_globals",
+                "WaylandWlrOutputManagementSource",
+                "registry_queue_init",
+                "GlobalListContents",
+                "compatible_version",
+                "ProviderError::Unsupported",
+            ),
+            errors,
+        )
+        production = production_prefix(transport)
+        for token in TRANSPORT_MUTATION_TOKENS + SHELL_FALLBACKS:
+            if token in production:
+                errors.append(
+                    f"{FILES['transport']}: transport-only probe crossed mutation/process boundary via {token!r}"
+                )
+        if "DisplayRefreshMutationOwner" in production:
+            errors.append(
+                f"{FILES['transport']}: transport probe must not implement or advertise mutation-owner authority"
+            )
+        if "globals.bind" in production or ".bind::<" in production:
+            errors.append(
+                f"{FILES['transport']}: transport probe must inspect registry contents without binding output-management objects"
+            )
+
+    provider_lib = sources.get("provider_lib")
+    if provider_lib is not None:
+        for marker in (
+            "pub mod wayland_output_management;",
+            "pub use wayland_output_management::*;",
+        ):
+            if marker not in provider_lib:
+                errors.append(f"{FILES['provider_lib']}: missing transport probe export {marker!r}")
 
     owner = sources.get("owner")
     if owner is not None:
@@ -261,11 +318,12 @@ def run(root: Path) -> list[str]:
 
     composition = sources.get("composition")
     if composition is not None:
-        # A future real owner may deliberately add this entry, at which point
-        # this checker must be updated together with executable validation.
+        # Transport-global presence alone is never enough to advertise the
+        # mutation capability. This gate changes only together with a proven
+        # concrete owner and executable validation.
         if re.search(r"\.add\(\s*(?:orbis_core::)?FeatureId::DisplayRefresh", composition):
             errors.append(
-                f"{FILES['composition']}: production registry must not expose DisplayRefresh before owner validation"
+                f"{FILES['composition']}: production registry must not expose DisplayRefresh from transport presence alone"
             )
 
     # No concrete implementation may enter production while this contract says
