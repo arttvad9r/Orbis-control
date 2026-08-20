@@ -2,10 +2,9 @@
 //!
 //! This is deliberately not the device-firmware `FirmwareUpdateProvider`.
 //! The Updates window represents the Orbis application/package itself. The
-//! current repository has multiple packaging targets but no canonical release
-//! metadata endpoint and no single installation mutation owner. Therefore this
-//! backend proves only local installation ownership and keeps network check and
-//! install actions disabled until a concrete package/release owner exists.
+//! repository currently has no canonical signed release source and no single
+//! installation mutation owner, so check/install remain fail-closed. The
+//! blocker is typed rather than represented only by a disabled button/string.
 //!
 //! No subprocess, package-manager command, downloader or self-replacing binary
 //! path is exposed here.
@@ -55,6 +54,86 @@ impl InstallOwner {
     }
 }
 
+/// Why a remote release check cannot be performed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReleaseSourceBlocker {
+    /// No repository-owned URL/schema/signature trust root has been designated
+    /// as the canonical Orbis application release feed.
+    CanonicalSourceMissing,
+}
+
+impl ReleaseSourceBlocker {
+    fn message(self) -> &'static str {
+        match self {
+            Self::CanonicalSourceMissing => {
+                "No canonical signed Orbis application release source is configured"
+            }
+        }
+    }
+}
+
+/// Why a downloaded application update could not be installed by Orbis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstallBlocker {
+    NixOwnedExternally,
+    AppImageInstallerMissing,
+    SystemPackageOwnerUnproven,
+    DevelopmentBuild,
+    UnknownOwner,
+}
+
+impl InstallBlocker {
+    fn for_owner(owner: &InstallOwner) -> Self {
+        match owner {
+            InstallOwner::NixStore => Self::NixOwnedExternally,
+            InstallOwner::AppImage(_) => Self::AppImageInstallerMissing,
+            InstallOwner::SystemPrefix(_) => Self::SystemPackageOwnerUnproven,
+            InstallOwner::Development(_) => Self::DevelopmentBuild,
+            InstallOwner::Unknown(_) => Self::UnknownOwner,
+        }
+    }
+
+    fn message(self) -> &'static str {
+        match self {
+            Self::NixOwnedExternally => "Installation is owned by Nix/NixOS",
+            Self::AppImageInstallerMissing => {
+                "No verified AppImage replacement/rollback owner is implemented"
+            }
+            Self::SystemPackageOwnerUnproven => {
+                "The owning system package manager/package identity is not proven"
+            }
+            Self::DevelopmentBuild => "Development builds are not self-updated",
+            Self::UnknownOwner => "Installation owner is unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UpdateBackendAssessment {
+    pub(crate) owner: InstallOwner,
+    pub(crate) release_source_blocker: ReleaseSourceBlocker,
+    pub(crate) install_blocker: InstallBlocker,
+}
+
+impl UpdateBackendAssessment {
+    fn from_owner(owner: InstallOwner) -> Self {
+        let install_blocker = InstallBlocker::for_owner(&owner);
+        Self {
+            owner,
+            release_source_blocker: ReleaseSourceBlocker::CanonicalSourceMissing,
+            install_blocker,
+        }
+    }
+
+    pub(crate) fn can_check(&self) -> bool {
+        false
+    }
+
+    pub(crate) fn can_install(&self) -> bool {
+        false
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UpdatesUiState {
     pub(crate) backend_ready: bool,
@@ -100,26 +179,36 @@ fn classify_executable(path: &Path) -> InstallOwner {
     InstallOwner::Unknown(path.to_path_buf())
 }
 
+pub(crate) fn assess_backend() -> Result<UpdateBackendAssessment, std::io::Error> {
+    detect_install_owner().map(UpdateBackendAssessment::from_owner)
+}
+
 pub(crate) fn read_state() -> Result<UpdatesUiState, std::io::Error> {
-    let owner = detect_install_owner()?;
-    let label = owner.label();
-    let ownership = owner.ownership_message();
+    let assessment = assess_backend()?;
+    let label = assessment.owner.label();
+    let ownership = assessment.owner.ownership_message();
 
     Ok(UpdatesUiState {
-        // The local ownership backend is functional. Remote release source and
-        // package installation are separate capabilities and remain false.
+        // Local ownership detection is functional. Remote source and install
+        // readiness are distinct capabilities and remain false while their
+        // typed blockers are present.
         backend_ready: true,
-        source_ready: false,
-        check_enabled: false,
-        install_enabled: false,
+        source_ready: assessment.can_check(),
+        check_enabled: assessment.can_check(),
+        install_enabled: assessment.can_install(),
         channel: 0,
         channel_enabled: false,
         update_available: false,
         latest_version: "—".into(),
         release_notes: format!(
-            "{ownership}. Orbis does not currently define a canonical signed release feed for this installation owner."
+            "{ownership}. {}. {}.",
+            assessment.release_source_blocker.message(),
+            assessment.install_blocker.message(),
         ),
-        status: format!("{label} detected · release source not configured"),
+        status: format!(
+            "{label} detected · {}",
+            assessment.release_source_blocker.message()
+        ),
     })
 }
 
@@ -158,14 +247,14 @@ pub(crate) fn wire(window: &UpdatesWindow) {
     window.on_channel_requested(|channel| {
         tracing::warn!(
             channel,
-            "update channel request ignored: no canonical Orbis release source is configured"
+            "update channel request ignored: no canonical signed Orbis release source is configured"
         );
     });
 
     {
         let weak = window.as_weak();
         window.on_check_requested(move || {
-            tracing::warn!("update check ignored: no canonical Orbis release source is configured");
+            tracing::warn!("update check ignored: canonical release source blocker is active");
             if let Some(window) = weak.upgrade() {
                 refresh(&window);
             }
@@ -175,7 +264,7 @@ pub(crate) fn wire(window: &UpdatesWindow) {
     {
         let weak = window.as_weak();
         window.on_install_requested(move || {
-            tracing::warn!("update install ignored: no proven installation mutation owner exists");
+            tracing::warn!("update install ignored: installation-owner blocker is active");
             if let Some(window) = weak.upgrade() {
                 refresh(&window);
             }
@@ -206,13 +295,17 @@ mod tests {
     }
 
     #[test]
-    fn source_and_install_are_fail_closed() {
-        let owner = InstallOwner::NixStore;
-        assert!(owner.ownership_message().contains("Nix"));
-        let source = include_str!("updates_backend.rs");
-        assert!(source.contains("source_ready: false"));
-        assert!(source.contains("check_enabled: false"));
-        assert!(source.contains("install_enabled: false"));
+    fn blockers_are_typed_per_installation_owner() {
+        let nix = UpdateBackendAssessment::from_owner(InstallOwner::NixStore);
+        assert_eq!(nix.release_source_blocker, ReleaseSourceBlocker::CanonicalSourceMissing);
+        assert_eq!(nix.install_blocker, InstallBlocker::NixOwnedExternally);
+        assert!(!nix.can_check());
+        assert!(!nix.can_install());
+
+        let appimage = UpdateBackendAssessment::from_owner(InstallOwner::AppImage(
+            PathBuf::from("/tmp/Orbis.AppImage"),
+        ));
+        assert_eq!(appimage.install_blocker, InstallBlocker::AppImageInstallerMissing);
     }
 
     #[test]
