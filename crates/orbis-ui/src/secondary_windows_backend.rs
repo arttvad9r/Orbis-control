@@ -13,6 +13,7 @@ mod automation_backend;
 mod extra_backend;
 
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use orbis_capabilities::CapabilityRegistrySnapshot;
 use orbis_core::telemetry::Telemetry;
@@ -34,6 +35,14 @@ pub(crate) fn clear() {
 /// runtime. No capability is mutated or synthesized here.
 pub(crate) fn replace_automation_capabilities(snapshot: Arc<CapabilityRegistrySnapshot>) {
     automation_backend::replace_capabilities(snapshot);
+}
+
+/// Feed one logind `PrepareForSleep(bool)` observation into the hardware-inert
+/// resume gate. This call runs on the Slint event-loop thread after the D-Bus
+/// observer marshals the signal back from Tokio.
+pub(crate) fn observe_prepare_for_sleep(start: bool, observed_at: SystemTime) {
+    let outcome = automation_backend::observe_prepare_for_sleep(start, observed_at);
+    tracing::debug!(start, outcome = ?outcome, "Automation resume lifecycle observation");
 }
 
 /// Feed one successful authoritative telemetry snapshot to Automation shadow
@@ -148,6 +157,7 @@ mod tests {
     #[test]
     fn shadow_bridge_is_observation_only() {
         let source = include_str!("secondary_windows_backend.rs");
+        assert!(source.contains("observe_prepare_for_sleep"));
         assert!(source.contains("observe_automation_telemetry"));
         assert!(source.contains("replace_automation_capabilities"));
         assert!(source.contains("set_runtime_ready(false)"));
