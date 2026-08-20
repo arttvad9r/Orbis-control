@@ -136,6 +136,7 @@ pub(crate) fn refresh(window: &DiagnosticsWindow) {
 
     window.set_refresh_enabled(false);
     window.set_refresh_pending(true);
+    window.set_copy_enabled(false);
     window.set_export_enabled(false);
     window.set_local_status("Collecting read-only snapshot…".into());
 
@@ -161,10 +162,10 @@ pub(crate) fn refresh(window: &DiagnosticsWindow) {
                 }
                 .into(),
             );
-            // Clipboard/log host actions remain unavailable until their own
-            // stable host integrations exist. Export uses only the frozen,
-            // privacy-reviewed DTO captured above.
-            window.set_copy_enabled(false);
+            // Clipboard copy is implemented by the standard Slint TextEdit in
+            // DiagnosticsWindow, using the already privacy-safe UI projection.
+            // Open Logs remains disabled until a stable host integration exists.
+            window.set_copy_enabled(true);
             window.set_logs_enabled(false);
             window.set_export_enabled(export_ready);
         }) {
@@ -396,6 +397,15 @@ mod tests {
         assert!(source.contains("window.set_export_enabled(false);"));
         assert!(source.contains("window.set_refresh_enabled(true);"));
         assert!(source.contains("if window.get_refresh_pending()"));
+    }
+
+    #[test]
+    fn successful_refresh_enables_builtin_clipboard_copy() {
+        let source = include_str!("diagnostics_backend.rs");
+        assert!(source.contains("window.set_copy_enabled(false);"));
+        assert!(source.contains("window.set_copy_enabled(true);"));
+        assert!(!source.contains("wl-copy"));
+        assert!(!source.contains("xclip"));
     }
 
     #[test]
