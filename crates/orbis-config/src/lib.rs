@@ -11,6 +11,7 @@
 #![warn(missing_docs)]
 
 pub mod automation_policy;
+pub mod automation_preflight;
 pub mod autostart;
 pub mod desired_state;
 pub mod paths;
@@ -19,8 +20,12 @@ pub mod store;
 pub mod window_state;
 
 pub use automation_policy::{
-    AutomationPolicy, DesiredDisplayPolicy, DesiredGpuPolicy, DesiredLightingPolicy,
-    DesiredPerformancePolicy, OrbisDesiredState, PowerAutomationPolicy,
+    AutomationPlan, AutomationPlanBlock, AutomationPolicy, AutomationPowerSource,
+    DesiredDisplayPolicy, DesiredGpuPolicy, DesiredLightingPolicy, DesiredPerformancePolicy,
+    OrbisDesiredState, PowerAutomationPolicy,
+};
+pub use automation_preflight::{
+    AutomationPreflight, AutomationPreflightBlock, preflight_automation_plan,
 };
 pub use autostart::{
     AUTOSTART_ENTRY, AUTOSTART_FILE_NAME, AutostartError, AutostartPathError, AutostartStatus,
