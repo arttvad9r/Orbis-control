@@ -161,6 +161,17 @@ impl PowerSourceEdgeDetector {
         self.reset_candidate();
     }
 
+    /// Break only in-progress debounce continuity while retaining the last
+    /// stable source.
+    ///
+    /// Suspend/resume is a sampling discontinuity: a candidate observed before
+    /// sleep must not count as the first of two consecutive fresh confirmations
+    /// for a post-resume edge. This method emits nothing and does not guess a new
+    /// stable source.
+    pub fn break_candidate_continuity(&mut self) {
+        self.reset_candidate();
+    }
+
     /// Consume one observation with an explicit caller-supplied clock value.
     ///
     /// Supplying `now` keeps freshness behavior deterministic in tests and
@@ -308,6 +319,40 @@ mod tests {
                 base + Duration::from_secs(2),
             ),
             PowerSourceObservationOutcome::Stable
+        );
+    }
+
+    #[test]
+    fn suspend_boundary_breaks_candidate_but_keeps_stable_source() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let mut detector = PowerSourceEdgeDetector::default();
+        detector.observe(Some(true), base, base);
+        assert_eq!(
+            detector.observe(
+                Some(false),
+                base + Duration::from_secs(1),
+                base + Duration::from_secs(1),
+            ),
+            PowerSourceObservationOutcome::Candidate
+        );
+
+        detector.break_candidate_continuity();
+        assert_eq!(detector.stable_ac_online(), Some(true));
+        assert_eq!(
+            detector.observe(
+                Some(false),
+                base + Duration::from_secs(10),
+                base + Duration::from_secs(10),
+            ),
+            PowerSourceObservationOutcome::Candidate
+        );
+        assert_eq!(
+            detector.observe(
+                Some(false),
+                base + Duration::from_secs(11),
+                base + Duration::from_secs(11),
+            ),
+            PowerSourceObservationOutcome::Trigger(AutomationTrigger::OnBattery)
         );
     }
 
