@@ -1,85 +1,120 @@
 # CI Validation Matrix
 
-> Роль: **CURRENT VERIFICATION MAP**. Команды/уровни evidence определены также
-> в [`verification.md`](verification.md) и `AGENTS.md`.
+> Роль: **CURRENT VERIFICATION MAP**.
+> Обновлено: 2026-08-20.
 >
-> Текущий GitHub Actions execution **BLOCKED** по #106: jobs не доходят до
-> Checkout/steps, поэтому наличие workflow definition не является PASS evidence.
+> Evidence rules также определены в [`verification.md`](verification.md), [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md) и `AGENTS.md`.
+>
+> GitHub Actions execution currently **BLOCKED** by #106: a workflow definition is not PASS evidence until runner steps actually execute.
 
-## Canonical flake checks
+## Layer 0 — stdlib static contracts
 
-Current `flake.nix` exposes:
+No Rust/Nix toolchain required:
 
-- `checks.default` — Cargo fmt/clippy/workspace tests using package vendoring;
+```bash
+python3 scripts/verify-static
+```
+
+Current suite includes source contracts for:
+
+- Slint/UI request-only and fake-success invariants;
+- Automation shadow/executor/recovery invariants;
+- Display Refresh fail-closed boundaries;
+- cross-surface backend completion status;
+- provider timeout / canonical capability-refresh invariants;
+- canonical documentation/current-status consistency and absence of one-off `.github` validation artifacts.
+
+This layer is a **fail-fast source check**, not compilation or runtime evidence.
+
+## Layer 1 — Rust workspace
+
+Intended exact-revision checks:
+
+```bash
+cargo fmt --all -- --check
+cargo check --workspace --all-targets --locked
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+git diff --check
+```
+
+Use `--locked` for repository/release claims.
+
+## Layer 2 — Nix / VM checks
+
+Current flake checks include:
+
+- `checks.default` — Rust workspace/package validation;
 - `checks.hardwared-lifecycle` — Hardware1 service/bus/sandbox/invalid-wire VM;
-- `checks.performance-mutation-vm` — controlled fake-file Performance mutation VM; UPower intentionally disabled to prove capability-local Session1 startup;
+- `checks.performance-mutation-vm` — controlled fake-file Performance mutation VM;
 - `checks.battery-mutation-vm` — controlled fake-asusd/fake-power-supply Battery mutation VM.
 
-Full release validation:
+Full gate:
 
 ```bash
 nix flake check --max-jobs 1 --cores 4
 ```
 
-No check in this matrix performs real ASUS hardware mutation.
+Automated checks must not perform real ASUS hardware mutation.
 
 ## GitHub Actions pipeline
 
-`.github/workflows/ci.yml` is intended to run on pull requests and pushes to
-`main` with these stages:
+`.github/workflows/ci.yml` is the only canonical workflow. Intended order:
 
 1. Checkout;
-2. install Nix;
-3. flake evaluation;
-4. package/Cargo check;
-5. Hardware1 lifecycle VM;
-6. Performance mutation VM;
-7. Battery mutation VM;
-8. final full `nix flake check`.
+2. `python3 scripts/verify-static`;
+3. install Nix;
+4. flake evaluation;
+5. Rust/package check;
+6. Hardware1 lifecycle VM;
+7. Performance mutation VM;
+8. Battery mutation VM;
+9. final full `nix flake check`.
 
-Current state under #106:
+The static step is deliberately before Nix so cheap contract failures are reported early once Actions execution is restored.
 
-- earlier jobs fail before the first step with `steps=[]` and no log blob;
-- a manual re-run reproduced the same failure;
-- recent `main` pushes may produce no workflow run at all.
+### Current #106 state
 
-Therefore none of those GitHub-hosted stages can currently be claimed green on
-latest `main`.
+Historical observations include jobs failing before their first repository step (`steps=[]`, no useful log blob) and pushes with no workflow run. That is infrastructure/account/repository execution evidence, not proof of Cargo/Nix failure.
+
+A run object, queued state or workflow YAML is not green evidence. PASS requires executed successful steps for the exact intended revision.
 
 ## Development tiers
 
 ### FAST
 
-For a normal single-crate change:
+For a narrow source change when toolchain exists:
 
 ```bash
+python3 scripts/verify-static
 cargo fmt --all
-cargo check -p <crate> --all-targets
-cargo test -p <crate>
-cargo clippy -p <crate> --all-targets -- -D warnings
+cargo check -p <crate> --all-targets --locked
+cargo test -p <crate> --locked
+cargo clippy -p <crate> --all-targets --locked -- -D warnings
 git diff --check
 ```
 
 ### INTEGRATION
 
-For multi-crate/protocol/service-boundary changes:
+For cross-crate/protocol/runtime changes:
 
 ```bash
-cargo fmt --all
+python3 scripts/verify-static
 cargo fmt --all -- --check
-cargo check --workspace --all-targets
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo check --workspace --all-targets --locked
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
 git diff --check
 ```
 
 ### FULL
 
-For package/module/polkit/D-Bus/release changes:
+For D-Bus/polkit/service/package/release changes:
 
 - INTEGRATION tier;
-- targeted Nix evaluation/build/checks;
-- full `nix flake check` before release acceptance.
+- targeted Nix checks/VMs;
+- full `nix flake check`;
+- packaged acceptance where applicable.
 
 ## Hardware safety
 
@@ -88,12 +123,10 @@ Automated CI must not:
 - access real ASUS hardware;
 - call real hardware mutation methods;
 - depend on host UPower/asusd/supergfxd state;
-- turn VM/fake-system success into LIVE-VALIDATED evidence.
+- convert VM/fake-system success into `LIVE-VALIDATED` evidence.
 
-Controlled hardware validation remains separate, dated and revision-scoped.
+Controlled hardware validation is separate, dated, model/environment-specific and revision-scoped.
 
-## Evidence rule
+## Current execution claim
 
-A workflow file, queued run or run object is not validation evidence. PASS
-requires actual executed steps and successful outputs for the exact intended
-revision. Until #106 is resolved, current-main release validation is BLOCKED.
+The active integration branch has expanded source/static contracts, but the available environment lacks Rust/Cargo/Slint and GitHub Actions remains blocked by #106. Therefore no new green Rust/Nix/Slint claim is made by documentation or static checks alone.
