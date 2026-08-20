@@ -5,7 +5,7 @@ import { Palette, ThemeState, ThemeMode } from "../themes/dark.slint";
 
 export component PreferencesWindow inherits Window {
     width: 452px;
-    height: 390px;
+    height: 466px;
     title: "Orbis Control — Preferences";
     background: Palette.window-background;
 
@@ -44,17 +44,18 @@ export component PreferencesWindow inherits Window {
 
         WindowHeader {
             title: "Preferences";
-            subtitle: "Application behavior and appearance";
+            subtitle: "Appearance, startup and window behavior";
         }
 
         SectionCard {
-            height: 88px;
+            height: 84px;
             VerticalLayout {
                 padding: 10px;
-                spacing: 8px;
+                spacing: 6px;
                 SectionTitle { title: "Appearance"; detail: "Saved immediately"; }
                 HorizontalLayout {
-                    height: 30px; spacing: 6px;
+                    height: 30px;
+                    spacing: 6px;
                     Text { width: 116px; text: "Theme"; font-size: 10px; font-weight: 550; color: Palette.text-primary; vertical-alignment: center; }
                     ChoiceChip { horizontal-stretch: 1; label: "Dark"; selected: ThemeState.mode == ThemeMode.Dark; clicked => { root.set-theme(false); } }
                     ChoiceChip { horizontal-stretch: 1; label: "Light"; selected: ThemeState.mode == ThemeMode.Light; clicked => { root.set-theme(true); } }
@@ -63,7 +64,7 @@ export component PreferencesWindow inherits Window {
         }
 
         SectionCard {
-            height: 120px;
+            height: 126px;
             VerticalLayout {
                 padding: 8px;
                 spacing: 2px;
@@ -86,7 +87,7 @@ export component PreferencesWindow inherits Window {
         }
 
         SectionCard {
-            height: 104px;
+            height: 116px;
             VerticalLayout {
                 padding: 8px;
                 spacing: 4px;
@@ -99,7 +100,9 @@ export component PreferencesWindow inherits Window {
                     toggled(value) => { root.remember-position-changed(value); }
                 }
                 HorizontalLayout {
-                    height: 32px; spacing: 8px; alignment: center;
+                    height: 32px;
+                    spacing: 8px;
+                    alignment: center;
                     Text { width: 148px; text: "Close button"; font-size: 10px; color: root.close-action-enabled ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
                     close-box := ComboBox {
                         horizontal-stretch: 1;
