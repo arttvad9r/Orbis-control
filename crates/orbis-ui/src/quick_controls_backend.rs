@@ -60,6 +60,21 @@ pub(crate) fn clear() {
     CONTEXT.with(|slot| *slot.borrow_mut() = None);
 }
 
+/// Forward one immutable capability generation to the Automation shadow
+/// runtime. This compatibility function exists until secondary-window
+/// backends get a dedicated top-level lifecycle coordinator.
+pub(crate) fn replace_automation_capabilities(
+    snapshot: Arc<orbis_capabilities::CapabilityRegistrySnapshot>,
+) {
+    secondary_windows_backend::replace_automation_capabilities(snapshot);
+}
+
+/// Forward one successful authoritative telemetry snapshot to the Automation
+/// shadow runtime. No mutation is performed by this path.
+pub(crate) fn observe_automation_telemetry(telemetry: &orbis_core::telemetry::Telemetry) {
+    secondary_windows_backend::observe_automation_telemetry(telemetry);
+}
+
 pub(crate) fn wire_window(app: &AppWindow) {
     let runtime_ready = CONTEXT.with(|slot| slot.borrow().is_some());
 
@@ -339,5 +354,13 @@ mod tests {
         assert_eq!(state.brightness, 2);
         assert!(state.status.contains("2/4"));
         assert!(state.status.contains("write disabled"));
+    }
+
+    #[test]
+    fn automation_forwarders_are_observation_only() {
+        let source = include_str!("quick_controls_backend.rs");
+        assert!(source.contains("replace_automation_capabilities"));
+        assert!(source.contains("observe_automation_telemetry"));
+        assert!(!source.contains("WorkerCommand::Set"));
     }
 }
