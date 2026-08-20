@@ -2,19 +2,22 @@
 //! future serialized executor.
 //!
 //! This module deliberately performs no hardware I/O. A shadow plan that looked
-//! ready is treated only as a candidate. Before a future executor may consider
-//! it, the candidate is rebuilt from the current persisted policy and checked
-//! against the current immutable capability generation again.
+//! dry-run ready is treated only as a candidate. Before serialization it is
+//! rebuilt from the current persisted policy and checked against the current
+//! immutable capability generation again.
 //!
 //! Even a successful [`AutomationExecutionHandoff`] is not authority to write on
-//! its own: the future executor must own serialization with capability refresh
-//! and verify `required_generation()` immediately before the first mutation.
+//! its own: it proves only the hardware-inert dry-run contract. A production
+//! executor must additionally pass the strict execution preflight (including
+//! `Automation.write == Supported`) and re-check identities immediately before
+//! the first mutation.
 
 use std::time::{Duration, SystemTime};
 
 use orbis_capabilities::CapabilityRegistrySnapshot;
 use orbis_config::{
-    AutomationPlan, AutomationPolicy, AutomationPreflight, preflight_automation_plan,
+    AutomationPlan, AutomationPolicy, AutomationPreflight,
+    preflight_automation_plan_for_dry_run,
 };
 use orbis_core::automation::{AutomationAction, AutomationTrigger};
 
@@ -55,7 +58,7 @@ impl AutomationExecutionCandidate {
     }
 }
 
-/// Why a shadow-ready candidate is no longer eligible for executor handoff.
+/// Why a shadow-ready candidate is no longer eligible for dry-run handoff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AutomationExecutionGuardBlock {
     /// Capability registry changed after shadow preflight.
@@ -65,14 +68,15 @@ pub enum AutomationExecutionGuardBlock {
         /// Generation current at revalidation.
         current: u64,
     },
-    /// The current capability snapshot is too old for an execution handoff.
+    /// The current capability snapshot is too old for a dry-run handoff.
     CapabilitySnapshotStale,
     /// The current capability timestamp is in the future relative to the
     /// supplied clock and cannot be trusted.
     CapabilitySnapshotFromFuture,
     /// Persisted policy no longer produces exactly the same plan.
     PolicyChanged,
-    /// Current operation-level capability evidence no longer passes preflight.
+    /// Current operation-level capability evidence no longer passes dry-run
+    /// preflight. Action-level write/target evidence remains mandatory.
     PreflightBlocked(AutomationPreflight),
 }
 
@@ -81,15 +85,16 @@ pub enum AutomationExecutionGuardBlock {
 pub enum AutomationExecutionGuardOutcome {
     /// Handoff remains blocked.
     Blocked(AutomationExecutionGuardBlock),
-    /// Candidate passed pure revalidation. No hardware action has run.
+    /// Candidate passed pure dry-run revalidation. No hardware action has run.
     Ready(AutomationExecutionHandoff),
 }
 
-/// Revalidated, still hardware-inert executor handoff.
+/// Revalidated, still hardware-inert serialization handoff.
 ///
 /// Fields are private so callers cannot forge a handoff without passing
 /// [`revalidate_automation_candidate`]. This object intentionally exposes no
-/// execute/apply/provider/worker method.
+/// execute/apply/provider/worker method and does not prove Automation write
+/// promotion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AutomationExecutionHandoff {
     generation: u64,
@@ -97,22 +102,28 @@ pub struct AutomationExecutionHandoff {
 }
 
 impl AutomationExecutionHandoff {
-    /// Capability generation the future serialized executor must still own at
-    /// the instant it begins mutation.
+    /// Capability generation a later serialized executor must still own at the
+    /// instant it begins mutation.
     pub fn required_generation(&self) -> u64 {
         self.generation
     }
 
-    /// Exact ordered action batch that passed the second preflight.
+    /// Exact ordered action batch that passed the second dry-run preflight.
     pub fn actions(&self) -> &[AutomationAction] {
         self.preflight
             .actions_if_ready()
-            .expect("execution handoff is constructed only from a ready preflight")
+            .expect("handoff is constructed only from a ready dry-run preflight")
     }
 
     /// Desired lifecycle trigger for diagnostics/audit logging.
     pub fn trigger(&self) -> &AutomationTrigger {
         &self.preflight.plan.trigger
+    }
+
+    /// Full immutable plan that passed dry-run revalidation. A strict execution
+    /// gate may clone this plan and re-run the normal execution preflight.
+    pub fn plan(&self) -> &AutomationPlan {
+        &self.preflight.plan
     }
 
     /// Explicit final generation comparison for a future executor that owns the
@@ -127,8 +138,9 @@ impl AutomationExecutionHandoff {
 ///
 /// This function is pure and hardware-inert. It intentionally rebuilds the plan
 /// instead of trusting the candidate's earlier copy. Any change to policy,
-/// generation, freshness or operation-level capability status blocks the whole
-/// batch; there is no partial handoff.
+/// generation, freshness or action-level capability status blocks the whole
+/// batch; there is no partial handoff. Automation runtime write promotion is
+/// deliberately left for the strict final execution gate.
 pub fn revalidate_automation_candidate(
     candidate: &AutomationExecutionCandidate,
     current_policy: &AutomationPolicy,
@@ -170,8 +182,10 @@ pub fn revalidate_automation_candidate(
         );
     }
 
-    let preflight =
-        preflight_automation_plan(rebuilt, current_capabilities.device_capabilities());
+    let preflight = preflight_automation_plan_for_dry_run(
+        rebuilt,
+        current_capabilities.device_capabilities(),
+    );
     if !preflight.is_ready() {
         return AutomationExecutionGuardOutcome::Blocked(
             AutomationExecutionGuardBlock::PreflightBlocked(preflight),
@@ -189,7 +203,7 @@ mod tests {
     use super::*;
     use crate::automation_shadow_runtime::AutomationShadowRuntime;
     use orbis_capabilities::CapabilityRegistryBuilder;
-    use orbis_config::DesiredPerformancePolicy;
+    use orbis_config::{DesiredPerformancePolicy, preflight_automation_plan};
     use orbis_core::capability::{
         Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, FeatureId,
         OperationCapability,
@@ -198,10 +212,11 @@ mod tests {
     use orbis_core::telemetry::Telemetry;
 
     fn capability(
+        status: CapabilityStatus,
         write: CapabilityStatus,
         constraints: CapabilityConstraints,
     ) -> Capability {
-        Capability::new(CapabilityStatus::Supported)
+        Capability::new(status)
             .with_operations(CapabilityOperations {
                 read: OperationCapability::new(CapabilityStatus::Supported),
                 write: OperationCapability::new(write),
@@ -212,19 +227,33 @@ mod tests {
     fn snapshot(
         generation: u64,
         checked_at: SystemTime,
+        automation_write: CapabilityStatus,
         performance_write: CapabilityStatus,
     ) -> CapabilityRegistrySnapshot {
         let mut builder = CapabilityRegistryBuilder::new(generation, checked_at);
         builder
             .add(
                 FeatureId::Automation,
-                capability(CapabilityStatus::Supported, CapabilityConstraints::None),
+                capability(
+                    if automation_write == CapabilityStatus::Supported {
+                        CapabilityStatus::Supported
+                    } else {
+                        CapabilityStatus::ReadOnly
+                    },
+                    automation_write,
+                    CapabilityConstraints::None,
+                ),
             )
             .unwrap();
         builder
             .add(
                 FeatureId::Performance,
                 capability(
+                    if performance_write == CapabilityStatus::Supported {
+                        CapabilityStatus::Supported
+                    } else {
+                        CapabilityStatus::ReadOnly
+                    },
                     performance_write,
                     CapabilityConstraints::PerformanceProfiles(vec![PerformanceProfile::Balanced]),
                 ),
@@ -275,7 +304,12 @@ mod tests {
     fn unchanged_policy_and_generation_produce_only_hardware_inert_handoff() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let policy = policy();
-        let snapshot = snapshot(7, base, CapabilityStatus::Supported);
+        let snapshot = snapshot(
+            7,
+            base,
+            CapabilityStatus::Supported,
+            CapabilityStatus::Supported,
+        );
         let candidate = ready_candidate(&policy, &snapshot, base);
 
         let outcome = revalidate_automation_candidate(
@@ -299,12 +333,50 @@ mod tests {
     }
 
     #[test]
+    fn read_only_runtime_can_revalidate_dry_run_but_not_strict_execution() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let policy = policy();
+        let snapshot = snapshot(
+            8,
+            base,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Supported,
+        );
+        let candidate = ready_candidate(&policy, &snapshot, base);
+        let outcome = revalidate_automation_candidate(
+            &candidate,
+            &policy,
+            &snapshot,
+            base + Duration::from_secs(3),
+            Duration::from_secs(30),
+        );
+        let AutomationExecutionGuardOutcome::Ready(handoff) = outcome else {
+            panic!("expected dry-run handoff");
+        };
+        assert!(!preflight_automation_plan(
+            handoff.plan().clone(),
+            snapshot.device_capabilities(),
+        )
+        .is_ready());
+    }
+
+    #[test]
     fn generation_change_blocks_whole_batch_before_second_preflight() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let policy = policy();
-        let old = snapshot(7, base, CapabilityStatus::Supported);
+        let old = snapshot(
+            9,
+            base,
+            CapabilityStatus::Supported,
+            CapabilityStatus::Supported,
+        );
         let candidate = ready_candidate(&policy, &old, base);
-        let current = snapshot(8, base + Duration::from_secs(2), CapabilityStatus::Supported);
+        let current = snapshot(
+            10,
+            base + Duration::from_secs(2),
+            CapabilityStatus::Supported,
+            CapabilityStatus::Supported,
+        );
 
         assert_eq!(
             revalidate_automation_candidate(
@@ -316,8 +388,8 @@ mod tests {
             ),
             AutomationExecutionGuardOutcome::Blocked(
                 AutomationExecutionGuardBlock::CapabilityGenerationChanged {
-                    candidate: 7,
-                    current: 8,
+                    candidate: 9,
+                    current: 10,
                 }
             )
         );
@@ -327,7 +399,12 @@ mod tests {
     fn policy_change_blocks_even_when_capability_generation_is_unchanged() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let original = policy();
-        let snapshot = snapshot(9, base, CapabilityStatus::Supported);
+        let snapshot = snapshot(
+            11,
+            base,
+            CapabilityStatus::Supported,
+            CapabilityStatus::Supported,
+        );
         let candidate = ready_candidate(&original, &snapshot, base);
         let mut changed = original;
         changed.battery.performance = DesiredPerformancePolicy::KeepCurrent;
@@ -347,16 +424,25 @@ mod tests {
     }
 
     #[test]
-    fn write_evidence_regression_blocks_second_preflight() {
+    fn action_write_evidence_regression_blocks_second_preflight() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let policy = policy();
-        let ready = snapshot(11, base, CapabilityStatus::Supported);
+        let ready = snapshot(
+            13,
+            base,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Supported,
+        );
         let candidate = ready_candidate(&policy, &ready, base);
 
-        // Same generation is deliberately used to model a contract violation in
-        // a caller. Even then, the second preflight detects regressed operation
-        // evidence and refuses the batch.
-        let blocked = snapshot(11, base, CapabilityStatus::Unsupported);
+        // Same generation deliberately models a caller contract violation. The
+        // dry-run revalidation must still detect action-level write regression.
+        let blocked = snapshot(
+            13,
+            base,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+        );
         assert!(matches!(
             revalidate_automation_candidate(
                 &candidate,
@@ -375,7 +461,12 @@ mod tests {
     fn stale_or_future_capability_metadata_never_produces_handoff() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let policy = policy();
-        let ready = snapshot(13, base, CapabilityStatus::Supported);
+        let ready = snapshot(
+            15,
+            base,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Supported,
+        );
         let candidate = ready_candidate(&policy, &ready, base);
 
         assert_eq!(
@@ -391,7 +482,12 @@ mod tests {
             )
         );
 
-        let future = snapshot(13, base + Duration::from_secs(10), CapabilityStatus::Supported);
+        let future = snapshot(
+            15,
+            base + Duration::from_secs(10),
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Supported,
+        );
         assert_eq!(
             revalidate_automation_candidate(
                 &candidate,
