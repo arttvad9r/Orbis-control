@@ -8,25 +8,35 @@
 
 ## Общие правила
 
-1. Backend сначала публикует наблюдаемое значение и availability/readiness.
-2. UI включает control только при доказанной availability/policy capability.
-3. Пользовательское действие вызывает request callback.
-4. Backend выполняет mutation вне Slint callback thread, где это требуется.
-5. После mutation backend делает authoritative read-back.
-6. Только read-back обновляет выбранное/применённое состояние.
-7. Pending/Error/Unavailable не маскируются optimistic local state.
+1. Backend сначала регистрирует handlers для всех callback'ов surface.
+2. Только после этого backend публикует readiness/availability и наблюдаемое значение.
+3. UI включает control только при доказанной availability/policy capability.
+4. Пользовательское действие вызывает request callback.
+5. Backend выполняет mutation вне Slint callback thread, где это требуется.
+6. После mutation backend делает authoritative read-back.
+7. Только read-back обновляет выбранное/применённое hardware-looking состояние.
+8. Pending/Error/Unavailable не маскируются optimistic local state.
 
-Локальный draft разрешён только для конфигурационных окон с явным `Apply`.
+`*-ready`, `*-enabled` и `backend-ready` являются не декоративными флагами, а
+интеграционным барьером. Их нельзя выставлять `true`, если соответствующий
+request handler ещё не зарегистрирован или backend не может вернуть
+authoritative state после операции.
+
+Локальный draft разрешён только для конфигурационных окон с явным `Apply`/`Save`.
+Draft controls могут меняться локально, но это не является hardware/system
+success. Backend-owned toggles используют request-only presentation и не меняют
+`checked` сами.
 
 ## AppWindow
 
 ### Уже подключено
 
-- Performance: `ui-state.perf-*` → `perf-clicked(int)`.
-- GPU mode: `ui-state.gpu-*` → `gpu-clicked(int)`.
-- Battery charge limit: `ui-state.charge-limit-*` → `charge-changed(float)`.
-- Fans window/navigation and existing fan callbacks.
-- Preferences/Extra/Automation/Diagnostics/Updates window opening callbacks.
+- Performance: `ui-state.perf-*` → `perf-clicked(int)` → worker/provider path.
+- Battery charge limit: `ui-state.charge-limit-*` → `charge-changed(float)` → worker/provider path.
+- GPU callback/worker path существует, но production mutation capability остаётся
+  product/policy disabled; UI должен оставаться read-only/disabled по evidence.
+- Fans window navigation, fan selection/profile refresh and existing fan callbacks.
+- Theme and secondary-window navigation.
 
 ### Display quick control
 
@@ -58,13 +68,14 @@ Backend handles:
 
 - `keyboard-brightness-requested(int)`
 
-The current keyboard probe/read capability should drive readiness independently
-from write capability. A read-only device may expose status without enabling the
-buttons.
+The keyboard read capability and write capability must remain distinct. A
+read-only device may expose status without enabling brightness buttons.
 
 ## PreferencesWindow
 
 Theme remains wired through `theme-changed(bool)` and is persisted immediately.
+`Start Minimized` is already consumed at application startup from preferences,
+but the new editing controls still require lifecycle wiring.
 
 Backend/lifecycle publishes:
 
@@ -85,12 +96,22 @@ Backend handles:
 - `0` Quit
 - `1` Hide to tray
 
-Window-position support must remain disabled where the active window system
-cannot satisfy the contract reliably.
+These controls use request-only toggles/chips. A click does not alter the
+presented setting until the lifecycle owner republishes the accepted value.
+Window-position support remains disabled where the active window system cannot
+satisfy the contract reliably. `Hide to tray` must not be enabled until a real
+tray/reopen lifecycle exists.
 
 ## FansWindow
 
-Backend/policy publishes in addition to `UiState`:
+Backend publishes through `UiState`:
+
+- fan state/readability/writability/error/dirty
+- selected fan/profile
+- 8 temperature points
+- 8 PWM points
+
+Additional presentation evidence:
 
 - `mutation-safety-blocked`
 - `factory-reset-available`
@@ -98,145 +119,115 @@ Backend/policy publishes in addition to `UiState`:
 - `curve-enabled`
 - `policy-status`
 
-Existing callbacks remain the mutation boundary:
+Frontend emits:
 
 - `fan-changed(int)`
 - `fan-profile-changed(int)`
 - `fan-temp-point-changed(int, int)`
 - `fan-pwm-point-changed(int, int)`
-- `fan-apply-clicked(bool reset_defaults)`
+- `fan-apply-clicked(bool)`
 
-`curve-enabled` must come from authoritative asusd/Hardware1 state. Do not infer
-it from curve point presence. Keep `mutation-safety-blocked=true` until enabled
-state preservation/read-back and factory-default restoration are validated.
+Current production keeps mutation safety-blocked. Read/profile refresh is useful
+and may remain available. Do not enable Apply/Factory Defaults until the known
+fan mutation safety issues are resolved and authoritative enabled-state evidence
+is carried through the model.
 
 ## ExtraWindow
 
-This window is a **draft editor**. Backend loads authoritative values into the
-window, user edits the local draft, and one explicit Apply commits the document.
+This surface is intentionally a local **draft editor** after `backend-ready=true`.
+The backend loads authoritative values into the in-out draft properties, then:
 
-Backend publishes:
+- `reload-requested` discards/reloads from backend;
+- `apply-requested` is the only commit boundary;
+- `applying=true` freezes controls until completion;
+- `status` describes success/failure/pending without claiming success before the
+  backend confirms it.
 
-- `backend-ready`
-- `applying`
-- `status`
-- hotkey action indexes `m1-action..m5-action`
-- keyboard `keyboard-brightness`, `keyboard-effect`, `keyboard-speed`
-- platform booleans `boot-sound`, `status-led`, `panel-overdrive`,
-  `auto-clamshell`, `disable-aspm`, `disable-standby-networking`
-- `igpu-memory`, `hibernate-after`, `p-cores`, `e-cores`
-
-Backend handles:
-
-- `reload-requested` — discard/reload draft from authoritative state
-- `apply-requested` — read the complete current window draft and submit one
-  validated application transaction
-
-On failure, retain the draft for correction and publish an error in `status`;
-do not replace authoritative state with the draft.
+Backend must validate every advanced setting independently; `backend-ready`
+does not imply every individual hardware mutation is permitted. Unsupported
+advanced settings should either be omitted in a future typed capability model or
+remain disabled through per-feature evidence before writes are introduced.
 
 ## AutomationWindow
 
-All visible rule values are backend-owned inputs.
-
-Backend publishes:
-
-- `backend-ready`, `saving`, `status`
-- `enabled`
-- AC/Battery performance, GPU, display and lighting indexes
-- `on-resume`, `on-ac-change`, `reconcile-only`, `notify-transitions`
-
-Backend handles request callbacks with matching names:
+Backend publishes the policy document and `backend-ready`. UI policy rows and
+request-only toggles emit draft-update requests:
 
 - `enabled-requested(bool)`
-- `ac-profile-requested(int)` / `battery-profile-requested(int)`
-- `ac-gpu-requested(int)` / `battery-gpu-requested(int)`
-- `ac-display-requested(int)` / `battery-display-requested(int)`
-- `ac-lighting-requested(int)` / `battery-lighting-requested(int)`
-- `on-resume-requested(bool)`
-- `on-ac-change-requested(bool)`
-- `reconcile-only-requested(bool)`
-- `notify-transitions-requested(bool)`
+- AC/Battery Performance/GPU/Display/Lighting request callbacks
+- resume/AC-change/reconcile/notification request callbacks
+
+Persistence boundaries:
+
 - `reset-requested`
 - `save-requested`
+- `saving=true` freezes edits
 
-The frontend does not claim persistence until the backend republishes the saved
-rule set/status.
+The backend owns the draft and republishes accepted values. Save persists policy;
+it is not proof that every hardware target was immediately reconciled.
 
 ## DiagnosticsWindow
 
-Read-only inputs already define the presentation model:
+Read-only backend publishes kernel/platform/version/build/capability/service/GPU/
+telemetry/display text and enabled/pending flags.
 
-- kernel/platform/version/build/system
-- capabilities/services/GPU/telemetry/display text
-- snapshot metadata and local status
-
-Lifecycle/action inputs:
-
-- `refresh-enabled`, `refresh-pending`
-- `copy-enabled`, `logs-enabled`, `export-enabled`
-
-Backend handles:
+Frontend emits:
 
 - `refresh-requested`
 - `copy-summary-requested`
 - `open-logs-requested`
 - `export-report-requested`
 
-No diagnostics callback may mutate hardware state.
+No diagnostics callback may mutate hardware.
 
 ## UpdatesWindow
 
 Backend publishes:
 
 - `backend-ready`
+- installed/current channel state
 - `checking`, `installing`
-- installed `version`
-- `channel`, `channel-enabled`
-- `update-available`, `latest-version`
-- `release-notes`, `status`
+- `update-available`
+- `latest-version`, `release-notes`, `status`
 
-Backend handles:
+Frontend emits:
 
 - `channel-requested(int)`
 - `check-requested`
 - `install-requested`
 
-When `backend-ready=false`, UI deliberately renders update state as Unknown —
-never `Up to date`.
+`backend-ready=false` renders Unknown/Unavailable and disables network/package
+actions. The UI never infers `Up to date` without an authoritative backend check.
 
 ## Action dialog
 
-`PreviewDialogWindow` is retained as a compatibility type name only. It is a
-production request dialog.
-
-Inputs:
-
-- `kind`: `0` reboot, `1` logout, `2` failure, `3` generic confirmation
-- `action-label`
-- `action-enabled`
-
-Callbacks:
+`PreviewDialogWindow` retains its compatibility name only. The production
+contract is request-only:
 
 - `dismiss-clicked`
 - `confirm-clicked`
+- `kind`, `action-label`, `action-enabled`
 
-The dialog never performs reboot/logout/mutation directly.
+Reboot/logout/confirmation are host/runtime responsibilities. The Slint dialog
+does not execute system actions itself.
 
-## Theme synchronization
+## Widget/theme integration
 
-Every top-level window using Slint standard widgets must instantiate
-`ThemeBridge`. It maps Orbis `ThemeState.mode` to the standard-widget
-`Palette.color-scheme`, so ComboBox/SpinBox/ScrollView follow the in-app theme
-instead of independently following the desktop theme.
+The build pins Slint standard widgets to the cross-platform `fluent` style.
+`ThemeBridge` then controls `std-widgets` `Palette.color-scheme` from Orbis
+`ThemeState`, keeping ComboBox/SpinBox/ScrollView aligned with dark/light themes.
 
-## Validation before enabling a backend
+## Backend integration completion checklist
 
-For each newly wired surface:
+For each surface before setting readiness true:
 
-1. run `scripts/check-ui-contract.py`;
-2. run `scripts/verify task` when the Rust/Nix toolchain is available;
-3. capture dark/light screenshots for affected windows;
-4. verify Loading → Ready, Unavailable, ReadOnly, Pending and Error states;
-5. for mutation paths, verify request → backend → read-back with no optimistic
-   selected/applied state between request and confirmation.
+1. register all request handlers;
+2. perform initial authoritative read;
+3. publish state + capability/readiness;
+4. disable the surface while a non-repeatable mutation has unknown outcome;
+5. read back after mutation/persistence;
+6. publish confirmed state or explicit error;
+7. test unavailable/read-only/pending/error paths as well as success.
+
+When these steps are complete, no UI redesign should be required; backend work is
+property publication, callback handling, lifecycle/persistence, and evidence.
