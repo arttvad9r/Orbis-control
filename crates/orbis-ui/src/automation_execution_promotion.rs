@@ -1,13 +1,12 @@
 //! Final strict permit between a worker-owned dry-run envelope and unattended
 //! hardware execution.
 //!
-//! Shadow planning and serialization intentionally operate while Automation is
-//! advertised as read-only so the pipeline can be proven before release
-//! promotion. This module restores the stronger mutation invariant immediately
-//! before any owner call: the current immutable capability snapshot must still
-//! match the prepared generation, be fresh, and the normal strict Automation
-//! preflight must pass. In particular `FeatureId::Automation.write` must be
-//! `Supported` here.
+//! Shadow planning/revalidation deliberately removes exactly one strict blocker:
+//! the Automation runtime write bit, while preserving every action-level
+//! write/target/requirement blocker. The serialized envelope is bound to one
+//! immutable capability generation. Therefore the final execution delta is
+//! intentionally narrow: the same generation must still be current/fresh and
+//! `FeatureId::Automation.write` must now be exactly `Supported`.
 //!
 //! A permit is move-only and exposes no mutation method. It is evidence for one
 //! prepared envelope under one current capability generation, not a global
@@ -16,7 +15,7 @@
 use std::time::{Duration, SystemTime};
 
 use orbis_capabilities::CapabilityRegistrySnapshot;
-use orbis_config::{AutomationPreflight, preflight_automation_plan};
+use orbis_core::capability::{CapabilityStatus, FeatureId};
 
 use crate::automation_worker_driver::AutomationWorkerPreparedEnvelope;
 
@@ -29,9 +28,9 @@ pub enum AutomationExecutionPromotionBlock {
     CapabilitySnapshotFromFuture,
     /// Capability evidence is older than the execution freshness budget.
     CapabilitySnapshotStale,
-    /// The normal strict execution preflight failed. This includes
-    /// `Automation.write != Supported` and every action-level blocker.
-    StrictPreflightBlocked(AutomationPreflight),
+    /// Automation runtime itself is not directly writable. Requirement-bearing,
+    /// unsupported, unavailable and unknown states all fail closed.
+    AutomationRuntimeWriteUnavailable(CapabilityStatus),
 }
 
 /// Move-only strict execution evidence for exactly one prepared envelope.
@@ -41,7 +40,7 @@ pub struct AutomationExecutionPermit {
 }
 
 impl AutomationExecutionPermit {
-    /// Generation that passed the final strict preflight.
+    /// Generation that passed the final strict runtime-write gate.
     pub fn required_generation(&self) -> u64 {
         self.generation
     }
@@ -49,6 +48,11 @@ impl AutomationExecutionPermit {
 
 /// Perform the final pure promotion check immediately before a future owner
 /// call. No I/O and no mutation occur here.
+///
+/// Action-level evidence is not recomputed from an incomplete serialized DTO:
+/// it already passed dry-run preflight and revalidation under the exact same
+/// immutable generation. A generation change forces the whole pipeline to plan
+/// again before this function can succeed.
 pub fn authorize_prepared_execution(
     envelope: &AutomationWorkerPreparedEnvelope,
     capabilities: &CapabilityRegistrySnapshot,
@@ -74,20 +78,16 @@ pub fn authorize_prepared_execution(
         Ok(_) => {}
     }
 
-    // The prepared batch came from a private execution handoff, but the worker
-    // envelope intentionally exposes only the typed batch. Reconstruct the
-    // strict plan from the persisted policy is already guaranteed by the
-    // worker driver's policy-revision/revalidation chain. The exact plan that
-    // reached serialization is retained by the lease as actions; the final
-    // execution gate therefore uses the prepared envelope's strict-plan helper.
-    let plan = envelope
-        .strict_plan()
-        .clone();
-    let preflight = preflight_automation_plan(plan, capabilities.device_capabilities());
-    if !preflight.is_ready() {
-        return Err(AutomationExecutionPromotionBlock::StrictPreflightBlocked(
-            preflight,
-        ));
+    let runtime_write = capabilities
+        .device_capabilities()
+        .features
+        .get(&FeatureId::Automation)
+        .map(|capability| capability.operations.write.status)
+        .unwrap_or(CapabilityStatus::Unknown);
+    if runtime_write != CapabilityStatus::Supported {
+        return Err(
+            AutomationExecutionPromotionBlock::AutomationRuntimeWriteUnavailable(runtime_write),
+        );
     }
 
     Ok(AutomationExecutionPermit { generation: current })
@@ -99,13 +99,12 @@ mod tests {
     use orbis_capabilities::CapabilityRegistryBuilder;
     use orbis_config::{AutomationPolicy, DesiredPerformancePolicy};
     use orbis_core::capability::{
-        Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, FeatureId,
-        OperationCapability,
+        Capability, CapabilityConstraints, CapabilityOperations, FeatureId, OperationCapability,
     };
     use orbis_core::profile::PerformanceProfile;
     use orbis_core::telemetry::Telemetry;
 
-    use crate::automation_worker_driver::AutomationWorkerDriver;
+    use crate::automation_worker_driver::{AutomationWorkerDriver, AutomationWorkerObservation};
 
     fn capability(
         status: CapabilityStatus,
@@ -176,7 +175,7 @@ mod tests {
         let mut driver = AutomationWorkerDriver::with_policy(policy());
         assert!(matches!(
             driver.observe_telemetry(&telemetry(true, base), capabilities, base),
-            crate::automation_worker_driver::AutomationWorkerObservation::NoConfirmedEvent
+            AutomationWorkerObservation::NoConfirmedEvent
         ));
         assert!(matches!(
             driver.observe_telemetry(
@@ -184,13 +183,16 @@ mod tests {
                 capabilities,
                 base + Duration::from_secs(1),
             ),
-            crate::automation_worker_driver::AutomationWorkerObservation::NoConfirmedEvent
+            AutomationWorkerObservation::NoConfirmedEvent
         ));
-        let _ = driver.observe_telemetry(
-            &telemetry(false, base + Duration::from_secs(2)),
-            capabilities,
-            base + Duration::from_secs(2),
-        );
+        assert!(matches!(
+            driver.observe_telemetry(
+                &telemetry(false, base + Duration::from_secs(2)),
+                capabilities,
+                base + Duration::from_secs(2),
+            ),
+            AutomationWorkerObservation::Confirmed(_)
+        ));
         let envelope = driver
             .prepare_latest_dry_run(
                 capabilities,
@@ -206,19 +208,21 @@ mod tests {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let capabilities = snapshot(7, base, CapabilityStatus::Unsupported);
         let (_driver, envelope) = prepared(&capabilities, base);
-        assert!(matches!(
+        assert_eq!(
             authorize_prepared_execution(
                 &envelope,
                 &capabilities,
                 base + Duration::from_secs(3),
                 Duration::from_secs(30),
             ),
-            Err(AutomationExecutionPromotionBlock::StrictPreflightBlocked(_))
-        ));
+            Err(AutomationExecutionPromotionBlock::AutomationRuntimeWriteUnavailable(
+                CapabilityStatus::Unsupported,
+            ))
+        );
     }
 
     #[test]
-    fn supported_runtime_and_exact_action_evidence_can_get_permit() {
+    fn supported_runtime_under_same_generation_can_get_permit() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let capabilities = snapshot(8, base, CapabilityStatus::Supported);
         let (_driver, envelope) = prepared(&capabilities, base);
@@ -233,11 +237,29 @@ mod tests {
     }
 
     #[test]
-    fn generation_or_freshness_drift_blocks_before_strict_preflight() {
+    fn requirement_bearing_runtime_is_not_direct_execution_authority() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
-        let capabilities = snapshot(9, base, CapabilityStatus::Supported);
+        let capabilities = snapshot(9, base, CapabilityStatus::SupportedWithRequirement);
         let (_driver, envelope) = prepared(&capabilities, base);
-        let newer = snapshot(10, base + Duration::from_secs(1), CapabilityStatus::Supported);
+        assert!(matches!(
+            authorize_prepared_execution(
+                &envelope,
+                &capabilities,
+                base + Duration::from_secs(3),
+                Duration::from_secs(30),
+            ),
+            Err(AutomationExecutionPromotionBlock::AutomationRuntimeWriteUnavailable(
+                CapabilityStatus::SupportedWithRequirement
+            ))
+        ));
+    }
+
+    #[test]
+    fn generation_or_freshness_drift_blocks() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let capabilities = snapshot(10, base, CapabilityStatus::Supported);
+        let (_driver, envelope) = prepared(&capabilities, base);
+        let newer = snapshot(11, base + Duration::from_secs(1), CapabilityStatus::Supported);
         assert!(matches!(
             authorize_prepared_execution(
                 &envelope,
