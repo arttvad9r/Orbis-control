@@ -12,16 +12,48 @@ mod automation_backend;
 #[path = "extra_backend.rs"]
 mod extra_backend;
 
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use orbis_capabilities::CapabilityRegistrySnapshot;
 use orbis_core::telemetry::Telemetry;
+use orbis_ui::automation_lifecycle_revision::{
+    AutomationLifecycleClock, AutomationLifecycleRevision,
+};
 use slint::ComponentHandle;
 
 use crate::{AppWindow, AutomationWindow, ExtraWindow, ThemeState};
 
+thread_local! {
+    static AUTOMATION_LIFECYCLE_CLOCK: RefCell<AutomationLifecycleClock> =
+        RefCell::new(AutomationLifecycleClock::new());
+}
+
+fn reset_automation_lifecycle_clock() {
+    AUTOMATION_LIFECYCLE_CLOCK.with(|clock| {
+        *clock.borrow_mut() = AutomationLifecycleClock::new();
+    });
+}
+
+/// Current confirmed lifecycle revision. Revision zero means this process has
+/// not yet admitted any confirmed Automation lifecycle event.
+pub(crate) fn current_automation_revision() -> AutomationLifecycleRevision {
+    AUTOMATION_LIFECYCLE_CLOCK.with(|clock| clock.borrow().current())
+}
+
+fn advance_automation_revision() -> Option<AutomationLifecycleRevision> {
+    AUTOMATION_LIFECYCLE_CLOCK.with(|clock| match clock.borrow_mut().advance() {
+        Ok(revision) => Some(revision),
+        Err(error) => {
+            tracing::error!(?error, "Automation lifecycle revision exhausted; execution remains disabled");
+            None
+        }
+    })
+}
+
 pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
+    reset_automation_lifecycle_clock();
     automation_backend::initialize(runtime.clone());
     extra_backend::initialize(runtime);
 }
@@ -29,6 +61,7 @@ pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
 pub(crate) fn clear() {
     automation_backend::clear();
     extra_backend::clear();
+    reset_automation_lifecycle_clock();
 }
 
 /// Publish one immutable capability generation to the Automation shadow
@@ -38,20 +71,27 @@ pub(crate) fn replace_automation_capabilities(snapshot: Arc<CapabilityRegistrySn
 }
 
 /// Feed one logind `PrepareForSleep(bool)` observation into the hardware-inert
-/// resume gate. This call runs on the Slint event-loop thread after the D-Bus
-/// observer marshals the signal back from Tokio.
+/// resume gate. This signal does not advance lifecycle revision by itself; a
+/// revision exists only after later fresh post-resume telemetry confirms the
+/// lifecycle event and reaches shadow evaluation.
 pub(crate) fn observe_prepare_for_sleep(start: bool, observed_at: SystemTime) {
     let outcome = automation_backend::observe_prepare_for_sleep(start, observed_at);
     tracing::debug!(start, outcome = ?outcome, "Automation resume lifecycle observation");
 }
 
 /// Feed one successful authoritative telemetry snapshot to Automation shadow
-/// observation. A notice is surfaced only for a confirmed transition that
-/// reached freshness/preflight evaluation; ordinary polling does not churn the
-/// Automation status line.
+/// observation. Ordinary baseline/stable/candidate polling returns no notice and
+/// therefore does not advance revision. A notice means one confirmed lifecycle
+/// event reached freshness/preflight evaluation; only then is revision advanced.
 pub(crate) fn observe_automation_telemetry(telemetry: &Telemetry) {
     let Some(status) = automation_backend::observe_telemetry(telemetry) else {
         return;
+    };
+
+    let revision = advance_automation_revision();
+    let status = match revision {
+        Some(revision) => format!("{status} · revision {}", revision.get()),
+        None => "Automation lifecycle revision exhausted · execution disabled".to_string(),
     };
 
     crate::AUTOMATION_WINDOW.with(|slot| {
@@ -155,11 +195,13 @@ mod tests {
     }
 
     #[test]
-    fn shadow_bridge_is_observation_only() {
+    fn shadow_bridge_is_observation_only_and_revision_bound() {
         let source = include_str!("secondary_windows_backend.rs");
         assert!(source.contains("observe_prepare_for_sleep"));
         assert!(source.contains("observe_automation_telemetry"));
         assert!(source.contains("replace_automation_capabilities"));
+        assert!(source.contains("AutomationLifecycleClock"));
+        assert!(source.contains("advance_automation_revision"));
         assert!(source.contains("set_runtime_ready(false)"));
     }
 }
