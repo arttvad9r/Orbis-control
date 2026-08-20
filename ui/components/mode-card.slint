@@ -1,14 +1,7 @@
-// ModeCard — карточка режима (производительность / GPU).
-// Состояния: normal, hover, pressed, selected, disabled, pending, error.
-// error-state реализован визуально, но в обычном окне не показывается.
-//
-// Геометрия: ширина от layout (равное растяжение, min-width 0), высота 60px.
-// Компактный режим (карточки <= 110px): padding 6px, иконка 18px, gap 4px,
-// заголовок 12px — определяется по фактической ширине компонента, а не по
-// названию режима. Для широких карточек: padding 8px, иконка 22px, gap 8px,
-// заголовок 13px.
-// Контент центрируется по вертикали парой растягивающихся спейсеров;
-// pending/disabled добавляют вторую строку, не меняя размер карточки.
+// Compact mode selector used by Performance and GPU sections.
+// Visual language follows the useful part of the G-Helper pattern: equal cards,
+// quiet neutral surfaces and a colored selected outline. Orbis deliberately
+// avoids placeholder pictograms until real icon assets exist.
 
 import { Palette } from "../themes/dark.slint";
 
@@ -21,124 +14,78 @@ export component ModeCard inherits Rectangle {
     in property <bool> pending: false;
     in property <bool> error-state: false;
     in property <string> pending-note: "Reboot required";
-    // placeholder-иконки: 0 = круг, 1 = квадрат, 2 = треугольник
+    // Retained for source compatibility with existing call sites. The old
+    // geometric placeholder icons are intentionally no longer rendered.
     in property <int> icon-kind: 0;
-    // компактный режим для узких карточек (задаётся рядом: 4 карточки ~98px).
-    // Ширинная детекция внутри компонента невозможна: compact -> icon-size ->
-    // layoutinfo -> width -> compact (binding loop в Slint).
     in property <bool> compact: false;
 
     callback clicked;
 
-    height: 60px;
+    height: 54px;
     horizontal-stretch: 1;
     preferred-width: 0px;
     min-width: 0px;
-    border-radius: 5px;
-    border-width: 1.5px;
+    border-radius: 8px;
+    border-width: root.selected || root.pending || root.error-state ? 1.5px : 1px;
 
     property <bool> hover: touch.has-hover;
     property <bool> down: touch.pressed;
-
-    property <color> icon-color: root.disabled ? Palette.text-disabled : root.accent;
-
-    property <length> hpad: root.compact ? 6px : 8px;
-    property <length> icon-size: root.compact ? 18px : 22px;
-    property <length> gap: root.compact ? 4px : 8px;
-    property <length> title-size: root.compact ? 11px : 13px;
-    property <float> icon-vb: root.compact ? 18.0 : 22.0;
+    property <length> title-size: root.compact ? 10px : 12px;
 
     background: root.disabled ? Palette.surface-disabled
-        : root.error-state ? Palette.surface-default
         : root.down ? Palette.surface-pressed
+        : root.selected || root.pending ? Palette.surface-selected
         : root.hover ? Palette.surface-hover
-        : root.pending ? Palette.surface-pressed
-        : root.selected ? Palette.surface-hover
         : Palette.surface-default;
 
     border-color: root.error-state ? Palette.error
-        : root.pending ? root.accent
-        : root.selected ? root.accent
+        : root.selected || root.pending ? root.accent
+        : root.hover && !root.disabled ? Palette.border-strong
         : Palette.border-default;
 
     VerticalLayout {
-        padding-left: root.hpad;
-        padding-right: root.hpad;
-        padding-top: 3px;
-        padding-bottom: 3px;
-        spacing: 2px;
+        padding-left: 7px;
+        padding-right: 7px;
+        padding-top: 6px;
+        padding-bottom: 5px;
+        spacing: 3px;
+        alignment: center;
 
-        // верхний спейсер — центрирует группу контента по вертикали
-        Rectangle {
-            vertical-stretch: 1;
-        }
-
-        // основная строка: иконка + заголовок/подпись
         HorizontalLayout {
-            spacing: root.gap;
             alignment: center;
-
-            if (root.icon-kind == 0) : Rectangle {
-                width: root.icon-size;
-                height: root.icon-size;
-                border-radius: root.icon-size / 2;
-                background: root.icon-color;
-            }
-            if (root.icon-kind == 1) : Rectangle {
-                width: root.icon-size;
-                height: root.icon-size;
-                border-radius: 2px;
-                background: root.icon-color;
-            }
-            if (root.icon-kind == 2) : Path {
-                width: root.icon-size;
-                height: root.icon-size;
-                commands: root.compact ? "M 9 2 L 16 16 L 2 16 Z" : "M 11 2 L 20 20 L 2 20 Z";
-                fill: root.icon-color;
-                viewbox-width: root.icon-vb;
-                viewbox-height: root.icon-vb;
-            }
-
-            VerticalLayout {
-                spacing: 0px;
-                Text {
-                    text: root.title;
-                    font-size: root.title-size;
-                    font-weight: 600;
-                    color: root.disabled ? Palette.text-disabled : Palette.text-primary;
-                    horizontal-alignment: left;
-                    overflow: elide;
-                }
-                if (root.subtitle != "") : Text {
-                    text: root.subtitle;
-                    font-size: 12px;
-                    color: root.disabled ? Palette.text-disabled : Palette.text-secondary;
-                    horizontal-alignment: left;
-                    wrap: word-wrap;
-                }
-            }
-        }
-
-        // строка pending-бейджа: отдельная строка, размер карточки не меняет
-        if (root.pending) : HorizontalLayout {
-            spacing: 4px;
+            spacing: 6px;
             Rectangle {
                 width: 6px;
                 height: 6px;
                 border-radius: 3px;
-                background: root.accent;
+                background: root.disabled ? Palette.text-disabled : root.accent;
+                opacity: root.selected || root.pending ? 1 : 0.72;
             }
             Text {
-                text: root.pending-note;
-                font-size: 11px;
-                color: root.accent;
-                wrap: word-wrap;
+                text: root.title;
+                font-size: root.title-size;
+                font-weight: root.selected ? 700 : 600;
+                color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
             }
         }
 
-        // нижний спейсер
-        Rectangle {
-            vertical-stretch: 1;
+        if (root.pending) : Text {
+            text: root.pending-note;
+            font-size: 8px;
+            color: root.accent;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+
+        if (!root.pending && root.subtitle != "") : Text {
+            text: root.subtitle;
+            font-size: 8px;
+            color: root.disabled ? Palette.text-disabled : Palette.text-secondary;
+            horizontal-alignment: center;
+            overflow: elide;
         }
     }
 
@@ -146,8 +93,6 @@ export component ModeCard inherits Rectangle {
         width: parent.width;
         height: parent.height;
         enabled: !root.disabled;
-        clicked => {
-            root.clicked();
-        }
+        clicked => { root.clicked(); }
     }
 }
