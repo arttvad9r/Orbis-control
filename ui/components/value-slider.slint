@@ -1,9 +1,5 @@
-// ValueSlider — компактный ползунок на примитивах Slint (без std-widgets).
-// Горизонтальный трек: неактивная серая часть + активная синяя часть от
-// начала диапазона до текущего значения. Круглый бегунок 15px.
-// Состояния: normal, hover, pressed/dragging, disabled.
-// Значение ограничено [min, max] и округляется к шагу (step) при перетаскивании
-// и нажатии по треку.
+// Compact value slider with an authoritative external value.
+// Dragging is local preview only; changed() is emitted once on pointer release.
 
 import { Palette } from "../themes/dark.slint";
 
@@ -18,15 +14,11 @@ export component ValueSlider inherits Rectangle {
     height: 30px;
     background: transparent;
 
-    // During a gesture this is only a local preview. The externally supplied
-    // value remains authoritative and is never changed by this component.
     property <bool> gesture-active: false;
     property <float> preview-value: root.value;
     property <float> internal-value: root.gesture-active ? root.preview-value : root.value;
-    // доля диапазона [min, max], 0..1
     property <float> frac: (root.internal-value - root.min) / (root.max - root.min);
 
-    // округление к шагу с ограничением диапазона
     function snap(v: float) -> float {
         let clamped = Math.min(Math.max(v, root.min), root.max);
         let steps = Math.round((clamped - root.min) / root.step);
@@ -34,54 +26,46 @@ export component ValueSlider inherits Rectangle {
     }
 
     HorizontalLayout {
-        spacing: 8px;
+        spacing: 7px;
         alignment: center;
 
-        // подпись минимума
         Text {
             text: root.min + "";
-            font-size: 10px;
+            font-size: 9px;
             color: Palette.text-disabled;
             vertical-alignment: center;
         }
 
-        // трек
         Rectangle {
-            height: 5px;
-            border-radius: 2.5px;
+            horizontal-stretch: 1;
+            min-width: 120px;
+            height: 4px;
+            border-radius: 2px;
             background: root.disabled ? Palette.surface-disabled : Palette.border-default;
-            width: 190px;
 
-            // активная часть от начала до текущего значения (frac в [0,1])
             Rectangle {
                 x: 0px;
                 width: parent.width * root.frac;
                 height: 100%;
-                border-radius: 2.5px;
+                border-radius: 2px;
                 background: root.disabled ? Palette.text-disabled : Palette.accent-default;
             }
 
-            // бегунок
             Rectangle {
-                width: 15px;
-                height: 15px;
-                border-radius: 7.5px;
-                background: root.disabled ? Palette.text-disabled
-                    : touch.pressed ? Palette.accent-default
-                    : Palette.text-primary;
-                border-width: touch.has-hover ? 1.5px : 1px;
+                width: 14px;
+                height: 14px;
+                border-radius: 7px;
+                background: root.disabled ? Palette.text-disabled : Palette.text-primary;
+                border-width: touch.has-hover && !root.disabled ? 1.5px : 1px;
                 border-color: root.disabled ? Palette.text-disabled : Palette.accent-default;
-                // travel = ширина трека - ширина бегунка: на 100% правый внешний
-                // край бегунка совпадает с правой границей трека (рамка рисуется
-                // внутри границ элемента и не выходит за контейнер)
-                x: root.frac * (parent.width - 15px);
-                y: (parent.height - 15px) / 2;
+                x: root.frac * (parent.width - 14px);
+                y: (parent.height - 14px) / 2;
             }
 
             touch := TouchArea {
                 width: parent.width;
-                height: 22px;
-                y: (parent.height - 22px) / 2;
+                height: 24px;
+                y: (parent.height - 24px) / 2;
                 enabled: !root.disabled;
                 pointer-event(ev) => {
                     if (ev.kind == PointerEventKind.down) {
@@ -90,15 +74,12 @@ export component ValueSlider inherits Rectangle {
                             + (self.mouse-x / parent.width) * (root.max - root.min));
                     } else if (ev.kind == PointerEventKind.move && self.pressed) {
                         let raw = root.min + (self.mouse-x / parent.width) * (root.max - root.min);
-                        // Move updates only the local preview; no mutation callback.
                         root.preview-value = root.snap(raw);
                     } else if (ev.kind == PointerEventKind.up && root.gesture-active) {
                         let raw = root.min + (self.mouse-x / parent.width) * (root.max - root.min);
                         let final-value = root.snap(raw);
                         root.gesture-active = false;
                         root.preview-value = root.value;
-                        // The callback is the single commit boundary. The
-                        // authoritative value remains supplied by the parent.
                         if (final-value != root.value) {
                             root.changed(final-value);
                         }
@@ -110,20 +91,19 @@ export component ValueSlider inherits Rectangle {
             }
         }
 
-        // подпись максимума
         Text {
             text: root.max + "";
-            font-size: 10px;
+            font-size: 9px;
             color: Palette.text-disabled;
             vertical-alignment: center;
         }
 
-        // значение справа от ползунка
         Text {
             text: round(root.internal-value) + "%";
-            font-size: 13px;
-            color: Palette.text-primary;
-            min-width: 44px;
+            font-size: 11px;
+            font-weight: 650;
+            color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+            min-width: 38px;
             horizontal-alignment: right;
             vertical-alignment: center;
         }
