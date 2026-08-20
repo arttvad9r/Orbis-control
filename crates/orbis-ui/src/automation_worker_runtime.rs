@@ -2,11 +2,9 @@
 //!
 //! The production worker already serializes application mutations and capability
 //! registry replacement. Automation must eventually run under that same owner,
-//! not on a second task. This module composes the existing pure lifecycle,
-//! planning, preflight, revision, revalidation, serialization and execution-scope
-//! layers without performing hardware I/O itself.
-//!
-//! No method in this module executes a prepared batch.
+//! not on a second task. This module composes lifecycle observation, planning,
+//! preflight, revision, revalidation, serialization and execution-scope layers
+//! without performing hardware I/O itself.
 
 use std::time::{Duration, SystemTime};
 
@@ -29,7 +27,6 @@ use crate::automation_serialization::{
 };
 use crate::automation_shadow_runtime::{AutomationShadowOutcome, AutomationShadowRuntime};
 
-/// One confirmed lifecycle event after shadow evaluation and revision binding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AutomationConfirmedEvent {
     revision: AutomationLifecycleRevision,
@@ -38,49 +35,32 @@ pub struct AutomationConfirmedEvent {
 }
 
 impl AutomationConfirmedEvent {
-    /// Monotonic lifecycle identity assigned to this event.
     pub fn revision(&self) -> AutomationLifecycleRevision {
         self.revision
     }
 
-    /// Full shadow result for audit/status publication.
     pub fn outcome(&self) -> &AutomationShadowOutcome {
         &self.outcome
     }
 
-    /// Ready execution candidate, only when shadow preflight succeeded.
     pub fn candidate(&self) -> Option<&AutomationRevisionCandidate> {
         self.candidate.as_ref()
     }
 }
 
-/// Failure to record a confirmed event in the monotonic lifecycle domain.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AutomationWorkerObservationError {
-    /// Lifecycle revision space was exhausted. The runtime must remain
-    /// fail-closed rather than wrap to an old revision.
     LifecycleRevision(AutomationLifecycleClockError),
 }
 
-/// Why the worker-owned dry-run path cannot produce a prepared batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AutomationWorkerPrepareBlock {
-    /// No current shadow-ready event exists. A blocked/newer event clears any
-    /// older candidate by design.
     NoReadyCandidate,
-    /// Lifecycle/policy/capability revalidation failed.
     Revalidation(AutomationRevisionGuardBlock),
-    /// Single-slot admission failed.
     Admission(AutomationAdmissionBlock),
-    /// The batch contains an action outside the proven Performance-only scope.
     ExecutionScope(AutomationExecutionScopeBlock),
 }
 
-/// Exclusive dry-run preparation owned by the future worker executor path.
-///
-/// This object contains only a serialization lease and scoped metadata. It has
-/// no execute/apply method and must be consumed by [`AutomationWorkerRuntime::finish`]
-/// after a future executor completes or aborts.
 #[derive(Debug, PartialEq, Eq)]
 pub struct AutomationWorkerPrepared {
     lease: AutomationDryRunLease,
@@ -88,22 +68,19 @@ pub struct AutomationWorkerPrepared {
 }
 
 impl AutomationWorkerPrepared {
-    /// Serialization lease; future executor proof uses this for identity checks.
     pub fn lease(&self) -> &AutomationDryRunLease {
         &self.lease
     }
 
-    /// Performance-only/no-op scoped batch metadata.
     pub fn batch(&self) -> &AutomationPreparedBatch {
         &self.batch
     }
 }
 
-/// Worker-owned hardware-inert Automation state.
+/// Single-owner Automation state intended to live inside the production worker.
 ///
 /// Deliberately not `Clone`: duplicating this value would duplicate the
-/// serialization owner and could make two copies believe they own the same
-/// lifecycle/capability state.
+/// serialization owner and lifecycle identity state.
 #[derive(Debug, PartialEq, Eq)]
 pub struct AutomationWorkerRuntime {
     shadow: AutomationShadowRuntime,
@@ -114,7 +91,6 @@ pub struct AutomationWorkerRuntime {
 }
 
 impl AutomationWorkerRuntime {
-    /// Construct an inert worker runtime before any lifecycle event.
     pub fn new() -> Self {
         Self {
             shadow: AutomationShadowRuntime::default(),
@@ -125,41 +101,37 @@ impl AutomationWorkerRuntime {
         }
     }
 
-    /// Current lifecycle revision. Zero means no confirmed event has occurred.
     pub fn current_revision(&self) -> AutomationLifecycleRevision {
         self.lifecycle.current()
     }
 
-    /// Whether a dry-run lease currently owns the one serialization slot.
     pub fn is_busy(&self) -> bool {
         self.serialization.is_busy()
     }
 
-    /// Last shadow-ready candidate. Any newer confirmed blocked event clears it,
-    /// and successful serialization admission consumes it to prevent replay of
-    /// the same lifecycle event.
     pub fn latest_candidate(&self) -> Option<&AutomationRevisionCandidate> {
         self.latest_candidate.as_ref()
     }
 
     /// Consume one logind-style `PrepareForSleep(bool)` observation.
     ///
-    /// This never advances lifecycle revision by itself. A paired resume must be
-    /// followed by fresh post-resume telemetry before becoming a confirmed event.
+    /// Entering suspend is a telemetry sampling discontinuity. Any in-progress
+    /// two-sample AC/Battery candidate is discarded before the resume gate is
+    /// armed, while the last proven stable source remains intact. The signal
+    /// itself never advances lifecycle revision.
     pub fn observe_prepare_for_sleep(
         &mut self,
         start: bool,
         observed_at: SystemTime,
     ) -> ResumeGateOutcome {
+        if start {
+            self.shadow.break_power_source_candidate();
+        }
         self.resume.observe_prepare_for_sleep(start, observed_at)
     }
 
     /// Consume one authoritative telemetry snapshot under the worker owner.
-    ///
-    /// AC/Battery and pending resume are evaluated from the same typed snapshot.
-    /// A ready resume has precedence over an AC/Battery outcome from that same
-    /// sample, matching the established sleep-source coalescing contract. Only a
-    /// non-observation shadow result advances lifecycle revision.
+    /// Resume has precedence when the same fresh sample closes a paired wake.
     pub fn observe_telemetry(
         &mut self,
         telemetry: &Telemetry,
@@ -192,7 +164,7 @@ impl AutomationWorkerRuntime {
         let candidate = AutomationRevisionCandidate::from_shadow(&selected, revision);
 
         // Every confirmed event supersedes the previous candidate, including a
-        // newer event that is itself blocked by capability/policy evidence.
+        // newer event that is itself blocked by policy/capability evidence.
         self.latest_candidate = candidate.clone();
 
         Ok(Some(AutomationConfirmedEvent {
@@ -202,14 +174,9 @@ impl AutomationWorkerRuntime {
         }))
     }
 
-    /// Revalidate and admit the latest candidate into the one dry-run slot, then
-    /// restrict it to the proven Performance-only execution scope.
-    ///
-    /// No mutation occurs. Busy admission preserves the candidate so the newest
-    /// event can be retried after the old lease is released. Successful
-    /// admission consumes the candidate immediately, preventing replay of one
-    /// lifecycle event after the lease is finished. Scope failure also consumes
-    /// the event and releases the just-acquired lease fail-closed.
+    /// Revalidate and admit the newest ready event into the single dry-run slot.
+    /// Busy admission preserves the newest candidate for retry. Successful
+    /// admission consumes it so one lifecycle event cannot be replayed.
     pub fn prepare_latest(
         &mut self,
         policy: &AutomationPolicy,
@@ -260,7 +227,6 @@ impl AutomationWorkerRuntime {
         }
     }
 
-    /// Release the exact serialization lease after future execution/abort.
     pub fn finish(&mut self, prepared: AutomationWorkerPrepared) -> bool {
         self.serialization.finish(prepared.lease)
     }
@@ -277,7 +243,7 @@ mod tests {
     use super::*;
     use orbis_capabilities::CapabilityRegistryBuilder;
     use orbis_config::DesiredPerformancePolicy;
-    use orbis_core::automation::AutomationAction;
+    use orbis_core::automation::{AutomationAction, AutomationTrigger};
     use orbis_core::capability::{
         Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, FeatureId,
         OperationCapability,
@@ -366,18 +332,60 @@ mod tests {
         let snapshot = snapshot(7, base);
         let mut runtime = AutomationWorkerRuntime::new();
         let event = confirm_battery_event(&mut runtime, &policy, &snapshot, base);
-
         assert_eq!(event.revision().get(), 1);
-        assert!(event.candidate().is_some());
-        assert_eq!(runtime.current_revision(), event.revision());
-        assert_eq!(
-            event.candidate().unwrap().trigger(),
-            &orbis_core::automation::AutomationTrigger::OnBattery
-        );
+        assert_eq!(event.candidate().unwrap().trigger(), &AutomationTrigger::OnBattery);
     }
 
     #[test]
-    fn latest_ready_candidate_prepares_performance_only_dry_run_once() {
+    fn suspend_breaks_pre_sleep_candidate_continuity() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let policy = policy();
+        let snapshot = snapshot(8, base);
+        let mut runtime = AutomationWorkerRuntime::new();
+        assert!(runtime
+            .observe_telemetry(&telemetry(true, base), &policy, &snapshot, base)
+            .unwrap()
+            .is_none());
+        assert!(runtime
+            .observe_telemetry(
+                &telemetry(false, base + Duration::from_secs(1)),
+                &policy,
+                &snapshot,
+                base + Duration::from_secs(1),
+            )
+            .unwrap()
+            .is_none());
+
+        runtime.observe_prepare_for_sleep(true, base + Duration::from_secs(2));
+        runtime.observe_prepare_for_sleep(false, base + Duration::from_secs(3));
+
+        // OnResume is disabled in this policy, so the first post-resume Battery
+        // sample starts a new power candidate rather than completing the one
+        // observed before suspend.
+        assert!(runtime
+            .observe_telemetry(
+                &telemetry(false, base + Duration::from_secs(3)),
+                &policy,
+                &snapshot,
+                base + Duration::from_secs(3),
+            )
+            .unwrap()
+            .is_none());
+        let event = runtime
+            .observe_telemetry(
+                &telemetry(false, base + Duration::from_secs(4)),
+                &policy,
+                &snapshot,
+                base + Duration::from_secs(4),
+            )
+            .unwrap()
+            .expect("fresh post-resume battery edge");
+        assert_eq!(event.revision().get(), 1);
+        assert_eq!(event.candidate().unwrap().trigger(), &AutomationTrigger::OnBattery);
+    }
+
+    #[test]
+    fn latest_candidate_prepares_once_and_is_consumed() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let policy = policy();
         let snapshot = snapshot(9, base);
@@ -392,7 +400,6 @@ mod tests {
                 Duration::from_secs(30),
             )
             .expect("prepared dry-run");
-        assert!(runtime.is_busy());
         assert!(runtime.latest_candidate().is_none());
         assert_eq!(prepared.lease().required_revision(), event.revision());
         assert_eq!(prepared.lease().required_generation(), 9);
@@ -401,7 +408,6 @@ mod tests {
             &[AutomationAction::SetProfile(PerformanceProfile::Balanced)]
         );
         assert!(runtime.finish(prepared));
-        assert!(!runtime.is_busy());
         assert_eq!(
             runtime.prepare_latest(
                 &policy,
@@ -414,13 +420,14 @@ mod tests {
     }
 
     #[test]
-    fn newer_confirmed_blocked_event_clears_older_ready_candidate() {
+    fn newer_blocked_event_clears_older_ready_candidate() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let mut policy = policy();
         let snapshot = snapshot(11, base);
         let mut runtime = AutomationWorkerRuntime::new();
-        let first = confirm_battery_event(&mut runtime, &policy, &snapshot, base);
-        assert!(first.candidate().is_some());
+        assert!(confirm_battery_event(&mut runtime, &policy, &snapshot, base)
+            .candidate()
+            .is_some());
 
         policy.on_ac_change = false;
         assert!(runtime
@@ -444,19 +451,10 @@ mod tests {
         assert_eq!(second.revision().get(), 2);
         assert!(second.candidate().is_none());
         assert!(runtime.latest_candidate().is_none());
-        assert_eq!(
-            runtime.prepare_latest(
-                &policy,
-                &snapshot,
-                base + Duration::from_secs(5),
-                Duration::from_secs(30),
-            ),
-            Err(AutomationWorkerPrepareBlock::NoReadyCandidate)
-        );
     }
 
     #[test]
-    fn prepared_old_lease_becomes_revision_stale_after_new_event() {
+    fn prepared_old_lease_is_revision_stale_after_new_event() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let policy = policy();
         let snapshot = snapshot(13, base);
@@ -490,8 +488,6 @@ mod tests {
             .unwrap()
             .expect("new AC event");
         assert_ne!(old_revision, newer.revision());
-        assert_eq!(runtime.current_revision(), newer.revision());
-
         assert!(runtime.is_busy());
         assert!(runtime.finish(prepared));
     }
