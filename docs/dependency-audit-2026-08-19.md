@@ -1,5 +1,11 @@
 # Orbis Control dependency audit — 2026-08-19
 
+> **HISTORICAL SNAPSHOT — superseded in part.** This document records the
+> repository/toolchain state observed on 2026-08-19. The Rust 1.85 blocker below
+> is no longer current: the workspace/toolchain is now pinned to Rust 1.87.
+> Use [`current-state.md`](current-state.md) and [`history.md`](history.md) for
+> current status. The original audit findings are retained below for provenance.
+
 Scope: backlog item #77. Audit unused/duplicate direct Rust dependencies, feature flags and lock consistency without broad dependency upgrades.
 
 ## Result
