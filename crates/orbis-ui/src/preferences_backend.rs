@@ -88,9 +88,6 @@ fn close_action_index(action: CloseAction) -> i32 {
     }
 }
 
-/// Conservative mirror of the runtime's absolute-position support gate.
-/// Slint cannot request absolute top-level placement on Wayland, so the setting
-/// is editable only on a clearly X11-style session.
 pub(crate) fn position_runtime_supported() -> bool {
     if std::env::var_os("WAYLAND_DISPLAY")
         .is_some_and(|value| !value.is_empty())
@@ -115,15 +112,15 @@ pub(crate) fn map_window_preferences(load: PreferencesLoad) -> WindowPreferences
         remember_position: load.preferences.window.remember_position,
         remember_position_writable: position_writable,
         close_action: close_action_index(load.preferences.window.close_action),
-        // Hide-to-tray is not exposed until a real StatusNotifier owner is
-        // registered. Quit remains the conservative runtime default.
+        // The tray bridge overrides this to true only while a real SNI host is
+        // registered and the until-quit event-loop lifecycle is active.
         close_action_writable: false,
         status: if has_warning {
             "Preferences source preserved · editing disabled"
         } else if position_writable {
-            "Startup and X11 window-position lifecycle connected · tray pending"
+            "Startup and X11 window-position lifecycle connected · tray probing"
         } else {
-            "Startup connected · window position unavailable on this session · tray pending"
+            "Startup connected · window position unavailable on this session · tray probing"
         },
     }
 }
@@ -169,6 +166,14 @@ pub(crate) fn persist_remember_position(
     }
     mutate_preferences_with(load_preferences, save_preferences, |preferences| {
         preferences.window.remember_position = enabled;
+    })
+}
+
+pub(crate) fn persist_close_action(
+    action: CloseAction,
+) -> Result<PreferencesConfig, PreferencesMutationError> {
+    mutate_preferences_with(load_preferences, save_preferences, |preferences| {
+        preferences.window.close_action = action;
     })
 }
 
@@ -239,5 +244,24 @@ mod tests {
         assert!(!updated.window.remember_position);
         assert!(updated.window.start_minimized);
         assert_eq!(updated.appearance.theme, orbis_config::ThemePreference::Light);
+    }
+
+    #[test]
+    fn close_action_mutation_preserves_other_preferences() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let mut preferences = PreferencesConfig::default();
+        preferences.window.start_minimized = true;
+        preferences.window.remember_position = false;
+        orbis_config::save_preferences_to_dir(&preferences, td.path()).expect("save fixture");
+
+        let updated = mutate_preferences_with(
+            || orbis_config::load_preferences_from_dir(td.path()),
+            |preferences| orbis_config::save_preferences_to_dir(preferences, td.path()),
+            |preferences| preferences.window.close_action = CloseAction::HideToTray,
+        )
+        .expect("save close action");
+        assert_eq!(updated.window.close_action, CloseAction::HideToTray);
+        assert!(updated.window.start_minimized);
+        assert!(!updated.window.remember_position);
     }
 }
