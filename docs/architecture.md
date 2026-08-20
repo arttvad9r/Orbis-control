@@ -1,139 +1,140 @@
 # Architecture — Orbis Control
 
-> Роль: **CURRENT DESIGN**. Этот документ фиксирует архитектурный контракт
-> текущего `main`. Фактическая готовность и blockers — в
-> [`current-state.md`](current-state.md), порядок работ — в
-> [`roadmap.md`](roadmap.md), причины отдельных решений — в [`adr/`](adr/).
+> Роль: **CURRENT DESIGN**.
+> Source snapshot: `chatgpt/ui-refresh-ghelper-20260820`.
+> Operational readiness — [`current-state.md`](current-state.md), future work — [`roadmap.md`](roadmap.md), stable decisions — [`adr/`](adr/).
 
-## 1. Основные принципы
+## 1. Architectural invariants
 
-- GUI работает от обычного пользователя; raw euid-0 guard ещё должен быть enforced (#125).
-- `sessiond` — read/session boundary; он не является privileged mutation deputy.
-- Privileged mutations проходят только через узкий typed `Hardware1` service.
-- Никаких generic sysfs/filesystem/shell/D-Bus proxy APIs.
-- Capability support определяется runtime evidence/probes, а не DMI model name.
-- Read и write evidence независимы.
-- `Unsupported`, `BackendMissing`, `TemporarilyUnavailable`, `PermissionDenied`
-  и `Unknown` — разные состояния.
-- `ApplyResult::Accepted` не означает `Applied`.
-- Authoritative observed state обновляется только из read/read-back evidence.
-- Неподтверждённая функция остаётся fail-closed в UI, Hardware1 composition,
-  policy и sandbox where applicable.
-- Live hardware claims всегда revision-scoped.
+- GUI is a normal user-session process. Interactive euid-0 rejection is still required by #125.
+- `orbis-sessiond` is a read/session boundary, never a privileged mutation deputy.
+- Privileged writes go only through typed `Hardware1` methods owned by `orbis-hardwared`.
+- No generic root filesystem/sysfs/shell/D-Bus proxy API.
+- Capability support comes from runtime evidence, not model-name tables.
+- Read and write evidence are independent.
+- `Unsupported`, `BackendMissing`, `TemporarilyUnavailable`, `PermissionDenied` and `Unknown` remain distinct.
+- `ApplyResult::Accepted` never means `Applied`.
+- Authoritative UI state is updated only from reads/read-back, not optimistic local mutation.
+- Product-disabled controls remain fail-closed even when implementation code exists.
+- Hardware claims are revision- and environment-scoped.
 
-## 2. Слои
+## 2. Layering
 
 ```text
 Slint UI / read-only orbisctl
-  ↓ typed commands/reads
-orbis-ui sequential worker / application services
+  ↓ typed requests / observations
+orbis-ui runtime + orbis-application services
   ↓
 provider traits + capability registry
   ├─ Session1 reads → orbis-sessiond → UPower / kernel / supergfxd / asusd
-  ├─ direct read-only providers → sysfs / Wayland where appropriate
-  └─ Hardware1 mutations → orbis-hardwared → polkit → bounded owner/backend
+  ├─ direct read-only providers → sysfs / Wayland observation
+  └─ Hardware1 mutations → orbis-hardwared → polkit → typed backend
 ```
 
-### Crates
+Primary crate ownership:
 
-| Crate | Ответственность |
+| Crate | Responsibility |
 |---|---|
-| `orbis-core` | Domain types, invariants, ApplyResult, diagnostics/state models |
+| `orbis-core` | Domain types, state/action invariants |
 | `orbis-config` | XDG preferences/state/autostart/desired-state persistence |
-| `orbis-capabilities` | Runtime capability registry, immutable snapshots, diagnostics projection |
-| `orbis-providers` | Typed provider traits and production/test implementations |
-| `orbis-application` | Use cases, command/read-back composition, diagnostics collector |
-| `orbis-session-protocol` | Getter-oriented Session1 wire contract |
-| `orbis-session-client` | Session1 read clients + caller-preserving Hardware1 clients |
-| `orbis-sessiond` | User read daemon and session D-Bus service |
-| `orbis-hardwared` | Root system service for bounded privileged operations |
-| `orbis-ui` | Slint presentation, worker, production composition |
-| `orbis-cli` | Read-only Session1 CLI (`orbisctl`) |
-| `orbis-test-support` | Test/demo fixtures; remaining GUI release-graph cleanup tracked in #115 |
+| `orbis-capabilities` | Typed evidence and immutable registry snapshots |
+| `orbis-providers` | Platform/provider implementations and bounded call primitive |
+| `orbis-application` | Use cases and command/read-back composition |
+| `orbis-session-protocol` | Session1 wire contract |
+| `orbis-session-client` | Session1 readers and caller-preserving Hardware1 clients |
+| `orbis-sessiond` | User-session read daemon |
+| `orbis-hardwared` | Narrow privileged service |
+| `orbis-ui` | Slint surfaces, production composition, worker runtime |
+| `orbis-cli` | Read-only Session1 CLI |
+| `orbis-test-support` | Fixtures/screenshots/tests; release-graph cleanup remains #115 |
+
+The active production worker is `crates/orbis-ui/src/worker_runtime.rs`. Legacy large worker files are not the source of truth for new runtime fixes.
 
 ## 3. Read path
 
-Canonical session path:
-
 ```text
-authoritative backend
-→ orbis-sessiond
-→ io.github.orbiscontrol.Session1
-→ orbis-session-client/provider
-→ application worker / orbisctl
-→ GUI or terminal output
+authoritative source
+→ Session1 or typed read-only provider
+→ bounded provider/application read
+→ worker / CLI / diagnostics
+→ presentation
 ```
 
-Session1 reads are fresh and do not become mutation proxies. `orbisctl status`
-uses only Session1 Battery/Performance/GPU reads and applies provider-declared
-timeouts; it has no Hardware1 mutation command.
+Current read concepts include:
 
-Current production read concepts include Battery Charge Limit, Performance,
-independent GPU power/MUX/access, profile-specific fan curves, telemetry and
-selected ASUS/display diagnostics.
+- Battery charge-limit state;
+- Performance current/available profiles;
+- independent GPU power, physical MUX and access policy;
+- profile-specific fan curves and active fan curves;
+- sysfs telemetry;
+- selected display/ASUS diagnostics.
 
-Battery discovery is **lazy/capability-local** in Session1. Absence or temporary
-failure of UPower must not prevent independent Performance/GPU/Fan reads.
+Read failures are capability-local. Missing Battery/UPower must not collapse unrelated GPU/Performance/Fan reads.
+
+`orbisctl status` and `status --json` use only read providers. The JSON schema is versioned and carries explicit observation states rather than fake values.
 
 ## 4. Privileged mutation path
 
 ```text
 original GUI/application caller
-→ system bus io.github.orbiscontrol.Hardware
-→ Hardware1 typed method
-→ polkit(system-bus-name of original sender)
-→ bounded backend
-→ authoritative read-back when confirmation is possible
+→ Hardware1 system bus
+→ per-capability polkit
+→ narrow typed backend
+→ authoritative read-back / explicit Pending / failure
 ```
 
-`orbis-hardwared` runs as root under a restrictive systemd sandbox and empty
-Linux capability bounding set. D-Bus policy controls bus ownership/access;
-operation authorization remains inside Hardware1 via per-capability polkit
-actions.
+Current product enablement is intentionally narrow:
 
-### Current production enablement
+- **Performance** — platform-profile mutation with read-back;
+- **Battery** — conditional typed mutation after fail-closed ownership/effective-threshold evidence.
 
-Typed backend code or a stable Hardware1 method does **not** imply a shipped
-write feature. Current production composition intentionally enables live
-mutation backends only for:
-
-- **Performance** — fixed `platform_profile` write + fresh read-back;
-- **Battery** — only after fail-closed startup evidence: effective threshold
-  discovery, non-activating `NameHasOwner(xyz.ljones.Asusd)`, and readable
-  effective kernel threshold.
-
-The following are hard-disabled in production Hardware1 composition and return
-`Unsupported` even if a local administrator weakens polkit:
+Production `Hardware1` composition keeps these writes disabled:
 
 - raw GPU mutation;
-- Fan curve/set-defaults mutation;
-- Panel Overdrive mutation;
-- Keyboard Backlight mutation;
-- Aura Static RGB mutation.
+- Fan set/reset;
+- Panel Overdrive;
+- Keyboard Backlight;
+- Aura Static RGB.
 
-Packaged polkit independently denies these five groups by default. The root
-service keeps all `/sys` read-only except the one exact enabled direct-write
-path `/sys/firmware/acpi/platform_profile`.
-
-Historical live evidence for Performance/Battery is revision-scoped and recorded
-in `current-state.md`; it does not automatically validate later revisions.
+Typed code existence does not override this policy. Packaged polkit and the service sandbox provide additional defense-in-depth. The intended direct sysfs writable surface of `hardwared` is only `/sys/firmware/acpi/platform_profile` until separately promoted controls are validated.
 
 ## 5. Capability registry
 
-`orbis-capabilities` owns immutable runtime snapshots. Each capability carries
-separate operation evidence; consumers must gate writes from
-`operations.write.status`, not from overall status alone.
+The registry is immutable and generation-based. Each capability carries operation-level evidence; mutation controls must gate from `operations.write.status` or an equivalent typed product-write status, not overall capability presence.
 
-Production composition performs read probes, queries typed mutation-status
-evidence, builds a whole snapshot, swaps it atomically and publishes generation
-changes. Periodic refresh re-queries mutation status before rebuilding. Explicit
-refresh must follow the same rule; #112 records the current stale-status defect.
+Refresh contract:
 
-Disabled Hardware1 backends must remain non-writable in downstream UI,
-diagnostics and support evidence (#120). Failure in one capability must not
-collapse unrelated capabilities.
+1. re-query mutation-status evidence;
+2. execute read-only capability probes;
+3. build a complete next-generation snapshot;
+4. publish by whole-snapshot replacement.
 
-## 6. Battery contract
+Explicit and periodic refresh now use the same canonical path (#112 source-complete).
+
+Public probes use bounded adapters. A probe timeout is local `TemporarilyUnavailable`, not `Unsupported`, and should not abort unrelated discovery.
+
+## 6. Bounded execution
+
+`orbis_providers::bounded_provider_call()` owns provider-declared read deadlines and performs no retry.
+
+Current source coverage includes:
+
+- public capability probes;
+- `orbisctl` reads;
+- worker Battery refresh;
+- worker Performance refresh and Automation recovery read;
+- worker Fan curve refresh;
+- independent GPU power/MUX/access refreshes.
+
+GPU primitive reads run concurrently with separate provider deadlines, so one hung concept does not serially block the other two.
+
+Remaining #123 boundary:
+
+- telemetry must expose/use a canonical deadline path;
+- Hardware1 mutation-status requery must be bounded;
+- mutation timeout after possible dispatch is **unknown outcome** and must enter observation/recovery, never generic blind retry.
+
+## 7. Battery model
 
 ```rust
 ChargeLimit {
@@ -144,187 +145,130 @@ ChargeLimit {
 }
 ```
 
-Sources remain distinct:
+Sources remain independent:
 
-- `enabled` — UPower policy state;
-- configured threshold — asusd;
-- effective threshold — kernel power-supply attribute;
-- bounds — only when actually supplied/proven by a backend.
+- `enabled` — policy/backend state;
+- configured threshold — backend configuration;
+- effective threshold — kernel observation;
+- bounds — only when actually reported/proven.
 
-No value is clamped or invented at domain/wire boundaries. Session1 decoding
-handles D-Bus data as untrusted and rejects noncanonical payloads. Hardware1
-mutation confirms fresh configured/effective state.
+Wire payloads are strict-decoded; absent values are not replaced by defaults. Production startup avoids activating a stopped asusd simply to prove writability. Dynamic owner/interface liveness remains #107.
 
-Battery power-supply discovery now preserves permission/transient failures and
-uses `Unsupported` only for successfully inspected structural absence (#108
-source fix). Production Hardware1 does not activate a stopped asusd merely to
-probe writability: startup uses D-Bus `NameHasOwner`. Dynamic owner/interface
-refresh after startup remains #107/#112.
+## 8. Performance model
 
-## 7. Performance contract
-
-Read:
+Read and write remain distinct:
 
 ```text
-Session1 → kernel platform_profile / choices
+read:  Session1 → platform_profile / choices
+write: original caller → Hardware1 → polkit → fixed path → read-back
 ```
 
-Write:
+Unknown wire values are protocol failures, not guessed profiles. UI selection is authoritative only after a successful read/read-back.
 
-```text
-original caller → Hardware1 → polkit → fixed platform_profile path → fresh read-back
-```
+## 9. GPU model
 
-Unknown wire values are rejected. UI selection is authoritative only while the
-read state is Ready. The NixOS Performance mutation VM intentionally disables
-UPower so it also proves Battery availability is not a Session1 startup
-dependency.
-
-## 8. GPU contract
-
-Keep these concepts independent:
+These are separate concepts:
 
 ```text
 physical MUX
 != dGPU access policy
 != runtime dGPU power
-!= requested product mode
+!= requested product GPU mode
 != pending reboot/logout requirement
 ```
 
-Production supports independent reads. Product buttons
-Eco/Standard/Ultimate/Optimized remain unavailable until a proven policy maps
-those concepts and defines confirmation semantics. Raw GPU Hardware1 mutation
-is code-disabled and policy-denied; raw backend enum values are not a product API.
+Production supports the first three as independent reads. Eco/Standard/Ultimate/Optimized remain product policy, not aliases for a raw backend enum.
 
-## 9. Fan contract
+## 10. Fan model
 
-There are two distinct read concepts:
+Two different observations exist:
 
-- **active curve** from `asus_custom_fan_curve` sysfs;
-- **stored profile-specific curve** from asusd `FanCurveData(profile)`.
+- active curve from sysfs;
+- stored profile-specific curve from asusd/Session1.
 
-They must not be conflated. ASUS fan profile identity is lossless
-(`Balanced/Performance/Quiet/LowPower`). Quiet and LowPower must not collapse in
-mutation/wire state.
+Per-fan profile reads now target a concrete `(profile, fan)`; the old requirement that one requested fan read must contain both CPU and GPU is no longer true in this branch.
 
-Current production write path is hard-disabled in UI + polkit + Hardware1
-composition. The dormant compatibility backend still has known issues:
+Remaining evidence problems:
 
-- preserve custom `CurveData.enabled` (#104);
-- restore original performance profile even when Factory Defaults fails (#105);
-- do not infer CPU/GPU fan support from each other (#109);
-- preserve profile-specific `enabled` evidence through Session1/UI (#116).
+- aggregate `FeatureId::FanCurves` is still derived from a CPU probe and can overstate GPU support (#109);
+- stored custom-curve `enabled` is not carried through the final typed observation (#116).
 
-No fan mutation is re-enabled until these are fixed, executable CI is green and
-controlled hardware validation confirms final state.
+Writes stay hard-blocked until #104/#105/#109/#116 and exact-build executable/live validation are complete.
 
-## 10. Telemetry
+## 11. Telemetry
 
-`SysfsTelemetryProvider` is read-only and dynamically discovers hwmon and
-power-supply sources. It does not invent total power, fan percent or GPU
-capability state. Independent metrics may be partial.
+`SysfsTelemetryProvider` is read-only and dynamically discovers hwmon/power-supply sources. Partial metrics are allowed; unsupported derived values are not invented.
 
-Collection freshness and useful-data coverage are separate concepts. Current
-partial/empty-snapshot evidence semantics need refinement (#117); a successful
-provider call must not automatically prove useful telemetry was observed.
+Freshness must mean recent useful observation, not merely `Ok(Telemetry)`. Empty/partial/field-local failure evidence remains #117.
 
-## 11. Desired / Observed / Pending
+## 12. Desired / Observed / Pending
 
 ```text
-Desired = persisted/user/policy intent
-Observed = authoritative runtime observation
-Pending = explicit unconfirmed transition + requirement
+Desired  = explicit persisted/user/policy intent
+Observed = authoritative runtime evidence
+Pending  = unconfirmed transition + requirement/recovery state
 ```
 
-`main` contains typed Desired/Observed/Pending values, lifecycle event values and
-generic versioned desired-state persistence. There is **no production
-reconciliation executor yet**.
+Loading configuration must never itself trigger hardware mutation. Reconciliation is not a generic “apply config” loop; it must compare fresh Observed state, evaluate capability/policy, perform one deliberate action, then read back.
 
-Loading config/defaults must never itself trigger hardware mutation. Legacy
-`AppConfig` defaults are now hardware-inert; legacy writes are durable/atomic;
-checked XDG resolvers fail instead of choosing CWD. Deprecated fallback helpers
-remain compatibility-only pending removal (#113).
+Legacy config defaults are hardware-inert and new stores use checked XDG paths. Deprecated compatibility helpers remain #113.
 
-## 12. Preferences and XDG state
+## 13. Preferences / desktop lifecycle
 
-Production persistence concerns remain separate:
+Separate stores/owners remain separate:
 
-- `preferences.toml` — application presentation/behavior;
-- independent window state;
-- owned XDG autostart desktop entry;
-- `desired-state.toml` — typed desired-state foundation.
+- `preferences.toml` — application behavior/presentation;
+- window-state file — position only;
+- owned XDG autostart desktop entry — startup source of truth;
+- `desired-state.toml` — hardware intent foundation.
 
-New stores use versioning, same-directory atomic replacement, durability and
-permission handling. Run on Startup backend exists, but current Rust lifecycle
-glue is incomplete; its UI remains disabled until #110 is completed.
+Source wiring now includes:
 
-## 13. Diagnostics
+- Autostart read/write/read-back (#110 closed);
+- Start Minimized persistence;
+- Remember Position on supported X11-style sessions;
+- explicit Wayland fail-closed positioning;
+- StatusNotifier tray lifecycle;
+- `HideToTray` only with a live host;
+- explicit Quit event-loop termination (#121 closed).
+
+These are user-level lifecycle settings, not Desired hardware state.
+
+## 14. Diagnostics
 
 Diagnostics is read-only and privacy-bounded:
 
 ```text
-approved typed sources
-→ immutable DiagnosticsSnapshot
+allowlisted typed sources
+→ DiagnosticsSnapshot
 → DiagnosticsUiDto
-→ allowlisted presentation / text / JSON projection
+→ UI/text/JSON projection
 ```
 
-It does not activate services, execute shell commands, dump arbitrary files or
-environment, or collect serial/UUID/asset-tag identifiers.
+The active branch initializes `DiagnosticsRuntime`, tracks capability generation replacement, performs one-shot Refresh off the Slint callback thread, and supports privacy-bounded Export/Copy (#111 closed). Open Logs remains intentionally disabled until a safe typed host-opening contract exists.
 
-Runtime/model/Slint foundations are integrated. The window stays fail-closed
-until current-main lifecycle/refresh wiring is completed (#111).
+## 15. Automation
 
-## 14. Mock/test boundary
+The current worker owns policy revision, lifecycle observations, AC/Battery debounce, resume freshness/coalescing, capability-generation preflight, replay-resistant serialization and Performance unknown-outcome recovery.
 
-Mock providers and deterministic device fixtures exist for tests, screenshots
-and development. They are not authoritative production hardware fallbacks.
-Workspace/sessiond/session-client default dependency paths now disable mock
-features explicitly. The full GUI still carries `orbis-test-support` because
-production and screenshot bootstrap share `UiState::from_mock_profile`; removing
-that remaining dependency/fixture-derived initial state is #115.
+A Performance-only executor contract exists with mandatory authoritative read-back, but `AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED` remains `false`. GPU/Fan/Battery/Display/Lighting unattended executors remain disabled.
 
-## 15. Runtime timeout boundary
+## 16. Display / Updates / ambiguous controls
 
-Provider traits expose a timeout, but the sequential GUI application/worker path
-does not yet enforce it generically (#123). One stuck provider can therefore
-block unrelated queued work. New `orbisctl status` already wraps each read in
-its provider timeout; GUI/application enforcement remains a release hardening
-item.
+Display Refresh has typed target/request/read-back semantics but no concrete compositor mutation owner. No shell fallback is accepted.
 
-## 16. Packaging and release gate
+Updates can classify installation ownership/blockers but has no canonical signed release feed or universal installer owner. It must not invent package-manager/self-replacement behavior.
 
-Nix packaging installs GUI/sessiond/CLI, Hardware1 support, D-Bus policy,
-per-capability polkit policy, desktop/AppStream metadata and NixOS services.
+Ambiguous ASUS controls stay disabled until exact upstream/domain ownership and confirmation semantics are proven.
 
-Canonical checks are lockfile-strict (`cargo ... --locked`) and flake checks now
-include support-matrix schema validation plus XML/desktop metadata syntax gates.
-Hardware1 lifecycle VM asserts the exact minimal sysfs writable surface and
-polkit default matrix without performing valid hardware mutation.
+## 17. Mock/test boundary
 
-A release candidate requires:
+Mock/fixture data is test/development evidence only. Production cannot treat fixture values as hardware observations.
 
-- no known unsafe write path enabled by default;
-- executable Cargo/Nix checks on the exact revision;
-- green `nix flake check`;
-- package/metadata acceptance;
-- dated evidence for device-specific claims;
-- unsupported/incomplete controls shown honestly as unavailable/unknown.
+The remaining release-graph defect is #115: the GUI still has a normal `orbis-test-support` dependency because screenshot and production bootstrap share fixture-derived `UiState` construction. The intended fix is a production-native Loading/Unknown/non-writable constructor plus dev/test-only fixture construction.
 
-GitHub Actions currently fails before its first workflow step / fresh pushes may
-receive no run (#106). After CI is executable, `main` should be protected with
-required checks (#114).
+## 18. Release boundary
 
-## 17. Source-of-truth hierarchy
+Executable release claims require the exact candidate revision to pass Rust/Slint/Nix/package validation. Static contracts are useful fail-fast checks, not compilation evidence.
 
-Use documents by role:
-
-1. [`current-state.md`](current-state.md) — what is true now;
-2. this file — architecture that must hold;
-3. ADRs — why stable decisions were made;
-4. [`roadmap.md`](roadmap.md) — future ordering;
-5. research/audit documents — supporting evidence, not automatic production claims.
-
-When code and a current-design document diverge, update the document or block
-the behavior; do not silently reinterpret evidence.
+Current blockers include #106, #125, remaining #123 work, #124 identity and #114 main protection after CI recovery. Fan/GPU/extended writes remain blocked by their separate evidence gates.
