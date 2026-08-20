@@ -99,7 +99,7 @@ Backend publishes:
 Read path использует существующий `AsusKeyboardBacklightProvider`, который
 читает `/sys/class/leds/asus::kbd_backlight/{brightness,max_brightness}`. Max
 level определяется hardware и не hardcode-ится как `3`; если устройство
-сообщляет, например, `4`, UI сохраняет это в status и не подделывает выбранный
+сообщает, например, `4`, UI сохраняет это в status и не подделывает выбранный
 preset.
 
 В `orbis-hardwared` уже существует typed keyboard mutation implementation с
@@ -264,8 +264,9 @@ services/GPU/telemetry/display поля и Refresh снова включаетс
   environment/raw telemetry surfaces.
 
 `export-enabled` становится `true` только после первого frozen snapshot и
-временно выключается на refresh/export. Export failure публикуется как явный
-error status, без optimistic success.
+валидного fail-closed XDG state path. Refresh и Export взаимно исключаются. При
+ошибке Export снова блокируется до следующего Refresh, чтобы повторная попытка
+не выглядела как доказанная availability после неуспешной записи.
 
 ### Ещё не подключено
 
