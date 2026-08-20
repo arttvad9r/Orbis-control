@@ -73,34 +73,36 @@ read-only device may expose status without enabling brightness buttons.
 
 ## PreferencesWindow
 
-Theme remains wired through `theme-changed(bool)` and is persisted immediately.
-`Start Minimized` is already consumed at application startup from preferences,
-but the new editing controls still require lifecycle wiring.
+### Подключено
 
-Backend/lifecycle publishes:
+- Theme: `theme-changed(bool)` меняет runtime theme и атомарно сохраняет только
+  appearance field в safe `preferences.toml`.
+- Run on startup: `startup/startup-enabled/startup-status` читаются из
+  принадлежащего Orbis XDG autostart entry; `startup-changed(bool)` меняет только
+  этот user-owned `.desktop` и затем делает authoritative read-back. Изменённая
+  или чужая запись никогда не показывается как Enabled; включение может
+  восстановить canonical owned entry.
+- Start Minimized: `start-minimized` читается из production preferences store,
+  `start-minimized-changed(bool)` сохраняет только это safe lifecycle field, а
+  runtime уже применяет его при следующем запуске до первого показа окна.
+- Если preferences load вернул preserved warning, editing остаётся disabled и
+  существующий проблемный файл не перезаписывается.
 
-- `startup`, `startup-enabled`, `startup-status`
-- `start-minimized`, `start-minimized-enabled`
-- `remember-position`, `remember-position-enabled`
-- `close-action`, `close-action-enabled`
+### Ещё не подключено
 
-Backend handles:
+- `remember-position` / `remember-position-changed(bool)` остаются disabled, пока
+  реальный window-state restore/save lifecycle не проверен для активного window system.
+- `close-action` / `close-action-changed(int)` остаются disabled, пока нет
+  production tray/reopen lifecycle. Persisted `HideToTray` без работающего tray
+  не считается допустимой реализацией.
 
-- `startup-changed(bool)`
-- `start-minimized-changed(bool)`
-- `remember-position-changed(bool)`
-- `close-action-changed(int)`
-
-`close-action` values:
+`close-action` UI values после подключения runtime lifecycle:
 
 - `0` Quit
 - `1` Hide to tray
 
-These controls use request-only toggles/chips. A click does not alter the
-presented setting until the lifecycle owner republishes the accepted value.
-Window-position support remains disabled where the active window system cannot
-satisfy the contract reliably. `Hide to tray` must not be enabled until a real
-tray/reopen lifecycle exists.
+Все backend-owned controls остаются request-only: клик не меняет presented
+setting до accepted persistence/read-back.
 
 ## FansWindow
 
