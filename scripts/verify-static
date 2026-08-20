@@ -14,6 +14,7 @@ CHECKS = (
     "scripts/check-display-refresh-contract.py",
     "scripts/check-backend-completion-contract.py",
     "scripts/check-provider-timeout-contract.py",
+    "scripts/check-docs-status-contract.py",
 )
 
 
