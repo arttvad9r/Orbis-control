@@ -10,8 +10,11 @@
 //! - Performance is enabled through its validated Hardware1 path;
 //! - Battery is enabled only after non-activating asusd-owner + effective-threshold preflight;
 //! - GPU/Fan/Panel/Keyboard/Aura mutations are hard-disabled in composition;
-//! - startup performs no hardware writes and does not activate asusd merely to probe Battery writability;
+//! - Panel/Aura startup preflight is read-only evidence only and never promotes product policy;
+//! - startup performs no hardware writes and does not activate asusd merely to probe writability;
 //! - reconnect/restart policy belongs to systemd.
+
+mod product_preflight;
 
 use std::error::Error;
 
@@ -260,6 +263,17 @@ fn init_tracing() {
 async fn main() -> Result<(), Box<dyn Error>> {
     init_tracing();
     let connection = zbus::connection::Builder::system()?.build().await?;
+
+    // Product-gated paths are probed read-only so release diagnostics can
+    // distinguish "implementation structurally available" from "product policy
+    // approved". These results never select a mutation backend in this build.
+    let panel_preflight = product_preflight::preflight_panel_overdrive(&connection).await;
+    let aura_preflight = product_preflight::preflight_aura_static_rgb(&connection).await;
+    tracing::info!(
+        ?panel_preflight,
+        ?aura_preflight,
+        "product mutation startup preflight complete; Panel/Aura writes remain release-disabled"
+    );
 
     let battery_backend = build_battery_backend(&connection).await;
 
