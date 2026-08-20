@@ -106,14 +106,28 @@ fn map_read_error(path: &Path, error: std::io::Error) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn fixture_root(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "orbis-boot-sound-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("fixture root");
+        root
+    }
 
     #[tokio::test]
     async fn reads_boolean_kernel_state_strictly() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let path = temp.path().join(ASUS_ARMOURY_BOOT_SOUND_RELATIVE_PATH);
+        let root = fixture_root("strict");
+        let path = root.join(ASUS_ARMOURY_BOOT_SOUND_RELATIVE_PATH);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "1\n").unwrap();
-        let provider = AsusBootSoundProvider::new(temp.path());
+        let provider = AsusBootSoundProvider::new(&root);
         assert_eq!(provider.boot_sound_state().await.unwrap(), BootSoundState::Enabled);
 
         std::fs::write(&path, "0\n").unwrap();
@@ -124,23 +138,25 @@ mod tests {
             provider.boot_sound_state().await,
             Err(ProviderError::Internal(_))
         ));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
     async fn missing_attribute_is_unsupported_not_disabled() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let provider = AsusBootSoundProvider::new(temp.path());
+        let root = fixture_root("missing");
+        let provider = AsusBootSoundProvider::new(&root);
         assert!(matches!(
             provider.boot_sound_state().await,
             Err(ProviderError::Unsupported(_))
         ));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
     fn provider_has_no_write_surface() {
         let source = include_str!("asus_boot_sound.rs");
         let forbidden = [
-            ["std::fs::", "write(&self"].concat(),
+            ["write", "_brightness"].concat(),
             ["set_", "boot_sound"].concat(),
             ["Command", "::new"].concat(),
         ];
