@@ -1,6 +1,6 @@
 import { ScrollView, ComboBox, SpinBox } from "std-widgets.slint";
 import { ToggleRow, ChoiceChip } from "../components/visual-controls.slint";
-import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
+import { ThemeBridge, WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 
 export component ExtraWindow inherits Window {
@@ -39,6 +39,8 @@ export component ExtraWindow inherits Window {
     callback apply-requested;
 
     property <[string]> binding-actions: ["Default", "None", "Mute", "Volume Up", "Volume Down", "Mic", "Screen", "Aura", "Performance", "GPU Mode"];
+
+    ThemeBridge { }
 
     scroll := ScrollView {
         width: parent.width;
