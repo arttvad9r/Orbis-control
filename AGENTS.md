@@ -1,162 +1,137 @@
 # AGENTS.md — Orbis Control
 
-Permanent working contract for AI agents in this repository. Task-specific
-instructions take priority; when they conflict, choose the safer and narrower
-action. Do not continue to the next architectural task automatically.
+Permanent working contract for AI agents in this repository. Task-specific instructions take priority; when instructions are ambiguous, choose the safer and narrower action. Current project status comes from `docs/current-state.md`; historical plans do not override current source.
 
 ## Project scope
 
-- Orbis Control: lightweight system application for ASUS laptops on Linux
-  (G-Helper-like), written in Rust with a Slint GUI.
-- Wayland-first; X11 is a compatibility mode.
-- GUI must not run as root and must not perform direct privileged hardware I/O.
-- Read-only/session interaction and privileged mutation are separate boundaries:
-  the GUI uses session/client providers for reads and calls the narrow Hardware1
-  system-bus API directly for proven mutations so the original caller identity
-  reaches polkit.
-- Architecture is capability-driven: capabilities are probed, not assumed.
-- Hardware-specific code must not leak into the UI or domain layer.
+- Orbis Control is a lightweight Linux system application for ASUS ROG/TUF/Zephyrus laptops, written in Rust with a Slint GUI.
+- Wayland-first; X11 is a compatibility path where the platform can actually provide the requested behavior.
+- GUI is a normal user-session application. It must not perform direct privileged hardware I/O; interactive euid-0 execution must be rejected before release (#125).
+- Read/session interaction and privileged mutation are separate boundaries.
+- Proven mutations preserve original application caller identity through the narrow `Hardware1` system-bus API and capability-specific polkit.
+- Architecture is capability/evidence-driven: support is probed, not assumed from model names.
+- Hardware-specific implementation details must not leak into UI/domain policy as implicit support claims.
 
 ## Workspace / crate structure
 
-Rust workspace (`resolver = 3`, edition 2024, MSRV **1.87**). Crates:
+Rust workspace: resolver 3, edition 2024, MSRV **1.87**.
 
-- `orbis-core` — domain types and their invariants.
-- `orbis-config` — configuration/state persistence.
-- `orbis-capabilities` — runtime capability probing/detection.
-- `orbis-providers` — provider traits plus production/test implementations.
-- `orbis-application` — application layer.
+- `orbis-core` — domain types and invariants.
+- `orbis-config` — hardened XDG preferences/state/desired-state foundations.
+- `orbis-capabilities` — capability evidence and immutable registry snapshots.
+- `orbis-providers` — provider traits and production/test implementations.
+- `orbis-application` — application services/use cases/read-back composition.
 - `orbis-sessiond` — unprivileged user-session D-Bus daemon/read boundary.
-- `orbis-session-protocol` — D-Bus protocol DTOs.
-- `orbis-session-client` — session + Hardware1 client/provider composition.
-- `orbis-ui` — Slint UI (src + `ui/` Slint files).
-- `orbis-cli` — CLI; current binary remains incomplete.
-- `orbis-test-support` — test support.
-- `orbis-hardwared` — narrow privileged Hardware1 system-bus daemon, in the
-  workspace since ADR 0006 proved the first privileged mutation boundary.
+- `orbis-session-protocol` — Session1 wire DTOs/contracts.
+- `orbis-session-client` — Session1 providers and caller-preserving Hardware1 client composition.
+- `orbis-ui` — Slint UI, UI runtime, production composition and worker integration.
+- `orbis-cli` — read-only CLI; `status` and versioned `status --json` exist. Do not add mutation commands without a separate explicit design/task.
+- `orbis-test-support` — fixtures/screenshots/tests; normal GUI release dependency cleanup is tracked by #115.
+- `orbis-hardwared` — narrow privileged Hardware1 system-bus daemon.
+
+The active production worker implementation is `crates/orbis-ui/src/worker_runtime.rs`. Legacy large worker files are not the source of truth for new runtime fixes.
 
 ## Architectural boundaries
 
 - `orbis-core` owns domain types and invariants.
 - Provider traits separate domain/application from concrete backends.
-- Session D-Bus protocol, client and daemon stay separate crates; the
-  application layer does not depend on the daemon implementation.
-- `orbis-sessiond` remains unprivileged and must never become a mutation deputy.
-  Proven mutations follow original application caller → Hardware1 → polkit
-  (`system-bus-name`) → bounded backend.
-- `orbis-hardwared` exposes only semantic typed mutations. It must never become
-  a generic sysfs/filesystem/shell/D-Bus proxy.
-- D-Bus DTOs are untrusted input, validated at the wire/domain boundary.
-- Use shared constants for bus names, object paths, interface names; don't
-  duplicate them.
-- Authoritative reads must not be hidden by an implicit property cache; values
-  that must stay fresh use explicit no-cache semantics, and that is tested.
-- GPU product policy, physical MUX, access policy, runtime power state and
-  pending/action requirement are separate concepts; don't collapse them.
-- Unknown/Unsupported/Unavailable/ReadOnly are distinct evidence states. Never
-  silently convert insufficient evidence into a known state.
-- asusd/supergfxd compatibility backends are used only where their typed
-  semantics have been evidenced. Prefer standard kernel ABI for reads/control
-  when ownership and semantics are proven.
-- Desired, Observed and Pending are independent. Loading persisted/default config
-  must never itself apply hardware state.
+- Session protocol/client/daemon remain separate crates; `orbis-sessiond` must never become a privileged mutation deputy.
+- Proven mutation flow is: original application caller → Hardware1 → polkit (`system-bus-name`) → narrow typed backend → authoritative read-back / explicit Pending / fail-closed error.
+- `orbis-hardwared` exposes only semantic typed mutations. Never add a generic sysfs/filesystem/shell/D-Bus proxy or caller-provided path/command execution.
+- D-Bus DTOs are untrusted input and are validated at wire/domain boundaries.
+- Authoritative reads that must remain fresh use explicit no-cache/read semantics.
+- Read and write evidence are independent. UI writability is derived from operation-level/equivalent typed write evidence, not from overall capability status, model name or implementation presence.
+- GPU product policy, physical MUX, access policy, runtime power and pending/action requirement are separate concepts.
+- `Unsupported`, `BackendMissing`, `TemporarilyUnavailable`, `PermissionDenied`, `ReadOnly` and `Unknown` are not interchangeable.
+- Desired, Observed and Pending are independent. Loading persisted/default config must never itself apply hardware state.
+- `ApplyResult::Accepted` is not `Applied`.
+- Mutation timeout after a request may have been dispatched is an **unknown outcome**; do not blindly retry it.
 
 ## Safety defaults
 
-- Hardware writes, sysfs writes, privileged commands and mutation D-Bus methods
-  are forbidden without explicit permission from the specific task.
+- Hardware/sysfs writes, privileged commands and mutation D-Bus calls are forbidden unless the task explicitly requires that exact mutation work and existing product/evidence gates permit it.
 - Read-only capability must never be presented as write capability.
-- Unsupported or blocked mutations return/appear honestly; never simulate success.
-- Do not use `sudo` or real system/session bus in tests without explicit task
-  permission.
-- Do not run real UPower/asusd/supergfxd, external D-Bus daemons, Docker,
-  Podman, VMs, or broad ignored tests without explicit task permission.
-- Battery charge-limit, performance-profile, GPU/MUX/power mutations, direct
-  real sysfs writes, real D-Bus mutation methods, and live ASUS hardware
-  manipulation require explicit permission. VM/fake-system validation does not
-  prove real hardware behavior.
-- Fan curve writes are owned by typed asusd through Hardware1; never add direct
-  sysfs fan writes or bypass Hardware1. **Current fan mutation/default-reset is
-  fail-closed in UI and packaged polkit policy. Do not re-enable it until the
-  current fan safety/evidence blockers in `docs/current-state.md` are resolved,
-  executable tests are green and required live validation is recorded.**
-- Do not add `unsafe`; keep existing `forbid`/`deny unsafe_code` lints. Do not
-  weaken lint policy or tests to make a check pass.
+- Unsupported/blocked mutations must appear honestly; never simulate success.
+- Do not use `sudo` or real system/session bus in automated tests without explicit task authorization.
+- Do not use real UPower/asusd/supergfxd, Docker/Podman/VMs or broad ignored tests unless the task explicitly calls for controlled integration validation.
+- VM/fake-system validation never proves physical ASUS hardware behavior.
+- Fan curve writes/reset remain hard-blocked. Do not re-enable them until #104/#105/#109/#116 are resolved, exact-build executable checks pass and required controlled hardware validation is recorded.
+- Raw/product GPU mutation, Panel/Keyboard/Aura product writes, unattended Automation, Display modeset and self-update remain independent promotion gates. Typed implementation code does not authorize them.
+- Do not add `unsafe`; keep existing `forbid`/`deny unsafe_code` lints. Never weaken lint/tests/safety gates to make a check pass.
+
+## Source-of-truth discipline
+
+Before modifying behavior, read:
+
+1. `docs/current-state.md`;
+2. `docs/architecture.md`;
+3. relevant ADR/provider/protocol document;
+4. relevant open issue when one exists.
+
+Use `docs/roadmap.md` for future ordering and `docs/beta-acceptance-checklist.md` for release gates. Dated audits/remediation plans are historical unless current docs explicitly promote them.
+
+Source inspection proves at most `IMPLEMENTED`. `TESTED`, `PACKAGED` and `LIVE-VALIDATED` require their corresponding executed evidence from `docs/verification.md` / `docs/release-evidence-taxonomy.md`.
 
 ## Scope discipline
 
-- Before making changes, check `git status --short` when a local checkout is
-  available.
-- Change only files allowed by the task. No incidental broad refactoring.
-- Do not change public API without explicit permission.
-- Do not add dependencies without a clear need and permission. Do not change
-  `Cargo.lock` unless it is the mandatory result of legitimate resolution.
-- If a task requires a forbidden file or API change, stop and report the exact
-  reason. Do not bypass the production path with a test-only shortcut.
+- Check `git status --short` before edits when a checkout is available.
+- Do not perform incidental broad refactors unrelated to the active task.
+- Public/protocol API changes require explicit justification and migration/compatibility consideration.
+- Add dependencies only for a clear architectural need; do not change `Cargo.lock` casually.
+- If the required safe implementation cannot be validated or patched reliably in the available environment, leave the product path fail-closed and document the exact blocker rather than inventing a shortcut.
 
 ## Development environment
 
-- The project development environment is the flake `devShell`. In normal
-  interactive work, entering this repository through the approved `.envrc`
-  activates it automatically via `direnv` and `nix-direnv`.
-- `.envrc` is part of the project contract and must remain exactly `use flake`.
-  Do not put secrets, credentials, manual `PATH` changes, duplicated toolchain
-  setup, or project commands there. `.direnv/` is local cache state and is not
-  committed.
-- `rustc`, `cargo`, `rustfmt`, `clippy`, `rust-analyzer`, `slint-lsp`, and
-  native build dependencies come from the project devShell, not the global
-  workstation environment.
+- Canonical environment is the flake `devShell`; `.envrc` must remain exactly `use flake`.
+- Rust/Slint/native tools come from the project devShell, not an ad-hoc global toolchain.
+- `.direnv/` is local cache state and is not committed.
+- If the environment lacks Rust/Cargo/Slint/Nix, report executable checks as `BLOCKED`/`NOT_RUN`; do not infer PASS from source/static checks.
 
-## Build / check / test commands
+## Verification
 
-Verification tiers: выбирай минимальный tier, который реально покрывает
-изменение. Не ослабляй correctness/security tests — tier выбирается по охвату,
-а не для экономии.
+Always run the smallest tier that actually covers the change, but repository/release claims remain lockfile-strict.
 
-`rustfmt 1.97.1` на текущем dev environment может аварийно завершаться в
-`--check` при печати Unicode-heavy diff. Поэтому сначала форматируй, затем
-проверяй формат. Не трактуй такой rustfmt SIGABRT как сбой Orbis daemon.
+### Layer 0 — source/static contracts
 
-### FAST — default для обычного изменения одного crate
+No Rust/Nix required:
 
 ```bash
+python3 scripts/verify-static
+```
+
+This is a fail-fast source check only. It does not prove Rust/Slint/Nix compilation or runtime behavior.
+
+### FAST — narrow crate change
+
+```bash
+python3 scripts/verify-static
 cargo fmt --all
-cargo check -p <affected-crate> --all-targets
-cargo test -p <affected-crate>
-cargo clippy -p <affected-crate> --all-targets -- -D warnings
+cargo check -p <affected-crate> --all-targets --locked
+cargo test -p <affected-crate> --locked
+cargo clippy -p <affected-crate> --all-targets --locked -- -D warnings
 git diff --check
 ```
 
-### INTEGRATION — изменение пересекает несколько crates / service boundaries
+### INTEGRATION — cross-crate/protocol/runtime change
 
 ```bash
-cargo fmt --all
+python3 scripts/verify-static
 cargo fmt --all -- --check
-cargo check --workspace --all-targets
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo check --workspace --all-targets --locked
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
 git diff --check
 ```
 
-### FULL — milestone/release acceptance, Nix/package/module changes,
-controlled live hardware preparation, or explicit task requirement
+### FULL — release/package/system-service/polkit/D-Bus change
 
-INTEGRATION + appropriate Nix checks:
+INTEGRATION plus targeted Nix checks and final:
 
 ```bash
-nix build .#orbis-control --max-jobs 1 --cores 4
 nix flake check --max-jobs 1 --cores 4
 ```
 
-For Rust-only changes full `nix flake check` is not automatically required. For
-`flake.nix`, packaging, systemd, polkit or D-Bus changes, run the relevant Cargo
-tier and targeted Nix validation first:
-
-```bash
-nix flake check --no-build --system x86_64-linux
-```
-
-Existing system-integration VM checks:
+Current system-integration checks include:
 
 ```text
 checks.x86_64-linux.hardwared-lifecycle
@@ -164,92 +139,70 @@ checks.x86_64-linux.performance-mutation-vm
 checks.x86_64-linux.battery-mutation-vm
 ```
 
-The Performance VM intentionally runs with UPower disabled: it must prove that
-Battery availability is not a Session1 startup dependency.
+Automated integration uses fake/VM state and must not mutate real ASUS hardware.
 
-Standalone development deployment deliberately owns only the hardwared binary
-and `/etc/systemd/system/orbis-hardwared.service`. Static D-Bus/polkit policy is
-registered separately by the policy-only NixOS module. Ordinary host rebuilds
-must not own or restart the standalone daemon lifecycle.
-
-### Docs-only / shell-only
+### Docs/repository-only
 
 ```bash
+python3 scripts/verify-static
 git diff --check
-# + релевантный rg/bash -n по затронутым файлам
 ```
 
-Никаких workspace cargo/nix checks без отдельной причины.
+Use additional targeted standard-library/shell syntax checks when relevant.
 
-### Notes
+### Verification notes
 
-- Для тяжёлых Nix commands всегда использовать `--max-jobs 1 --cores 4`.
-- Интеграционные тесты, которые могут deadlock во время handshake, обязаны
-  использовать bounded timeout; timeout не заменяет корректную обработку
-  lifecycle.
-- Не используй `sleep`, polling или retry для маскировки races/deadlocks.
-- Когда важна cache semantics, проверяй свежие authoritative reads минимум
-  двумя последовательными различающимися значениями. Ассертируй класс
-  ошибки, не только факт ошибки. Ассертируй счётчики/порядок вызовов, если
-  short-circuit важен.
-- A GitHub Actions run object is **not** verification evidence by itself. A run
-  that fails before Checkout, has `steps=[]`, or has no executable log must be
-  recorded as BLOCKED/FAIL infrastructure evidence, never as a repository PASS.
+- Heavy Nix commands use `--max-jobs 1 --cores 4`.
+- Async/integration operations that can hang need bounded timeouts; do not use `sleep`/retry to mask races.
+- Provider read timeouts must preserve local evidence classes. Generic timeout helpers must not automatically retry mutations.
+- When cache semantics matter, verify distinct sequential authoritative values.
+- Assert error classes and call ordering/counts where short-circuit/lifecycle correctness matters.
+- A GitHub Actions run object is not verification evidence by itself. A job that fails before Checkout, has `steps=null`/empty steps or no executable logs is an infrastructure blocker, not a repository test result (#106).
 
-## Git policy
+## Git / repository policy
 
-- Never use `git add .`. Stage only an explicit list of files.
-- Do not create a commit unless the task prompt explicitly authorizes repository
-  writes/commits or the task is explicitly an integration/cleanup operation.
-- Do not amend, rebase, reset, force push or remove others' changes without
-  direct permission.
-- After a commit, verify it contains exactly the intended files and pre-existing
-  baseline paths remain unchanged; unrelated baseline changes may remain in the
-  working tree.
-- Commit messages: `<scope>: <imperative summary>` (for example `ui:`,
-  `session:`, `sessiond:`, `hardwared:`, `docs:`).
+- Never use `git add .`; stage explicit files when working from a checkout.
+- Do not amend/rebase/reset/force-push/delete others' unique work without explicit authorization.
+- Integration/cleanup tasks may create commits/PRs when the user has authorized repository maintenance; record exactly what was changed.
+- Prefer Draft PRs for large unvalidated integration lines. Do not merge them merely because GitHub reports `mergeable=true`.
+- Commit messages: `<scope>: <imperative summary>` (`ui:`, `session:`, `hardwared:`, `docs:`, `verify:`, `repo:`).
+- `main` required checks remain deferred until #106 is actually fixed; see #114.
+- Obsolete remote branch cleanup is tracked by #118. Do not bulk-delete refs with unique commits without confirming they are superseded or integrated.
 
 ## Known project gotchas
 
-- `orbis-hardwared` is a workspace member. Its privileged surface must stay
-  narrow; adding a new mutation requires evidence for semantics, ownership,
-  authorization and authoritative read-back.
-- Slint UI files live in `ui/`; Rust glue in `crates/orbis-ui/src`. Theme tokens
-  live in `ui/themes/dark.slint`. See `docs/ui-reference.md` and
-  `docs/ui-measurements.json`.
-- Dev environment: `nix develop` provides cargo/rustc/rustfmt/clippy and
-  headless-Slint test env. Do not install a global Rust toolchain.
-- Production providers include real read-only sysfs/session backends and typed
-  asusd/supergfxd compatibility adapters. Do not reintroduce production mock
-  fallback.
-- The release UI feature graph still carries development mock/test-support code;
-  do not interpret that as production hardware fallback. Cleanup is tracked in
-  the current backlog.
+- `orbis-hardwared` is a workspace member; every new mutation requires typed semantics, ownership, authorization and read-back evidence.
+- Slint files live under `ui/`; Rust UI glue/runtime lives under `crates/orbis-ui/src`.
+- Production mock fallback is forbidden. The remaining normal `orbis-test-support` GUI dependency is a bootstrap/dependency-graph defect tracked by #115, not permission to use fixtures as hardware state.
 - Fan curve sysfs values are raw PWM `0..255`, not percentages.
-- Stored asusd fan curve points, their `enabled` state and the active sysfs curve
-  are distinct evidence concepts.
-- GPU product policy (Eco/Standard/Ultimate/Optimized) is not proven merely by
-  exposing backend-level supergfxd modes; keep product controls disabled until
-  evidence establishes mapping and lifecycle semantics.
-- Legacy `AppConfig`/path helpers are compatibility-only and must not become the
-  basis of reconciliation or new persistence until hardened.
+- Stored asusd fan curve points, their `enabled` state and the active sysfs curve are distinct evidence concepts.
+- Per-fan profile reads exist, but the aggregate FanCurves capability still has a CPU→GPU inference gap (#109).
+- GPU product modes Eco/Standard/Ultimate/Optimized are product policies, not raw supergfxd aliases.
+- Legacy `AppConfig`/path helpers are compatibility-only and must not become reconciliation/new-persistence foundations (#113).
+- Telemetry `Ok` is not automatically useful/fresh evidence; coverage semantics remain #117.
+- Support-matrix artifacts are documentation/release evidence only and must never become model-name runtime support inference.
 
 ## Reporting
 
-Keep the final report short:
+Final engineering reports should state:
 
-1. Changed files. 2. What was implemented. 3. Key architectural invariants.
-4. Tests added or changed. 5. Check results. 6. Repository status when visible.
-7. Whether commits/merges were created. 8. What was intentionally left out.
+1. files/issues/PRs changed;
+2. implemented behavior;
+3. preserved safety/architecture invariants;
+4. tests/contracts added or changed;
+5. **executed** check results separately from source/static inspection;
+6. repository/branch/PR state;
+7. commits/merges created;
+8. intentionally blocked work and exact reasons.
 
-A detailed report is required for diagnostic stops, public API changes,
-protocol/ABI changes, privileged or hardware operations, real system/session bus
-bootstrap, and migration or dependency-resolution issues.
+Detailed reporting is required for public/protocol API changes, privileged behavior, hardware operations, dependency resolution, migrations and diagnostic stops.
 
-## Skills
+## Project skills
 
 Project-specific procedures live in `.opencode/skills/`:
-`orbis-slint-ui`, `orbis-hardware-safety`, and `orbis-system-integration`.
-Load UI or system-integration guidance only when the task matches its scope;
-load hardware-safety as well when system-integration work changes hardware
-semantics. Ordinary Rust/domain work follows this file directly.
+
+- `orbis-slint-ui`;
+- `orbis-hardware-safety`;
+- `orbis-system-integration`.
+
+Load the matching procedure when the task enters that scope; hardware-safety guidance is mandatory for changes that affect real hardware semantics.
