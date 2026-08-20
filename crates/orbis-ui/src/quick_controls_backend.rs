@@ -14,6 +14,8 @@ use slint::ComponentHandle;
 
 use crate::AppWindow;
 
+const READ_TIMEOUT: Duration = Duration::from_secs(2);
+
 #[derive(Clone)]
 struct QuickControlsContext {
     runtime: tokio::runtime::Handle,
@@ -136,14 +138,8 @@ fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
     let weak = app.as_weak();
     let completion = context.refreshing.clone();
     context.runtime.spawn(async move {
-        let display_provider =
-            WaylandDisplayOutputProvider::new(WaylandCompositorOutputSource::new());
-        let keyboard_provider = AsusKeyboardBacklightProvider::default();
-
-        let (display_result, keyboard_result) = tokio::join!(
-            display_provider.display_output_snapshot(),
-            keyboard_provider.keyboard_backlight_state(),
-        );
+        let (display_result, keyboard_result) =
+            tokio::join!(read_display_state(), read_keyboard_state());
 
         let display = display_state(display_result);
         let keyboard = keyboard_state(keyboard_result);
@@ -166,6 +162,20 @@ fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
             tracing::warn!(error = ?error, "failed to publish quick-control state to UI");
         }
     });
+}
+
+async fn read_display_state() -> Result<DisplayOutputSnapshot, ProviderError> {
+    let provider = WaylandDisplayOutputProvider::new(WaylandCompositorOutputSource::new());
+    tokio::time::timeout(READ_TIMEOUT, provider.display_output_snapshot())
+        .await
+        .map_err(|_| ProviderError::Timeout("quick controls display read timed out".into()))?
+}
+
+async fn read_keyboard_state() -> Result<KeyboardBacklightState, ProviderError> {
+    let provider = AsusKeyboardBacklightProvider::default();
+    tokio::time::timeout(READ_TIMEOUT, provider.keyboard_backlight_state())
+        .await
+        .map_err(|_| ProviderError::Timeout("quick controls keyboard read timed out".into()))?
 }
 
 fn display_state(result: Result<DisplayOutputSnapshot, ProviderError>) -> DisplayUiState {
@@ -248,6 +258,7 @@ fn read_error_status(prefix: &str, error: &ProviderError) -> String {
         ProviderError::Unsupported(_) => format!("{prefix} unsupported"),
         ProviderError::PermissionDenied(_) => format!("{prefix} read denied"),
         ProviderError::BackendUnavailable(_) => format!("{prefix} backend unavailable"),
+        ProviderError::Timeout(_) => format!("{prefix} read timed out"),
         _ => format!("{prefix} state unavailable"),
     }
 }
