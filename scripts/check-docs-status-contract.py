@@ -44,6 +44,8 @@ REQUIRED = {
         "#121 closed",
         "bounded_provider_call",
         "aggregate capability still CPU-centric",
+        "Effective product-policy truth (#120 complete)",
+        "Draft integration PR: #129",
     ),
     "architecture": (
         "worker_runtime.rs",
@@ -59,17 +61,22 @@ REQUIRED = {
         "#111 closed",
         "#121 closed",
         "tokio::join!",
+        "Effective product write truth (#120 complete)",
     ),
     "roadmap": (
-        "#110 source-complete",
-        "#111 source-complete",
-        "#121 source-complete",
+        "Autostart (#110 closed)",
+        "Diagnostics Refresh/Export/Copy (#111 closed",
+        "#121 closed",
         "#112 is source-complete",
+        "#120 closed",
         "#125 GUI root boundary",
+        "Draft PR #129",
     ),
     "beta": (
         "Current checklist for the active integration branch",
+        "Draft PR #129",
         "#106",
+        "#120:",
         "#125",
         "#109",
         "#115",
@@ -82,6 +89,7 @@ FORBIDDEN = {
         "Diagnostics | TESTED FOUNDATION / FAIL-CLOSED UI",
         "Window lifecycle | PARTIAL",
         "Lifecycle wiring: #110, #111, #121",
+        "#120 consumer/support-matrix policy truth",
     ),
     "architecture": (
         "its UI remains disabled until #110 is completed",
@@ -94,6 +102,7 @@ FORBIDDEN = {
         "#111 — finish Diagnostics open/refresh lifecycle wiring",
         "#121 — finish window-state, close and tray semantics",
         "#112 — make explicit capability refresh",
+        "#120 effective policy truth",
     ),
     "beta": (
         "PR #19",
@@ -101,6 +110,7 @@ FORBIDDEN = {
         "PR #23",
         "Draft, not merged",
         "stacked on #19",
+        "[ ] #120:",
     ),
 }
 
@@ -131,7 +141,9 @@ def run(root: Path) -> list[str]:
 
     obsolete_trigger = root / ".github/keyboard-backlight-probe-validation-trigger"
     if obsolete_trigger.exists():
-        errors.append(f"{obsolete_trigger.relative_to(root)}: obsolete one-off validation trigger must stay removed")
+        errors.append(
+            f"{obsolete_trigger.relative_to(root)}: obsolete one-off validation trigger must stay removed"
+        )
 
     workflows = root / ".github/workflows"
     if workflows.is_dir():
