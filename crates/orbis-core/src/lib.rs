@@ -67,8 +67,8 @@ pub use display_output::{
     DisplayOutputState,
 };
 pub use display_refresh::{
-    DisplayRefreshEvidence, DisplayRefreshPreset, DisplayRefreshPresetTarget,
-    DisplayRefreshTargetId, DisplayRefreshTargetRole,
+    DisplayRefreshConstraints, DisplayRefreshEvidence, DisplayRefreshPreset,
+    DisplayRefreshPresetTarget, DisplayRefreshTargetId, DisplayRefreshTargetRole,
 };
 pub use error::CoreError;
 pub use fan::{FanCurve, FanCurvePoint, FanId};
