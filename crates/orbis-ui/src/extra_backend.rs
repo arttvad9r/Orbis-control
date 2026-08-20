@@ -5,11 +5,13 @@ use std::time::Duration;
 
 use orbis_core::aura::{AuraMode, AuraSpeed};
 use orbis_core::display::PanelOverdriveState;
+use orbis_core::firmware::BootSoundState;
 use orbis_core::keyboard_backlight::KeyboardBacklightState;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{AuraProvider, KeyboardBacklightProvider, PanelOverdriveProvider};
 use orbis_providers::{
-    AsusArmouryPanelOverdriveProvider, AsusAuraProvider, AsusKeyboardBacklightProvider,
+    AsusArmouryPanelOverdriveProvider, AsusAuraProvider, AsusBootSoundProvider,
+    AsusKeyboardBacklightProvider,
 };
 use slint::ComponentHandle;
 
@@ -53,6 +55,13 @@ struct PanelObserved {
     status: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BootSoundObserved {
+    ready: bool,
+    enabled: bool,
+    status: String,
+}
+
 pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
     CONTEXT.with(|slot| {
         *slot.borrow_mut() = Some(ExtraContext {
@@ -76,6 +85,7 @@ fn reset_readiness(window: &ExtraWindow) {
     window.set_aura_control_ready(false);
     window.set_panel_overdrive_state_ready(false);
     window.set_panel_overdrive_control_ready(false);
+    window.set_boot_sound_state_ready(false);
 }
 
 pub(crate) fn wire_window(window: &ExtraWindow) {
@@ -83,6 +93,7 @@ pub(crate) fn wire_window(window: &ExtraWindow) {
     window.set_keyboard_brightness(-1);
     window.set_keyboard_effect(-1);
     window.set_keyboard_speed(-1);
+    window.set_boot_sound(false);
     window.set_status(
         if CONTEXT.with(|slot| slot.borrow().is_some()) {
             "Reading advanced hardware observations…"
@@ -179,9 +190,6 @@ fn request_keyboard_brightness(window: &ExtraWindow, level: i32) {
                     );
                 }
             }
-            // The request never establishes readiness or state by itself.
-            // Re-read both authoritative hardware state and current Hardware1
-            // mutation-status after every attempt.
             refresh(&window);
         }) {
             tracing::warn!(error = ?error, "failed to publish Extra keyboard mutation result");
@@ -262,19 +270,25 @@ pub(crate) fn refresh(window: &ExtraWindow) {
     context.runtime.spawn(async move {
         let keyboard_provider = AsusKeyboardBacklightProvider::default();
         let panel_provider = AsusArmouryPanelOverdriveProvider::default();
+        let boot_sound_provider = AsusBootSoundProvider::default();
 
         // Reads and mutation evidence are independent. Hardware1 status never
-        // substitutes for the authoritative read-only provider state.
-        let (keyboard_result, aura_result, panel_result, write_statuses) = tokio::join!(
-            bounded_keyboard_read(&keyboard_provider),
-            bounded_aura_read(),
-            bounded_panel_read(&panel_provider),
-            bounded_write_statuses(),
-        );
+        // substitutes for authoritative observed state. Boot sound has only a
+        // proven read path in Orbis today, so it never participates in write
+        // readiness.
+        let (keyboard_result, aura_result, panel_result, boot_sound_result, write_statuses) =
+            tokio::join!(
+                bounded_keyboard_read(&keyboard_provider),
+                bounded_aura_read(),
+                bounded_panel_read(&panel_provider),
+                bounded_boot_sound_read(&boot_sound_provider),
+                bounded_write_statuses(),
+            );
 
         let keyboard = keyboard_observed(keyboard_result);
         let aura = aura_observed(aura_result);
         let panel = panel_observed(panel_result);
+        let boot_sound = boot_sound_observed(boot_sound_result);
         let (keyboard_write, panel_write) = match write_statuses {
             Ok(statuses) => statuses,
             Err(error) => {
@@ -285,9 +299,6 @@ pub(crate) fn refresh(window: &ExtraWindow) {
         completion.store(false, Ordering::Release);
 
         if let Err(error) = weak.upgrade_in_event_loop(move |window| {
-            // The unrelated multi-field draft remains unavailable. The two
-            // direct hardware controls are gated independently by authoritative
-            // observed state AND Hardware1's explicit mutation status.
             window.set_backend_ready(false);
             window.set_applying(false);
 
@@ -304,21 +315,25 @@ pub(crate) fn refresh(window: &ExtraWindow) {
             window.set_panel_overdrive_control_ready(panel.ready && panel_write.is_supported());
             window.set_panel_overdrive(panel.enabled);
 
-            let any_ready = keyboard.ready || aura.ready || panel.ready;
+            window.set_boot_sound_state_ready(boot_sound.ready);
+            window.set_boot_sound(boot_sound.enabled);
+
+            let any_ready = keyboard.ready || aura.ready || panel.ready || boot_sound.ready;
             window.set_status(
                 if any_ready {
                     format!(
-                        "Observed · {} · keyboard {} · {} · panel {} · {}",
+                        "Observed · {} · keyboard {} · {} · panel {} · {} · {}",
                         keyboard.status,
                         keyboard_write.short_label(),
                         aura.status,
                         panel_write.short_label(),
                         panel.status,
+                        boot_sound.status,
                     )
                 } else {
                     format!(
-                        "Advanced observations unavailable · {} · {} · {}",
-                        keyboard.status, aura.status, panel.status
+                        "Advanced observations unavailable · {} · {} · {} · {}",
+                        keyboard.status, aura.status, panel.status, boot_sound.status
                     )
                 }
                 .into(),
@@ -356,6 +371,14 @@ async fn bounded_panel_read(
     tokio::time::timeout(READ_TIMEOUT, provider.panel_overdrive_state())
         .await
         .map_err(|_| ProviderError::Timeout("Extra panel-overdrive read timed out".into()))?
+}
+
+async fn bounded_boot_sound_read(
+    provider: &AsusBootSoundProvider,
+) -> Result<BootSoundState, ProviderError> {
+    tokio::time::timeout(READ_TIMEOUT, provider.boot_sound_state())
+        .await
+        .map_err(|_| ProviderError::Timeout("Extra boot-sound read timed out".into()))?
 }
 
 async fn bounded_write_statuses(
@@ -420,13 +443,30 @@ fn panel_observed(result: Result<PanelOverdriveState, ProviderError>) -> PanelOb
     }
 }
 
+fn boot_sound_observed(result: Result<BootSoundState, ProviderError>) -> BootSoundObserved {
+    match result {
+        Ok(state) => BootSoundObserved {
+            ready: true,
+            enabled: matches!(state, BootSoundState::Enabled),
+            status: if matches!(state, BootSoundState::Enabled) {
+                "boot sound on".into()
+            } else {
+                "boot sound off".into()
+            },
+        },
+        Err(error) => BootSoundObserved {
+            ready: false,
+            enabled: false,
+            status: error_status("boot sound", &error),
+        },
+    }
+}
+
 fn aura_effect_index(mode: AuraMode) -> i32 {
     match mode {
         AuraMode::Static => 0,
         AuraMode::Breathe => 1,
         AuraMode::RainbowCycle => 2,
-        // The current Extra UI's fourth legacy label is "Strobing" while the
-        // exact domain value is Flash. Do not claim that they are equivalent.
         AuraMode::Flash => -1,
         _ => -1,
     }
@@ -499,6 +539,14 @@ mod tests {
     }
 
     #[test]
+    fn boot_sound_observation_preserves_false_as_known_state() {
+        let state = boot_sound_observed(Ok(BootSoundState::Disabled));
+        assert!(state.ready);
+        assert!(!state.enabled);
+        assert!(state.status.contains("off"));
+    }
+
+    #[test]
     fn unknown_aura_speed_has_no_selected_ui_preset() {
         let state = aura_observed(Ok(AuraState {
             current_mode: AuraMode::Static,
@@ -534,11 +582,14 @@ mod tests {
     }
 
     #[test]
-    fn unrelated_extra_draft_and_aura_effect_writes_stay_disabled() {
+    fn boot_sound_is_observation_only_and_unrelated_draft_stays_disabled() {
         let source = include_str!("extra_backend.rs");
+        assert!(source.contains("AsusBootSoundProvider"));
+        assert!(source.contains("set_boot_sound_state_ready"));
         assert!(source.contains("set_backend_ready(false)"));
         assert!(source.contains("set_aura_control_ready(false)"));
         assert!(!source.contains("set_aura_static_rgb"));
+        assert!(!source.contains("set_boot_sound("));
         assert!(!source.contains("set_gpu_mode"));
         assert!(!source.contains("set_fan_curve"));
     }
