@@ -22,6 +22,7 @@ FILES = {
     "output": "crates/orbis-core/src/display_output.rs",
     "provider": "crates/orbis-providers/src/wayland_output.rs",
     "owner": "crates/orbis-providers/src/display_refresh_owner.rs",
+    "service": "crates/orbis-ui/src/display_refresh_service.rs",
     "preflight": "crates/orbis-config/src/automation_preflight.rs",
     "quick": "crates/orbis-ui/src/quick_controls_backend.rs",
     "composition": "crates/orbis-ui/src/composition.rs",
@@ -49,6 +50,17 @@ def require(source: str, relative: str, markers: tuple[str, ...], errors: list[s
     for marker in markers:
         if marker not in source:
             errors.append(f"{relative}: missing required marker {marker!r}")
+
+
+def production_prefix(source: str) -> str:
+    """Return code before the conventional trailing `#[cfg(test)]` module.
+
+    Current Orbis modules keep test fixtures at the end of the file. This is a
+    deliberately narrow helper, not a Rust parser: it prevents test-only fake
+    owners from being mistaken for production compositor implementations.
+    """
+
+    return source.split("#[cfg(test)]", 1)[0]
 
 
 def run(root: Path) -> list[str]:
@@ -117,7 +129,7 @@ def run(root: Path) -> list[str]:
             ),
             errors,
         )
-        if "Unknown` never confirms mutation" not in state:
+        if "`Unknown` never confirms mutation" not in state:
             errors.append(
                 f"{FILES['state']}: Unknown active policy must be documented as non-confirming"
             )
@@ -183,10 +195,43 @@ def run(root: Path) -> list[str]:
                 f"{FILES['owner']}: setter must borrow the exact request so post-write validation can reuse it"
             )
         for token in SHELL_FALLBACKS:
-            if token in owner:
+            if token in production_prefix(owner):
                 errors.append(
                     f"{FILES['owner']}: typed owner contract contains shell/process fallback {token!r}"
                 )
+
+    service = sources.get("service")
+    if service is not None:
+        require(
+            service,
+            FILES["service"],
+            (
+                "pub struct DisplayRefreshCommandOutcome",
+                "pub enum DisplayRefreshCommandError",
+                "PreflightRead",
+                "StaleRequest",
+                "Command(ProviderError)",
+                "ReadBack",
+                "ReadBackMismatch",
+                "pub async fn apply_display_refresh",
+                "display_refresh_evidence()",
+                "validate_display_refresh_request(request, &before)",
+                "set_display_refresh(request)",
+                "display_refresh_applied_state()",
+                "validate_display_refresh_readback(request, &before, &state)",
+            ),
+            errors,
+        )
+        production = production_prefix(service)
+        for token in SHELL_FALLBACKS:
+            if token in production:
+                errors.append(
+                    f"{FILES['service']}: application orchestration contains shell/process fallback {token!r}"
+                )
+        if "app.set_display_control_ready(true)" in production:
+            errors.append(
+                f"{FILES['service']}: service module must not directly enable UI write readiness"
+            )
 
     preflight = sources.get("preflight")
     if preflight is not None:
@@ -224,8 +269,7 @@ def run(root: Path) -> list[str]:
             )
 
     # No concrete implementation may enter production while this contract says
-    # the feature is write-disabled. Test fixtures should stay local to tests;
-    # the current tree intentionally has no `impl DisplayRefreshMutationOwner`.
+    # the feature is write-disabled. Trailing cfg(test) fixtures are ignored.
     for path in (root / "crates").rglob("*.rs"):
         if path.name == "display_refresh_owner.rs":
             continue
@@ -233,7 +277,8 @@ def run(root: Path) -> list[str]:
             source = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        if re.search(r"impl(?:<[^>]*>)?\s+DisplayRefreshMutationOwner\s+for\b", source):
+        production = production_prefix(source)
+        if re.search(r"impl(?:<[^>]*>)?\s+DisplayRefreshMutationOwner\s+for\b", production):
             errors.append(
                 f"{path.relative_to(root)}: concrete DisplayRefresh owner appeared before promotion gate update"
             )
