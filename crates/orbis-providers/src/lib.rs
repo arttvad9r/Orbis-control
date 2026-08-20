@@ -19,6 +19,7 @@ pub mod asus_diagnostics;
 pub mod aura;
 pub mod display_diagnostics;
 pub mod display_refresh_owner;
+pub mod drm_kms_identity;
 pub mod error;
 pub mod fan_defaults;
 pub mod gpu_diagnostics;
@@ -49,6 +50,7 @@ pub use display_refresh_owner::{
     DisplayRefreshMutationOwner, validate_display_refresh_readback,
     validate_display_refresh_request,
 };
+pub use drm_kms_identity::*;
 pub use error::{OperationId, ProviderError, ValidationResult};
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 pub use gpu_diagnostics::gpu_diagnostics_snapshot;
