@@ -1,3 +1,4 @@
+import { TextEdit } from "std-widgets.slint";
 import { MetricTile } from "../components/visual-controls.slint";
 import { WindowHeader, SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
 import { Palette } from "../themes/dark.slint";
@@ -30,9 +31,39 @@ export component DiagnosticsWindow inherits Window {
     in-out property <string> local-status: "Diagnostics unavailable · lifecycle wiring pending";
 
     callback refresh-requested;
+    // Compatibility callback retained for existing Rust glue. Clipboard copy is
+    // now handled by Slint's own platform backend and does not require a shell
+    // helper or a second host integration.
     callback copy-summary-requested;
     callback open-logs-requested;
     callback export-report-requested;
+
+    function summary-text() -> string {
+        return "Orbis Control diagnostics\n"
+            + "Version: " + root.version-value + "\n"
+            + "Kernel: " + root.kernel-value + "\n"
+            + "Platform: " + root.platform-value + "\n"
+            + "Build: " + root.build-detail + "\n"
+            + "System: " + root.system-detail + "\n"
+            + "Snapshot: " + root.snapshot-meta + "\n\n"
+            + "Capabilities\n" + root.capabilities-text + "\n\n"
+            + "Services\n" + root.services-text + "\n\n"
+            + "GPU\n" + root.gpu-text + "\n\n"
+            + "Telemetry\n" + root.telemetry-text + "\n\n"
+            + "Display\n" + root.display-text;
+    }
+
+    // The standard TextEdit owns the actual platform clipboard integration.
+    // It is kept off-canvas and read-only; the user-visible button selects its
+    // complete privacy-safe text and invokes the built-in copy operation.
+    clipboard-source := TextEdit {
+        x: -10000px;
+        y: -10000px;
+        width: 1px;
+        height: 1px;
+        read-only: true;
+        text: root.summary-text();
+    }
 
     VerticalLayout {
         padding: 12px;
@@ -124,7 +155,16 @@ export component DiagnosticsWindow inherits Window {
             height: 30px;
             spacing: 6px;
             ActionButton { width: 88px; label: root.refresh-pending ? "Refreshing…" : "Refresh"; accent: true; disabled: !root.refresh-enabled || root.refresh-pending; clicked => { root.refresh-requested(); } }
-            ActionButton { width: 104px; label: "Copy Summary"; disabled: !root.copy-enabled; clicked => { root.copy-summary-requested(); } }
+            ActionButton {
+                width: 104px;
+                label: "Copy Summary";
+                disabled: !root.copy-enabled;
+                clicked => {
+                    clipboard-source.select-all();
+                    clipboard-source.copy();
+                    root.local-status = "Summary copied to clipboard";
+                }
+            }
             ActionButton { width: 86px; label: "Open Logs"; disabled: !root.logs-enabled; clicked => { root.open-logs-requested(); } }
             Text {
                 horizontal-stretch: 1;
