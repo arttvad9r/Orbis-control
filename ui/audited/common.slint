@@ -3,21 +3,33 @@ import { Palette } from "../themes/dark.slint";
 export component WindowHeader inherits Rectangle {
     in property <string> title;
     in property <string> subtitle: "";
-    height: 34px;
+    height: 38px;
     background: transparent;
+
     HorizontalLayout {
         alignment: center;
         VerticalLayout {
             alignment: center;
-            Text { text: root.title; font-size: 13px; font-weight: 700; color: Palette.text-primary; }
-            if (root.subtitle != "") : Text { text: root.subtitle; font-size: 8px; color: Palette.text-secondary; overflow: elide; }
+            spacing: 1px;
+            Text {
+                text: root.title;
+                font-size: 14px;
+                font-weight: 700;
+                color: Palette.text-primary;
+            }
+            if (root.subtitle != "") : Text {
+                text: root.subtitle;
+                font-size: 10px;
+                color: Palette.text-secondary;
+                overflow: elide;
+            }
         }
         Rectangle { horizontal-stretch: 1; background: transparent; }
     }
 }
 
 export component SectionCard inherits Rectangle {
-    border-radius: 4px;
+    border-radius: 8px;
     border-width: 1px;
     border-color: Palette.border-default;
     background: Palette.surface-default;
@@ -26,50 +38,95 @@ export component SectionCard inherits Rectangle {
 export component SectionTitle inherits Rectangle {
     in property <string> title;
     in property <string> detail: "";
-    height: 18px;
+    height: 22px;
     background: transparent;
+
     HorizontalLayout {
         alignment: center;
         spacing: 8px;
-        Text { text: root.title; font-size: 10px; font-weight: 700; color: Palette.text-primary; vertical-alignment: center; overflow: elide; }
+        Text {
+            text: root.title;
+            font-size: 11px;
+            font-weight: 700;
+            color: Palette.text-primary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
         Rectangle { horizontal-stretch: 1; background: transparent; }
-        if (root.detail != "") : Text { text: root.detail; font-size: 8px; color: Palette.text-secondary; vertical-alignment: center; overflow: elide; }
+        if (root.detail != "") : Text {
+            text: root.detail;
+            font-size: 10px;
+            color: Palette.text-secondary;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            overflow: elide;
+        }
     }
 }
 
 export component ActionButton inherits Rectangle {
     in property <string> label;
     in property <bool> disabled: false;
+    // accent means selected/important, not a permanently filled primary action.
     in property <bool> accent: false;
     callback clicked;
-    height: 28px;
-    min-width: 70px;
-    border-radius: 3px;
+
+    height: 30px;
+    min-width: 68px;
+    border-radius: 7px;
     border-width: 1px;
-    border-color: root.accent && !root.disabled ? Palette.accent-default : Palette.border-default;
+    border-color: root.accent && !root.disabled ? Palette.accent-default
+        : touch.has-hover && !root.disabled ? Palette.border-strong
+        : Palette.border-default;
     background: root.disabled ? Palette.surface-disabled
         : touch.pressed ? Palette.surface-pressed
+        : root.accent ? Palette.surface-selected
         : touch.has-hover ? Palette.surface-hover
-        : root.accent ? Palette.accent-default : Palette.surface-default;
+        : Palette.surface-default;
+
     Text {
         text: root.label;
-        font-size: 9px;
-        font-weight: 600;
+        font-size: 10px;
+        font-weight: root.accent ? 650 : 600;
         color: root.disabled ? Palette.text-disabled : Palette.text-primary;
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;
     }
-    touch := TouchArea { enabled: !root.disabled; clicked => { root.clicked(); } }
+
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.clicked(); }
+    }
 }
 
 export component LocalStatus inherits Rectangle {
     in property <string> text;
     in property <color> accent: Palette.text-secondary;
-    height: 24px;
-    border-radius: 3px;
+    height: 26px;
+    border-radius: 7px;
     border-width: 1px;
     border-color: root.accent;
-    background: Palette.surface-pressed;
-    Text { x: 7px; width: parent.width - 14px; text: root.text; font-size: 8px; color: root.accent; vertical-alignment: center; overflow: elide; }
+    background: Palette.surface-selected;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 7px;
+        alignment: center;
+        Rectangle {
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: root.accent;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.text;
+            font-size: 9px;
+            color: Palette.text-secondary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
 }
