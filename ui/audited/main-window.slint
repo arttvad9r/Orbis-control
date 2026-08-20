@@ -27,7 +27,6 @@ export component AppWindow inherits Window {
         fan-pwm-0: 0, fan-pwm-1: 0, fan-pwm-2: 0, fan-pwm-3: 0, fan-pwm-4: 0, fan-pwm-5: 0, fan-pwm-6: 0, fan-pwm-7: 0,
     };
 
-    // Existing production callbacks.
     callback perf-clicked(int);
     callback gpu-clicked(int);
     callback charge-changed(float);
@@ -45,16 +44,13 @@ export component AppWindow inherits Window {
     callback preview-dialog-clicked(int);
     callback quit-clicked;
 
-    // Frontend-complete contracts for planned quick controls. Backend wiring
-    // only needs to publish the authoritative values/readiness and handle the
-    // callbacks; the UI never invents an applied state locally.
     in property <bool> display-control-ready: false;
-    in property <int> display-mode: 0; // 0 Auto, 1 60 Hz, 2 120 Hz
+    in property <int> display-mode: 0;
     in property <string> display-status: "Unavailable";
     callback display-mode-requested(int);
 
     in property <bool> keyboard-control-ready: false;
-    in property <int> keyboard-brightness: 0; // 0..3
+    in property <int> keyboard-brightness: 0;
     in property <string> keyboard-status: "Unavailable";
     callback keyboard-brightness-requested(int);
 
@@ -121,25 +117,28 @@ export component AppWindow inherits Window {
 
         VerticalLayout {
             spacing: 4px;
-            SectionTitle { title: "Quick Controls"; detail: root.display-control-ready || root.keyboard-control-ready ? "Hardware-backed" : "Backend not connected"; }
+            SectionTitle {
+                title: "Quick Controls";
+                detail: root.display-status + " · " + root.keyboard-status;
+            }
             SectionCard {
                 height: 98px;
                 VerticalLayout {
                     padding: 8px; spacing: 8px;
                     HorizontalLayout {
                         height: 32px; spacing: 6px; alignment: center;
-                        Text { width: 76px; text: "Display"; font-size: 10px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }
-                        ChoiceChip { horizontal-stretch: 1; label: "Auto"; selected: root.display-mode == 0; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(0); } }
-                        ChoiceChip { horizontal-stretch: 1; label: "60 Hz"; selected: root.display-mode == 1; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(1); } }
-                        ChoiceChip { horizontal-stretch: 1; label: "120 Hz"; selected: root.display-mode == 2; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(2); } }
+                        Text { width: 76px; text: "Display"; font-size: 10px; font-weight: 650; color: root.display-control-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
+                        ChoiceChip { horizontal-stretch: 1; label: "Auto"; selected: root.display-control-ready && root.display-mode == 0; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(0); } }
+                        ChoiceChip { horizontal-stretch: 1; label: "60 Hz"; selected: root.display-control-ready && root.display-mode == 1; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(1); } }
+                        ChoiceChip { horizontal-stretch: 1; label: "120 Hz"; selected: root.display-control-ready && root.display-mode == 2; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(2); } }
                     }
                     HorizontalLayout {
                         height: 32px; spacing: 6px; alignment: center;
-                        Text { width: 76px; text: "Keyboard"; font-size: 10px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }
-                        ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.keyboard-brightness == 0; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(0); } }
-                        ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.keyboard-brightness == 1; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(1); } }
-                        ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.keyboard-brightness == 2; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(2); } }
-                        ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.keyboard-brightness == 3; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(3); } }
+                        Text { width: 76px; text: "Keyboard"; font-size: 10px; font-weight: 650; color: root.keyboard-control-ready ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
+                        ChoiceChip { horizontal-stretch: 1; label: "Off"; selected: root.keyboard-control-ready && root.keyboard-brightness == 0; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(0); } }
+                        ChoiceChip { horizontal-stretch: 1; label: "1"; selected: root.keyboard-control-ready && root.keyboard-brightness == 1; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(1); } }
+                        ChoiceChip { horizontal-stretch: 1; label: "2"; selected: root.keyboard-control-ready && root.keyboard-brightness == 2; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(2); } }
+                        ChoiceChip { horizontal-stretch: 1; label: "3"; selected: root.keyboard-control-ready && root.keyboard-brightness == 3; disabled: !root.keyboard-control-ready; clicked => { root.keyboard-brightness-requested(3); } }
                     }
                 }
             }
