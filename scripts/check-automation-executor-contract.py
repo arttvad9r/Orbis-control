@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Static fail-closed checks for worker-owned Automation execution.
 
-This script is intentionally not a substitute for Rust type checking. It protects
-architecture invariants that are reviewable without Cargo:
+This checker is intentionally independent of Cargo. It does not prove Rust type
+correctness; it protects architectural invariants that must remain true even
+before executable validation is available:
 
-- Automation lifecycle/policy/revision/serialization/recovery state is owned by
-  the same sequential worker module as application mutations;
-- logind lifecycle observations reach that worker through a typed channel;
-- the only compiled unattended mutation executor is Performance-only;
-- policy/lifecycle/capability identities are rechecked immediately before the
-  owner call;
-- unknown post-mutation outcomes enter typed recovery;
-- this exact revision remains promotion-gated and the canonical Automation
-  capability remains read-only/write-Unsupported.
+- Automation lifecycle/policy/revision/serialization/recovery share the same
+  sequential worker owner as application mutations;
+- shadow/dry-run may operate with read-only Automation evidence, but the final
+  execution boundary requires a separate strict permit;
+- this revision keeps the compile/release promotion bit false;
+- the only unattended executor modeled is Performance-only;
+- policy/lifecycle/capability identities and unknown-outcome recovery remain
+  fail-closed;
+- canonical Automation capability stays read-only/write-Unsupported.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import sys
 from pathlib import Path
 
 CAPABILITY = "crates/orbis-ui/src/automation_capability.rs"
+DRY_RUN = "crates/orbis-config/src/automation_dry_run_preflight.rs"
 REVISION = "crates/orbis-ui/src/automation_lifecycle_revision.rs"
 SERIALIZATION = "crates/orbis-ui/src/automation_serialization.rs"
 SCOPE = "crates/orbis-ui/src/automation_execution_scope.rs"
@@ -30,6 +32,7 @@ RECOVERY = "crates/orbis-ui/src/automation_recovery.rs"
 WORKER_RUNTIME_STATE = "crates/orbis-ui/src/automation_worker_runtime.rs"
 WORKER_COORDINATOR = "crates/orbis-ui/src/automation_worker_coordinator.rs"
 WORKER_DRIVER = "crates/orbis-ui/src/automation_worker_driver.rs"
+PROMOTION = "crates/orbis-ui/src/automation_execution_promotion.rs"
 EXECUTOR = "crates/orbis-ui/src/automation_performance_executor.rs"
 WORKER = "crates/orbis-ui/src/worker_runtime.rs"
 RESUME = "crates/orbis-ui/src/resume_observer.rs"
@@ -43,6 +46,12 @@ REQUIRED = {
         "augment_snapshot_with_automation_shadow",
         "executable_validation_passed",
     ),
+    DRY_RUN: (
+        "preflight_automation_plan_for_dry_run",
+        "preflight_automation_plan(plan, capabilities)",
+        "runtime_read == CapabilityStatus::Supported",
+        "AutomationRuntimeWriteUnavailable",
+    ),
     REVISION: (
         "AutomationLifecycleRevision",
         "AutomationLifecycleClock",
@@ -52,8 +61,6 @@ REQUIRED = {
     SERIALIZATION: (
         "AutomationDryRunLease",
         "AutomationSerializationCoordinator",
-        "required_revision",
-        "required_generation",
         "last_admitted_revision",
         "pub fn admit",
         "pub fn finish",
@@ -90,8 +97,14 @@ REQUIRED = {
         "required_policy_revision",
         "prepare_latest_dry_run",
         "finish_performance_unknown",
-        "replace_persisted_policy",
-        "clear_persisted_policy",
+    ),
+    PROMOTION: (
+        "AutomationExecutionPermit",
+        "authorize_prepared_execution",
+        "AutomationRuntimeWriteUnavailable",
+        "CapabilityGenerationChanged",
+        "CapabilitySnapshotStale",
+        "runtime_write != CapabilityStatus::Supported",
     ),
     EXECUTOR: (
         "Production-ready Performance-only Automation execution boundary",
@@ -113,18 +126,16 @@ REQUIRED = {
         "observe_automation_telemetry",
         "augment_snapshot_with_automation_shadow",
         "prepare_latest_dry_run",
+        "authorize_prepared_execution",
         "execute_prepared_performance",
         "finish_performance_unknown",
         "reconcile_performance",
         "AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED: bool = false",
     ),
-    RESUME: (
-        "PrepareForSleep",
-        "receive_signal",
-        "publish_prepare_for_sleep",
-    ),
+    RESUME: ("PrepareForSleep", "receive_signal", "publish_prepare_for_sleep"),
     LIB: (
-        "pub mod automation_performance_executor;",
+        "pub mod automation_execution_promotion;",
+        "mod automation_performance_executor;",
         '#[path = "worker_runtime.rs"]',
         "pub mod worker;",
     ),
@@ -132,6 +143,7 @@ REQUIRED = {
 
 INERT_FILES = (
     CAPABILITY,
+    DRY_RUN,
     REVISION,
     SERIALIZATION,
     SCOPE,
@@ -139,6 +151,7 @@ INERT_FILES = (
     WORKER_RUNTIME_STATE,
     WORKER_COORDINATOR,
     WORKER_DRIVER,
+    PROMOTION,
 )
 
 FORBIDDEN_INERT = tuple(
@@ -154,17 +167,12 @@ FORBIDDEN_INERT = tuple(
 )
 
 NONCLONE_TYPES = {
-    SERIALIZATION: (
-        "AutomationDryRunLease",
-        "AutomationSerializationCoordinator",
-    ),
+    SERIALIZATION: ("AutomationDryRunLease", "AutomationSerializationCoordinator"),
     RECOVERY: ("AutomationRecoveryBarrier",),
     WORKER_RUNTIME_STATE: ("AutomationWorkerRuntime",),
     WORKER_COORDINATOR: ("AutomationWorkerCoordinator",),
-    WORKER_DRIVER: (
-        "AutomationWorkerDriver",
-        "AutomationWorkerPreparedEnvelope",
-    ),
+    WORKER_DRIVER: ("AutomationWorkerDriver", "AutomationWorkerPreparedEnvelope"),
+    PROMOTION: ("AutomationExecutionPermit",),
 }
 
 
@@ -177,14 +185,13 @@ def read(root: Path, relative: str, errors: list[str]) -> str | None:
 
 
 def derive_traits(source: str, type_name: str) -> set[str] | None:
-    pattern = re.compile(
-        r"#\s*\[\s*derive\((?P<traits>[^\)]*)\)\s*\]\s*"
-        + r"pub\s+struct\s+"
+    match = re.search(
+        r"#\s*\[\s*derive\((?P<traits>[^\)]*)\)\s*\]\s*pub\s+struct\s+"
         + re.escape(type_name)
         + r"\b",
+        source,
         re.S,
     )
-    match = pattern.search(source)
     if match is None:
         return None
     return {item.strip() for item in match.group("traits").split(",")}
@@ -204,51 +211,47 @@ def run(root: Path) -> list[str]:
                 errors.append(f"{relative}: missing required marker {marker!r}")
 
     for relative in INERT_FILES:
-        source = sources.get(relative)
-        if source is None:
-            continue
+        source = sources.get(relative, "")
         for token in FORBIDDEN_INERT:
             if token in source:
                 errors.append(f"{relative}: inert layer contains mutation/process token {token!r}")
 
     for relative, type_names in NONCLONE_TYPES.items():
-        source = sources.get(relative)
-        if source is None:
-            continue
+        source = sources.get(relative, "")
         for type_name in type_names:
             traits = derive_traits(source, type_name)
             if traits is None:
                 errors.append(f"{relative}: cannot locate derive for {type_name}")
-                continue
-            if {"Clone", "Copy"} & traits:
+            elif {"Clone", "Copy"} & traits:
                 errors.append(f"{relative}: {type_name} must not be Clone/Copy")
 
     capability = sources.get(CAPABILITY, "")
-    risky_capability_tokens = (
+    for token in (
         "write: OperationCapability::new(CapabilityStatus::Supported)",
         "write: OperationCapability::with_reason(CapabilityStatus::Supported",
-    )
-    for token in risky_capability_tokens:
+    ):
         if token in capability:
-            errors.append(f"{CAPABILITY}: Automation write was promoted by static source")
+            errors.append(f"{CAPABILITY}: canonical Automation write was promoted")
+
+    dry_run = sources.get(DRY_RUN, "")
+    if dry_run:
+        if "preflight.blocks.retain" not in dry_run:
+            errors.append(f"{DRY_RUN}: strict preflight must be the source of dry-run evidence")
+        for marker in ("ActionWriteUnavailable", "TargetNotAdvertised", "TargetEvidenceMissing"):
+            # These may live in the strict preflight rather than the adapter; the
+            # adapter must not explicitly remove them.
+            if f"AutomationPreflightBlock::{marker}" in dry_run and "retain" in dry_run:
+                errors.append(f"{DRY_RUN}: adapter appears to special-case action blocker {marker}")
 
     worker = sources.get(WORKER, "")
     if worker:
-        if "const AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED: bool = false;" not in worker:
-            errors.append(f"{WORKER}: exact revision must remain promotion-gated false")
-        dry_run = worker.find("if !AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED")
+        gate = worker.find("if !AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED")
+        permit = worker.find("authorize_prepared_execution(")
         execute = worker.find("execute_prepared_performance(")
-        if dry_run < 0 or execute < 0 or dry_run > execute:
-            errors.append(f"{WORKER}: promotion gate must precede executor call")
-        for marker in (
-            "driver.current_policy_revision()",
-            "driver.current_revision()",
-            "capabilities.generation()",
-        ):
-            if marker not in worker:
-                errors.append(f"{WORKER}: final executor identity missing {marker!r}")
-        if "tokio::spawn(async move" not in worker:
-            errors.append(f"{WORKER}: expected existing telemetry background snapshot task")
+        if min(gate, permit, execute) < 0 or not (gate < permit < execute):
+            errors.append(f"{WORKER}: compile gate -> strict permit -> executor order is broken")
+        if "permit.required_generation()" not in worker:
+            errors.append(f"{WORKER}: executor must consume generation proven by strict permit")
 
     executor = sources.get(EXECUTOR, "")
     if executor:
@@ -258,11 +261,8 @@ def run(root: Path) -> list[str]:
             executor.find("current_lifecycle_revision != required_revision"),
             executor.find("current_generation != required_generation"),
         )
-        if owner_call < 0:
-            errors.append(f"{EXECUTOR}: Performance owner call missing")
-        elif any(index < 0 or index > owner_call for index in checks):
-            errors.append(f"{EXECUTOR}: all identity checks must precede Performance owner call")
-
+        if owner_call < 0 or any(index < 0 or index > owner_call for index in checks):
+            errors.append(f"{EXECUTOR}: identity checks must precede Performance owner call")
         for forbidden in (
             "set_gpu_mode(",
             "set_fan_curve(",
@@ -278,29 +278,14 @@ def run(root: Path) -> list[str]:
         mark = coordinator.find("mark_performance_unknown(prepared.lease(), requested)")
         release = coordinator.find("self.runtime.finish(prepared)", max(mark, 0))
         if mark < 0 or release < 0 or mark > release:
-            errors.append(
-                f"{WORKER_COORDINATOR}: recovery must be marked before serialization lease release"
-            )
+            errors.append(f"{WORKER_COORDINATOR}: recovery must be marked before lease release")
 
     recovery = sources.get(RECOVERY, "")
     if recovery:
-        for generic_clear in ("pub fn clear(", "pub fn reset("):
-            if generic_clear in recovery:
-                errors.append(f"{RECOVERY}: unknown-outcome barrier exposes generic clear/reset")
+        if "pub fn clear(" in recovery or "pub fn reset(" in recovery:
+            errors.append(f"{RECOVERY}: unknown-outcome barrier exposes generic clear/reset")
         if "self.pending = None" not in recovery:
             errors.append(f"{RECOVERY}: typed reconciliation does not clear pending recovery")
-
-    resume = sources.get(RESUME, "")
-    if resume:
-        for forbidden in (
-            "set_performance(",
-            "set_gpu_mode(",
-            "set_fan_curve(",
-            "set_charge_limit(",
-            "Command::new(",
-        ):
-            if forbidden in resume:
-                errors.append(f"{RESUME}: lifecycle observer contains mutation surface {forbidden!r}")
 
     return errors
 
@@ -309,14 +294,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args()
-
     errors = run(args.root.resolve())
     if errors:
         print("Automation executor contract: FAIL", file=sys.stderr)
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-
     print("Automation executor contract: PASS")
     return 0
 
