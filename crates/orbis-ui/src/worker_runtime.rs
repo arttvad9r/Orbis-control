@@ -449,6 +449,16 @@ async fn reconcile_after_resume<G, B, R, F>(
     ));
 
     let telemetry = runtime.telemetry.snapshot().await;
+    if let Err(error) = &telemetry {
+        // Canonical provider identity and declared deadline flow into the
+        // diagnostic path (#123): failures name the backend and its contract
+        // deadline instead of an anonymous read.
+        tracing::warn!(
+            provider = runtime.telemetry.provider_id(),
+            deadline_ms = runtime.telemetry.snapshot_timeout().as_millis() as u64,
+            "telemetry refresh failed: {error:?}"
+        );
+    }
     if let Ok(sample) = &telemetry {
         let capabilities = runtime.capabilities().clone();
         observe_automation_telemetry(

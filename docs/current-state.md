@@ -82,10 +82,10 @@ Implemented in source:
 
 Still open:
 
-1. telemetry trait does not expose canonical provider identity/timeout to the worker path;
-2. Hardware1 mutation-status requery is now bounded (`HARDWARE1_STATUS_DEADLINE`, timeout → `Unknown`); executable validation of the exact revision remains;
+1. telemetry now exposes canonical provider identity/deadline through `TelemetryServiceRuntime` (`provider_id`/`snapshot_timeout`), and snapshot reads remain bounded via `provider.timeout()`; executable validation of the exact revision remains;
+2. Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`, timeout → `Unknown`);
 3. mutation timeout after possible dispatch is an **unknown outcome**, not an ordinary failure; it requires observation/recovery before any retry;
-4. `orbisctl validate` bus connects and status query are now bounded (`VALIDATE_BUS_CONNECT_DEADLINE`/`VALIDATE_STATUS_DEADLINE`); the interactive confirmation and the confirmed mutation itself remain intentionally outside generic timeout (unknown-outcome contract);
+4. `orbisctl validate` bus connects and status query are bounded (`VALIDATE_BUS_CONNECT_DEADLINE`/`VALIDATE_STATUS_DEADLINE`); the interactive confirmation and the confirmed mutation itself remain intentionally outside generic timeout (unknown-outcome contract);
 5. hosted CI execution remains blocked (#106).
 
 ## Effective product-policy truth (#120 complete)

@@ -469,6 +469,20 @@ pub trait TelemetryServiceRuntime: Send + Sync {
 
     /// Provider-defined polling interval for this telemetry backend.
     fn poll_interval(&self) -> Duration;
+
+    /// Canonical provider identity for timeout/error/diagnostic reporting.
+    ///
+    /// Exposes the underlying `Provider::id()` so the worker path can name the
+    /// backend that produced a timeout or failure instead of guessing it from
+    /// formatted error text.
+    fn provider_id(&self) -> &'static str;
+
+    /// Provider-declared deadline that bounds every snapshot read.
+    ///
+    /// Exposes the same `Provider::timeout()` value that
+    /// `bounded_provider_call` applies, so diagnostics can report the contract
+    /// deadline alongside failures.
+    fn snapshot_timeout(&self) -> Duration;
 }
 
 #[async_trait]
@@ -487,6 +501,14 @@ where
 
     fn poll_interval(&self) -> Duration {
         self.provider().default_poll_interval()
+    }
+
+    fn provider_id(&self) -> &'static str {
+        self.provider().id()
+    }
+
+    fn snapshot_timeout(&self) -> Duration {
+        self.provider().timeout()
     }
 }
 
@@ -1211,8 +1233,8 @@ mod tests {
     use super::{
         ApplicationRuntime, CapabilityRegistrySnapshot, GpuPrimitiveServices, GpuServices,
         GpuServicesRuntime, HARDWARE1_STATUS_DEADLINE, MockRuntime, ProbeError,
-        aggregate_fan_curve_capability, bounded_hardware1_status, build_initial_registry_snapshot,
-        probe_capability_registry, refresh_capability_registry,
+        TelemetryServiceRuntime, aggregate_fan_curve_capability, bounded_hardware1_status,
+        build_initial_registry_snapshot, probe_capability_registry, refresh_capability_registry,
     };
     use orbis_application::{AppService, CommandError};
     use orbis_core::FeatureId;
@@ -1225,6 +1247,8 @@ mod tests {
     use orbis_test_support::devices::build_state_arc;
     use std::cell::Cell;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
 
     #[tokio::test(start_paused = true)]
     async fn hung_hardware1_status_requery_resolves_unknown_within_deadline() {
@@ -1262,6 +1286,171 @@ mod tests {
                 bounded_hardware1_status("performance_mutation_status", async move { expected })
                     .await;
             assert_eq!(observed, expected);
+        }
+    }
+
+    // --- Telemetry provider timeout/identity contract (#123) ---
+
+    /// Test provider with a controllable deadline and snapshot behaviour.
+    struct TelemetryContractProvider {
+        id: &'static str,
+        timeout: Duration,
+        hang: bool,
+        error: Box<dyn Fn() -> ProviderError + Send + Sync>,
+        snapshot_calls: AtomicU32,
+    }
+
+    impl TelemetryContractProvider {
+        fn hung(id: &'static str, timeout: Duration) -> Arc<Self> {
+            Arc::new(Self {
+                id,
+                timeout,
+                hang: true,
+                error: Box::new(|| ProviderError::Internal("unused".into())),
+                snapshot_calls: AtomicU32::new(0),
+            })
+        }
+
+        fn failing(
+            id: &'static str,
+            timeout: Duration,
+            error: impl Fn() -> ProviderError + Send + Sync + 'static,
+        ) -> Arc<Self> {
+            Arc::new(Self {
+                id,
+                timeout,
+                hang: false,
+                error: Box::new(error),
+                snapshot_calls: AtomicU32::new(0),
+            })
+        }
+    }
+
+    impl orbis_providers::traits::Provider for TelemetryContractProvider {
+        fn id(&self) -> &'static str {
+            self.id
+        }
+
+        fn backend(&self) -> orbis_core::BackendIdentity {
+            orbis_core::BackendIdentity::simple(self.id)
+        }
+
+        fn timeout(&self) -> Duration {
+            self.timeout
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("telemetry contract test: {feature} unsupported")
+        }
+
+        fn health(&self) -> orbis_providers::traits::ProviderHealth {
+            orbis_providers::traits::ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<orbis_core::diagnostics::DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl orbis_providers::traits::TelemetryProvider for TelemetryContractProvider {
+        async fn snapshot(&self) -> Result<orbis_core::telemetry::Telemetry, ProviderError> {
+            self.snapshot_calls.fetch_add(1, Ordering::SeqCst);
+            if self.hang {
+                std::future::pending().await
+            } else {
+                Err((self.error)())
+            }
+        }
+
+        fn default_poll_interval(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+    }
+
+    #[test]
+    fn telemetry_service_exposes_canonical_provider_identity_and_deadline() {
+        let service = AppService::new(TelemetryContractProvider::hung(
+            "identity-telemetry",
+            Duration::from_millis(750),
+        ));
+
+        assert_eq!(
+            TelemetryServiceRuntime::provider_id(&service),
+            "identity-telemetry"
+        );
+        assert_eq!(
+            TelemetryServiceRuntime::snapshot_timeout(&service),
+            Duration::from_millis(750)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn hung_telemetry_provider_times_out_with_identity_and_never_retries() {
+        let provider =
+            TelemetryContractProvider::hung("hung-telemetry", Duration::from_millis(250));
+        let service = AppService::new(provider.clone());
+        let started = tokio::time::Instant::now();
+
+        let result = service.snapshot().await;
+
+        assert_eq!(started.elapsed(), Duration::from_millis(250));
+        match &result {
+            Err(ProviderError::Timeout(detail)) => {
+                // Canonical identity survives into the timeout evidence.
+                assert!(detail.contains("hung-telemetry"));
+                assert!(detail.contains("telemetry.snapshot"));
+                assert!(detail.contains("250 ms"));
+            }
+            other => panic!("expected Timeout with identity, got {other:?}"),
+        }
+        assert_eq!(
+            provider.snapshot_calls.load(Ordering::SeqCst),
+            1,
+            "timeout must not retry the telemetry read"
+        );
+    }
+
+    #[tokio::test]
+    async fn telemetry_error_classes_pass_through_without_coercion() {
+        fn debug(error: &ProviderError) -> String {
+            format!("{error:?}")
+        }
+
+        let cases: Vec<(String, Box<dyn Fn() -> ProviderError + Send + Sync>)> = vec![
+            (
+                "Unsupported".into(),
+                Box::new(|| ProviderError::Unsupported("no hwmon source".into())),
+            ),
+            (
+                "BackendUnavailable".into(),
+                Box::new(|| ProviderError::BackendUnavailable("sysfs absent".into())),
+            ),
+            (
+                "PermissionDenied".into(),
+                Box::new(|| ProviderError::PermissionDenied("read denied".into())),
+            ),
+            (
+                "Internal".into(),
+                Box::new(|| ProviderError::Internal("malformed value".into())),
+            ),
+        ];
+        for (class, error) in cases {
+            let provider = TelemetryContractProvider::failing(
+                "class-telemetry",
+                Duration::from_secs(1),
+                error,
+            );
+            let service = AppService::new(provider);
+
+            let observed = service.snapshot().await;
+
+            let observed_error = observed.expect_err("failing provider must return its error");
+            assert!(
+                debug(&observed_error).starts_with(&format!("{class}(")),
+                "error class {class} must pass through uncoerced, got {}",
+                debug(&observed_error)
+            );
         }
     }
 
