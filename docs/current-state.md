@@ -63,6 +63,7 @@ Production product path намеренно включает только док�
 | GUI root boundary | IMPLEMENTED SOURCE — #125 | Interactive launch rejects euid 0 before preferences/runtime/bus setup; screenshot/offscreen paths remain allowed. |
 | Hardwared sandbox | STRUCTURALLY MINIMIZED / VALIDATION OPEN — #126 | Intended direct sysfs write surface is `platform_profile` only; executable package/VM proof awaits #106/tooling. |
 | ASUS FA707NV live read baseline | OBSERVED / READ-ONLY | `platform_profile`, asusd/asusctl profile, UPower, DRM/sysfs GPU, hwmon, thermal and power_supply reads were observed on FA707NV; Session1/Hardware1/hardwared and supergfxd were unavailable. This does not promote write support. |
+| ASUS FA707NV first hardware mutation validated.
 
 ## Bounded execution status (#123)
 
