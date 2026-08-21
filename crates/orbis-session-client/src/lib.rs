@@ -1258,7 +1258,7 @@ where
         };
         let confirmed_profile = performance_current_from_wire(confirmed)?;
         if confirmed_profile != profile {
-            return Err(ProviderError::Internal(format!(
+            return Err(ProviderError::Conflict(format!(
                 "hardware protocol: подтверждён другой profile: requested={profile:?}, confirmed={confirmed_profile:?}"
             )));
         }
@@ -2434,7 +2434,7 @@ mod tests {
         );
         assert!(matches!(
             provider.set_profile(PerformanceProfile::Turbo).await,
-            Err(ProviderError::Internal(_))
+            Err(ProviderError::Conflict(_))
         ));
 
         let provider = SessionHardwarePerformanceProvider::new(
@@ -2456,6 +2456,20 @@ mod tests {
         assert!(matches!(
             provider.set_profile(PerformanceProfile::Turbo).await,
             Err(ProviderError::PermissionDenied(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn composed_provider_preserves_backend_unavailable_error() {
+        let provider = SessionHardwarePerformanceProvider::new(
+            ScriptedPerfSource::new(Vec::new()),
+            ScriptedHardwareSource::new(Err(ProviderError::BackendUnavailable(
+                "hardwared unavailable".into(),
+            ))),
+        );
+        assert!(matches!(
+            provider.set_profile(PerformanceProfile::Balanced).await,
+            Err(ProviderError::BackendUnavailable(_))
         ));
     }
 

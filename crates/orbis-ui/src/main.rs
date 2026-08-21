@@ -845,6 +845,9 @@ fn battery_write_available(
 }
 
 fn performance_click_allowed(state: &controller::UiState, index: i32) -> bool {
+    // Capability status (including backend/permission evidence) is reduced to
+    // `perf_writable`; Ready requires a successful current-profile read. No
+    // request reaches the worker while any precondition is unknown/blocked.
     (0..=2).contains(&index)
         && state.perf_state == controller::PerformanceHwState::Ready
         && state.perf_writable

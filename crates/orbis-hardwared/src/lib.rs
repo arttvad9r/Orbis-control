@@ -10,8 +10,8 @@
 //! - никакого generic filesystem writer API;
 //! - никакого кэша/optimistic success: каждый вызов читает choices и делает
 //!   fresh read-back;
-//! - D-Bus/polkit/activation/identity contract — следующий шаг (ADR 0006);
-//!   этот crate не выполняет I/O к реальному sysfs в тестах (fake backend).
+//! - D-Bus/Hardware1 and polkit authorization are narrow typed boundaries;
+//!   this crate does not perform real sysfs I/O in tests (fake backend).
 
 use std::path::{Path, PathBuf};
 
@@ -159,7 +159,7 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
         let current = self.read_trimmed(&self.profile_path, "platform_profile")?;
 
         if current != symbol {
-            return Err(ProviderError::BackendUnavailable(format!(
+            return Err(ProviderError::Conflict(format!(
                 "hardwared: read-back не подтвердил requested profile: expected='{symbol}', got='{current}'"
             )));
         }
@@ -1385,7 +1385,7 @@ mod tests {
         let err = w
             .set_performance_profile(PerformanceProfile::Silent)
             .expect_err("read-back mismatch");
-        assert!(matches!(err, ProviderError::BackendUnavailable(_)));
+        assert!(matches!(err, ProviderError::Conflict(_)));
         assert_eq!(w.io.writes(), 1);
     }
 
@@ -1539,6 +1539,19 @@ mod tests {
         assert_eq!(confirmed, wire::SILENT);
         assert_eq!(w.io.writes(), 1);
         assert_eq!(w.io.profile(), "quiet\n");
+    }
+
+    #[tokio::test]
+    async fn writer_failure_is_failed_not_unsupported() {
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        io.set_write_error(std::io::Error::other("simulated write failure"));
+        let w = writer(io);
+        let auth = FakeAuthorizer::new(AuthOutcome::Ok);
+        let err = handle_set_performance_profile(&auth, &w, wire::BALANCED, ":1.42")
+            .await
+            .expect_err("write failure");
+        assert!(matches!(err, zbus::fdo::Error::Failed(_)));
+        assert!(!matches!(err, zbus::fdo::Error::NotSupported(_)));
     }
 
     struct FakeBatteryBackend {
