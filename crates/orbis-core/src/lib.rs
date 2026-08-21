@@ -38,6 +38,7 @@ pub mod lifecycle;
 pub mod lighting;
 pub mod limits;
 pub mod newtypes;
+pub mod platform_profile;
 pub mod power;
 pub mod profile;
 pub mod provider;
@@ -94,6 +95,10 @@ pub use lifecycle::{LifecycleEvent, ResumeGateOutcome, ResumeTelemetryGate};
 pub use lighting::LightingMode;
 pub use limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
 pub use newtypes::{EnergyMWh, FanPwm, MilliWatt, Percent, PowerW, RefreshHz, Rpm, TemperatureC};
+pub use platform_profile::{
+    PlatformProfileCapability, PlatformProfileEvidenceState, PlatformProfileSource,
+    PlatformProfileTelemetry, PlatformProfileTelemetryQuality, PlatformProfileTransaction,
+};
 pub use power::PowerSource;
 pub use profile::{AsusdFanProfile, PerformanceProfile, PlatformProfile};
 pub use provider::ProviderStatus;

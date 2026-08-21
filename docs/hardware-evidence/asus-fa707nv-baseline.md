@@ -2,7 +2,7 @@
 
 > Read-only evidence collected 2026-08-21 on branch
 > `asus-hardware-validation-20260821`; capability audit updated after
-> `8f9ae01`.
+> `3791863`; platform-profile evidence model prepared after this snapshot.
 > No hardware mutation commands were executed.
 
 ## Machine Identity
@@ -130,6 +130,25 @@ all Session1 observations were unavailable because the service was not active.
 | ChargeLimit | Host sources disagree on reported/configured/effective facets; Orbis read unavailable | Not promoted; sessiond is read-only and Hardware1 is unavailable | UPower reports 80%; asusd and effective sysfs threshold report 100% | Read: medium, requires live Orbis read; write: none |
 | GPU telemetry/identity | AMDGPU and NVIDIA identity/telemetry read confirmed | Not promoted | DRM/sysfs links and `nvidia-smi` | High for read |
 | GpuMux / GpuPower / GpuAccess | Orbis reads unavailable | Not promoted | No supergfxd, switcheroo-control, Session1, or Hardware1 owner | None |
+
+### Platform Profile validation matrix
+
+The three-button product model is `quiet / balanced / performance`. The
+backend/domain mapping is `Silent / Balanced / Turbo` respectively; no source
+is allowed to select one silently when independent observations disagree.
+
+| Feature | Read | Write | Evidence | Confidence |
+| --- | --- | --- | --- | --- |
+| Current profile | Supported when Session1 reads kernel `platform_profile` | Unknown | Session1 → `orbis-sessiond` → kernel sysfs; current `balanced` was observed on the host | High for host read; Orbis runtime unavailable in this snapshot |
+| Available choices | Supported when kernel `platform_profile_choices` is readable | Unknown | Kernel sysfs choices: `quiet`, `balanced`, `performance` | High for host read |
+| ASUS/asusd current profile | Not part of the current Orbis Performance provider flow | Unknown | Host `asusctl` observed `Balanced`; no independent Orbis asusd profile provider exists | Host-only evidence |
+| Profile write | Unknown until validated | Unknown | Intended owner is original caller → Hardware1 → polkit → hardwared typed kernel writer; no write was attempted | None |
+| Profile read-back | Unknown until a validated transaction exists | N/A | Intended authoritative read-back is a fresh kernel `platform_profile` read | None |
+| Source disagreement | `Conflicted` | Unknown | `asusd != sysfs` must remain conflict evidence; neither source is selected silently | Fail-closed |
+
+Desired, Observed and Pending are independent. A desired profile different from
+the observed profile is represented as Pending only; this validation stage does
+not reconcile or apply it.
 
 The source-level tests already cover the relevant fail-closed rules: fan RPM
 does not imply curve support, and missing mutation status does not promote a

@@ -8,6 +8,7 @@
 use orbis_core::capability::CapabilityStatus;
 use orbis_core::fan::FanId;
 use orbis_core::gpu::GpuMode;
+use orbis_core::platform_profile::{PlatformProfileCapability, PlatformProfileTransaction};
 use orbis_core::profile::PerformanceProfile;
 
 /// Состояние capability (read-only).
@@ -65,6 +66,19 @@ pub fn write_allows_mutation(status: CapabilityStatus) -> bool {
         status,
         CapabilityStatus::Supported | CapabilityStatus::SupportedWithRequirement
     )
+}
+
+/// UI gate for the evidence-only ASUS platform-profile model.
+///
+/// Available choices and a current read never enable this control; only a
+/// separately validated write capability can do so.
+pub fn platform_profile_write_allows_mutation(capability: &PlatformProfileCapability) -> bool {
+    write_allows_mutation(capability.write)
+}
+
+/// Whether the platform-profile UI should show an unconfirmed desired target.
+pub fn platform_profile_has_pending(transaction: &PlatformProfileTransaction) -> bool {
+    transaction.pending.is_some()
 }
 
 /// Единый user-facing disabled reason для mutation capability.
@@ -796,6 +810,25 @@ mod tests {
         assert_eq!(s.charge_limit_state, ChargeLimitState::Ready);
         assert_eq!(s.charge_limit, 80);
         assert!(s.charge_limit_enabled);
+    }
+
+    #[test]
+    fn platform_profile_ui_keeps_unvalidated_write_disabled_and_shows_pending() {
+        let capability = orbis_core::PlatformProfileCapability::from_observations(
+            None,
+            None,
+            vec![
+                orbis_core::PlatformProfile::Quiet,
+                orbis_core::PlatformProfile::Balanced,
+                orbis_core::PlatformProfile::Performance,
+            ],
+        );
+        let transaction = orbis_core::PlatformProfileTransaction::from_values(
+            orbis_core::DesiredValue::Set(orbis_core::PlatformProfile::Performance),
+            orbis_core::ObservedValue::Known(orbis_core::PlatformProfile::Balanced),
+        );
+        assert!(!platform_profile_write_allows_mutation(&capability));
+        assert!(platform_profile_has_pending(&transaction));
     }
 
     #[test]

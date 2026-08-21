@@ -23,7 +23,11 @@ use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::battery::ChargeLimit;
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
-use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
+use orbis_core::platform_profile::{
+    PlatformProfileCapability, PlatformProfileSource, PlatformProfileTelemetry,
+    PlatformProfileTelemetryQuality, PlatformProfileTransaction,
+};
+use orbis_core::profile::{AsusdFanProfile, PerformanceProfile, PlatformProfile};
 use orbis_providers::bounded_provider_call;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
@@ -38,6 +42,17 @@ pub struct PerformanceState {
     pub current: PerformanceProfile,
     /// Доступные профили; порядок совпадает с ответом provider.
     pub available: Vec<PerformanceProfile>,
+}
+
+/// Evidence-only platform-profile state prepared for a future transaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlatformProfileState {
+    /// Current profile telemetry, when an authoritative read succeeded.
+    pub telemetry: Option<PlatformProfileTelemetry>,
+    /// Independent read/write capability evidence.
+    pub capability: PlatformProfileCapability,
+    /// Desired/Observed/Pending state; never performs a write.
+    pub transaction: PlatformProfileTransaction,
 }
 
 /// Общий результат application-команды: исходный `ApplyResult` + authoritative
@@ -146,6 +161,52 @@ where
         )
         .await?;
         Ok(PerformanceState { current, available })
+    }
+
+    /// Prepare ASUS quiet/balanced/performance evidence without switching it.
+    ///
+    /// The current production read provider is the kernel `platform_profile`
+    /// source exposed through Session1. Write evidence deliberately remains
+    /// `Unknown`; a valid input and available choices do not prove a write
+    /// owner or read-back contract.
+    pub async fn platform_profile_state(
+        &self,
+        desired: orbis_core::desired_observed::DesiredValue<PlatformProfile>,
+    ) -> PlatformProfileState {
+        let current = bounded_provider_call(
+            self.provider.as_ref(),
+            "platform_profile.current",
+            self.provider.current_profile(),
+        )
+        .await
+        .ok();
+        let available = bounded_provider_call(
+            self.provider.as_ref(),
+            "platform_profile.choices",
+            self.provider.profiles(),
+        )
+        .await
+        .unwrap_or_default();
+        let current = current.map(PlatformProfile::from);
+        let telemetry = current.clone().map(|current| PlatformProfileTelemetry {
+            current: current.clone(),
+            source: PlatformProfileSource::Sysfs,
+            timestamp: std::time::SystemTime::now(),
+            quality: PlatformProfileTelemetryQuality::Complete,
+        });
+        let choices = available.into_iter().map(PlatformProfile::from).collect();
+        let capability =
+            PlatformProfileCapability::from_observations(telemetry.as_ref(), None, choices);
+        let observed = telemetry
+            .as_ref()
+            .map(|value| orbis_core::desired_observed::ObservedValue::Known(value.current.clone()))
+            .unwrap_or_default();
+        let transaction = PlatformProfileTransaction::from_values(desired, observed);
+        PlatformProfileState {
+            telemetry,
+            capability,
+            transaction,
+        }
     }
 
     /// Установить профиль производительности.
@@ -443,12 +504,14 @@ mod tests {
     use async_trait::async_trait;
     use orbis_core::action::{ActionRequirement, ApplyResult};
     use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
+    use orbis_core::capability::CapabilityStatus;
+    use orbis_core::desired_observed::DesiredValue;
     use orbis_core::diagnostics::DiagnosticEntry;
     use orbis_core::fan::FanId;
     use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
     use orbis_core::identity::BackendIdentity;
     use orbis_core::newtypes::Percent;
-    use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
+    use orbis_core::profile::{AsusdFanProfile, PerformanceProfile, PlatformProfile};
     use orbis_providers::error::{ProviderError, ValidationResult};
     use orbis_providers::mock::{MockErrorMode, MockProvider};
     use orbis_providers::traits::{
@@ -543,6 +606,49 @@ mod tests {
                 PerformanceProfile::Turbo,
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn platform_profile_read_is_observed_and_write_is_unknown() {
+        let (_, svc) = service();
+        let state = svc.platform_profile_state(DesiredValue::Unset).await;
+        assert_eq!(
+            state.telemetry.as_ref().map(|telemetry| &telemetry.current),
+            Some(&PlatformProfile::Balanced)
+        );
+        assert_eq!(state.capability.read, CapabilityStatus::Supported);
+        assert_eq!(state.capability.write, CapabilityStatus::Unknown);
+    }
+
+    #[tokio::test]
+    async fn platform_profile_choices_do_not_prove_write_capability() {
+        let (_, svc) = service();
+        let state = svc.platform_profile_state(DesiredValue::Unset).await;
+        assert!(!matches!(
+            state.capability.write,
+            CapabilityStatus::Supported | CapabilityStatus::SupportedWithRequirement
+        ));
+    }
+
+    #[tokio::test]
+    async fn platform_profile_desired_difference_is_pending() {
+        let (_, svc) = service();
+        let state = svc
+            .platform_profile_state(DesiredValue::Set(PlatformProfile::Performance))
+            .await;
+        assert!(state.transaction.pending.is_some());
+    }
+
+    #[tokio::test]
+    async fn platform_profile_backend_unavailable_is_temporarily_unavailable() {
+        let (provider, svc) = service();
+        provider.state().write().await.error_mode = MockErrorMode::BackendDown;
+        let state = svc.platform_profile_state(DesiredValue::Unset).await;
+        assert_eq!(
+            state.capability.read,
+            CapabilityStatus::TemporarilyUnavailable
+        );
+        assert!(state.telemetry.is_none());
     }
 
     #[tokio::test(start_paused = true)]
