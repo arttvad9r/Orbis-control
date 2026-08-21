@@ -1,7 +1,8 @@
 # ASUS FA707NV Hardware Baseline
 
 > Read-only evidence collected 2026-08-21 on branch
-> `asus-hardware-validation-20260821`, commit `67f9913`.
+> `asus-hardware-validation-20260821`; capability audit updated after
+> `8f9ae01`.
 > No hardware mutation commands were executed.
 
 ## Machine Identity
@@ -63,6 +64,9 @@
 - charge state: fully charged; 100%; ACAD online
 - capacity: 78.5704 Wh full, 87.2952% of design capacity
 - charge thresholds: UPower reports start 75%, end 80%, threshold support present
+- direct effective threshold reads: `BAT1/charge_control_end_threshold` and the
+  asusd `ChargeControlEndThreshold` property both report 100%; the UPower 80%
+  value is therefore not treated as the mutation-owned configured value
 - power_supply interfaces: `ACAD`, `BAT1`, and two UCSI USB source supplies
 
 ## Sensors
@@ -110,6 +114,26 @@
 - Orbis mutation providers: **Unavailable**
   - Reason: permission/ownership boundary unavailable — Hardware1/hardwared was not
     running; no mutation was attempted
+
+## Capability Validation Status
+
+This matrix separates host observations from the Orbis capability registry. The
+registry was not observed live: `orbisctl status --json` built successfully but
+all Session1 observations were unavailable because the service was not active.
+
+| Feature | Read | Write | Evidence | Confidence |
+| --- | --- | --- | --- | --- |
+| Performance / platform profile | Host read confirmed; Orbis read unavailable | Not promoted; Hardware1 owner unavailable | `platform_profile=balanced`; choices `quiet`, `balanced`, `performance` | Read: high; write: none |
+| Fan telemetry | CPU/GPU RPM read confirmed | Not applicable from RPM evidence | ASUS hwmon: `cpu_fan=2500`, `gpu_fan=2400`; telemetry percent is absent | High for read |
+| FanCurves | Not confirmed on this host; curve provider unavailable | Not promoted | RPM readings do not prove curve support; current registry requires typed curve evidence | None |
+| Battery telemetry | Host read confirmed | Not applicable | UPower/sysfs reports BAT1 at 100% and AC online | High for read |
+| ChargeLimit | Host sources disagree on reported/configured/effective facets; Orbis read unavailable | Not promoted; sessiond is read-only and Hardware1 is unavailable | UPower reports 80%; asusd and effective sysfs threshold report 100% | Read: medium, requires live Orbis read; write: none |
+| GPU telemetry/identity | AMDGPU and NVIDIA identity/telemetry read confirmed | Not promoted | DRM/sysfs links and `nvidia-smi` | High for read |
+| GpuMux / GpuPower / GpuAccess | Orbis reads unavailable | Not promoted | No supergfxd, switcheroo-control, Session1, or Hardware1 owner | None |
+
+The source-level tests already cover the relevant fail-closed rules: fan RPM
+does not imply curve support, and missing mutation status does not promote a
+write capability. No new hardware-facing test or mutation path was added.
 
 ## Safety Boundary
 
