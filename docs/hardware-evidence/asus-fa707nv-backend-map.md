@@ -30,6 +30,30 @@ was attempted.
 - The installed system D-Bus policy file was not present at
   `/etc/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf`.
 
+### Current NixOS activation audit
+
+The active configuration at `/home/artt/.nixos` imports only
+`nixosModules.orbis-hardwared-policies` and sets:
+
+```nix
+services.orbis-hardwared-policies.enable = true;
+```
+
+It does not import `nixosModules.orbis-control`. Consequently the full
+`services.orbis-control` option is not declared, neither generated systemd unit
+is present, and the Orbis binaries are absent from the current system/profile
+paths. This is an intentional policy-registration-only configuration, not a
+failed daemon activation.
+
+Required production step, to be performed explicitly by the system owner:
+
+```nix
+imports = [ inputs.orbis-control.nixosModules.orbis-control ];
+services.orbis-control.enable = true;
+```
+
+No configuration was changed automatically during this validation.
+
 ### Reason
 
 The host has no deployed/active Orbis sessiond or hardwared runtime. This is a
