@@ -42,7 +42,8 @@ fn observation_from_result<T>(result: Result<T, ProviderError>) -> DiagnosticObs
             ProviderError::InvalidRequest(_)
             | ProviderError::Io(_)
             | ProviderError::Dbus(_)
-            | ProviderError::Internal(_),
+            | ProviderError::Internal(_)
+            | ProviderError::Conflict(_),
         ) => DiagnosticObservation::Unknown,
     }
 }

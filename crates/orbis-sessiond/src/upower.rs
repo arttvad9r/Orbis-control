@@ -295,6 +295,17 @@ where
             Percent::new(self.asusd.read_configured_threshold().await?).map_err(|e| {
                 ProviderError::Internal(format!("asusd: невалидный configured threshold: {e}"))
             })?;
+        let upower_reported = u8::try_from(snapshot.end_threshold).map_err(|_| {
+            ProviderError::Internal(format!(
+                "UPower: end_threshold вне u8 диапазона: {}",
+                snapshot.end_threshold
+            ))
+        })?;
+        if configured.get() != upower_reported {
+            return Err(ProviderError::Conflict(format!(
+                "UPower reported {upower_reported}% but asusd configured {configured}%"
+            )));
+        }
         let effective = Percent::new(self.effective.read_effective_end_threshold().await?)
             .map_err(|e| {
                 ProviderError::Internal(format!("kernel: невалидный effective threshold: {e}"))
@@ -711,7 +722,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn asusd_configured_value_wins_over_upower_reported_value() {
+    async fn mismatched_upower_and_asusd_thresholds_are_conflicted() {
         let p = asusd_provider(
             UPowerChargeLimitSnapshot {
                 supported: true,
@@ -722,10 +733,10 @@ mod tests {
             vec![Ok(100)],
             100,
         );
-        let limit = p.charge_limit().await.expect("charge limit");
-        assert!(!limit.enabled);
-        assert_eq!(limit.configured_percent.map(|x| x.get()), Some(100));
-        assert_eq!(limit.effective_percent.map(|x| x.get()), Some(100));
+        assert!(matches!(
+            p.charge_limit().await,
+            Err(ProviderError::Conflict(_))
+        ));
     }
 
     #[tokio::test]
@@ -734,22 +745,22 @@ mod tests {
             ScriptedSource::new(ScriptedOutcome::Snapshot(UPowerChargeLimitSnapshot {
                 supported: true,
                 enabled: true,
-                end_threshold: 55,
+                end_threshold: 80,
                 effective_end_threshold: None,
             })),
             ScriptedAsusdSource {
-                values: std::sync::Mutex::new(vec![Ok(80), Ok(100)]),
+                values: std::sync::Mutex::new(vec![Ok(80), Ok(80)]),
             },
             ScriptedEffectiveSource {
-                values: std::sync::Mutex::new(vec![80, 100]),
+                values: std::sync::Mutex::new(vec![80, 80]),
             },
         );
         let first = p.charge_limit().await.expect("80 read");
         assert_eq!(first.configured_percent.map(|x| x.get()), Some(80));
         assert_eq!(first.effective_percent.map(|x| x.get()), Some(80));
         let second = p.charge_limit().await.expect("100 read");
-        assert_eq!(second.configured_percent.map(|x| x.get()), Some(100));
-        assert_eq!(second.effective_percent.map(|x| x.get()), Some(100));
+        assert_eq!(second.configured_percent.map(|x| x.get()), Some(80));
+        assert_eq!(second.effective_percent.map(|x| x.get()), Some(80));
         assert!(second.enabled);
     }
 
@@ -1035,6 +1046,7 @@ mod tests {
                     ProviderError::Timeout(m) => ProviderError::Timeout(m.clone()),
                     ProviderError::Dbus(m) => ProviderError::Dbus(m.clone()),
                     ProviderError::Internal(m) => ProviderError::Internal(m.clone()),
+                    ProviderError::Conflict(m) => ProviderError::Conflict(m.clone()),
                     ProviderError::Io(e) => ProviderError::Io(std::io::Error::other(e.to_string())),
                 }),
             }

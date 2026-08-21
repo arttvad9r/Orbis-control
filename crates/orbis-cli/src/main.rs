@@ -79,7 +79,8 @@ fn observation_from_result<T>(result: Result<T, ProviderError>) -> Observation<T
                 | ProviderError::Dbus(_) => Observation::Unavailable { detail },
                 ProviderError::InvalidRequest(_)
                 | ProviderError::Io(_)
-                | ProviderError::Internal(_) => Observation::Unknown { detail },
+                | ProviderError::Internal(_)
+                | ProviderError::Conflict(_) => Observation::Unknown { detail },
             }
         }
     }

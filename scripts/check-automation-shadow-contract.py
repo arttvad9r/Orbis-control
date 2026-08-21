@@ -369,22 +369,19 @@ def check_resume_observer(root: Path, errors: list[str]) -> None:
             errors.append(f"{relative}: unexpected active D-Bus operation {suspicious!r}")
 
 
-def check_proof_executor_is_test_only(root: Path, errors: list[str]) -> None:
+def check_proof_executor_boundary(root: Path, errors: list[str]) -> None:
     lib_relative = "crates/orbis-ui/src/lib.rs"
     proof_relative = "crates/orbis-ui/src/automation_performance_executor.rs"
     lib = read_required(root, lib_relative, errors)
     proof = read_required(root, proof_relative, errors)
     if lib is not None:
-        if not re.search(
-            r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*mod\s+automation_performance_executor\s*;",
-            lib,
-        ):
-            errors.append(f"{lib_relative}: Performance executor proof must remain cfg(test)-only")
+        if not re.search(r"\bmod\s+automation_performance_executor\s*;", lib):
+            errors.append(f"{lib_relative}: Performance executor module must remain privately wired")
         if re.search(r"\bpub\s+mod\s+automation_performance_executor\b", lib):
             errors.append(f"{lib_relative}: proof executor must not be publicly exported")
     if proof is not None:
         for marker in (
-            "run_performance_proof",
+            "execute_prepared_performance",
             "LifecycleRevisionChanged",
             "CapabilityGenerationChanged",
             "ReadBackAfterMutation",
@@ -434,7 +431,7 @@ def run(root: Path) -> list[str]:
     check_runtime_readiness(root, errors)
     check_public_execution_surfaces(root, errors)
     check_resume_observer(root, errors)
-    check_proof_executor_is_test_only(root, errors)
+    check_proof_executor_boundary(root, errors)
     check_automation_capability_fail_closed(root, errors)
     check_manifests(root, errors)
     return errors

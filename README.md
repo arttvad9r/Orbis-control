@@ -4,7 +4,7 @@ Orbis Control — Linux-first приложение на Rust + Slint для уп
 
 ## Статус проекта
 
-Версия workspace: `0.1.0`. Активная интеграционная ветка `chatgpt/ui-refresh-ghelper-20260820` содержит более новый UI/backend/runtime слой, чем текущий `main`; `main` остаётся последней консолидированной release-базой до отдельной интеграции ветки.
+Версия workspace: `0.1.0`. Активная интеграционная ветка `asus-hardware-validation-20260821` содержит более новый UI/backend/runtime слой, чем текущий `main`; `main` остаётся последней консолидированной release-базой до отдельной интеграции ветки.
 
 Текущие source-level production slices в активной ветке:
 

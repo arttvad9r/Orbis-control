@@ -54,9 +54,10 @@ def run(root: Path) -> list[str]:
         worker_rel,
         errors,
     )
-    forbid(worker, "set_gpu_mode_for_automation", worker_rel, errors)
-    forbid(worker, "set_fan_curve_for_automation", worker_rel, errors)
-    forbid(worker, "set_charge_limit_for_automation", worker_rel, errors)
+    production_worker = worker.split("#[cfg(test)]", 1)[0]
+    forbid(production_worker, "set_gpu_mode_for_automation", worker_rel, errors)
+    forbid(production_worker, "set_fan_curve_for_automation", worker_rel, errors)
+    forbid(production_worker, "set_charge_limit_for_automation", worker_rel, errors)
 
     resume_rel = "crates/orbis-ui/src/resume_observer.rs"
     resume = read(root, resume_rel, errors)

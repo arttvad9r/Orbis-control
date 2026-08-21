@@ -37,6 +37,8 @@ pub enum ProbeClassification {
     PermissionDenied,
     /// Evidence is insufficient to classify the operation.
     Unknown,
+    /// Independent authoritative sources disagree.
+    Conflicted,
 }
 
 impl ProbeClassification {
@@ -50,6 +52,7 @@ impl ProbeClassification {
             Self::TemporarilyUnavailable => CapabilityStatus::TemporarilyUnavailable,
             Self::PermissionDenied => CapabilityStatus::PermissionDenied,
             Self::Unknown => CapabilityStatus::Unknown,
+            Self::Conflicted => CapabilityStatus::Conflicted,
         }
     }
 
@@ -152,6 +155,11 @@ pub fn resolve_overall_status(operations: &CapabilityOperations) -> CapabilitySt
     {
         return CapabilityStatus::SupportedWithRequirement;
     }
+    if operations.read.status == CapabilityStatus::Conflicted
+        || operations.write.status == CapabilityStatus::Conflicted
+    {
+        return CapabilityStatus::Conflicted;
+    }
     if operations.read.status == CapabilityStatus::Supported
         || operations.write.status == CapabilityStatus::Supported
     {
@@ -228,6 +236,10 @@ mod tests {
         assert_eq!(
             ProbeClassification::Unknown.status(),
             CapabilityStatus::Unknown
+        );
+        assert_eq!(
+            ProbeClassification::Conflicted.status(),
+            CapabilityStatus::Conflicted
         );
     }
 

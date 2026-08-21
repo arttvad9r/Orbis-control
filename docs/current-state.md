@@ -2,7 +2,7 @@
 
 > Роль: **CURRENT STATUS**.
 > Обновлено: **2026-08-21**.
-> Source snapshot: `asus-hardware-validation-20260821` at `67f9913`.
+> Source snapshot: `asus-hardware-validation-20260821` at `7977d25`.
 >
 > `main` остаётся последней консолидированной baseline до отдельной интеграции этой ветки. Claims используют [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md): `IMPLEMENTED / TESTED / PACKAGED / LIVE-VALIDATED / BLOCKED / UNKNOWN`.
 
@@ -18,7 +18,7 @@ Production product path намеренно включает только док�
 
 ## Repository status
 
-- Active integration branch: `chatgpt/ui-refresh-ghelper-20260820`.
+- Active integration branch: `asus-hardware-validation-20260821`.
 - Draft integration PR: #129; он не должен merge до executable validation и safety blockers.
 - `main` — previous consolidated baseline; required checks не включены из-за #106/#114.
 - Единственный canonical workflow — `.github/workflows/ci.yml`.

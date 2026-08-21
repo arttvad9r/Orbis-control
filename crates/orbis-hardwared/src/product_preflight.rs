@@ -35,9 +35,9 @@ fn classify_error(error: ProviderError) -> ProductPreflightStatus {
         | ProviderError::Timeout(_)
         | ProviderError::Dbus(_)
         | ProviderError::Io(_) => ProductPreflightStatus::TemporarilyUnavailable,
-        ProviderError::InvalidRequest(_) | ProviderError::Internal(_) => {
-            ProductPreflightStatus::Unknown
-        }
+        ProviderError::InvalidRequest(_)
+        | ProviderError::Internal(_)
+        | ProviderError::Conflict(_) => ProductPreflightStatus::Unknown,
     }
 }
 

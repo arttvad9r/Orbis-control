@@ -75,7 +75,8 @@ fn status_from_error(error: &ProviderError) -> TelemetryCollectionStatus {
         ProviderError::InvalidRequest(_)
         | ProviderError::Io(_)
         | ProviderError::Dbus(_)
-        | ProviderError::Internal(_) => TelemetryCollectionStatus::Unknown,
+        | ProviderError::Internal(_)
+        | ProviderError::Conflict(_) => TelemetryCollectionStatus::Unknown,
     }
 }
 

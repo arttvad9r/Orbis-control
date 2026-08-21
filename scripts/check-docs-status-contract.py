@@ -30,11 +30,11 @@ REQUIRED = {
         "status --json",
         "python3 scripts/verify-static",
         "--locked",
-        "mutation timeout after a request may have been dispatched is an **unknown outcome**",
+        "Mutation timeout after a request may have been dispatched is an **unknown outcome**",
         "#125",
     ),
     "root": (
-        "chatgpt/ui-refresh-ghelper-20260820",
+        "asus-hardware-validation-20260821",
         "worker_runtime.rs",
         "status --json",
         "scripts/verify-static",
@@ -48,7 +48,7 @@ REQUIRED = {
         "Source inspection proves at most `IMPLEMENTED`",
     ),
     "state": (
-        "Source snapshot: `chatgpt/ui-refresh-ghelper-20260820`",
+        "Source snapshot: `asus-hardware-validation-20260821`",
         "#110 closed",
         "#111 closed",
         "#121 closed",

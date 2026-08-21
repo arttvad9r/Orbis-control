@@ -19,7 +19,7 @@
 
 ## Current branch vs release baseline
 
-На 2026-08-20 активная интеграционная ветка `chatgpt/ui-refresh-ghelper-20260820` содержит более новый UI/runtime/backend слой, чем `main`. `current-state.md`, `architecture.md`, `backend-completion-status.md`, `roadmap.md` и `beta-acceptance-checklist.md` описывают именно этот source snapshot и явно отделяют его от executable/release evidence.
+На 2026-08-21 активная интеграционная ветка `asus-hardware-validation-20260821` содержит более новый UI/runtime/backend слой, чем `main`. `current-state.md`, `architecture.md`, `backend-completion-status.md`, `roadmap.md` и `beta-acceptance-checklist.md` описывают именно этот source snapshot и явно отделяют его от executable/release evidence.
 
 До merge `main` остаётся последней консолидированной release baseline. Наличие source work в integration branch не делает его автоматически `TESTED`/`PACKAGED`/`LIVE-VALIDATED`.
 

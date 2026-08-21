@@ -89,6 +89,9 @@ pub enum ProviderError {
     /// Внутренняя ошибка.
     #[error("внутренняя ошибка: {0}")]
     Internal(String),
+    /// Независимые authoritative sources противоречат друг другу.
+    #[error("конфликт источников: {0}")]
+    Conflict(String),
 }
 
 impl ProviderError {
@@ -131,6 +134,9 @@ impl ProviderError {
                 return Err(ProbeError::ContractViolation(detail.clone()));
             }
             Self::Internal(detail) => return Err(ProbeError::Internal(detail.clone())),
+            Self::Conflict(detail) => {
+                ProbeOperationResult::with_detail(ProbeClassification::Conflicted, detail.clone())
+            }
         };
         Ok(result)
     }
@@ -160,6 +166,13 @@ mod tests {
                 .unwrap()
                 .classification,
             ProbeClassification::Unsupported
+        );
+        assert_eq!(
+            ProviderError::Conflict("threshold mismatch".into())
+                .into_probe_result(ProbeContext::EstablishedBackend)
+                .unwrap()
+                .classification,
+            ProbeClassification::Conflicted
         );
         assert_eq!(
             ProviderError::PermissionDenied("polkit".into())

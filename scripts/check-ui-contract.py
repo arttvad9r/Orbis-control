@@ -268,6 +268,11 @@ def check_themes(root: Path, errors: list[str]) -> None:
 
 
 def declared_geometry(text: str) -> tuple[int, int] | None:
+    # Secondary surfaces may declare helper components before the exported
+    # window. Only the exported surface owns the reviewed window budget.
+    exported = re.search(r"\bexport\s+component\b", text)
+    if exported:
+        text = text[exported.start() :]
     width = re.search(r"\bwidth:\s*(\d+)px", text)
     height = re.search(r"\bheight:\s*(\d+)px", text)
     if not width or not height:

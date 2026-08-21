@@ -1,7 +1,7 @@
 # Architecture — Orbis Control
 
 > Роль: **CURRENT DESIGN**.
-> Source snapshot: `chatgpt/ui-refresh-ghelper-20260820`.
+> Source snapshot: `asus-hardware-validation-20260821`.
 > Operational readiness — [`current-state.md`](current-state.md), future work — [`roadmap.md`](roadmap.md), stable decisions — [`adr/`](adr/).
 
 ## 1. Architectural invariants

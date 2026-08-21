@@ -54,6 +54,7 @@ fn write_from_read_failure(read: &OperationCapability) -> OperationCapability {
         CapabilityStatus::BackendMissing => CapabilityStatus::BackendMissing,
         CapabilityStatus::Unsupported => CapabilityStatus::Unsupported,
         CapabilityStatus::TemporarilyUnavailable => CapabilityStatus::TemporarilyUnavailable,
+        CapabilityStatus::Conflicted => CapabilityStatus::Conflicted,
         CapabilityStatus::Unknown => CapabilityStatus::Unknown,
         // PermissionDenied proves read-only access, not write denial.
         _ => CapabilityStatus::Unsupported,
@@ -507,6 +508,7 @@ mod tests {
         Unsupported,
         PermissionDenied,
         Internal,
+        Conflict,
     }
 
     impl ScriptedError {
@@ -516,6 +518,7 @@ mod tests {
                 Self::Unsupported => ProviderError::Unsupported("unsupported".into()),
                 Self::PermissionDenied => ProviderError::PermissionDenied("denied".into()),
                 Self::Internal => ProviderError::Internal("malformed".into()),
+                Self::Conflict => ProviderError::Conflict("sources disagree".into()),
             }
         }
     }
@@ -802,6 +805,60 @@ mod tests {
             denied.operations.read.status,
             CapabilityStatus::PermissionDenied
         );
+    }
+
+    #[tokio::test]
+    async fn battery_source_conflict_never_promotes_support_or_write() {
+        let capability = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Error(ScriptedError::Conflict)),
+            CapabilityStatus::Supported,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Conflicted
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Conflicted
+        );
+        assert_eq!(capability.status, CapabilityStatus::Conflicted);
+    }
+
+    #[tokio::test]
+    async fn backend_presence_without_mutation_evidence_never_promotes_write() {
+        let performance = probe_performance(
+            &ScriptedProvider::performance(Scripted::Value(vec![PerformanceProfile::Balanced])),
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            performance.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+
+        let battery = probe_charge_limit(
+            &ScriptedProvider::battery(Scripted::Value(charge_limit(None))),
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            battery.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+
+        let fan = probe_fan_curve(
+            &ScriptedFanProvider::ok(),
+            &orbis_core::fan::FanId::Cpu,
+            CapabilityStatus::Unsupported,
+        )
+        .await
+        .unwrap();
+        assert_eq!(fan.operations.read.status, CapabilityStatus::Supported);
+        assert_eq!(fan.operations.write.status, CapabilityStatus::Unsupported);
     }
 
     #[tokio::test]

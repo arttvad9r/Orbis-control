@@ -270,6 +270,7 @@ fn provider_error_to_dbus(error: ProviderError) -> zbus::fdo::Error {
         ProviderError::Io(e) => zbus::fdo::Error::Failed(e.to_string()),
         ProviderError::Dbus(msg) => zbus::fdo::Error::Failed(msg),
         ProviderError::Internal(msg) => zbus::fdo::Error::Failed(msg),
+        ProviderError::Conflict(msg) => zbus::fdo::Error::Failed(msg),
     }
 }
 

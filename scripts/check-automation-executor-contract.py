@@ -235,12 +235,13 @@ def run(root: Path) -> list[str]:
 
     dry_run = sources.get(DRY_RUN, "")
     if dry_run:
-        if "preflight.blocks.retain" not in dry_run:
+        production_dry_run = dry_run.split("#[cfg(test)]", 1)[0]
+        if "preflight.blocks.retain" not in production_dry_run:
             errors.append(f"{DRY_RUN}: strict preflight must be the source of dry-run evidence")
         for marker in ("ActionWriteUnavailable", "TargetNotAdvertised", "TargetEvidenceMissing"):
-            # These may live in the strict preflight rather than the adapter; the
-            # adapter must not explicitly remove them.
-            if f"AutomationPreflightBlock::{marker}" in dry_run and "retain" in dry_run:
+            # Action-level blockers must remain in the dry-run result. The
+            # adapter may remove only the Automation runtime blocker itself.
+            if f"AutomationPreflightBlock::{marker}" in production_dry_run:
                 errors.append(f"{DRY_RUN}: adapter appears to special-case action blocker {marker}")
 
     worker = sources.get(WORKER, "")

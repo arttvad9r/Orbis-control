@@ -40,7 +40,8 @@ fn observation_from_result(
             ProviderError::InvalidRequest(_)
             | ProviderError::Io(_)
             | ProviderError::Dbus(_)
-            | ProviderError::Internal(_),
+            | ProviderError::Internal(_)
+            | ProviderError::Conflict(_),
         ) => DiagnosticObservation::Unknown,
     }
 }

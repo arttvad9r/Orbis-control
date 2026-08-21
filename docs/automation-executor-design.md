@@ -15,11 +15,13 @@ The current path is:
 5. execution candidate revalidation;
 6. single-slot serialization admission;
 7. first-version execution-scope validation;
-8. test-only Performance executor proof;
-9. future production executor under the worker/capability-generation owner;
+8. Performance executor boundary under the worker/capability-generation owner;
+9. future production promotion after the release gate;
 10. authoritative read-back before any success publication.
 
-Only stages 1–8 exist today. Stage 8 is compiled only for tests. There is no production Automation mutation path.
+Only stages 1–8 exist today. The executor boundary is compiled privately in
+production, but execution promotion remains disabled and no unattended mutation
+path is reachable.
 
 ## Revalidation boundary
 
@@ -71,9 +73,11 @@ Performance is the only candidate in the current UI/application stack with all o
 
 GPU product mutation remains product/policy disabled. Display refresh is observation-only. Lighting still lacks an unambiguous typed owner for Automation intent. Fan writes remain outside Automation scope while fan safety blocks are open.
 
-## Test-only Performance executor proof
+## Performance executor boundary
 
-`automation_performance_executor.rs` is included only under `#[cfg(test)]`.
+`automation_performance_executor.rs` is privately included by the UI crate.
+The compile-time promotion gate remains false, so this does not authorize
+unattended mutation.
 
 Its purpose is to develop mutation-result semantics without making Automation reachable in production. The proof uses the existing `PerformanceServiceRuntime` contract and requires:
 
@@ -97,7 +101,7 @@ The following are never reported as Automation success:
 
 ## Promotion gate to production
 
-The Performance proof must remain test-only until all of the following are true:
+The Performance executor must remain promotion-disabled until all of the following are true:
 
 1. Rust 1.87+ workspace `cargo check --locked --workspace --all-targets` passes;
 2. `cargo test --locked --workspace` passes, including executor failure-path tests;

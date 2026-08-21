@@ -183,7 +183,7 @@ async fn connect_composition(
 #[tokio::test]
 async fn composition_serves_upower_charge_limit() {
     tokio::time::timeout(Duration::from_secs(5), async {
-        let state = Arc::new(Mutex::new(FakeUPowerState::new(true, false, 80)));
+        let state = Arc::new(Mutex::new(FakeUPowerState::new(true, false, 100)));
         let (_u_s, _u_c, _s_s, _s_c) = connect_composition(state.clone())
             .await
             .expect("p2p connect");
@@ -223,7 +223,7 @@ async fn composition_serves_upower_charge_limit() {
 #[tokio::test]
 async fn composition_reads_fresh_upower_values() {
     tokio::time::timeout(Duration::from_secs(5), async {
-        let state = Arc::new(Mutex::new(FakeUPowerState::new(true, true, 80)));
+        let state = Arc::new(Mutex::new(FakeUPowerState::new(true, true, 100)));
         let (_u_s, _u_c, _s_s, _s_c) = connect_composition(state.clone())
             .await
             .expect("p2p connect");
@@ -244,10 +244,8 @@ async fn composition_reads_fresh_upower_values() {
             st.end_threshold = 60;
         }
 
-        let second = proxy.charge_limit().await.expect("read2");
-        assert!(!second.enabled);
-        assert_eq!(second.configured_percent, 100);
-        assert_eq!(second.effective_percent, 100);
+        let second = proxy.charge_limit().await;
+        assert!(matches!(second, Err(zbus::Error::FDO(_))));
 
         let calls = state.lock().unwrap().calls.clone();
         assert_eq!(
