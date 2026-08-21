@@ -1,8 +1,8 @@
 # Current State
 
 > Роль: **CURRENT STATUS**.
-> Обновлено: **2026-08-20**.
-> Source snapshot: `chatgpt/ui-refresh-ghelper-20260820`.
+> Обновлено: **2026-08-21**.
+> Source snapshot: `asus-hardware-validation-20260821` at `67f9913`.
 >
 > `main` остаётся последней консолидированной baseline до отдельной интеграции этой ветки. Claims используют [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md): `IMPLEMENTED / TESTED / PACKAGED / LIVE-VALIDATED / BLOCKED / UNKNOWN`.
 
@@ -25,6 +25,7 @@ Production product path намеренно включает только док�
 - Удалён оставшийся одноразовый `.github/keyboard-backlight-probe-validation-trigger` artifact.
 - Canonical docs hierarchy определена в `docs/README.md`; historical plans/audits отделены через `history.md`.
 - Remote `agent/*` refs ещё требуют cleanup #118; текущий connector не предоставляет delete-ref operation.
+- Read-only ASUS FA707NV evidence is recorded in [`hardware-evidence/asus-fa707nv-baseline.md`](hardware-evidence/asus-fa707nv-baseline.md).
 
 ## Current areas
 
@@ -61,6 +62,7 @@ Production product path намеренно включает только док�
 | Release dependency graph | OPEN — #115 | GUI still has normal `orbis-test-support` dependency because production/offscreen startup share fixture-derived UiState bootstrap. |
 | GUI root boundary | OPEN — #125 | Interactive raw binary still lacks early euid-0 rejection before preferences/runtime/bus setup. |
 | Hardwared sandbox | STRUCTURALLY MINIMIZED / VALIDATION OPEN — #126 | Intended direct sysfs write surface is `platform_profile` only; executable package/VM proof awaits #106/tooling. |
+| ASUS FA707NV live read baseline | OBSERVED / READ-ONLY | `platform_profile`, asusd/asusctl profile, UPower, DRM/sysfs GPU, hwmon, thermal and power_supply reads were observed on FA707NV; Session1/Hardware1/hardwared and supergfxd were unavailable. This does not promote write support. |
 
 ## Bounded execution status (#123)
 

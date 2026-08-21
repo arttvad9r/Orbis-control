@@ -1,7 +1,7 @@
 # Roadmap
 
 > Роль: **FUTURE PLAN**. Очередность работ без календарных обещаний.
-> Обновлено: **2026-08-20**.
+> Обновлено: **2026-08-21**.
 > Фактическое состояние — [`current-state.md`](current-state.md).
 
 ## Principles
@@ -28,6 +28,7 @@ Completed in the active integration branch:
 - source-complete Autostart (#110), Diagnostics (#111) and Window/Tray lifecycle (#121) issues closed;
 - effective product write-truth consumer/support-matrix audit and policy decision completed (#120 closed);
 - Draft PR #129 created as the explicit integration checkpoint for the active branch.
+- Read-only ASUS FA707NV baseline evidence captured on `asus-hardware-validation-20260821` at `67f9913`; no hardware mutation performed.
 
 Remaining:
 
@@ -36,6 +37,9 @@ Remaining:
 3. #118 — prune obsolete `agent/*` refs when delete-ref access exists;
 4. #124 — decide permanent `io.github.orbiscontrol.*` identity before stable release;
 5. integrate Draft PR #129 only after executable validation and merge blockers are resolved.
+
+The ASUS baseline is observation evidence only. It does not promote any unvalidated
+write or product capability to `Supported`.
 
 ## Milestone 1 — Runtime reliability and security
 

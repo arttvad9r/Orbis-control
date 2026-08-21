@@ -1,7 +1,7 @@
 # Backend Completion Status
 
-> Status date: 2026-08-20.
-> Source snapshot: `chatgpt/ui-refresh-ghelper-20260820`.
+> Status date: 2026-08-21.
+> Source snapshot: `asus-hardware-validation-20260821` at `67f9913`.
 >
 > Concise companion to [`current-state.md`](current-state.md) and [`architecture.md`](architecture.md). Source-level `IMPLEMENTED` does not imply executable validation.
 
@@ -24,6 +24,16 @@
 - **Aura** — observation/config-level typed surfaces exist; no promoted unattended hardware write.
 - **Boot sound** — strict read-only firmware-attribute provider.
 - **Updates** — installation-owner/blocker classification only; no fabricated feed/downloader/installer.
+
+## ASUS FA707NV read-only baseline
+
+The dated read-only snapshot is [`hardware-evidence/asus-fa707nv-baseline.md`](hardware-evidence/asus-fa707nv-baseline.md).
+It records a readable `platform_profile` (`balanced`, choices `quiet/balanced/performance`),
+active asusd/asusctl profile reads, UPower `BAT1`, AMDGPU/NVIDIA DRM identities, NVIDIA
+telemetry, ASUS CPU/GPU fan RPM channels and thermal/hwmon data. Session1, Hardware1,
+hardwared, supergfxd and switcheroo-control were not active in the observed session.
+These observations are read evidence only; they do not upgrade any capability from
+`Detected` or `ReadOnly` to mutation `Supported`.
 
 ## Provider execution hardening
 
