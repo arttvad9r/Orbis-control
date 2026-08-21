@@ -7,6 +7,7 @@ export enum GpuModeHwState { Loading, Ready, Unavailable }
 export enum FanCurveHwState { Loading, Ready, Unavailable }
 
 export struct UiState {
+    capability-generation: int,
     perf-selected: int,
     available-perf-mask: int,
     perf-state: PerformanceHwState,

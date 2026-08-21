@@ -118,6 +118,7 @@ fn window_height(state: &controller::UiState) -> f32 {
 
 fn to_slint(state: &controller::UiState) -> UiState {
     UiState {
+        capability_generation: state.capability_generation as i32,
         perf_selected: state.perf_selected,
         available_perf_mask: state.available_perf_mask,
         perf_state: match state.perf_state {
@@ -223,6 +224,7 @@ fn to_slint(state: &controller::UiState) -> UiState {
 
 fn from_slint(state: &UiState) -> controller::UiState {
     controller::UiState {
+        capability_generation: state.capability_generation.max(0) as u64,
         perf_selected: state.perf_selected,
         available_perf_mask: state.available_perf_mask,
         perf_state: match state.perf_state {
@@ -1169,7 +1171,7 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         WorkerEvent::PerformanceRefresh(result) => apply_performance_refresh(state, result),
         WorkerEvent::RegistryChange(Ok((generation, snapshot))) => {
             tracing::debug!("capability registry refreshed: generation={}", generation);
-            state.update_capabilities(&snapshot);
+            state.update_capabilities_at(generation, &snapshot);
         }
         WorkerEvent::RegistryChange(Err(e)) => {
             tracing::warn!("capability registry refresh failed: {e:?}");

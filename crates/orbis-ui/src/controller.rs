@@ -191,6 +191,8 @@ pub enum FanCurveHwState {
 /// Отображаемое состояние главного окна.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiState {
+    /// Latest capability registry generation accepted by the UI.
+    pub capability_generation: u64,
     /// Выбранный профиль производительности: 0=Silent, 1=Balanced, 2=Turbo.
     pub perf_selected: i32,
     /// Битовая маска доступных профилей (bit0=Silent, bit1=Balanced, bit2=Turbo).
@@ -405,6 +407,7 @@ impl UiState {
         let power_ac = format_watts(state.telemetry.power.ac);
 
         Self {
+            capability_generation: 0,
             perf_selected,
             available_perf_mask,
             // mock/offscreen: готово сразу и writable (fake interactive
@@ -520,6 +523,23 @@ impl UiState {
                 CapabilityAvailability::from_status(cap.operations.write.status),
             );
         }
+    }
+
+    /// Apply a capability snapshot only when it is newer than the UI state.
+    ///
+    /// Registry generations are monotonic. Ignoring an older event prevents a
+    /// delayed `Supported` snapshot from restoring write access after a newer
+    /// Hardware1 disappearance snapshot removed it.
+    pub fn update_capabilities_at(
+        &mut self,
+        generation: u64,
+        snapshot: &orbis_capabilities::CapabilityRegistrySnapshot,
+    ) {
+        if generation <= self.capability_generation {
+            return;
+        }
+        self.capability_generation = generation;
+        self.update_capabilities(snapshot);
     }
 
     /// Сбросить все telemetry-поля в неизвестное состояние.

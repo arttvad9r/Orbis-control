@@ -483,6 +483,59 @@ fn registry_change_updates_gating_without_touching_observed() {
 }
 
 #[test]
+fn platform_profile_lifecycle_promotes_only_after_new_supported_evidence() {
+    use orbis_core::capability::CapabilityStatus;
+
+    let mut s = base_state();
+    apply_performance_event(
+        &mut s,
+        WorkerEvent::RegistryChange(Ok((1, snapshot_with_write(CapabilityStatus::Unknown)))),
+    );
+    assert_eq!(s.capability_generation, 1);
+    assert!(!s.perf_writable);
+
+    apply_performance_event(
+        &mut s,
+        WorkerEvent::RegistryChange(Ok((2, snapshot_with_write(CapabilityStatus::Supported)))),
+    );
+    assert_eq!(s.capability_generation, 2);
+    assert!(s.perf_writable);
+}
+
+#[test]
+fn platform_profile_disappearance_rejects_pending_request_and_ignores_stale_support() {
+    use orbis_core::capability::CapabilityStatus;
+
+    let mut s = base_state();
+    s.capability_generation = 4;
+    s.perf_selected = 1;
+    assert_eq!(
+        performance_command_for_click(&s, 2),
+        Some(WorkerCommand::SetPerformance(PerformanceProfile::Turbo))
+    );
+
+    apply_performance_event(
+        &mut s,
+        WorkerEvent::RegistryChange(Ok((
+            5,
+            snapshot_with_write(CapabilityStatus::BackendMissing),
+        ))),
+    );
+    assert_eq!(s.capability_generation, 5);
+    assert!(!s.perf_writable);
+    assert_eq!(performance_command_for_click(&s, 2), None);
+    assert_eq!(s.perf_selected, 1);
+
+    apply_performance_event(
+        &mut s,
+        WorkerEvent::RegistryChange(Ok((4, snapshot_with_write(CapabilityStatus::Supported)))),
+    );
+    assert_eq!(s.capability_generation, 5);
+    assert!(!s.perf_writable);
+    assert_eq!(performance_command_for_click(&s, 2), None);
+}
+
+#[test]
 fn disabled_charge_control_does_not_emit_mutation_command() {
     let mut s = base_state();
     s.charge_limit_writable = false;
