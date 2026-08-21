@@ -58,8 +58,7 @@ impl EmaFilter {
 
         let n = i64::from(self.numerator);
         let d = i64::from(self.denominator);
-        let filtered =
-            (n * i64::from(sample) + (d - n) * i64::from(previous) + d / 2) / d;
+        let filtered = (n * i64::from(sample) + (d - n) * i64::from(previous) + d / 2) / d;
         let filtered = filtered as i32;
         self.value = Some(filtered);
         filtered
@@ -178,9 +177,7 @@ pub fn weighted_temperature(values: &[(TemperatureC, u16)]) -> Option<Temperatur
 
     let weighted_sum: i64 = values
         .iter()
-        .map(|(temperature, weight)| {
-            i64::from(temperature.get()) * i64::from(*weight)
-        })
+        .map(|(temperature, weight)| i64::from(temperature.get()) * i64::from(*weight))
         .sum();
 
     let average = weighted_sum / total_weight as i64;

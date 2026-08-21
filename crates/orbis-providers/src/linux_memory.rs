@@ -134,7 +134,9 @@ pub fn parse_meminfo(raw: &str) -> Result<SystemMemoryTelemetry, ProviderError> 
             .next()
             .ok_or_else(|| ProviderError::Internal("meminfo value missing".into()))?
             .parse::<u64>()
-            .map_err(|error| ProviderError::Internal(format!("invalid meminfo integer: {error}")))?;
+            .map_err(|error| {
+                ProviderError::Internal(format!("invalid meminfo integer: {error}"))
+            })?;
         if let Some(unit) = fields.next() {
             if unit != "kB" {
                 return Err(ProviderError::Internal(format!(
@@ -193,10 +195,12 @@ fn parse_percent_basis_points(raw: &str) -> Result<u16, ProviderError> {
     }
     let fraction = match fractional.len() {
         0 => 0,
-        1 => fractional
-            .parse::<u16>()
-            .map_err(|error| ProviderError::Internal(error.to_string()))?
-            * 10,
+        1 => {
+            fractional
+                .parse::<u16>()
+                .map_err(|error| ProviderError::Internal(error.to_string()))?
+                * 10
+        }
         2 => fractional
             .parse::<u16>()
             .map_err(|error| ProviderError::Internal(error.to_string()))?,
@@ -390,12 +394,7 @@ mod tests {
 
     #[test]
     fn malformed_psi_is_fail_closed() {
-        assert!(
-            parse_memory_pressure(
-                "some avg10=101.00 avg60=0.00 avg300=0.00 total=1"
-            )
-            .is_err()
-        );
+        assert!(parse_memory_pressure("some avg10=101.00 avg60=0.00 avg300=0.00 total=1").is_err());
     }
 
     #[test]

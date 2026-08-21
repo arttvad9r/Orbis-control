@@ -7,9 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    EmaFilter, FanCurve, FanPwm, PwmRateLimiter, TemperatureC, ThermalControlError,
-};
+use crate::{EmaFilter, FanCurve, FanPwm, PwmRateLimiter, TemperatureC, ThermalControlError};
 
 /// Temperature deadband used to suppress small oscillations around curve
 /// boundaries.
@@ -139,19 +137,11 @@ mod tests {
         FanCurve {
             profile: PerformanceProfile::Balanced,
             fan: FanId::Cpu,
+            enabled: None,
             points: vec![
-                FanCurvePoint::new(
-                    TemperatureC::new(40).unwrap(),
-                    FanPwm::new(20).unwrap(),
-                ),
-                FanCurvePoint::new(
-                    TemperatureC::new(60).unwrap(),
-                    FanPwm::new(100).unwrap(),
-                ),
-                FanCurvePoint::new(
-                    TemperatureC::new(80).unwrap(),
-                    FanPwm::new(200).unwrap(),
-                ),
+                FanCurvePoint::new(TemperatureC::new(40).unwrap(), FanPwm::new(20).unwrap()),
+                FanCurvePoint::new(TemperatureC::new(60).unwrap(), FanPwm::new(100).unwrap()),
+                FanCurvePoint::new(TemperatureC::new(80).unwrap(), FanPwm::new(200).unwrap()),
             ],
         }
     }
@@ -184,19 +174,11 @@ mod tests {
         let c = FanCurve {
             profile: PerformanceProfile::Balanced,
             fan: FanId::Cpu,
+            enabled: None,
             points: vec![
-                FanCurvePoint::new(
-                    TemperatureC::new(50).unwrap(),
-                    FanPwm::new(20).unwrap(),
-                ),
-                FanCurvePoint::new(
-                    TemperatureC::new(50).unwrap(),
-                    FanPwm::new(40).unwrap(),
-                ),
-                FanCurvePoint::new(
-                    TemperatureC::new(70).unwrap(),
-                    FanPwm::new(100).unwrap(),
-                ),
+                FanCurvePoint::new(TemperatureC::new(50).unwrap(), FanPwm::new(20).unwrap()),
+                FanCurvePoint::new(TemperatureC::new(50).unwrap(), FanPwm::new(40).unwrap()),
+                FanCurvePoint::new(TemperatureC::new(70).unwrap(), FanPwm::new(100).unwrap()),
             ],
         };
         assert_eq!(
@@ -223,16 +205,8 @@ mod tests {
 
     #[test]
     fn combined_policy_smooths_and_rate_limits() {
-        let mut policy = SoftwareFanPolicy::new(
-            curve(),
-            FanPwm::new(20).unwrap(),
-            1,
-            1,
-            0,
-            10,
-            20,
-        )
-        .unwrap();
+        let mut policy =
+            SoftwareFanPolicy::new(curve(), FanPwm::new(20).unwrap(), 1, 1, 0, 10, 20).unwrap();
 
         assert_eq!(
             policy.update(TemperatureC::new(80).unwrap()).unwrap().get(),

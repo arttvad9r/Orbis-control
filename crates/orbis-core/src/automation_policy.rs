@@ -15,17 +15,32 @@ use crate::PowerSource;
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PolicyEvent {
     /// Power source changed.
-    PowerSourceChanged { source: PowerSource },
+    PowerSourceChanged {
+        /// Observed power source.
+        source: PowerSource,
+    },
     /// System resumed from sleep.
     Resume,
     /// Process started.
-    ProcessStarted { executable: String },
+    ProcessStarted {
+        /// Stable executable identity.
+        executable: String,
+    },
     /// Process stopped.
-    ProcessStopped { executable: String },
+    ProcessStopped {
+        /// Stable executable identity.
+        executable: String,
+    },
     /// GameMode activation changed.
-    GameModeChanged { active: bool },
+    GameModeChanged {
+        /// Whether GameMode is active.
+        active: bool,
+    },
     /// External display presence changed.
-    ExternalDisplayChanged { connected: bool },
+    ExternalDisplayChanged {
+        /// Whether an external display is connected.
+        connected: bool,
+    },
 }
 
 /// Trigger predicate for a policy rule.
@@ -33,17 +48,32 @@ pub enum PolicyEvent {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PolicyTrigger {
     /// Match a specific power source transition.
-    PowerSource { source: PowerSource },
+    PowerSource {
+        /// Required power source.
+        source: PowerSource,
+    },
     /// Match resume.
     Resume,
     /// Match process start.
-    ProcessStarted { executable: String },
+    ProcessStarted {
+        /// Required executable identity.
+        executable: String,
+    },
     /// Match process stop.
-    ProcessStopped { executable: String },
+    ProcessStopped {
+        /// Required executable identity.
+        executable: String,
+    },
     /// Match GameMode state.
-    GameMode { active: bool },
+    GameMode {
+        /// Required GameMode state.
+        active: bool,
+    },
     /// Match external display presence.
-    ExternalDisplay { connected: bool },
+    ExternalDisplay {
+        /// Required external display state.
+        connected: bool,
+    },
 }
 
 /// Optional condition evaluated against already-observed runtime context.
@@ -51,13 +81,25 @@ pub enum PolicyTrigger {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PolicyCondition {
     /// Current power source must match.
-    PowerSource { source: PowerSource },
+    PowerSource {
+        /// Required power source.
+        source: PowerSource,
+    },
     /// Process must currently be running.
-    ProcessRunning { executable: String },
+    ProcessRunning {
+        /// Required executable identity.
+        executable: String,
+    },
     /// GameMode state must match.
-    GameMode { active: bool },
+    GameMode {
+        /// Required GameMode state.
+        active: bool,
+    },
     /// External display presence must match.
-    ExternalDisplay { connected: bool },
+    ExternalDisplay {
+        /// Required external display state.
+        connected: bool,
+    },
 }
 
 /// Observed context used only for rule matching.
@@ -131,10 +173,9 @@ fn trigger_matches(trigger: &PolicyTrigger, event: &PolicyEvent) -> bool {
             },
             PolicyEvent::ProcessStopped { executable },
         ) => expected == executable,
-        (
-            PolicyTrigger::GameMode { active: expected },
-            PolicyEvent::GameModeChanged { active },
-        ) => expected == active,
+        (PolicyTrigger::GameMode { active: expected }, PolicyEvent::GameModeChanged { active }) => {
+            expected == active
+        }
         (
             PolicyTrigger::ExternalDisplay {
                 connected: expected,
@@ -242,7 +283,9 @@ mod tests {
             priority: 255,
             enabled: false,
         }];
-        assert!(select_policy_preset(&rules, &PolicyEvent::Resume, &PolicyContext::default()).is_none());
+        assert!(
+            select_policy_preset(&rules, &PolicyEvent::Resume, &PolicyContext::default()).is_none()
+        );
     }
 
     #[test]
@@ -283,6 +326,8 @@ mod tests {
             priority: 10,
             enabled: true,
         }];
-        assert!(select_policy_preset(&rules, &PolicyEvent::Resume, &PolicyContext::default()).is_none());
+        assert!(
+            select_policy_preset(&rules, &PolicyEvent::Resume, &PolicyContext::default()).is_none()
+        );
     }
 }

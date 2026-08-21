@@ -27,9 +27,7 @@ pub fn readiness_from_service_diagnostics(
         ServiceAvailability::Unavailable => {
             (ReadinessState::NotAvailable, PermissionState::NotRequired)
         }
-        ServiceAvailability::PermissionDenied => {
-            (ReadinessState::Unknown, PermissionState::Denied)
-        }
+        ServiceAvailability::PermissionDenied => (ReadinessState::Unknown, PermissionState::Denied),
         ServiceAvailability::Unknown => (ReadinessState::Unknown, PermissionState::Unknown),
     };
 
@@ -48,9 +46,7 @@ pub fn readiness_from_service_diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orbis_core::diagnostics::{
-        DiagnosticsServiceId, ServiceBusScope, ServiceCriticality,
-    };
+    use orbis_core::diagnostics::{DiagnosticsServiceId, ServiceBusScope, ServiceCriticality};
 
     fn diagnostics(availability: ServiceAvailability) -> ServiceDiagnostics {
         ServiceDiagnostics {

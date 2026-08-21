@@ -76,8 +76,8 @@ impl PresetBundle {
 
     /// Parse and validate untrusted JSON.
     pub fn from_json(json: &str) -> Result<Self, PresetBundleError> {
-        let bundle: Self =
-            serde_json::from_str(json).map_err(|error| PresetBundleError::InvalidJson(error.to_string()))?;
+        let bundle: Self = serde_json::from_str(json)
+            .map_err(|error| PresetBundleError::InvalidJson(error.to_string()))?;
         bundle.validate()?;
         Ok(bundle)
     }

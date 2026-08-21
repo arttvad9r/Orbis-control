@@ -113,9 +113,11 @@ pub fn outcome_from_apply_result(result: &ApplyResult) -> MutationAuditOutcome {
 /// not `Applied`.
 pub fn outcome_from_phase(phase: &MutationPhase) -> MutationAuditOutcome {
     match phase {
-        MutationPhase::Prepared | MutationPhase::AwaitingObservation => MutationAuditOutcome::Pending {
-            requirement: ActionRequirement::None,
-        },
+        MutationPhase::Prepared | MutationPhase::AwaitingObservation => {
+            MutationAuditOutcome::Pending {
+                requirement: ActionRequirement::None,
+            }
+        }
         MutationPhase::AwaitingConfirmation => MutationAuditOutcome::Pending {
             requirement: ActionRequirement::Confirmation,
         },

@@ -112,10 +112,7 @@ mod tests {
             read_contract_valid: true,
             ..Default::default()
         };
-        assert_eq!(
-            evidence.stage(),
-            HardwareValidationStage::ReadOnlyValidated
-        );
+        assert_eq!(evidence.stage(), HardwareValidationStage::ReadOnlyValidated);
     }
 
     #[test]

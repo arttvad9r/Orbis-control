@@ -103,7 +103,11 @@ mod tests {
             requirement: ActionRequirement::Reboot,
             created_at_ms: 1,
         });
-        assert!(registry.reobserve_candidates(&LifecycleEvent::Resume).is_empty());
+        assert!(
+            registry
+                .reobserve_candidates(&LifecycleEvent::Resume)
+                .is_empty()
+        );
     }
 
     #[test]

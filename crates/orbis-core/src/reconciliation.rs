@@ -6,9 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ActionRequirement;
 use crate::capability::CapabilityStatus;
 use crate::desired_observed::{DesiredObservedState, DesiredValue, ObservedValue};
-use crate::ActionRequirement;
 
 /// Pure next-step decision for one typed setting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

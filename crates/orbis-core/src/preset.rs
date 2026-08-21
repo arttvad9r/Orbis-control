@@ -6,9 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    AsusdFanProfile, GpuMode, Percent, PerformanceProfile, PowerSource, RefreshHz,
-};
+use crate::{AsusdFanProfile, GpuMode, Percent, PerformanceProfile, PowerSource, RefreshHz};
 
 /// Desired values grouped into one reusable preset.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

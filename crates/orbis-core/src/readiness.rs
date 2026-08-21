@@ -66,7 +66,10 @@ impl ReadinessItem {
             self.state,
             ReadinessState::Ready | ReadinessState::NotRelevant
         );
-        let permission_ok = !matches!(self.permission, PermissionState::Denied | PermissionState::Unknown);
+        let permission_ok = !matches!(
+            self.permission,
+            PermissionState::Denied | PermissionState::Unknown
+        );
         !(dependency_ok && permission_ok)
     }
 }
@@ -81,7 +84,10 @@ pub struct ReadinessReport {
 impl ReadinessReport {
     /// Return all readiness records that currently block a feature.
     pub fn blockers_for(&self, feature: FeatureId) -> Vec<&ReadinessItem> {
-        self.items.iter().filter(|item| item.blocks(feature)).collect()
+        self.items
+            .iter()
+            .filter(|item| item.blocks(feature))
+            .collect()
     }
 
     /// Whether every relevant dependency is currently ready for a feature.
@@ -140,11 +146,7 @@ pub fn detect_ownership_conflicts(claims: &[OwnershipClaim]) -> Vec<OwnershipCon
 mod tests {
     use super::*;
 
-    fn item(
-        id: &str,
-        state: ReadinessState,
-        permission: PermissionState,
-    ) -> ReadinessItem {
+    fn item(id: &str, state: ReadinessState, permission: PermissionState) -> ReadinessItem {
         ReadinessItem {
             id: id.into(),
             state,

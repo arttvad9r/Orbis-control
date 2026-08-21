@@ -45,13 +45,13 @@ impl PolicyDesiredState {
     ///
     /// This is configuration transformation only. `selected_preset` records
     /// which preset generated the intent but does not imply convergence.
-    pub fn apply_preset(
-        &mut self,
-        preset: &Preset,
-        unspecified: UnspecifiedPresetFieldPolicy,
-    ) {
+    pub fn apply_preset(&mut self, preset: &Preset, unspecified: UnspecifiedPresetFieldPolicy) {
         self.selected_preset = DesiredValue::Set(preset.id.clone());
-        apply_optional(&mut self.performance, preset.intent.performance, unspecified);
+        apply_optional(
+            &mut self.performance,
+            preset.intent.performance,
+            unspecified,
+        );
         apply_optional(&mut self.gpu_mode, preset.intent.gpu_mode, unspecified);
         apply_optional(
             &mut self.charge_limit,
@@ -146,7 +146,10 @@ mod tests {
             state.display_refresh,
             DesiredValue::Set(RefreshHz::new(165).unwrap())
         );
-        assert_eq!(state.charge_limit, DesiredValue::Set(Percent::new(80).unwrap()));
+        assert_eq!(
+            state.charge_limit,
+            DesiredValue::Set(Percent::new(80).unwrap())
+        );
         assert_eq!(state.selected_preset, DesiredValue::Set("battery".into()));
     }
 
