@@ -1,7 +1,10 @@
 use std::fmt::Debug;
+use std::io::{self, Write};
 use std::process::ExitCode;
 
+use async_trait::async_trait;
 use orbis_core::battery::{BatteryThresholdEvidence, ChargeLimit};
+use orbis_core::capability::CapabilityStatus;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::bounded_provider_call;
@@ -10,14 +13,15 @@ use orbis_providers::traits::{
     BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
 };
 use orbis_session_client::{
-    SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
-    SessionGpuPowerProvider, SessionPerformanceProvider, ZbusSessionChargeLimitSource,
-    ZbusSessionGpuSource, ZbusSessionPerformanceSource,
+    HardwarePerformanceSource, SessionChargeLimitProvider, SessionGpuAccessProvider,
+    SessionGpuMuxProvider, SessionGpuPowerProvider, SessionPerformanceProvider,
+    ZbusHardwarePerformanceSource, ZbusSessionChargeLimitSource, ZbusSessionGpuSource,
+    ZbusSessionPerformanceSource, performance_current_from_wire,
 };
 use serde::Serialize;
 
 const STATUS_SCHEMA_VERSION: u32 = 2;
-const HELP: &str = "orbisctl — Orbis Control read-only command-line client\n\nUSAGE:\n    orbisctl [OPTIONS] <COMMAND>\n\nOPTIONS:\n    -h, --help       Print help\n    -V, --version    Print version\n\nCOMMANDS:\n    status [--json]  Read current Session1 state without performing mutations\n";
+const HELP: &str = "orbisctl — Orbis Control command-line client\n\nUSAGE:\n    orbisctl [OPTIONS] <COMMAND>\n\nOPTIONS:\n    -h, --help       Print help\n    -V, --version    Print version\n\nCOMMANDS:\n    status [--json]  Read current Session1 state without performing mutations\n    validate platform-profile [--profile PROFILE] [--apply-test]\n                    Validate the Hardware1 profile path (dry-run by default)\n\nVALIDATION:\n    --apply-test     Opt into one controlled profile write and restore\n    --profile NAME   Target quiet, balanced, or performance\n                    Interactive confirmation is required before any write\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
@@ -30,6 +34,10 @@ enum Command {
     Help,
     Version,
     Status(OutputFormat),
+    ValidatePlatformProfile {
+        apply_test: bool,
+        target: Option<PerformanceProfile>,
+    },
     Invalid(String),
 }
 
@@ -45,6 +53,28 @@ where
         [arg] if arg == "status" => Command::Status(OutputFormat::Human),
         [command, flag] if command == "status" && flag == "--json" => {
             Command::Status(OutputFormat::Json)
+        }
+        [command, subcommand, rest @ ..]
+            if command == "validate" && subcommand == "platform-profile" =>
+        {
+            let mut apply_test = false;
+            let mut target = None;
+            let mut index = 0;
+            while index < rest.len() {
+                match rest[index].as_str() {
+                    "--apply-test" if !apply_test => apply_test = true,
+                    "--profile" if target.is_none() && index + 1 < rest.len() => {
+                        index += 1;
+                        match PerformanceProfile::parse(&rest[index]) {
+                            Ok(profile) => target = Some(profile),
+                            Err(_) => return Command::Invalid("validate".into()),
+                        }
+                    }
+                    _ => return Command::Invalid("validate".into()),
+                }
+                index += 1;
+            }
+            Command::ValidatePlatformProfile { apply_test, target }
         }
         [arg, ..] => Command::Invalid(arg.clone()),
     }
@@ -253,6 +283,279 @@ async fn status(format: OutputFormat) -> ExitCode {
     }
 }
 
+/// Read/write boundary used by the validation workflow.
+#[async_trait]
+trait PlatformProfileValidationBackend: Send + Sync {
+    async fn current(&self) -> Result<PerformanceProfile, ProviderError>;
+    async fn choices(&self) -> Result<Vec<PerformanceProfile>, ProviderError>;
+    fn write_capability(&self) -> CapabilityStatus;
+    async fn apply(&self, profile: PerformanceProfile)
+    -> Result<PerformanceProfile, ProviderError>;
+}
+
+/// Sanitized validation log. It contains profile symbols only; no bus names,
+/// sender identities, paths or user data are recorded.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct PlatformProfileValidationReport {
+    initial_state: Option<PerformanceProfile>,
+    available_choices: Vec<PerformanceProfile>,
+    write_capability: Option<CapabilityStatus>,
+    requested_state: Option<PerformanceProfile>,
+    applied_state: Option<PerformanceProfile>,
+    read_back: Option<PerformanceProfile>,
+    restore_state: Option<PerformanceProfile>,
+    error: Option<String>,
+    restore_failure: Option<String>,
+    mutated: bool,
+}
+
+impl PlatformProfileValidationReport {
+    fn successful(&self, apply_test: bool) -> bool {
+        self.error.is_none()
+            && self.restore_failure.is_none()
+            && (!apply_test || (self.mutated && self.restore_state == self.initial_state))
+    }
+}
+
+fn validation_detail(error: ProviderError) -> String {
+    error.to_string()
+}
+
+fn print_validation_evidence(report: &PlatformProfileValidationReport) {
+    println!("initial state: {:?}", report.initial_state);
+    println!("available choices: {:?}", report.available_choices);
+    println!("write capability: {:?}", report.write_capability);
+}
+
+fn print_validation_report(report: &PlatformProfileValidationReport) {
+    println!("requested state: {:?}", report.requested_state);
+    println!("applied state: {:?}", report.applied_state);
+    println!("read-back: {:?}", report.read_back);
+    println!("restore state: {:?}", report.restore_state);
+    if let Some(error) = &report.restore_failure {
+        println!("result: CRITICAL RESTORE FAILURE ({error})");
+    } else if let Some(error) = &report.error {
+        println!("result: FAILED ({error})");
+    } else if report.mutated {
+        println!("result: PASS (profile applied, verified, and restored)");
+    } else {
+        println!("result: DRY-RUN (no mutation performed)");
+    }
+}
+
+/// Execute the explicit validation workflow. The confirmation callback is
+/// called only after initial evidence is read and printed by the caller.
+async fn run_platform_profile_validation<B, F>(
+    backend: &B,
+    apply_test: bool,
+    requested: Option<PerformanceProfile>,
+    confirm: F,
+) -> PlatformProfileValidationReport
+where
+    B: PlatformProfileValidationBackend,
+    F: FnOnce(&PlatformProfileValidationReport) -> bool,
+{
+    let mut report = PlatformProfileValidationReport::default();
+    report.initial_state = match backend.current().await {
+        Ok(profile) => Some(profile),
+        Err(error) => {
+            report.error = Some(format!(
+                "initial profile read failed: {}",
+                validation_detail(error)
+            ));
+            return report;
+        }
+    };
+    report.available_choices = match backend.choices().await {
+        Ok(choices) => choices,
+        Err(error) => {
+            report.error = Some(format!(
+                "profile choices read failed: {}",
+                validation_detail(error)
+            ));
+            return report;
+        }
+    };
+
+    let initial = report.initial_state.expect("initial state was recorded");
+    if !report.available_choices.contains(&initial) {
+        report.error = Some("initial profile is absent from available choices".into());
+        return report;
+    }
+    let target = requested.or_else(|| {
+        report
+            .available_choices
+            .iter()
+            .copied()
+            .find(|profile| *profile != initial)
+    });
+    report.requested_state = target;
+    let Some(target) = target else {
+        report.error = Some("no alternate profile is available for validation".into());
+        return report;
+    };
+    if !report.available_choices.contains(&target) {
+        report.error = Some("requested profile is absent from available choices".into());
+        return report;
+    }
+    report.write_capability = Some(backend.write_capability());
+    if !apply_test {
+        let _ = confirm(&report);
+        return report;
+    }
+    if backend.write_capability() != CapabilityStatus::Supported {
+        report.error = Some(format!(
+            "write capability is not Supported: {:?}",
+            backend.write_capability()
+        ));
+        return report;
+    }
+    if !confirm(&report) {
+        report.error = Some("explicit APPLY-TEST confirmation was not provided".into());
+        return report;
+    }
+
+    report.mutated = true;
+    match backend.apply(target).await {
+        Ok(applied) => report.applied_state = Some(applied),
+        Err(error) => {
+            report.error = Some(format!(
+                "profile apply failed: {}",
+                validation_detail(error)
+            ))
+        }
+    }
+    if report.error.is_none() {
+        match backend.current().await {
+            Ok(read_back) if read_back == target => report.read_back = Some(read_back),
+            Ok(read_back) => {
+                report.read_back = Some(read_back);
+                report.error = Some("apply read-back mismatch".into());
+            }
+            Err(error) => {
+                report.error = Some(format!(
+                    "apply read-back failed: {}",
+                    validation_detail(error)
+                ));
+            }
+        }
+    }
+
+    match backend.apply(initial).await {
+        Ok(restored) => report.restore_state = Some(restored),
+        Err(error) => {
+            report.restore_failure = Some(format!(
+                "restore apply failed: {}",
+                validation_detail(error)
+            ));
+            return report;
+        }
+    }
+    match backend.current().await {
+        Ok(read_back) if read_back == initial => {}
+        Ok(read_back) => {
+            report.restore_failure = Some(format!(
+                "restore read-back mismatch: expected {initial:?}, got {read_back:?}"
+            ));
+        }
+        Err(error) => {
+            report.restore_failure = Some(format!(
+                "restore read-back failed: {}",
+                validation_detail(error)
+            ));
+        }
+    }
+    report
+}
+
+struct LivePlatformProfileValidationBackend {
+    session: SessionPerformanceProvider<ZbusSessionPerformanceSource>,
+    hardware: ZbusHardwarePerformanceSource,
+    write_capability: CapabilityStatus,
+}
+
+#[async_trait]
+impl PlatformProfileValidationBackend for LivePlatformProfileValidationBackend {
+    async fn current(&self) -> Result<PerformanceProfile, ProviderError> {
+        bounded_provider_call(
+            &self.session,
+            "validation.platform_profile.current",
+            self.session.current_profile(),
+        )
+        .await
+    }
+
+    async fn choices(&self) -> Result<Vec<PerformanceProfile>, ProviderError> {
+        bounded_provider_call(
+            &self.session,
+            "validation.platform_profile.choices",
+            self.session.profiles(),
+        )
+        .await
+    }
+
+    fn write_capability(&self) -> CapabilityStatus {
+        self.write_capability
+    }
+
+    async fn apply(
+        &self,
+        profile: PerformanceProfile,
+    ) -> Result<PerformanceProfile, ProviderError> {
+        let confirmed = self
+            .hardware
+            .set_performance(orbis_hardwared::profile_to_wire(profile))
+            .await?;
+        performance_current_from_wire(confirmed)
+    }
+}
+
+async fn validate_platform_profile(
+    apply_test: bool,
+    requested: Option<PerformanceProfile>,
+) -> ExitCode {
+    let session_connection = match zbus::Connection::session().await {
+        Ok(connection) => connection,
+        Err(error) => {
+            eprintln!("orbisctl: cannot connect to the user session bus: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let system_connection = match zbus::Connection::system().await {
+        Ok(connection) => connection,
+        Err(error) => {
+            eprintln!("orbisctl: cannot connect to the system bus: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let write_capability =
+        orbis_session_client::hardware1_performance_mutation_status(&system_connection).await;
+    let backend = LivePlatformProfileValidationBackend {
+        session: SessionPerformanceProvider::new(ZbusSessionPerformanceSource::new(
+            session_connection,
+        )),
+        hardware: ZbusHardwarePerformanceSource::new(system_connection),
+        write_capability,
+    };
+    let report = run_platform_profile_validation(&backend, apply_test, requested, |evidence| {
+        print_validation_evidence(evidence);
+        if !apply_test {
+            return false;
+        }
+        print!("Type APPLY-TEST to apply one profile and restore it: ");
+        let _ = io::stdout().flush();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).is_ok() && input.trim() == "APPLY-TEST"
+    })
+    .await;
+    print_validation_report(&report);
+    if report.successful(apply_test) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     match parse_args(std::env::args().skip(1)) {
@@ -265,6 +568,9 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Command::Status(format) => status(format).await,
+        Command::ValidatePlatformProfile { apply_test, target } => {
+            validate_platform_profile(apply_test, target).await
+        }
         Command::Invalid(arg) => {
             eprintln!("orbisctl: unknown or invalid argument: {arg}");
             eprintln!("Try 'orbisctl --help'.");
@@ -275,7 +581,76 @@ async fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
     use super::*;
+
+    struct FakeValidationBackend {
+        current: Mutex<PerformanceProfile>,
+        choices: Vec<PerformanceProfile>,
+        capability: CapabilityStatus,
+        applies: Mutex<VecDeque<Result<PerformanceProfile, ProviderError>>>,
+        writes: Mutex<usize>,
+    }
+
+    impl FakeValidationBackend {
+        fn new(
+            capability: CapabilityStatus,
+            applies: impl IntoIterator<Item = Result<PerformanceProfile, ProviderError>>,
+        ) -> Self {
+            Self {
+                current: Mutex::new(PerformanceProfile::Silent),
+                choices: vec![
+                    PerformanceProfile::Silent,
+                    PerformanceProfile::Balanced,
+                    PerformanceProfile::Turbo,
+                ],
+                capability,
+                applies: Mutex::new(applies.into_iter().collect()),
+                writes: Mutex::new(0),
+            }
+        }
+
+        fn writes(&self) -> usize {
+            *self.writes.lock().unwrap()
+        }
+    }
+
+    #[async_trait]
+    impl PlatformProfileValidationBackend for FakeValidationBackend {
+        async fn current(&self) -> Result<PerformanceProfile, ProviderError> {
+            Ok(*self.current.lock().unwrap())
+        }
+
+        async fn choices(&self) -> Result<Vec<PerformanceProfile>, ProviderError> {
+            Ok(self.choices.clone())
+        }
+
+        fn write_capability(&self) -> CapabilityStatus {
+            self.capability
+        }
+
+        async fn apply(
+            &self,
+            profile: PerformanceProfile,
+        ) -> Result<PerformanceProfile, ProviderError> {
+            *self.writes.lock().unwrap() += 1;
+            let result = self
+                .applies
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("scripted apply result");
+            if let Ok(confirmed) = result {
+                *self.current.lock().unwrap() = confirmed;
+                assert_eq!(confirmed, profile);
+                Ok(confirmed)
+            } else {
+                result
+            }
+        }
+    }
 
     #[test]
     fn parser_accepts_help_version_and_status_formats() {
@@ -289,6 +664,19 @@ mod tests {
         assert_eq!(
             parse_args(["status".into(), "--json".into()]),
             Command::Status(OutputFormat::Json)
+        );
+        assert_eq!(
+            parse_args([
+                "validate".into(),
+                "platform-profile".into(),
+                "--apply-test".into(),
+                "--profile".into(),
+                "balanced".into(),
+            ]),
+            Command::ValidatePlatformProfile {
+                apply_test: true,
+                target: Some(PerformanceProfile::Balanced),
+            }
         );
     }
 
@@ -369,5 +757,91 @@ mod tests {
         assert_eq!(json["performance"]["current"]["value"], "balanced");
         assert_eq!(json["gpu"]["access"]["state"], "permission_denied");
         assert_eq!(snapshot.successful_reads(), 2);
+    }
+
+    #[tokio::test]
+    async fn validation_dry_run_does_not_mutate() {
+        let backend = FakeValidationBackend::new(CapabilityStatus::Supported, []);
+        let report = run_platform_profile_validation(&backend, false, None, |_| true).await;
+        assert!(!report.mutated);
+        assert_eq!(backend.writes(), 0);
+        assert!(report.successful(false));
+    }
+
+    #[tokio::test]
+    async fn validation_apply_requires_explicit_apply_test_flag() {
+        let backend = FakeValidationBackend::new(
+            CapabilityStatus::Supported,
+            [Ok(PerformanceProfile::Balanced)],
+        );
+        let report = run_platform_profile_validation(
+            &backend,
+            false,
+            Some(PerformanceProfile::Balanced),
+            |_| true,
+        )
+        .await;
+        assert!(!report.mutated);
+        assert_eq!(backend.writes(), 0);
+    }
+
+    #[tokio::test]
+    async fn unknown_write_capability_blocks_apply_without_mutation() {
+        let backend = FakeValidationBackend::new(
+            CapabilityStatus::Unknown,
+            [Ok(PerformanceProfile::Balanced)],
+        );
+        let report = run_platform_profile_validation(
+            &backend,
+            true,
+            Some(PerformanceProfile::Balanced),
+            |_| panic!("confirmation must not be requested without write evidence"),
+        )
+        .await;
+        assert!(report.error.is_some());
+        assert!(!report.mutated);
+        assert_eq!(backend.writes(), 0);
+    }
+
+    #[tokio::test]
+    async fn failed_write_does_not_claim_success() {
+        let backend = FakeValidationBackend::new(
+            CapabilityStatus::Supported,
+            [
+                Err(ProviderError::BackendUnavailable("write failed".into())),
+                Ok(PerformanceProfile::Silent),
+            ],
+        );
+        let report = run_platform_profile_validation(
+            &backend,
+            true,
+            Some(PerformanceProfile::Balanced),
+            |_| true,
+        )
+        .await;
+        assert!(report.error.is_some());
+        assert!(!report.successful(true));
+        assert_eq!(report.restore_state, Some(PerformanceProfile::Silent));
+        assert_eq!(backend.writes(), 2);
+    }
+
+    #[tokio::test]
+    async fn restore_failure_is_critical_and_separate() {
+        let backend = FakeValidationBackend::new(
+            CapabilityStatus::Supported,
+            [
+                Ok(PerformanceProfile::Balanced),
+                Err(ProviderError::PermissionDenied("restore denied".into())),
+            ],
+        );
+        let report = run_platform_profile_validation(
+            &backend,
+            true,
+            Some(PerformanceProfile::Balanced),
+            |_| true,
+        )
+        .await;
+        assert!(report.restore_failure.is_some());
+        assert!(!report.successful(true));
     }
 }

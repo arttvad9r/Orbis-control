@@ -13,10 +13,12 @@ name = "orbisctl"
 path = "src/main.rs"
 
 [dependencies]
+async-trait = { workspace = true }
 tokio = { workspace = true }
 zbus = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 orbis-core = { workspace = true }
+orbis-hardwared = { path = "../orbis-hardwared", version = "0.1.0" }
 orbis-session-client = { path = "../orbis-session-client", version = "0.1.0" }
 orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false }
