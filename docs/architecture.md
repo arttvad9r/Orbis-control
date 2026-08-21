@@ -21,7 +21,7 @@
 ## 2. Layering
 
 ```text
-Slint UI / read-only orbisctl
+Slint UI / read-only status CLI / explicit validation CLI
   ↓ typed requests / observations
 orbis-ui runtime + orbis-application services
   ↓
@@ -45,7 +45,7 @@ Primary crate ownership:
 | `orbis-sessiond` | User-session read daemon |
 | `orbis-hardwared` | Narrow privileged service |
 | `orbis-ui` | Slint surfaces, production composition, worker runtime |
-| `orbis-cli` | Read-only Session1 CLI |
+| `orbis-cli` | Read-only status CLI and explicit Hardware1 validation tool |
 | `orbis-test-support` | Fixtures/screenshots/tests; release-graph cleanup remains #115 |
 
 The active production worker is `crates/orbis-ui/src/worker_runtime.rs`. Legacy large worker files are not the source of truth for new runtime fixes.
@@ -102,6 +102,52 @@ Production `Hardware1` composition keeps these writes disabled:
 - Aura Static RGB.
 
 Typed code existence does not override this policy. Packaged polkit and the service sandbox provide additional defense-in-depth. The intended direct sysfs writable surface of `hardwared` is only `/sys/firmware/acpi/platform_profile` until separately promoted controls are validated.
+
+### Privileged backend activation lifecycle
+
+The service binaries, service contracts and activation policy are separate
+artifacts. Their presence in the repository or in a package does not mean that
+either daemon is running.
+
+#### Development
+
+- `services.orbis-control.enable` defaults to `false`; no `orbis-sessiond` user
+  unit or `orbis-hardwared` system unit is enabled by default.
+- `nixosModules.orbis-hardwared-policies` is a **policy-only** integration. It
+  installs static D-Bus policy and polkit action files, but does not create or
+  start a daemon.
+- The standalone `orbis-hardwared` package and
+  `packaging/deploy-dev-hardwared.sh` provide a separate development lifecycle.
+  This path must not be combined with the NixOS-managed unit because both use
+  the same `Hardware1` bus name.
+- Tests use fake sysfs/P2P boundaries and do not start host daemons.
+
+#### Production
+
+Enabling `services.orbis-control` in the NixOS module is the production
+activation mechanism. The module then:
+
+- starts `orbis-sessiond` as a user-session D-Bus service at
+  `graphical-session.target`;
+- starts `orbis-hardwared` as a root system D-Bus service after `dbus.service`;
+- uses the packaged `orbis-sessiond` and `orbis-hardwared` binaries;
+- installs the Hardware1 system-bus policy and per-capability polkit actions;
+- applies the narrow hardwared sandbox, with only
+  `/sys/firmware/acpi/platform_profile` writable.
+
+The flake exposes the full `orbis-control` package, a standalone
+`orbis-hardwared` package, and a policy-only package. The full package source
+contains the workspace binaries used by the module, while the standalone
+package intentionally builds only `orbis-hardwared` and does not define a
+systemd unit.
+
+The FA707NV `Hardware1 unavailable` result is therefore classified as a
+deployment/lifecycle gap, not as missing Rust implementation or an intentional
+product capability disablement: the crate, package recipe, NixOS unit,
+Hardware1 D-Bus contract and polkit action exist, but the host has no enabled or
+installed Orbis service, no owned Hardware1 bus name, and no activatable service
+registration. A policy file alone cannot activate the daemon or provide a
+write path.
 
 ## 5. Capability registry
 
