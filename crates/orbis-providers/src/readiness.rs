@@ -94,6 +94,13 @@ where
                 permission: permission_unknown(),
             }
         }
+        Err(ProviderError::Conflict(detail)) => ReadinessItem {
+            id,
+            state: ReadinessState::Unknown,
+            required_for,
+            evidence: vec![detail],
+            permission: permission_unknown(),
+        },
     }
 }
 
