@@ -38,9 +38,9 @@ rustPlatform.buildRustPackage {
   # flake.nix, flake.lock, LICENSE, .github/**, .opencode/**, deny.toml
   # и прочее, не используемое сборкой/установкой.
   #
-  # packaging/nix/polkit/ включён: тест polkit_policy_contains_all_mutation_actions
-  # (crates/orbis-hardwared) читает policy-файл через CARGO_MANIFEST_DIR для
-  # проверки, что все mutation action constants присутствуют в установленном policy.
+  # Policy and D-Bus files are package resources referenced below. The hardwared
+  # policy test receives its Nix store resource path through preCheck instead of
+  # assuming that ../../packaging survives source filtering.
   src = lib.cleanSourceWith {
     src = lib.cleanSource ../..;
     filter = path: type:
@@ -82,6 +82,10 @@ rustPlatform.buildRustPackage {
     pango
     gdk-pixbuf
   ];
+
+  preCheck = ''
+    export ORBIS_HARDWARED_POLKIT_POLICY="${./polkit/io.github.orbiscontrol.hardware.policy}"
+  '';
 
   # GUI (orbis-control) использует winit/glutin, которые загружают системные
   # библиотеки через dlopen (libwayland-client/cursor/egl, libxkbcommon,

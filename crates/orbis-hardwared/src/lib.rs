@@ -1954,10 +1954,10 @@ mod tests {
 
     #[test]
     fn polkit_policy_contains_all_mutation_actions() {
-        let policy_path = concat!(
+        let policy_path = option_env!("ORBIS_HARDWARED_POLKIT_POLICY").unwrap_or(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../packaging/nix/polkit/io.github.orbiscontrol.hardware.policy"
-        );
+        ));
         let policy = std::fs::read_to_string(policy_path)
             .unwrap_or_else(|e| panic!("не удалось прочитать policy файл {policy_path}: {e}"));
 
