@@ -27,9 +27,12 @@ pub mod fan_defaults;
 pub mod gpu_diagnostics;
 pub mod hardware_identity;
 pub mod keyboard_backlight;
+pub mod linux_memory;
 pub mod native_asus_eco;
 pub mod probes;
+pub mod readiness;
 pub mod service_presence;
+pub mod service_readiness;
 pub mod supergfxd;
 pub mod sysfs_telemetry;
 pub mod system_metadata;
@@ -64,8 +67,13 @@ pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsPro
 pub use gpu_diagnostics::gpu_diagnostics_snapshot;
 pub use hardware_identity::HardwareIdentityProvider;
 pub use keyboard_backlight::*;
+pub use linux_memory::{
+    LinuxSystemMemoryProvider, SystemMemoryProvider, parse_meminfo, parse_memory_pressure,
+};
 pub use native_asus_eco::*;
+pub use readiness::{bounded_readiness_probe, join_readiness2};
 pub use service_presence::*;
+pub use service_readiness::readiness_from_service_diagnostics;
 pub use sysfs_telemetry::SysfsTelemetryProvider;
 pub use system_metadata::SystemMetadataProvider;
 pub use telemetry_diagnostics::telemetry_diagnostics_after_attempt;
