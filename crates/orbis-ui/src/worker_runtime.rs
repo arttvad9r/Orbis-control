@@ -235,6 +235,7 @@ async fn observe_automation_telemetry<R>(
     performance: &R,
     source_capabilities: &orbis_capabilities::CapabilityRegistrySnapshot,
     telemetry: &orbis_core::telemetry::Telemetry,
+    allow_execution: bool,
 ) where
     R: PerformanceServiceRuntime + Sync,
 {
@@ -280,6 +281,13 @@ async fn observe_automation_telemetry<R>(
     // This is the production dry-run boundary. Until the exact build is
     // promoted, even a future Supported Automation capability cannot reach the
     // owner call. The move-only envelope is still consumed exactly once.
+    if !allow_execution {
+        if let Err(error) = driver.finish_dry_run(envelope) {
+            tracing::error!(?error, "Resume dry-run lease release failed");
+        }
+        return;
+    }
+
     if !AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED {
         tracing::info!(
             policy_revision = envelope.required_policy_revision().get(),
@@ -404,6 +412,57 @@ fn reconcile_automation_from_performance_result(
     }
 }
 
+/// Reconcile read-only state after a paired resume observation.
+///
+/// This publishes fresh provider results and a new capability generation. It
+/// deliberately does not dispatch or restore any hardware mutation.
+async fn reconcile_after_resume<G, B, R, F>(
+    runtime: &mut ApplicationRuntime<G, B, R>,
+    automation: &mut AutomationWorkerDriver,
+    emit: &mut F,
+) where
+    G: GpuServicesRuntime,
+    B: BatteryServiceRuntime,
+    R: PerformanceServiceRuntime + Sync,
+    F: FnMut(WorkerEvent),
+{
+    match refresh_capability_registry(runtime).await {
+        Ok(snapshot) => {
+            let generation = snapshot.generation();
+            let snapshot = Arc::new(snapshot);
+            runtime.replace_capabilities((*snapshot).clone());
+            emit(WorkerEvent::RegistryChange(Ok((generation, snapshot))));
+        }
+        Err(error) => emit(WorkerEvent::RegistryChange(Err(error))),
+    }
+
+    let (power, mux, access) = bounded_gpu_capabilities(&runtime.gpu).await;
+    emit(WorkerEvent::GpuPowerRefresh(power));
+    emit(WorkerEvent::GpuMuxRefresh(mux));
+    emit(WorkerEvent::GpuAccessRefresh(access));
+
+    let performance = bounded_performance_state(&runtime.performance).await;
+    reconcile_automation_from_performance_result(automation, &performance);
+    emit(WorkerEvent::PerformanceRefresh(performance));
+    emit(WorkerEvent::ChargeLimitRefresh(
+        bounded_charge_limit(&runtime.battery).await,
+    ));
+
+    let telemetry = runtime.telemetry.snapshot().await;
+    if let Ok(sample) = &telemetry {
+        let capabilities = runtime.capabilities().clone();
+        observe_automation_telemetry(
+            automation,
+            &runtime.performance,
+            &capabilities,
+            sample,
+            false,
+        )
+        .await;
+    }
+    emit(WorkerEvent::TelemetryRefresh(telemetry));
+}
+
 async fn bounded_performance_state<R>(performance: &R) -> Result<PerformanceState, ProviderError>
 where
     R: PerformanceServiceRuntime + ?Sized,
@@ -517,6 +576,10 @@ async fn run_worker_inner<G, B, R, F>(
                                     outcome = ?outcome,
                                     "Automation lifecycle signal consumed by worker"
                                 );
+                                if !lifecycle.start {
+                                    reconcile_after_resume(&mut runtime, &mut automation, &mut emit)
+                                        .await;
+                                }
                             }
                             continue;
                         }
@@ -529,6 +592,7 @@ async fn run_worker_inner<G, B, R, F>(
                                         &runtime.performance,
                                         &capabilities,
                                         telemetry,
+                                        true,
                                     ).await;
                                 }
                                 emit(WorkerEvent::TelemetryRefresh(snapshot));
@@ -580,6 +644,10 @@ async fn run_worker_inner<G, B, R, F>(
                                     lifecycle.observed_at,
                                 );
                                 tracing::debug!(start = lifecycle.start, outcome = ?outcome, "Automation lifecycle signal consumed by worker");
+                                if !lifecycle.start {
+                                    reconcile_after_resume(&mut runtime, &mut automation, &mut emit)
+                                        .await;
+                                }
                             }
                             continue;
                         }
@@ -614,6 +682,7 @@ async fn run_worker_inner<G, B, R, F>(
                     &runtime.performance,
                     &capabilities,
                     telemetry,
+                    true,
                 )
                 .await;
             }
@@ -736,6 +805,8 @@ mod tests {
         assert!(source.contains("execute_prepared_performance"));
         assert!(source.contains("finish_performance_unknown"));
         assert!(source.contains("reconcile_performance"));
+        assert!(source.contains("reconcile_after_resume"));
+        assert!(source.contains("sample,\n            false,"));
         assert!(!source.contains("set_gpu_mode_for_automation"));
         assert!(!source.contains("set_fan_curve_for_automation"));
         assert!(!source.contains("set_charge_limit_for_automation"));

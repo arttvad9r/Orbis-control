@@ -251,6 +251,8 @@ The active branch initializes `DiagnosticsRuntime`, tracks capability generation
 
 The current worker owns policy revision, lifecycle observations, AC/Battery debounce, resume freshness/coalescing, capability-generation preflight, replay-resistant serialization and Performance unknown-outcome recovery.
 
+After a paired logind resume observation, the worker refreshes authoritative read-only provider state and publishes a new capability generation. Resume is not a mutation trigger: desired presets are not restored, and automation observation is restricted to dry-run preparation on this path.
+
 A Performance-only executor contract exists with mandatory authoritative read-back, but `AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED` remains `false`. GPU/Fan/Battery/Display/Lighting unattended executors remain disabled.
 
 ## 16. Display / Updates / ambiguous controls

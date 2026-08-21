@@ -56,7 +56,7 @@ Production product path намеренно включает только док�
 | Panel write | HARD-BLOCKED | Typed API may exist; production backend status remains Unsupported/default-deny. |
 | Keyboard write | HARD-BLOCKED | Current production Hardware1 reports Unsupported; root sandbox does not expose keyboard write path. |
 | Aura write | HARD-BLOCKED | Static RGB typed writer is not promoted into product/unattended execution. |
-| Automation | IMPLEMENTED SHADOW/EXECUTOR CONTRACT, EXECUTION BLOCKED | Worker owns policy/lifecycle/debounce/recovery/serialization; Performance executor compiled but promotion=false. Other executors disabled. |
+| Automation | IMPLEMENTED SHADOW/EXECUTOR CONTRACT, EXECUTION BLOCKED | Worker owns policy/lifecycle/debounce/recovery/serialization; resume performs read-only provider/capability refresh and never restores desired hardware state. Performance executor compiled but promotion=false. Other executors disabled. |
 | Display Refresh | IMPLEMENTED CONTRACT / NO MUTATION OWNER | Typed target/request/read-back design exists; no concrete compositor configuration owner is enabled. |
 | Updates | FAIL-CLOSED | Installation owner detection + typed blockers exist; no invented release feed/downloader/installer. |
 | Release dependency graph | OPEN — #115 | GUI still has normal `orbis-test-support` dependency because production/offscreen startup share fixture-derived UiState bootstrap. |
