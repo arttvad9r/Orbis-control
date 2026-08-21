@@ -3,6 +3,7 @@
 //! This module owns construction and grouping of application services. It does
 //! not define provider semantics or transport contracts.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -21,6 +22,7 @@ use orbis_core::capability::{
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
+use orbis_providers::bounded_operation;
 use orbis_providers::bounded_provider_call;
 use orbis_providers::error::ProviderError;
 #[cfg(test)]
@@ -660,12 +662,21 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
         let Some(connection) = &self.mutation_status_connection else {
             return;
         };
-        self.fan_mutation_status =
-            orbis_session_client::hardware1_fan_mutation_status(connection).await;
-        self.battery_mutation_status =
-            orbis_session_client::hardware1_battery_mutation_status(connection).await;
-        self.performance_mutation_status =
-            orbis_session_client::hardware1_performance_mutation_status(connection).await;
+        self.fan_mutation_status = bounded_hardware1_status(
+            "fan_mutation_status",
+            orbis_session_client::hardware1_fan_mutation_status(connection),
+        )
+        .await;
+        self.battery_mutation_status = bounded_hardware1_status(
+            "battery_mutation_status",
+            orbis_session_client::hardware1_battery_mutation_status(connection),
+        )
+        .await;
+        self.performance_mutation_status = bounded_hardware1_status(
+            "performance_mutation_status",
+            orbis_session_client::hardware1_performance_mutation_status(connection),
+        )
+        .await;
     }
 }
 
@@ -994,18 +1005,72 @@ pub type ProductionRuntime = ApplicationRuntime<
     >,
 >;
 
+/// Deadline for one read-only Hardware1 status query over D-Bus.
+///
+/// This bounds the canonical mutation-status requery (#123): a hung
+/// hardwared/service may delay capability refresh or startup by at most this
+/// deadline, never indefinitely. The value mirrors the per-read deadlines of
+/// the Session1 providers (one second) with headroom for bus round-trips.
+const HARDWARE1_STATUS_DEADLINE: Duration = Duration::from_secs(2);
+
+/// Run one read-only Hardware1 status query within an explicit deadline.
+///
+/// These queries already map every transport/protocol failure to
+/// [`CapabilityStatus::Unknown`] — the honest no-evidence state. Bounding the
+/// wait extends exactly that classification to a hung peer; a timeout is never
+/// reported as success and never retried. The next canonical refresh re-queries
+/// statuses from scratch.
+async fn bounded_hardware1_status<F>(
+    operation: &'static str,
+    future: F,
+) -> orbis_core::capability::CapabilityStatus
+where
+    F: Future<Output = orbis_core::capability::CapabilityStatus>,
+{
+    // The status queries resolve to a plain status rather than
+    // `Result<_, ProviderError>`; adapt them so the canonical bounded
+    // primitive owns the deadline.
+    let outcome = bounded_operation(
+        HARDWARE1_STATUS_DEADLINE,
+        "hardware1",
+        operation,
+        async move { Ok::<_, ProviderError>(future.await) },
+    )
+    .await;
+    match outcome {
+        Ok(status) => status,
+        Err(_) => orbis_core::capability::CapabilityStatus::Unknown,
+    }
+}
+
 /// Build the current production application runtime.
 pub async fn build_production_runtime(
     session_connection: zbus::Connection,
     system_connection: zbus::Connection,
 ) -> anyhow::Result<(ProductionRuntime, bool)> {
-    let hardware_owner = hardware1_write_available(&system_connection).await;
-    let fan_mutation_status =
-        orbis_session_client::hardware1_fan_mutation_status(&system_connection).await;
-    let battery_mutation_status =
-        orbis_session_client::hardware1_battery_mutation_status(&system_connection).await;
-    let performance_mutation_status =
-        orbis_session_client::hardware1_performance_mutation_status(&system_connection).await;
+    let hardware_owner = bounded_operation(
+        HARDWARE1_STATUS_DEADLINE,
+        "hardware1",
+        "write_available",
+        async { Ok::<_, ProviderError>(hardware1_write_available(&system_connection).await) },
+    )
+    .await
+    .unwrap_or(false);
+    let fan_mutation_status = bounded_hardware1_status(
+        "fan_mutation_status",
+        orbis_session_client::hardware1_fan_mutation_status(&system_connection),
+    )
+    .await;
+    let battery_mutation_status = bounded_hardware1_status(
+        "battery_mutation_status",
+        orbis_session_client::hardware1_battery_mutation_status(&system_connection),
+    )
+    .await;
+    let performance_mutation_status = bounded_hardware1_status(
+        "performance_mutation_status",
+        orbis_session_client::hardware1_performance_mutation_status(&system_connection),
+    )
+    .await;
 
     let battery_read_provider = SessionChargeLimitProvider::new(ZbusSessionChargeLimitSource::new(
         session_connection.clone(),
@@ -1145,8 +1210,9 @@ pub fn mock_runtime() -> MockRuntime {
 mod tests {
     use super::{
         ApplicationRuntime, CapabilityRegistrySnapshot, GpuPrimitiveServices, GpuServices,
-        GpuServicesRuntime, MockRuntime, ProbeError, aggregate_fan_curve_capability,
-        build_initial_registry_snapshot, probe_capability_registry, refresh_capability_registry,
+        GpuServicesRuntime, HARDWARE1_STATUS_DEADLINE, MockRuntime, ProbeError,
+        aggregate_fan_curve_capability, bounded_hardware1_status, build_initial_registry_snapshot,
+        probe_capability_registry, refresh_capability_registry,
     };
     use orbis_application::{AppService, CommandError};
     use orbis_core::FeatureId;
@@ -1157,7 +1223,47 @@ mod tests {
     use orbis_providers::error::ProviderError;
     use orbis_providers::mock::{MockErrorMode, MockProvider};
     use orbis_test_support::devices::build_state_arc;
+    use std::cell::Cell;
     use std::sync::Arc;
+
+    #[tokio::test(start_paused = true)]
+    async fn hung_hardware1_status_requery_resolves_unknown_within_deadline() {
+        let started = tokio::time::Instant::now();
+        let status = bounded_hardware1_status("fan_mutation_status", std::future::pending()).await;
+
+        assert_eq!(status, CapabilityStatus::Unknown);
+        // The paused Tokio clock advances exactly to the deadline when the
+        // timeout fires, so equality proves the bound is actually applied.
+        assert_eq!(started.elapsed(), HARDWARE1_STATUS_DEADLINE);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn hardware1_status_timeout_is_never_success_and_never_retried() {
+        let calls = Cell::new(0u32);
+        let status = bounded_hardware1_status("battery_mutation_status", async {
+            calls.set(calls.get() + 1);
+            std::future::pending::<CapabilityStatus>().await
+        })
+        .await;
+
+        assert_eq!(status, CapabilityStatus::Unknown);
+        assert_eq!(calls.get(), 1, "timeout must not retry the query");
+    }
+
+    #[tokio::test]
+    async fn proven_hardware1_status_passes_through_without_coercion() {
+        let proven = [
+            CapabilityStatus::Supported,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::PermissionDenied,
+        ];
+        for expected in proven {
+            let observed =
+                bounded_hardware1_status("performance_mutation_status", async move { expected })
+                    .await;
+            assert_eq!(observed, expected);
+        }
+    }
 
     #[test]
     fn fan_curve_capability_requires_cpu_and_gpu_curve_reads() {

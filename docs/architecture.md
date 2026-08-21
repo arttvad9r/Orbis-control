@@ -182,7 +182,7 @@ GPU primitive reads run concurrently with separate provider deadlines, so one hu
 Remaining #123 boundary:
 
 - telemetry must expose/use a canonical deadline path;
-- Hardware1 mutation-status requery must be bounded;
+- Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`, timeout → `Unknown`); executable validation of the exact revision remains;
 - mutation timeout after possible dispatch is **unknown outcome** and must enter observation/recovery, never generic blind retry.
 
 ## 7. Battery model

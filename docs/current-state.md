@@ -83,9 +83,10 @@ Implemented in source:
 Still open:
 
 1. telemetry trait does not expose canonical provider identity/timeout to the worker path;
-2. Hardware1 mutation-status requery still needs an explicit bounded read contract;
+2. Hardware1 mutation-status requery is now bounded (`HARDWARE1_STATUS_DEADLINE`, timeout → `Unknown`); executable validation of the exact revision remains;
 3. mutation timeout after possible dispatch is an **unknown outcome**, not an ordinary failure; it requires observation/recovery before any retry;
-4. executable Rust validation remains blocked.
+4. the `orbisctl validate` subcommand still issues one direct Hardware1 status query and an unbounded bus connect;
+5. hosted CI execution remains blocked (#106).
 
 ## Effective product-policy truth (#120 complete)
 
