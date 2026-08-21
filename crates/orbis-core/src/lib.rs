@@ -97,7 +97,9 @@ pub use newtypes::{EnergyMWh, FanPwm, MilliWatt, Percent, PowerW, RefreshHz, Rpm
 pub use power::PowerSource;
 pub use profile::{AsusdFanProfile, PerformanceProfile, PlatformProfile};
 pub use provider::ProviderStatus;
-pub use telemetry::{BatteryTelemetry, FanTelemetry, HardwareSnapshot, PowerTelemetry, Telemetry};
+pub use telemetry::{
+    BatteryTelemetry, FanTelemetry, HardwareSnapshot, PowerTelemetry, Telemetry, TelemetryQuality,
+};
 pub use warning::{Warning, WarningSeverity};
 
 /// Результат операции, общий для провайдеров и демона.

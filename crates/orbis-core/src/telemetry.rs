@@ -80,6 +80,25 @@ pub struct Telemetry {
     pub ts: SystemTime,
 }
 
+/// Quality of the data fields in one telemetry snapshot.
+///
+/// This is deliberately independent from backend availability and sample
+/// freshness: a responding backend may return `Partial` or `Empty` data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryQuality {
+    /// All expected top-level telemetry groups contain useful data.
+    Complete,
+    /// Some useful telemetry is present, but one or more groups are absent.
+    Partial,
+    /// The provider returned successfully but no useful telemetry fields exist.
+    Empty,
+    /// A previously successful sample is retained but is no longer fresh.
+    Stale,
+    /// No usable sample exists because collection failed.
+    Failed,
+}
+
 impl Telemetry {
     /// Пустой снапшот телеметрии.
     pub fn empty() -> Self {
@@ -92,6 +111,40 @@ impl Telemetry {
             battery: None,
             gpu_power_state: GpuPowerState::Unknown,
             ts: SystemTime::now(),
+        }
+    }
+
+    /// Classify the useful data present in this snapshot without considering
+    /// backend availability or age.
+    pub fn quality(&self) -> TelemetryQuality {
+        let has_power = self.power.ac.is_some()
+            || self.power.battery.is_some()
+            || self.power.total.is_some()
+            || self.power.gpu.is_some();
+        let has_any = self.cpu_temp.is_some()
+            || self.gpu_temp.is_some()
+            || !self.fans.is_empty()
+            || has_power
+            || self.ac_online.is_some()
+            || self.battery.is_some()
+            || !matches!(self.gpu_power_state, GpuPowerState::Unknown);
+
+        if !has_any {
+            return TelemetryQuality::Empty;
+        }
+
+        let complete = self.cpu_temp.is_some()
+            && self.gpu_temp.is_some()
+            && !self.fans.is_empty()
+            && has_power
+            && self.ac_online.is_some()
+            && self.battery.is_some()
+            && !matches!(self.gpu_power_state, GpuPowerState::Unknown);
+
+        if complete {
+            TelemetryQuality::Complete
+        } else {
+            TelemetryQuality::Partial
         }
     }
 }

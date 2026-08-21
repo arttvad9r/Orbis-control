@@ -8,7 +8,7 @@ use crate::capability::DeviceCapabilities;
 use crate::display_output::DisplayOutputSnapshot;
 use crate::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use crate::identity::DeviceIdentity;
-use crate::telemetry::Telemetry;
+use crate::telemetry::{Telemetry, TelemetryQuality};
 use crate::warning::WarningSeverity;
 
 /// Версия typed in-memory diagnostics snapshot contract.
@@ -292,6 +292,29 @@ pub struct TelemetryDiagnostics {
     pub last_success_at: Option<SystemTime>,
     /// Freshness classification independent from the telemetry values.
     pub freshness: TelemetryFreshness,
+}
+
+impl TelemetryDiagnostics {
+    /// Classify data quality independently from collection availability and
+    /// freshness.
+    pub fn quality(&self) -> TelemetryQuality {
+        if self.latest.is_none() {
+            return TelemetryQuality::Failed;
+        }
+        if matches!(self.freshness, TelemetryFreshness::Stale) {
+            return TelemetryQuality::Stale;
+        }
+        match self.status {
+            TelemetryCollectionStatus::Unavailable
+            | TelemetryCollectionStatus::PermissionDenied
+            | TelemetryCollectionStatus::Unknown => TelemetryQuality::Stale,
+            TelemetryCollectionStatus::Available | TelemetryCollectionStatus::Degraded => self
+                .latest
+                .as_ref()
+                .map(Telemetry::quality)
+                .unwrap_or(TelemetryQuality::Failed),
+        }
+    }
 }
 
 /// Read-only display/output diagnostics.

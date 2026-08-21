@@ -119,8 +119,9 @@ impl DiagnosticsWindowModel {
         );
 
         let telemetry = format!(
-            "status={:?} · freshness={:?} · sample={}",
+            "status={:?} · quality={:?} · freshness={:?} · sample={}",
             dto.telemetry.status,
+            dto.telemetry.quality(),
             dto.telemetry.freshness,
             if dto.telemetry.latest.is_some() {
                 "available"

@@ -90,6 +90,7 @@ pub fn summary_text(dto: &DiagnosticsUiDto) -> String {
 
     out.push_str("\n[telemetry]\n");
     out.push_str(&format!("status={:?}\n", dto.telemetry.status));
+    out.push_str(&format!("quality={:?}\n", dto.telemetry.quality()));
     out.push_str(&format!("freshness={:?}\n", dto.telemetry.freshness));
     out.push_str(&format!(
         "sample_present={}\n",
@@ -175,6 +176,7 @@ pub fn report_json_value(dto: &DiagnosticsUiDto) -> Value {
         },
         "telemetry": {
             "status": format!("{:?}", dto.telemetry.status),
+            "quality": format!("{:?}", dto.telemetry.quality()),
             "freshness": format!("{:?}", dto.telemetry.freshness),
             "sample_present": dto.telemetry.latest.is_some(),
         },

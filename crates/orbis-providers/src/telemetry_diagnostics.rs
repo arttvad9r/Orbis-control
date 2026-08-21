@@ -26,7 +26,13 @@ pub fn telemetry_diagnostics_after_attempt(
     match result {
         Ok(sample) => {
             let last_success_at = sample.ts;
-            let freshness = freshness_at(last_success_at, attempted_at, freshness_threshold);
+            let freshness = if matches!(sample.quality(), orbis_core::TelemetryQuality::Empty) {
+                // A successful transport response with no useful fields is not
+                // a fresh telemetry observation.
+                TelemetryFreshness::Unknown
+            } else {
+                freshness_at(last_success_at, attempted_at, freshness_threshold)
+            };
             TelemetryDiagnostics {
                 latest: Some(sample),
                 status: TelemetryCollectionStatus::Available,
@@ -84,7 +90,11 @@ fn status_from_error(error: &ProviderError) -> TelemetryCollectionStatus {
 mod tests {
     use std::time::Duration;
 
-    use orbis_core::{gpu::GpuPowerState, telemetry::PowerTelemetry};
+    use orbis_core::{
+        gpu::GpuPowerState,
+        newtypes::{EnergyMWh, MilliWatt, Percent, Rpm, TemperatureC},
+        telemetry::{BatteryTelemetry, FanTelemetry, PowerTelemetry, TelemetryQuality},
+    };
 
     use super::*;
 
@@ -97,6 +107,35 @@ mod tests {
             ac_online: None,
             battery: None,
             gpu_power_state: GpuPowerState::Unknown,
+            ts,
+        }
+    }
+
+    fn complete_sample(ts: SystemTime) -> Telemetry {
+        Telemetry {
+            cpu_temp: Some(TemperatureC::new(50).unwrap()),
+            gpu_temp: Some(TemperatureC::new(55).unwrap()),
+            fans: vec![FanTelemetry {
+                fan: orbis_core::fan::FanId::Cpu,
+                rpm: Rpm::new(2000).unwrap(),
+                percent: Some(Percent::new(40).unwrap()),
+            }],
+            power: PowerTelemetry {
+                ac: Some(MilliWatt::new(50_000).unwrap()),
+                battery: Some(MilliWatt::new(20_000).unwrap()),
+                total: Some(MilliWatt::new(70_000).unwrap()),
+                gpu: Some(MilliWatt::new(10_000).unwrap()),
+            },
+            ac_online: Some(true),
+            battery: Some(BatteryTelemetry {
+                percent: Percent::new(80).unwrap(),
+                capacity: Some(Percent::new(95).unwrap()),
+                energy_now: Some(EnergyMWh::new(40_000).unwrap()),
+                energy_full: Some(EnergyMWh::new(50_000).unwrap()),
+                charge_cycles: Some(10),
+                state: "Charging".into(),
+            }),
+            gpu_power_state: GpuPowerState::Active,
             ts,
         }
     }
@@ -118,7 +157,22 @@ mod tests {
         assert_eq!(diagnostics.status, TelemetryCollectionStatus::Available);
         assert_eq!(diagnostics.last_attempt_at, Some(attempted_at));
         assert_eq!(diagnostics.last_success_at, Some(sampled_at));
+        assert_eq!(diagnostics.freshness, TelemetryFreshness::Unknown);
+        assert_eq!(diagnostics.quality(), TelemetryQuality::Empty);
+    }
+
+    #[test]
+    fn complete_sample_is_fresh_and_complete() {
+        let sampled_at = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let diagnostics = telemetry_diagnostics_after_attempt(
+            None,
+            Ok(complete_sample(sampled_at)),
+            sampled_at,
+            Duration::from_secs(5),
+        );
+
         assert_eq!(diagnostics.freshness, TelemetryFreshness::Fresh);
+        assert_eq!(diagnostics.quality(), TelemetryQuality::Complete);
     }
 
     #[test]
@@ -128,13 +182,14 @@ mod tests {
 
         let diagnostics = telemetry_diagnostics_after_attempt(
             None,
-            Ok(sample(sampled_at)),
+            Ok(complete_sample(sampled_at)),
             attempted_at,
             Duration::from_secs(5),
         );
 
         assert_eq!(diagnostics.status, TelemetryCollectionStatus::Available);
         assert_eq!(diagnostics.freshness, TelemetryFreshness::Stale);
+        assert_eq!(diagnostics.quality(), TelemetryQuality::Stale);
     }
 
     #[test]
@@ -163,6 +218,7 @@ mod tests {
         assert_eq!(diagnostics.last_attempt_at, Some(failed_at));
         assert_eq!(diagnostics.status, TelemetryCollectionStatus::Unavailable);
         assert_eq!(diagnostics.freshness, TelemetryFreshness::Stale);
+        assert_eq!(diagnostics.quality(), TelemetryQuality::Stale);
     }
 
     #[test]
@@ -184,12 +240,14 @@ mod tests {
             TelemetryCollectionStatus::PermissionDenied
         );
         assert_eq!(diagnostics.freshness, TelemetryFreshness::Unknown);
+        assert_eq!(diagnostics.quality(), TelemetryQuality::Failed);
     }
 
     #[test]
     fn partial_success_is_not_downgraded_or_filled_with_fake_values() {
         let sampled_at = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
-        let partial = sample(sampled_at);
+        let mut partial = sample(sampled_at);
+        partial.cpu_temp = Some(TemperatureC::new(46).unwrap());
 
         let diagnostics = telemetry_diagnostics_after_attempt(
             None,
@@ -200,8 +258,9 @@ mod tests {
 
         assert_eq!(diagnostics.status, TelemetryCollectionStatus::Available);
         assert_eq!(diagnostics.latest, Some(partial));
+        assert_eq!(diagnostics.quality(), TelemetryQuality::Partial);
         let latest = diagnostics.latest.as_ref().unwrap();
-        assert!(latest.cpu_temp.is_none());
+        assert!(latest.cpu_temp.is_some());
         assert!(latest.gpu_temp.is_none());
         assert!(latest.fans.is_empty());
         assert!(latest.power.ac.is_none());
