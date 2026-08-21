@@ -1,7 +1,7 @@
 # Architecture — Orbis Control
 
 > Роль: **CURRENT DESIGN**.
-> Source snapshot: `asus-hardware-validation-20260821`.
+> Source snapshot: development branch (consolidates the former `asus-hardware-validation-20260821` line).
 > Operational readiness — [`current-state.md`](current-state.md), future work — [`roadmap.md`](roadmap.md), stable decisions — [`adr/`](adr/).
 
 ## 1. Architectural invariants
@@ -263,6 +263,8 @@ Pending  = unconfirmed transition + requirement/recovery state
 Loading configuration must never itself trigger hardware mutation. Reconciliation is not a generic “apply config” loop; it must compare fresh Observed state, evaluate capability/policy, perform one deliberate action, then read back.
 
 Legacy config defaults are hardware-inert and new stores use checked XDG paths. Deprecated compatibility helpers remain #113.
+
+Pure research-foundation modules (preset/policy selection, reconciliation decisions, transaction phases, readiness, software fan-policy computations) exist in `orbis-core`/`orbis-config`/`orbis-providers` but no production executor consumes them yet; they remain FOUNDATION-only until a deliberate wiring step preserves the separation above.
 
 ## 13. Preferences / desktop lifecycle
 

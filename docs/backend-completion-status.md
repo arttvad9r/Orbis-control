@@ -1,7 +1,7 @@
 # Backend Completion Status
 
 > Status date: 2026-08-21.
-> Source snapshot: `asus-hardware-validation-20260821` at `67f9913`.
+> Source snapshot: development branch (consolidates the former `asus-hardware-validation-20260821` line).
 >
 > Concise companion to [`current-state.md`](current-state.md) and [`architecture.md`](architecture.md). Source-level `IMPLEMENTED` does not imply executable validation.
 
@@ -146,4 +146,10 @@ Status LEDs, clamshell/ASPM/standby-networking/iGPU-memory/CPU-core/hotkey conce
 
 `scripts/verify-static` provides standard-library source contracts for UI, Automation, Display, backend completion, provider-timeout and documentation-status invariants. It is a fail-fast safety net only.
 
-A fresh Draft PR #129 CI run again failed before repository steps (`steps=null`), so #106 remains an external Actions execution blocker. The available environment also cannot run Rust/Cargo/Slint locally. Therefore this branch is not claimed as passing `cargo check/test/clippy`, Slint compile or final Nix/package acceptance.
+The local flake devShell provides a Rust/Cargo toolchain. On the current `development` revision, `cargo fmt/check/test/clippy --locked` were executed green and `python3 scripts/verify-static` passes after `317f22d`. This is revision-scoped source/test evidence only: it does not restore trustworthy hosted CI (#106), does not prove Slint/package/VM acceptance (`nix flake check --no-build` is evaluation-only), and creates no live hardware evidence for this branch.
+
+## Unwired research foundations
+
+Policy/desired-state presets, reconciliation decisions, transaction phases, readiness helpers, software fan-policy computations and system-telemetry parsers are exported from crate APIs but have no runtime consumers. They remain FOUNDATION-only; no preset, policy or reconciliation path can dispatch hardware actions today.
+
+A fresh Draft PR #129 CI run previously failed before repository steps (`steps=null`), so #106 remains an external Actions execution blocker; live PR status requires GitHub verification.

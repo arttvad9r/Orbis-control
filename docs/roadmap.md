@@ -36,7 +36,7 @@ Remaining:
 2. #114 — after #106, protect `main` with the real required check names;
 3. #118 — prune obsolete `agent/*` refs when delete-ref access exists;
 4. #124 — decide permanent `io.github.orbiscontrol.*` identity before stable release;
-5. integrate Draft PR #129 only after executable validation and merge blockers are resolved.
+5. reconcile integration lines: `development` (active) vs Draft PR #129 (head `e8b611e`); any merge decision waits for executable validation and resolved safety blockers.
 
 The ASUS baseline is observation evidence only. It does not promote any unvalidated
 write or product capability to `Supported`.
@@ -93,7 +93,7 @@ Completed source foundations include versioned desired-state storage, lifecycle 
 Next:
 
 - #113 — remove deprecated legacy config/path compatibility APIs after executable compatibility validation;
-- keep config loading hardware-inert;
+- wire research-foundation modules (presets, reconciliation, transaction, readiness) only through deliberate design steps that keep config loading hardware-inert;
 - reconciliation must read authoritative Observed state before any action;
 - Desired/Observed/Pending remain explicit;
 - unattended Automation promotion remains `false` until exact-build executable validation;

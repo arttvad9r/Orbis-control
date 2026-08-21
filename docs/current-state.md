@@ -2,7 +2,7 @@
 
 > Роль: **CURRENT STATUS**.
 > Обновлено: **2026-08-21**.
-> Source snapshot: `asus-hardware-validation-20260821` at `7977d25`.
+> Source snapshot: development branch (consolidates `asus-hardware-validation-20260821` / PR #129 head `e8b611e`).
 >
 > `main` остаётся последней консолидированной baseline до отдельной интеграции этой ветки. Claims используют [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md): `IMPLEMENTED / TESTED / PACKAGED / LIVE-VALIDATED / BLOCKED / UNKNOWN`.
 
@@ -14,12 +14,12 @@ Privileged mutation architecture остаётся узкой: original caller �
 
 Production product path намеренно включает только доказанные writes. Performance и условно Battery — live mutation owners; raw GPU, Fan, Panel, Keyboard и Aura остаются product/policy blocked. Automation execution promotion=false, Display modeset не имеет concrete owner, Updates не имеет canonical signed feed/installer owner.
 
-Главный release blocker — #106: GitHub Actions не предоставляет trustworthy executable validation. В доступной среде также отсутствует Rust/Cargo/Slint toolchain. Поэтому изменения текущей ветки можно называть `IMPLEMENTED` по source evidence, но нельзя называть green `TESTED` только на основании static checks.
+Главный release blocker — #106: GitHub Actions не предоставляет trustworthy executable validation. Локальный Rust/Cargo toolchain (flake devShell) доступен: на текущей ревизии `cargo fmt/check/test/clippy --locked` выполнены успешно, `python3 scripts/verify-static` проходит после `317f22d`, а `nix flake check --no-build` подтверждает только evaluation. Поэтому изменения текущей ветки можно называть `IMPLEMENTED`/`TESTED` по source и локальному executable evidence точной ревизии, но это не `PACKAGED`, не `LIVE-VALIDATED` и не восстановление hosted CI.
 
 ## Repository status
 
-- Active integration branch: `asus-hardware-validation-20260821`.
-- Draft integration PR: #129; он не должен merge до executable validation и safety blockers.
+- Active integration branch: `development` (pushed to `origin/development`; consolidates the former `asus-hardware-validation-20260821` line).
+- Draft integration PR: #129 (last known state: Draft; live status requires GitHub verification). Its head remains `e8b611e`; `development` now supersedes it as the integration line, and no merge decision has been made.
 - `main` — previous consolidated baseline; required checks не включены из-за #106/#114.
 - Единственный canonical workflow — `.github/workflows/ci.yml`.
 - Удалён оставшийся одноразовый `.github/keyboard-backlight-probe-validation-trigger` artifact.
@@ -31,7 +31,7 @@ Production product path намеренно включает только док�
 
 | Area | Status | Current fact |
 |---|---|---|
-| Repository baseline | CLEANED / IMPLEMENTED | One-off validation artifact удалён; canonical workflow/document hierarchy сохранены; Draft PR #129 создан как integration checkpoint. |
+| Repository baseline | CLEANED / IMPLEMENTED | One-off validation artifact удалён; canonical workflow/document hierarchy сохранены; интеграция консолидирована в ветку `development` (PR #129 head `e8b611e` сохранён как исходная история). |
 | Rust/build contract | IMPLEMENTED | Workspace MSRV/toolchain contract — Rust 1.87. |
 | Executable CI | BLOCKED — #106 | Actions failure/no-run occurs before trustworthy repository steps; не интерпретируется как Cargo/Nix result. |
 | Main protection | DEFERRED — #114 | Required checks включать только после реально исполняемого CI. |
@@ -63,7 +63,8 @@ Production product path намеренно включает только док�
 | GUI root boundary | IMPLEMENTED SOURCE — #125 | Interactive launch rejects euid 0 before preferences/runtime/bus setup; screenshot/offscreen paths remain allowed. |
 | Hardwared sandbox | STRUCTURALLY MINIMIZED / VALIDATION OPEN — #126 | Intended direct sysfs write surface is `platform_profile` only; executable package/VM proof awaits #106/tooling. |
 | ASUS FA707NV live read baseline | OBSERVED / READ-ONLY | `platform_profile`, asusd/asusctl profile, UPower, DRM/sysfs GPU, hwmon, thermal and power_supply reads were observed on FA707NV; Session1/Hardware1/hardwared and supergfxd were unavailable. This does not promote write support. |
-| ASUS FA707NV first hardware mutation validated.
+| ASUS FA707NV platform profile mutation | LIVE-VALIDATED (revision-scoped) | Controlled Hardware1 apply/read-back/restore was validated on-device; see [`hardware-evidence/fa707nv-platform-profile-validation.md`](hardware-evidence/fa707nv-platform-profile-validation.md). Evidence is scoped to that revision and environment; it does not extend to later changes or other capabilities. |
+| Research foundations (policy/preset/reconciliation/fan-policy/transaction/readiness/system-telemetry) | FOUNDATION | Merged modules are exported from `orbis-core`/`orbis-config`/`orbis-providers` public APIs but have no runtime consumers: worker, UI, sessiond and hardwared do not call them. Loading config remains hardware-inert. See "Research-foundation status" below. |
 
 ## Bounded execution status (#123)
 
@@ -135,7 +136,9 @@ original GUI/application caller
 
 Current product block remains defense-in-depth: UI gating + Hardware1 disabled backend + polkit/default sandbox where applicable.
 
-## Work still possible without executable CI
+## Work still possible while GitHub Actions remain blocked (#106)
+
+Local executable Rust checks are available in the flake devShell and were executed green on this revision (`cargo fmt/check/test/clippy --locked`; `python3 scripts/verify-static` PASS after `317f22d`). This is revision-scoped `TESTED` evidence only. It does not restore trustworthy hosted CI (#106), does not prove packaging/VM acceptance, and does not create live hardware evidence for this branch.
 
 Safe source work may continue when it does not widen unvalidated hardware writes:
 
@@ -146,7 +149,23 @@ Safe source work may continue when it does not widen unvalidated hardware writes
 - fail-closed runtime hardening whose source semantics are locally reviewable;
 - preparation of tests that will execute later.
 
-Do not promote fan/GPU/Panel/Keyboard/Aura writes, unattended Automation, Display modeset or self-update on static evidence alone.
+Do not promote fan/GPU/Panel/Keyboard/Aura writes, unattended Automation, Display modeset or self-update on static or local-test evidence alone.
+
+## Research-foundation status (FOUNDATION, unwired)
+
+The consolidated `development` branch includes domain modules merged from the research-mechanics line. They are honest foundations, not production features:
+
+- policy/desired-state presets (`orbis-config::policy_desired`, `orbis-core` preset/preset-bundle);
+- reconciliation decision/scheduling primitives;
+- software fan-policy primitives (EMA, hysteresis, PWM rate limiting, interpolation);
+- mutation transaction phases and audit model;
+- readiness model with bounded probe helpers;
+- system telemetry (Linux memory/PSI/zram/zswap parsers);
+- telemetry history/export/statistics primitives;
+- thermal-control pure computations;
+- hardware-validation evidence state machine.
+
+All of them are exported from crate public APIs but have **no runtime consumers**: the worker, UI composition, sessiond and hardwared do not call them. No preset import, policy selection or reconciliation pass can dispatch a hardware action today; configuration loading remains hardware-inert. Wiring any of these into production requires its own design step and must preserve Desired/Observed/Pending separation, `Accepted != Applied`, and the existing fail-closed product gates.
 
 ## Active blockers / next work
 

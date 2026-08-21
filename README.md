@@ -4,7 +4,7 @@ Orbis Control — Linux-first приложение на Rust + Slint для уп
 
 ## Статус проекта
 
-Версия workspace: `0.1.0`. Активная интеграционная ветка `asus-hardware-validation-20260821` содержит более новый UI/backend/runtime слой, чем текущий `main`; `main` остаётся последней консолидированной release-базой до отдельной интеграции ветки.
+Версия workspace: `0.1.0`. Активная интеграционная ветка — `development`; она консолидирует прежнюю линию `asus-hardware-validation-20260821` (head PR #129, `e8b611e`) и содержит более новый UI/backend/runtime слой, чем текущий `main`. `main` остаётся последней консолидированной release-базой до отдельной интеграции.
 
 Текущие source-level production slices в активной ветке:
 
@@ -25,7 +25,7 @@ Orbis Control — Linux-first приложение на Rust + Slint для уп
 
 ## Release gate
 
-Release сейчас **BLOCKED**. Основной внешний blocker — #106: GitHub Actions не выполняет trustworthy repository jobs. В доступной рабочей среде также нет Rust/Cargo/Slint toolchain, поэтому source review и stdlib static checks не считаются green Cargo/Clippy/Slint validation.
+Release сейчас **BLOCKED**. Основной внешний blocker — #106: GitHub Actions не выполняет trustworthy repository jobs. Локальный Rust/Cargo toolchain (flake devShell) доступен: на текущей ревизии `cargo fmt/check/test/clippy --locked` выполнялись успешно, а `python3 scripts/verify-static` проходит после `317f22d`. Это source/test-level evidence для точной ревизии; оно не является runtime/package/hardware verification и не отменяет #106.
 
 До release обязательны:
 
@@ -114,6 +114,12 @@ git diff --check
 ```
 
 `scripts/verify-static` — только source-level safety net для среды без toolchain. Он не заменяет компиляцию.
+
+Дополнительные ограничения evidence:
+
+- `nix flake check --no-build` подтверждает только evaluation flake, а не VM/build/package acceptance;
+- локальные Cargo-результаты действительны для точной ревизии и не восстанавливают hosted CI (#106);
+- новые изменения ветки `development` не имеют полноценного live hardware evidence.
 
 ## Документация
 

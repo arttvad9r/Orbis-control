@@ -34,7 +34,7 @@ REQUIRED = {
         "#125",
     ),
     "root": (
-        "asus-hardware-validation-20260821",
+        "`development`",
         "worker_runtime.rs",
         "status --json",
         "scripts/verify-static",
@@ -48,7 +48,7 @@ REQUIRED = {
         "Source inspection proves at most `IMPLEMENTED`",
     ),
     "state": (
-        "Source snapshot: `asus-hardware-validation-20260821`",
+        "Source snapshot: development",
         "#110 closed",
         "#111 closed",
         "#121 closed",

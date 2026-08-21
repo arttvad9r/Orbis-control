@@ -112,6 +112,8 @@ Intended order:
 
 #106 currently blocks trustworthy Actions execution: earlier jobs did not reach repository steps or fresh pushes produced no run. Until actual steps execute successfully, GitHub-hosted validation remains `BLOCKED`, not `PASS` or `FAIL` for the source itself.
 
+The local flake devShell does provide a Rust/Cargo toolchain. Locally executed `--locked` checks are valid revision-scoped evidence for the exact commit, but they do not restore hosted CI (#106), do not prove packaging/VM acceptance (`nix flake check --no-build` is evaluation-only), and never substitute live hardware validation.
+
 ## 8. Runtime and hardware evidence
 
 `PACKAGED`/runtime evidence should record at least:
