@@ -24,6 +24,7 @@ use orbis_core::battery::ChargeLimit;
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
+use orbis_providers::bounded_provider_call;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
     BatteryProvider, FanCurveMutationProvider, FanCurvePoints, FanProvider, GpuAccessProvider,
@@ -132,8 +133,18 @@ where
     ///
     /// Данные берутся только из ответов provider; внутренний кэш отсутствует.
     pub async fn performance_state(&self) -> Result<PerformanceState, ProviderError> {
-        let current = self.provider.current_profile().await?;
-        let available = self.provider.profiles().await?;
+        let current = bounded_provider_call(
+            self.provider.as_ref(),
+            "performance.current_profile",
+            self.provider.current_profile(),
+        )
+        .await?;
+        let available = bounded_provider_call(
+            self.provider.as_ref(),
+            "performance.profiles",
+            self.provider.profiles(),
+        )
+        .await?;
         Ok(PerformanceState { current, available })
     }
 
@@ -175,7 +186,12 @@ where
     ///
     /// Данные берутся только из `BatteryProvider::charge_limit`; кэш отсутствует.
     pub async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
-        self.provider.charge_limit().await
+        bounded_provider_call(
+            self.provider.as_ref(),
+            "battery.charge_limit",
+            self.provider.charge_limit(),
+        )
+        .await
     }
 
     /// Установить лимит зарядки.
@@ -241,10 +257,30 @@ where
     /// Поля читаются через отдельные provider методы; внутренний кэш отсутствует.
     /// Примечание: составной snapshot неатомарен (см. известные ограничения).
     pub async fn gpu_state(&self) -> Result<GpuState, ProviderError> {
-        let requested = self.provider.requested_mode().await?;
-        let mux = self.provider.mux_state().await?;
-        let access_policy = self.provider.access_policy().await?;
-        let power_state = self.provider.power_state().await?;
+        let requested = bounded_provider_call(
+            self.provider.as_ref(),
+            "gpu.requested_mode",
+            self.provider.requested_mode(),
+        )
+        .await?;
+        let mux = bounded_provider_call(
+            self.provider.as_ref(),
+            "gpu.mux_state",
+            self.provider.mux_state(),
+        )
+        .await?;
+        let access_policy = bounded_provider_call(
+            self.provider.as_ref(),
+            "gpu.access_policy",
+            self.provider.access_policy(),
+        )
+        .await?;
+        let power_state = bounded_provider_call(
+            self.provider.as_ref(),
+            "gpu.power_state",
+            self.provider.power_state(),
+        )
+        .await?;
         let requirement = self.provider.requirement_for(requested);
         Ok(GpuState {
             requested,
@@ -296,7 +332,12 @@ where
     /// mode / MUX / access policy и не строит `GpuState`. `ProviderError`
     /// сохраняется без преобразования и не подменяется `Unknown`.
     pub async fn gpu_power_state(&self) -> Result<GpuPowerState, ProviderError> {
-        self.provider.power_state().await
+        bounded_provider_call(
+            self.provider.as_ref(),
+            "gpu.power_state",
+            self.provider.power_state(),
+        )
+        .await
     }
 }
 
@@ -310,7 +351,12 @@ where
     /// `ProviderError` сохраняется без преобразования и не подменяется
     /// `Unknown`.
     pub async fn gpu_mux_state(&self) -> Result<GpuMuxState, ProviderError> {
-        self.provider.mux_state().await
+        bounded_provider_call(
+            self.provider.as_ref(),
+            "gpu.mux_state",
+            self.provider.mux_state(),
+        )
+        .await
     }
 }
 
@@ -324,7 +370,12 @@ where
     /// `GpuState`. `ProviderError` сохраняется без преобразования и не
     /// подменяется `Unknown`.
     pub async fn gpu_access_policy(&self) -> Result<GpuAccessPolicy, ProviderError> {
-        self.provider.access_policy().await
+        bounded_provider_call(
+            self.provider.as_ref(),
+            "gpu.access_policy",
+            self.provider.access_policy(),
+        )
+        .await
     }
 }
 
@@ -356,7 +407,12 @@ where
     /// Вызывает только `FanProvider::active_curve(fan)`; `ProviderError`
     /// сохраняется без преобразования. Read-only: никакой mutation.
     pub async fn active_curve(&self, fan: &FanId) -> Result<FanCurve, ProviderError> {
-        self.provider.active_curve(fan).await
+        bounded_provider_call(
+            self.provider.as_ref(),
+            "fan.active_curve",
+            self.provider.active_curve(fan),
+        )
+        .await
     }
 
     /// Прочитать lossless fan curve для конкретного `AsusdFanProfile`.
@@ -368,12 +424,18 @@ where
         profile: AsusdFanProfile,
         fan: &FanId,
     ) -> Result<FanCurve, ProviderError> {
-        self.provider.fan_curve_for_profile(profile, fan).await
+        bounded_provider_call(
+            self.provider.as_ref(),
+            "fan.curve_for_profile",
+            self.provider.fan_curve_for_profile(profile, fan),
+        )
+        .await
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::future::pending;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
@@ -406,6 +468,64 @@ mod tests {
         (provider, svc)
     }
 
+    struct HangingPerformanceProvider;
+
+    impl Provider for HangingPerformanceProvider {
+        fn id(&self) -> &'static str {
+            "application-hanging-performance"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("application-hanging-performance")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_millis(10)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("unsupported: {feature}")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl PerformanceProvider for HangingPerformanceProvider {
+        async fn profiles(&self) -> Result<Vec<PerformanceProfile>, ProviderError> {
+            pending().await
+        }
+
+        async fn current_profile(&self) -> Result<PerformanceProfile, ProviderError> {
+            Ok(PerformanceProfile::Balanced)
+        }
+
+        async fn set_profile(
+            &self,
+            _profile: PerformanceProfile,
+        ) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported("test read-only provider".into()))
+        }
+
+        async fn profile_on_ac(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+            Ok(None)
+        }
+
+        async fn profile_on_battery(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+            Ok(None)
+        }
+
+        fn validate_set_profile(&self, _profile: PerformanceProfile) -> ValidationResult {
+            ValidationResult::invalid("test read-only provider")
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Performance
     // -----------------------------------------------------------------------
@@ -423,6 +543,18 @@ mod tests {
                 PerformanceProfile::Turbo,
             ]
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn performance_state_timeout_is_bounded_at_application_boundary() {
+        let svc = AppService::new(Arc::new(HangingPerformanceProvider));
+
+        let error = svc
+            .performance_state()
+            .await
+            .expect_err("provider hang must not block application state read");
+
+        assert!(matches!(error, ProviderError::Timeout(_)));
     }
 
     #[tokio::test]

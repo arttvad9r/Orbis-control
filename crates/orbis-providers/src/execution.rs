@@ -14,6 +14,32 @@ use std::future::Future;
 use crate::error::ProviderError;
 use crate::traits::Provider;
 
+/// Execute an arbitrary provider-facing operation within a supplied deadline.
+///
+/// Provider-backed callers should normally use [`bounded_provider_call`], which
+/// obtains the deadline from the provider contract. This lower-level form is
+/// also used by read-only status adapters that do not implement `Provider`
+/// themselves but still need the same timeout/error boundary.
+pub async fn bounded_operation<T, F>(
+    limit: std::time::Duration,
+    provider_id: &str,
+    operation: &str,
+    future: F,
+) -> Result<T, ProviderError>
+where
+    F: Future<Output = Result<T, ProviderError>>,
+{
+    match tokio::time::timeout(limit, future).await {
+        Ok(result) => result,
+        Err(_) => Err(ProviderError::Timeout(format!(
+            "provider '{}' operation '{}' exceeded {} ms",
+            provider_id,
+            operation,
+            limit.as_millis()
+        ))),
+    }
+}
+
 /// Execute one provider operation within the provider-declared timeout.
 ///
 /// Successful values and provider errors are returned unchanged. If the
@@ -31,16 +57,7 @@ where
     P: Provider + ?Sized,
     F: Future<Output = Result<T, ProviderError>>,
 {
-    let limit = provider.timeout();
-    match tokio::time::timeout(limit, future).await {
-        Ok(result) => result,
-        Err(_) => Err(ProviderError::Timeout(format!(
-            "provider '{}' operation '{}' exceeded {} ms",
-            provider.id(),
-            operation,
-            limit.as_millis()
-        ))),
-    }
+    bounded_operation(provider.timeout(), provider.id(), operation, future).await
 }
 
 #[cfg(test)]

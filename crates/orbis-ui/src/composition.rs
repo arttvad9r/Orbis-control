@@ -18,6 +18,7 @@ use orbis_core::battery::ChargeLimit;
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
+use orbis_providers::bounded_provider_call;
 use orbis_providers::error::ProviderError;
 #[cfg(test)]
 use orbis_providers::mock::MockProvider;
@@ -471,7 +472,12 @@ where
     P: orbis_providers::traits::TelemetryProvider + Send + Sync,
 {
     async fn snapshot(&self) -> Result<orbis_core::telemetry::Telemetry, ProviderError> {
-        self.provider().snapshot().await
+        bounded_provider_call(
+            self.provider(),
+            "telemetry.snapshot",
+            self.provider().snapshot(),
+        )
+        .await
     }
 
     fn poll_interval(&self) -> Duration {

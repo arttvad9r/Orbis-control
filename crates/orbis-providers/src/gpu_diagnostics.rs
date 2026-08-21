@@ -3,7 +3,7 @@
 use orbis_core::diagnostics::{DiagnosticObservation, GpuDiagnostics};
 
 use crate::{
-    ProviderError,
+    ProviderError, bounded_provider_call,
     traits::{GpuAccessProvider, GpuMuxProvider, GpuPowerProvider},
 };
 
@@ -18,9 +18,14 @@ where
     A: GpuAccessProvider + ?Sized,
     P: GpuPowerProvider + ?Sized,
 {
-    let mux = observation_from_result(mux.mux_state().await);
-    let access_policy = observation_from_result(access.access_policy().await);
-    let runtime_power = observation_from_result(power.power_state().await);
+    let mux =
+        observation_from_result(bounded_provider_call(mux, "gpu.mux_state", mux.mux_state()).await);
+    let access_policy = observation_from_result(
+        bounded_provider_call(access, "gpu.access_policy", access.access_policy()).await,
+    );
+    let runtime_power = observation_from_result(
+        bounded_provider_call(power, "gpu.power_state", power.power_state()).await,
+    );
 
     GpuDiagnostics {
         mux,

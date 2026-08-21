@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime};
 use orbis_application::diagnostics::DiagnosticsCollector;
 use orbis_capabilities::CapabilityRegistrySnapshot;
 use orbis_core::diagnostics::{DiagnosticsSnapshot, ServiceCriticality, TelemetryDiagnostics};
+use orbis_providers::bounded_provider_call;
 use orbis_providers::traits::TelemetryProvider;
 use orbis_providers::{
     ASUSD_SERVICE, HardwareIdentityProvider, ORBIS_HARDWARE_SERVICE, ORBIS_SESSION_SERVICE,
@@ -139,7 +140,12 @@ impl DiagnosticsRuntime {
         let gpu = gpu_diagnostics_snapshot(&gpu_mux, &gpu_access, &gpu_power).await;
 
         let telemetry_provider = SysfsTelemetryProvider::default();
-        let telemetry_result = telemetry_provider.snapshot().await;
+        let telemetry_result = bounded_provider_call(
+            &telemetry_provider,
+            "telemetry.snapshot",
+            telemetry_provider.snapshot(),
+        )
+        .await;
         let previous_telemetry = self
             .previous_telemetry
             .lock()

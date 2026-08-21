@@ -1,5 +1,6 @@
 //! Read-only D-Bus service-presence diagnostics.
 
+use std::time::Duration;
 use std::time::SystemTime;
 
 use async_trait::async_trait;
@@ -8,6 +9,11 @@ use orbis_core::diagnostics::{
     ServiceDiagnostics,
 };
 use zbus::{Connection, fdo::DBusProxy, names::BusName};
+
+use crate::bounded_operation;
+use crate::error::ProviderError;
+
+const SERVICE_PRESENCE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Exact well-known name of the Orbis privileged Hardware1 service.
 pub const ORBIS_HARDWARE_BUS_NAME: &str = "io.github.orbiscontrol.Hardware";
@@ -97,7 +103,27 @@ impl ServicePresenceProvider {
             ServiceBusScope::Session => &self.session,
         };
         let query = ZbusPresenceQuery { connection };
-        check_with_query(&query, target, criticality, checked_at).await
+        match bounded_operation(
+            SERVICE_PRESENCE_TIMEOUT,
+            "dbus",
+            "service_presence.check",
+            async {
+                Ok::<_, ProviderError>(
+                    check_with_query(&query, target, criticality, checked_at).await,
+                )
+            },
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => ServiceDiagnostics {
+                service: target.service(),
+                bus: target.bus(),
+                availability: ServiceAvailability::Unknown,
+                criticality,
+                checked_at,
+            },
+        }
     }
 }
 

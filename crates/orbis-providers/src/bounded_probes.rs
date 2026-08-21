@@ -314,6 +314,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::future::pending;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     use async_trait::async_trait;
@@ -465,5 +466,68 @@ mod tests {
             .expect("timeout reason must be preserved");
         assert!(reason.reason.contains("performance.profiles"));
         assert!(reason.reason.contains("hanging-performance"));
+    }
+
+    struct RecoveringGpuPowerProvider {
+        available: AtomicBool,
+    }
+
+    impl Provider for RecoveringGpuPowerProvider {
+        fn id(&self) -> &'static str {
+            "recovering-gpu-power"
+        }
+
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("recovering-gpu-power")
+        }
+
+        fn timeout(&self) -> Duration {
+            Duration::from_millis(50)
+        }
+
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("unsupported: {feature}")
+        }
+
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl GpuPowerProvider for RecoveringGpuPowerProvider {
+        async fn power_state(&self) -> Result<GpuPowerState, ProviderError> {
+            if self.available.load(Ordering::SeqCst) {
+                Ok(GpuPowerState::Off)
+            } else {
+                pending::<Result<GpuPowerState, ProviderError>>().await
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timed_out_probe_can_recover_to_supported_on_next_generation() {
+        let provider = RecoveringGpuPowerProvider {
+            available: AtomicBool::new(false),
+        };
+
+        let unavailable = probe_gpu_power(&provider)
+            .await
+            .expect("local timeout evidence");
+        assert_eq!(
+            unavailable.operations.read.status,
+            CapabilityStatus::TemporarilyUnavailable
+        );
+
+        provider.available.store(true, Ordering::SeqCst);
+        let recovered = probe_gpu_power(&provider).await.expect("recovered read");
+        assert_eq!(
+            recovered.operations.read.status,
+            CapabilityStatus::Supported
+        );
     }
 }

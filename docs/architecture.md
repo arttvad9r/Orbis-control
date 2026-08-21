@@ -71,6 +71,11 @@ Current read concepts include:
 
 Read failures are capability-local. Missing Battery/UPower must not collapse unrelated GPU/Performance/Fan reads.
 
+Provider operations are bounded and timeout results are capability-local. A
+timeout maps to `TemporarilyUnavailable`, while invalid data remains `Unknown`,
+permission failures remain `PermissionDenied`, and structural backend absence
+does not become a timeout or `Unsupported` by guesswork.
+
 `orbisctl status` and `status --json` use only read providers. The JSON schema is versioned and carries explicit observation states rather than fake values.
 
 ## 4. Privileged mutation path

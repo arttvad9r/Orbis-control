@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use orbis_core::diagnostics::{DiagnosticObservation, DisplayDiagnostics};
 use orbis_core::display_output::DisplayOutputSnapshot;
 
-use crate::{DisplayOutputProvider, ProviderError};
+use crate::{DisplayOutputProvider, ProviderError, bounded_provider_call};
 
 /// Read one authoritative display-output snapshot and classify the observation.
 ///
@@ -20,7 +20,14 @@ where
     P: DisplayOutputProvider + ?Sized,
 {
     DisplayDiagnostics {
-        outputs: observation_from_result(provider.display_output_snapshot().await),
+        outputs: observation_from_result(
+            bounded_provider_call(
+                provider,
+                "display.output_snapshot",
+                provider.display_output_snapshot(),
+            )
+            .await,
+        ),
         checked_at,
     }
 }

@@ -59,7 +59,7 @@ pub use display_refresh_owner::{
     validate_display_refresh_request,
 };
 pub use error::{OperationId, ProviderError, ValidationResult};
-pub use execution::bounded_provider_call;
+pub use execution::{bounded_operation, bounded_provider_call};
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 pub use gpu_diagnostics::gpu_diagnostics_snapshot;
 pub use hardware_identity::HardwareIdentityProvider;
