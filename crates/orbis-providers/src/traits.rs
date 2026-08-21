@@ -8,7 +8,7 @@ use orbis_capabilities::engine::CapabilityPart;
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::aura::AuraState;
 use orbis_core::automation::AutomationRule;
-use orbis_core::battery::ChargeLimit;
+use orbis_core::battery::{BatteryThresholdEvidence, ChargeLimit};
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::display::{
     DisplayMode, MiniLedModeState, PanelOverdriveState, ScreenAutoBrightnessState,
@@ -188,6 +188,13 @@ pub trait PowerLimitProvider: Provider {
 pub trait BatteryProvider: Provider {
     /// Лимит зарядки.
     async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError>;
+
+    /// Source-labelled threshold evidence; this method never performs writes.
+    async fn threshold_evidence(&self) -> Result<BatteryThresholdEvidence, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "battery threshold evidence is unavailable".into(),
+        ))
+    }
 
     /// Установить лимит зарядки.
     async fn set_charge_limit(&self, percent: u8) -> Result<ApplyResult, ProviderError>;

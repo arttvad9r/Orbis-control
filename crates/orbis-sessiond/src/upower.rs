@@ -12,11 +12,14 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
-use orbis_core::battery::ChargeLimit;
+use orbis_core::battery::{
+    BatteryThresholdConfidence, BatteryThresholdEvidence, BatteryThresholdFreshness,
+    BatteryThresholdObservation, BatteryThresholdSource, ChargeLimit,
+};
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::Percent;
@@ -301,17 +304,63 @@ where
                 snapshot.end_threshold
             ))
         })?;
-        if configured.get() != upower_reported {
-            return Err(ProviderError::Conflict(format!(
-                "UPower reported {upower_reported}% but asusd configured {configured}%"
-            )));
-        }
         let effective = Percent::new(self.effective.read_effective_end_threshold().await?)
             .map_err(|e| {
                 ProviderError::Internal(format!("kernel: невалидный effective threshold: {e}"))
             })?;
+        if configured.get() != upower_reported || configured != effective {
+            return Err(ProviderError::Conflict(format!(
+                "battery thresholds disagree: UPower={upower_reported}%, ASUS={configured}%, sysfs={effective}%"
+            )));
+        }
         ChargeLimit::new(snapshot.enabled, Some(configured), Some(effective), None)
             .map_err(|e| ProviderError::Internal(format!("Battery threshold невалиден: {e}")))
+    }
+
+    async fn threshold_evidence(&self) -> Result<BatteryThresholdEvidence, ProviderError> {
+        let snapshot = self.upower.read_charge_limit().await?;
+        if !snapshot.supported {
+            return Err(ProviderError::Unsupported(
+                "UPower: charge threshold не поддерживается устройством".into(),
+            ));
+        }
+        let asus = Percent::new(self.asusd.read_configured_threshold().await?).map_err(|e| {
+            ProviderError::Internal(format!("asusd: невалидный configured threshold: {e}"))
+        })?;
+        let sysfs =
+            Percent::new(self.effective.read_effective_end_threshold().await?).map_err(|e| {
+                ProviderError::Internal(format!("kernel: невалидный effective threshold: {e}"))
+            })?;
+        let observed_at = SystemTime::now();
+        Ok(BatteryThresholdEvidence::from_observations(vec![
+            BatteryThresholdObservation {
+                source: BatteryThresholdSource::UPower,
+                value: Percent::new(u8::try_from(snapshot.end_threshold).map_err(|_| {
+                    ProviderError::Internal(format!(
+                        "UPower: end_threshold вне u8 диапазона: {}",
+                        snapshot.end_threshold
+                    ))
+                })?)
+                .map_err(|e| ProviderError::Internal(format!("UPower: invalid threshold: {e}")))?,
+                observed_at,
+                freshness: BatteryThresholdFreshness::Fresh,
+                confidence: BatteryThresholdConfidence::Medium,
+            },
+            BatteryThresholdObservation {
+                source: BatteryThresholdSource::AsusBackend,
+                value: asus,
+                observed_at,
+                freshness: BatteryThresholdFreshness::Fresh,
+                confidence: BatteryThresholdConfidence::High,
+            },
+            BatteryThresholdObservation {
+                source: BatteryThresholdSource::Sysfs,
+                value: sysfs,
+                observed_at,
+                freshness: BatteryThresholdFreshness::Fresh,
+                confidence: BatteryThresholdConfidence::High,
+            },
+        ]))
     }
 
     async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {
@@ -639,6 +688,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+    use orbis_core::battery::BatteryThresholdEvidenceState;
     use tempfile::tempdir;
 
     /// Исход теста ScriptedSource: snapshot либо сценарий ошибки.
@@ -737,6 +787,31 @@ mod tests {
             p.charge_limit().await,
             Err(ProviderError::Conflict(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn threshold_evidence_retains_all_conflicting_sources() {
+        let provider = asusd_provider(
+            UPowerChargeLimitSnapshot {
+                supported: true,
+                enabled: true,
+                end_threshold: 80,
+                effective_end_threshold: None,
+            },
+            vec![Ok(100)],
+            100,
+        );
+
+        let evidence = provider.threshold_evidence().await.expect("evidence");
+        assert_eq!(evidence.state, BatteryThresholdEvidenceState::Conflict);
+        assert_eq!(evidence.observations.len(), 3);
+        assert_eq!(
+            evidence.observations[0].source,
+            BatteryThresholdSource::UPower
+        );
+        assert_eq!(evidence.observations[0].value.get(), 80);
+        assert_eq!(evidence.observations[1].value.get(), 100);
+        assert_eq!(evidence.observations[2].value.get(), 100);
     }
 
     #[tokio::test]

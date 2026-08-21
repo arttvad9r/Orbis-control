@@ -9,6 +9,10 @@
 use std::sync::Arc;
 
 use orbis_core::battery::ChargeLimit;
+use orbis_core::battery::{
+    BatteryThresholdConfidence, BatteryThresholdEvidence, BatteryThresholdEvidenceState,
+    BatteryThresholdFreshness, BatteryThresholdSource,
+};
 use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::newtypes::{FanPwm, TemperatureC};
@@ -89,6 +93,13 @@ impl SessionService {
     pub async fn read_charge_limit(&self) -> Result<ChargeLimitInfo, ProviderError> {
         let value = self.battery.charge_limit().await?;
         Ok(charge_limit_to_wire(value))
+    }
+
+    /// Read source-labelled battery threshold evidence without writes.
+    pub async fn read_battery_threshold_evidence(
+        &self,
+    ) -> Result<BatteryThresholdEvidence, ProviderError> {
+        self.battery.threshold_evidence().await
     }
 
     /// Прочитать authoritative dGPU power state (domain).
@@ -256,6 +267,77 @@ pub fn charge_limit_to_wire(value: ChargeLimit) -> ChargeLimitInfo {
     }
 }
 
+fn battery_threshold_evidence_to_wire(
+    value: BatteryThresholdEvidence,
+) -> orbis_session_protocol::BatteryThresholdEvidenceTuple {
+    let state = match value.state {
+        BatteryThresholdEvidenceState::Observed => {
+            orbis_session_protocol::battery_threshold_state::OBSERVED
+        }
+        BatteryThresholdEvidenceState::Confirmed => {
+            orbis_session_protocol::battery_threshold_state::CONFIRMED
+        }
+        BatteryThresholdEvidenceState::Conflict => {
+            orbis_session_protocol::battery_threshold_state::CONFLICT
+        }
+        BatteryThresholdEvidenceState::Unknown => {
+            orbis_session_protocol::battery_threshold_state::UNKNOWN
+        }
+    };
+    let observations = value
+        .observations
+        .into_iter()
+        .map(|observation| {
+            let source = match observation.source {
+                BatteryThresholdSource::UPower => {
+                    orbis_session_protocol::battery_threshold_source::UPOWER
+                }
+                BatteryThresholdSource::AsusBackend => {
+                    orbis_session_protocol::battery_threshold_source::ASUS_BACKEND
+                }
+                BatteryThresholdSource::Sysfs => {
+                    orbis_session_protocol::battery_threshold_source::SYSFS
+                }
+            };
+            let freshness = match observation.freshness {
+                BatteryThresholdFreshness::Fresh => {
+                    orbis_session_protocol::battery_threshold_freshness::FRESH
+                }
+                BatteryThresholdFreshness::Stale => {
+                    orbis_session_protocol::battery_threshold_freshness::STALE
+                }
+                BatteryThresholdFreshness::Unknown => {
+                    orbis_session_protocol::battery_threshold_freshness::UNKNOWN
+                }
+            };
+            let confidence = match observation.confidence {
+                BatteryThresholdConfidence::Low => {
+                    orbis_session_protocol::battery_threshold_confidence::LOW
+                }
+                BatteryThresholdConfidence::Medium => {
+                    orbis_session_protocol::battery_threshold_confidence::MEDIUM
+                }
+                BatteryThresholdConfidence::High => {
+                    orbis_session_protocol::battery_threshold_confidence::HIGH
+                }
+            };
+            let observed_at_ms = observation
+                .observed_at
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
+                .unwrap_or(0);
+            (
+                source,
+                observation.value.get(),
+                observed_at_ms,
+                freshness,
+                confidence,
+            )
+        })
+        .collect();
+    (state, observations)
+}
+
 /// Преобразовать domain `ProviderError` в `zbus::fdo::Error`.
 ///
 /// Детерминированное отображение классов ошибок; диагностический смысл строки
@@ -270,7 +352,11 @@ fn provider_error_to_dbus(error: ProviderError) -> zbus::fdo::Error {
         ProviderError::Io(e) => zbus::fdo::Error::Failed(e.to_string()),
         ProviderError::Dbus(msg) => zbus::fdo::Error::Failed(msg),
         ProviderError::Internal(msg) => zbus::fdo::Error::Failed(msg),
-        ProviderError::Conflict(msg) => zbus::fdo::Error::Failed(msg),
+        ProviderError::Conflict(msg) => zbus::fdo::Error::Failed(format!(
+            "{}{}",
+            orbis_session_protocol::BATTERY_THRESHOLD_CONFLICT_PREFIX,
+            msg
+        )),
     }
 }
 
@@ -349,6 +435,17 @@ impl SessionService {
             .await
             .map_err(provider_error_to_dbus)?;
         Ok(charge_limit_info_to_tuple(info))
+    }
+
+    /// Source-labelled battery threshold evidence (read-only method).
+    async fn battery_threshold_evidence(
+        &self,
+    ) -> zbus::fdo::Result<orbis_session_protocol::BatteryThresholdEvidenceTuple> {
+        let evidence = self
+            .read_battery_threshold_evidence()
+            .await
+            .map_err(provider_error_to_dbus)?;
+        Ok(battery_threshold_evidence_to_wire(evidence))
     }
 
     /// Текущий dGPU runtime power state (read-only property, wire signature `y`).

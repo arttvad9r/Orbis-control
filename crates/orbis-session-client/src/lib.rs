@@ -12,11 +12,15 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
-use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
+use orbis_core::battery::{
+    BatteryThresholdConfidence, BatteryThresholdEvidence, BatteryThresholdEvidenceState,
+    BatteryThresholdFreshness, BatteryThresholdObservation, BatteryThresholdSource, ChargeLimit,
+    ChargeLimitBounds,
+};
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
@@ -32,7 +36,9 @@ use orbis_providers::traits::{
     GpuMuxProvider, GpuPowerProvider, PerformanceProvider, Provider, ProviderHealth,
 };
 use orbis_session_protocol::{
-    ChargeLimitInfo, PerformanceInfo, Session1Proxy, gpu_access, gpu_mux, gpu_power, performance,
+    BatteryThresholdEvidenceTuple, ChargeLimitInfo, PerformanceInfo, Session1Proxy,
+    battery_threshold_confidence, battery_threshold_freshness, battery_threshold_source,
+    battery_threshold_state, gpu_access, gpu_mux, gpu_power, performance,
 };
 use zbus::proxy::CacheProperties;
 
@@ -42,6 +48,15 @@ pub trait SessionChargeLimitSource: Send + Sync {
     /// Прочитать authoritative `ChargeLimitInfo` (wire DTO, без domain
     /// conversion); ошибка не превращается в bool/None.
     async fn read_charge_limit(&self) -> Result<ChargeLimitInfo, ProviderError>;
+
+    /// Прочитать source-labelled threshold evidence.
+    async fn read_threshold_evidence(
+        &self,
+    ) -> Result<BatteryThresholdEvidenceTuple, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "session protocol: battery threshold evidence unavailable".into(),
+        ))
+    }
 }
 
 /// Реальный zbus источник через generated `Session1Proxy`.
@@ -73,6 +88,90 @@ impl SessionChargeLimitSource for ZbusSessionChargeLimitSource {
         let info = proxy.charge_limit().await.map_err(zbus_error_to_provider)?;
         Ok(info)
     }
+
+    async fn read_threshold_evidence(
+        &self,
+    ) -> Result<BatteryThresholdEvidenceTuple, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .battery_threshold_evidence()
+            .await
+            .map_err(zbus_error_to_provider)
+    }
+}
+
+/// Convert untrusted Session1 threshold evidence into the domain model.
+pub fn battery_threshold_evidence_from_wire(
+    wire: BatteryThresholdEvidenceTuple,
+) -> Result<BatteryThresholdEvidence, ProviderError> {
+    let state = match wire.0 {
+        battery_threshold_state::OBSERVED => BatteryThresholdEvidenceState::Observed,
+        battery_threshold_state::CONFIRMED => BatteryThresholdEvidenceState::Confirmed,
+        battery_threshold_state::CONFLICT => BatteryThresholdEvidenceState::Conflict,
+        battery_threshold_state::UNKNOWN => BatteryThresholdEvidenceState::Unknown,
+        other => {
+            return Err(ProviderError::Internal(format!(
+                "session protocol: unknown battery evidence state {other}"
+            )));
+        }
+    };
+    let mut observations = Vec::with_capacity(wire.1.len());
+    for (source, value, observed_at_ms, freshness, confidence) in wire.1 {
+        let source = match source {
+            battery_threshold_source::UPOWER => BatteryThresholdSource::UPower,
+            battery_threshold_source::ASUS_BACKEND => BatteryThresholdSource::AsusBackend,
+            battery_threshold_source::SYSFS => BatteryThresholdSource::Sysfs,
+            other => {
+                return Err(ProviderError::Internal(format!(
+                    "session protocol: unknown battery evidence source {other}"
+                )));
+            }
+        };
+        let freshness = match freshness {
+            battery_threshold_freshness::FRESH => BatteryThresholdFreshness::Fresh,
+            battery_threshold_freshness::STALE => BatteryThresholdFreshness::Stale,
+            battery_threshold_freshness::UNKNOWN => BatteryThresholdFreshness::Unknown,
+            other => {
+                return Err(ProviderError::Internal(format!(
+                    "session protocol: unknown battery evidence freshness {other}"
+                )));
+            }
+        };
+        let confidence = match confidence {
+            battery_threshold_confidence::LOW => BatteryThresholdConfidence::Low,
+            battery_threshold_confidence::MEDIUM => BatteryThresholdConfidence::Medium,
+            battery_threshold_confidence::HIGH => BatteryThresholdConfidence::High,
+            other => {
+                return Err(ProviderError::Internal(format!(
+                    "session protocol: unknown battery evidence confidence {other}"
+                )));
+            }
+        };
+        observations.push(BatteryThresholdObservation {
+            source,
+            value: Percent::new(value).map_err(|error| {
+                ProviderError::Internal(format!("session protocol: invalid threshold: {error}"))
+            })?,
+            observed_at: SystemTime::UNIX_EPOCH
+                .checked_add(Duration::from_millis(observed_at_ms))
+                .ok_or_else(|| {
+                    ProviderError::Internal("session protocol: timestamp overflow".into())
+                })?,
+            freshness,
+            confidence,
+        });
+    }
+    let evidence = BatteryThresholdEvidence::from_observations(observations);
+    if evidence.state != state {
+        return Err(ProviderError::Internal(
+            "session protocol: battery evidence state does not match observations".into(),
+        ));
+    }
+    Ok(evidence)
 }
 
 /// Преобразовать `zbus::Error` в `ProviderError`.
@@ -85,6 +184,18 @@ fn zbus_error_to_provider(error: zbus::Error) -> ProviderError {
             zbus::fdo::Error::NotSupported(msg) => ProviderError::Unsupported(msg.clone()),
             zbus::fdo::Error::AccessDenied(msg) => ProviderError::PermissionDenied(msg.clone()),
             zbus::fdo::Error::InvalidArgs(msg) => ProviderError::InvalidRequest(msg.clone()),
+            zbus::fdo::Error::Failed(message)
+                if message
+                    .starts_with(orbis_session_protocol::BATTERY_THRESHOLD_CONFLICT_PREFIX) =>
+            {
+                ProviderError::Conflict(
+                    message
+                        .trim_start_matches(
+                            orbis_session_protocol::BATTERY_THRESHOLD_CONFLICT_PREFIX,
+                        )
+                        .to_string(),
+                )
+            }
             _ => ProviderError::Dbus(error.to_string()),
         };
     }
@@ -230,6 +341,10 @@ where
     async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
         let info = self.source.read_charge_limit().await?;
         charge_limit_from_wire(info)
+    }
+
+    async fn threshold_evidence(&self) -> Result<BatteryThresholdEvidence, ProviderError> {
+        battery_threshold_evidence_from_wire(self.source.read_threshold_evidence().await?)
     }
 
     async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {

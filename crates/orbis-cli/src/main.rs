@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::process::ExitCode;
 
-use orbis_core::battery::ChargeLimit;
+use orbis_core::battery::{BatteryThresholdEvidence, ChargeLimit};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::bounded_provider_call;
@@ -16,7 +16,7 @@ use orbis_session_client::{
 };
 use serde::Serialize;
 
-const STATUS_SCHEMA_VERSION: u32 = 1;
+const STATUS_SCHEMA_VERSION: u32 = 2;
 const HELP: &str = "orbisctl — Orbis Control read-only command-line client\n\nUSAGE:\n    orbisctl [OPTIONS] <COMMAND>\n\nOPTIONS:\n    -h, --help       Print help\n    -V, --version    Print version\n\nCOMMANDS:\n    status [--json]  Read current Session1 state without performing mutations\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +89,7 @@ fn observation_from_result<T>(result: Result<T, ProviderError>) -> Observation<T
 #[derive(Debug, Serialize)]
 struct BatteryStatusSnapshot {
     charge_limit: Observation<ChargeLimit>,
+    threshold_evidence: Observation<BatteryThresholdEvidence>,
 }
 
 #[derive(Debug, Serialize)]
@@ -116,6 +117,7 @@ impl StatusSnapshot {
     fn successful_reads(&self) -> usize {
         [
             self.battery.charge_limit.is_available(),
+            self.battery.threshold_evidence.is_available(),
             self.performance.current.is_available(),
             self.performance.available.is_available(),
             self.gpu.power.is_available(),
@@ -149,6 +151,10 @@ where
 
 fn print_human(snapshot: &StatusSnapshot) {
     print_observation("battery.charge_limit", &snapshot.battery.charge_limit);
+    print_observation(
+        "battery.threshold_evidence",
+        &snapshot.battery.threshold_evidence,
+    );
     print_observation("performance.current", &snapshot.performance.current);
     print_observation("performance.available", &snapshot.performance.available);
     print_observation("gpu.power", &snapshot.gpu.power);
@@ -169,6 +175,14 @@ async fn collect_status() -> Result<StatusSnapshot, zbus::Error> {
 
     let charge_limit = observation_from_result(
         bounded_provider_call(&battery, "battery.charge_limit", battery.charge_limit()).await,
+    );
+    let threshold_evidence = observation_from_result(
+        bounded_provider_call(
+            &battery,
+            "battery.threshold_evidence",
+            battery.threshold_evidence(),
+        )
+        .await,
     );
 
     let current = observation_from_result(
@@ -202,7 +216,10 @@ async fn collect_status() -> Result<StatusSnapshot, zbus::Error> {
 
     Ok(StatusSnapshot {
         schema_version: STATUS_SCHEMA_VERSION,
-        battery: BatteryStatusSnapshot { charge_limit },
+        battery: BatteryStatusSnapshot {
+            charge_limit,
+            threshold_evidence,
+        },
         performance: PerformanceStatusSnapshot { current, available },
         gpu: GpuStatusSnapshot { power, mux, access },
     })
@@ -319,6 +336,9 @@ mod tests {
             battery: BatteryStatusSnapshot {
                 charge_limit: Observation::Unsupported {
                     detail: "not supported".into(),
+                },
+                threshold_evidence: Observation::Unknown {
+                    detail: "not collected".into(),
                 },
             },
             performance: PerformanceStatusSnapshot {

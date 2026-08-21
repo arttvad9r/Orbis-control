@@ -42,14 +42,14 @@ Production product path намеренно включает только док�
 | Autostart | IMPLEMENTED SOURCE — #110 closed | Owned XDG desktop entry read/write/read-back wired to Preferences. |
 | Window/tray lifecycle | IMPLEMENTED SOURCE — #121 closed | Start Minimized, X11-style position restore/save, Wayland fail-closed behavior, StatusNotifier tray gating and explicit Quit lifecycle. |
 | Diagnostics | IMPLEMENTED SOURCE — #111 closed | Runtime initialization, capability generation replacement, Refresh, privacy-bounded JSON export and Copy Summary wired; Open Logs intentionally disabled. |
-| Battery read | HISTORICAL LIVE-VALIDATED / CURRENT SOURCE IMPLEMENTED | Session1/UPower/asusd/kernel contract. |
+| Battery read | IMPLEMENTED / CONFLICT-AWARE | Session1 exposes UPower, ASUS backend and sysfs threshold evidence; disagreements are `Conflict`, not `Supported`. |
 | Battery mutation | HISTORICAL LIVE-VALIDATED / HARDENING OPEN | Controlled Hardware1 path; dynamic asusd owner/interface liveness remains #107. |
 | Performance read/write | HISTORICAL LIVE-VALIDATED / CURRENT SOURCE IMPLEMENTED | Session1 read + Hardware1/polkit write + read-back. |
 | GPU primitives | HISTORICAL LIVE-VALIDATED READS | Power, physical MUX and access policy remain separate read concepts. |
 | GPU product/raw mutation | BLOCKED | Product modes are policy, not raw backend enum. Production raw mutation disabled. |
 | Capability registry | IMPLEMENTED / HARDENING OPEN | Whole-swap immutable generations; explicit and periodic refresh share canonical mutation-status requery (#112 source-complete). UI/Diagnostics/support-policy source audit #120 is complete; Battery owner evidence remains #107. |
 | Provider execution | PARTIAL HARDENING — #123 | Canonical `bounded_provider_call`; public probes, CLI and main worker read refreshes use provider deadlines. Telemetry/status requery and mutation unknown-outcome boundary remain. |
-| CLI | IMPLEMENTED READ-ONLY / VALIDATION OPEN — #119 | `status` + versioned `status --json`; typed states; no mutation commands. |
+| CLI | IMPLEMENTED READ-ONLY / VALIDATION OPEN — #119 | `status` + versioned `status --json` (schema 2 includes battery threshold evidence); typed states; no mutation commands. |
 | Telemetry | IMPLEMENTED / EVIDENCE GAP — #117 | Partial metrics are supported, but empty/useful/field-local failure coverage is not fully modeled. |
 | Fan reads | IMPLEMENTED / EVIDENCE GAPS — #109/#116 | Per-fan Session1 read exists; aggregate capability still CPU-centric and stored `enabled` is not carried end-to-end. |
 | Fan writes/reset | HARD-BLOCKED — #104/#105 | UI + polkit + production Hardware1 composition prevent the dormant unsafe write path. |

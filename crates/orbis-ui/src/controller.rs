@@ -30,6 +30,8 @@ pub enum CapabilityAvailability {
     TemporarilyUnavailable,
     /// Недостаточно прав для capability.
     PermissionDenied,
+    /// Independent authoritative sources disagree.
+    Conflicted,
     /// Unknown capability status.
     #[default]
     Unknown,
@@ -47,9 +49,8 @@ impl CapabilityAvailability {
             CapabilityStatus::BackendMissing => Self::BackendMissing,
             CapabilityStatus::TemporarilyUnavailable => Self::TemporarilyUnavailable,
             CapabilityStatus::PermissionDenied => Self::PermissionDenied,
-            CapabilityStatus::Experimental
-            | CapabilityStatus::Conflicted
-            | CapabilityStatus::Unknown => Self::Unknown,
+            CapabilityStatus::Experimental | CapabilityStatus::Unknown => Self::Unknown,
+            CapabilityStatus::Conflicted => Self::Conflicted,
         }
     }
 }
@@ -85,6 +86,7 @@ pub fn mutation_unavailable_reason(availability: CapabilityAvailability) -> Opti
             Some("Temporarily unavailable".to_string())
         }
         CapabilityAvailability::PermissionDenied => Some("Permission denied".to_string()),
+        CapabilityAvailability::Conflicted => Some("Conflicting evidence".to_string()),
         CapabilityAvailability::Unknown => Some("Availability is unknown".to_string()),
     }
 }
@@ -1748,6 +1750,10 @@ mod tests {
         assert_eq!(
             mutation_unavailable_reason(CapabilityAvailability::Unknown).as_deref(),
             Some("Availability is unknown")
+        );
+        assert_eq!(
+            mutation_unavailable_reason(CapabilityAvailability::Conflicted).as_deref(),
+            Some("Conflicting evidence")
         );
     }
 

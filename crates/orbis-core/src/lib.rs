@@ -49,7 +49,10 @@ pub use aura::{
     AuraBrightness, AuraDirection, AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraState, AuraZone,
 };
 pub use automation::{AutomationAction, AutomationRule, AutomationTrigger};
-pub use battery::ChargeLimit;
+pub use battery::{
+    BatteryThresholdConfidence, BatteryThresholdEvidence, BatteryThresholdEvidenceState,
+    BatteryThresholdFreshness, BatteryThresholdObservation, BatteryThresholdSource, ChargeLimit,
+};
 pub use capability::{
     Capability, CapabilityReason, CapabilityStatus, DeviceCapabilities, FeatureId,
 };

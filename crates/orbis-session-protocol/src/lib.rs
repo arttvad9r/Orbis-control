@@ -59,6 +59,62 @@ pub struct ChargeLimitInfo {
     pub step_percent: u8,
 }
 
+/// One source-labelled threshold observation on the Session1 wire.
+/// `(source, value, observed_at_ms, freshness, confidence)`.
+pub type BatteryThresholdObservationTuple = (u8, u8, u64, u8, u8);
+
+/// Battery threshold evidence wire: `(state, observations)`.
+pub type BatteryThresholdEvidenceTuple = (u8, Vec<BatteryThresholdObservationTuple>);
+
+/// Prefix for preserving typed evidence conflicts across the FDO error mapper.
+pub const BATTERY_THRESHOLD_CONFLICT_PREFIX: &str = "battery-threshold-conflict:";
+
+/// Source discriminants for battery threshold observations.
+pub mod battery_threshold_source {
+    /// Source discriminants for threshold observations.
+    /// UPower source.
+    pub const UPOWER: u8 = 0;
+    /// ASUS backend source.
+    pub const ASUS_BACKEND: u8 = 1;
+    /// Kernel sysfs source.
+    pub const SYSFS: u8 = 2;
+}
+
+/// Aggregate state discriminants for battery threshold evidence.
+pub mod battery_threshold_state {
+    /// Aggregate evidence-state discriminants.
+    /// One source observed.
+    pub const OBSERVED: u8 = 0;
+    /// Equal sources confirmed.
+    pub const CONFIRMED: u8 = 1;
+    /// Conflicting source values.
+    pub const CONFLICT: u8 = 2;
+    /// No usable evidence.
+    pub const UNKNOWN: u8 = 3;
+}
+
+/// Freshness discriminants for battery threshold observations.
+pub mod battery_threshold_freshness {
+    /// Freshness discriminants.
+    /// Fresh observation.
+    pub const FRESH: u8 = 0;
+    /// Stale observation.
+    pub const STALE: u8 = 1;
+    /// Unknown freshness.
+    pub const UNKNOWN: u8 = 2;
+}
+
+/// Confidence discriminants for battery threshold observations.
+pub mod battery_threshold_confidence {
+    /// Confidence discriminants.
+    /// Low confidence.
+    pub const LOW: u8 = 0;
+    /// Medium confidence.
+    pub const MEDIUM: u8 = 1;
+    /// High confidence.
+    pub const HIGH: u8 = 2;
+}
+
 impl ChargeLimitInfo {
     /// Создать DTO с достоверным текущим значением процента и известными bounds.
     ///
@@ -204,6 +260,9 @@ pub trait Session1 {
     /// Текущий Battery Charge Limit (read-only property).
     #[zbus(property)]
     fn charge_limit(&self) -> zbus::Result<ChargeLimitInfo>;
+
+    /// Source-labelled battery threshold evidence (read-only method).
+    fn battery_threshold_evidence(&self) -> zbus::Result<BatteryThresholdEvidenceTuple>;
 
     /// Текущий dGPU runtime power state (read-only property).
     #[zbus(property)]

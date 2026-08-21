@@ -1,9 +1,107 @@
 //! Лимит зарядки батареи.
 
+use std::time::SystemTime;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
 use crate::newtypes::Percent;
+
+/// Source of one battery threshold observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BatteryThresholdSource {
+    /// UPower-reported threshold.
+    UPower,
+    /// ASUS/asusd configured threshold.
+    AsusBackend,
+    /// Effective kernel power-supply threshold.
+    Sysfs,
+}
+
+/// Freshness of a battery threshold observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BatteryThresholdFreshness {
+    /// Observation was freshly read.
+    Fresh,
+    /// Observation is older than the caller's freshness policy.
+    Stale,
+    /// Freshness could not be established.
+    Unknown,
+}
+
+/// Confidence assigned by the provider that produced an observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BatteryThresholdConfidence {
+    /// Weak or indirect source evidence.
+    Low,
+    /// Source is useful but not the mutation owner.
+    Medium,
+    /// Typed authoritative source evidence.
+    High,
+}
+
+/// One source-labelled battery threshold observation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatteryThresholdObservation {
+    /// Origin of the observation.
+    pub source: BatteryThresholdSource,
+    /// Observed threshold percentage.
+    pub value: Percent,
+    /// Time at which the source was read.
+    pub observed_at: SystemTime,
+    /// Caller-owned freshness classification.
+    pub freshness: BatteryThresholdFreshness,
+    /// Provider-assigned confidence.
+    pub confidence: BatteryThresholdConfidence,
+}
+
+/// Aggregate interpretation of threshold observations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BatteryThresholdEvidenceState {
+    /// Exactly one usable source was observed.
+    Observed,
+    /// Multiple usable sources agree.
+    Confirmed,
+    /// Usable sources report different values.
+    Conflict,
+    /// No usable source was observed.
+    Unknown,
+}
+
+/// Battery threshold evidence kept separate from mutation capability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatteryThresholdEvidence {
+    /// Source observations retained for diagnostics and JSON projection.
+    pub observations: Vec<BatteryThresholdObservation>,
+    /// Conservative aggregate interpretation.
+    pub state: BatteryThresholdEvidenceState,
+}
+
+impl BatteryThresholdEvidence {
+    /// Classify one or more observations without inferring write capability.
+    pub fn from_observations(observations: Vec<BatteryThresholdObservation>) -> Self {
+        let state = match observations.as_slice() {
+            [] => BatteryThresholdEvidenceState::Unknown,
+            [_, ..]
+                if observations
+                    .iter()
+                    .any(|observation| observation.value != observations[0].value) =>
+            {
+                BatteryThresholdEvidenceState::Conflict
+            }
+            [_] => BatteryThresholdEvidenceState::Observed,
+            [_, ..] => BatteryThresholdEvidenceState::Confirmed,
+        };
+        Self {
+            observations,
+            state,
+        }
+    }
+}
 
 /// Известные hardware/backend constraints диапазона charge limit.
 ///
@@ -97,6 +195,46 @@ mod tests {
 
     fn p(v: u8) -> Percent {
         Percent::new(v).unwrap()
+    }
+
+    fn observation(source: BatteryThresholdSource, value: u8) -> BatteryThresholdObservation {
+        BatteryThresholdObservation {
+            source,
+            value: p(value),
+            observed_at: SystemTime::UNIX_EPOCH,
+            freshness: BatteryThresholdFreshness::Fresh,
+            confidence: BatteryThresholdConfidence::High,
+        }
+    }
+
+    #[test]
+    fn one_threshold_source_is_observed() {
+        let evidence = BatteryThresholdEvidence::from_observations(vec![observation(
+            BatteryThresholdSource::UPower,
+            80,
+        )]);
+
+        assert_eq!(evidence.state, BatteryThresholdEvidenceState::Observed);
+    }
+
+    #[test]
+    fn equal_threshold_sources_are_confirmed() {
+        let evidence = BatteryThresholdEvidence::from_observations(vec![
+            observation(BatteryThresholdSource::UPower, 80),
+            observation(BatteryThresholdSource::AsusBackend, 80),
+        ]);
+
+        assert_eq!(evidence.state, BatteryThresholdEvidenceState::Confirmed);
+    }
+
+    #[test]
+    fn different_threshold_sources_are_conflicted() {
+        let evidence = BatteryThresholdEvidence::from_observations(vec![
+            observation(BatteryThresholdSource::UPower, 80),
+            observation(BatteryThresholdSource::AsusBackend, 100),
+        ]);
+
+        assert_eq!(evidence.state, BatteryThresholdEvidenceState::Conflict);
     }
 
     #[test]
