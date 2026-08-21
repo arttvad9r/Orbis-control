@@ -6,7 +6,7 @@
 
 ## 1. Architectural invariants
 
-- GUI is a normal user-session process. Interactive euid-0 rejection is still required by #125.
+- GUI is a normal user-session process. Interactive euid-0 rejection occurs before preferences, runtime, or bus setup; screenshot/offscreen paths remain available for tests.
 - `orbis-sessiond` is a read/session boundary, never a privileged mutation deputy.
 - Privileged writes go only through typed `Hardware1` methods owned by `orbis-hardwared`.
 - No generic root filesystem/sysfs/shell/D-Bus proxy API.

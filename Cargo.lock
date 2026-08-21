@@ -3641,6 +3641,7 @@ dependencies = [
  "orbis-session-client",
  "orbis-sessiond",
  "orbis-test-support",
+ "rustix 0.38.44",
  "serde_json",
  "slint",
  "slint-build",

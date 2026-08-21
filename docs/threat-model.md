@@ -56,7 +56,7 @@ Implemented:
 
 Open:
 
-- raw GUI binary does not yet refuse euid 0 itself (#125). Normal desktop/Nix deployment is user-session oriented, but that convention is not the same as an enforced binary invariant;
+- interactive GUI launch rejects euid 0 before preferences, runtime, or bus setup (#125). Screenshot/offscreen rendering remains explicitly exempt for test workflows;
 - mock/test-support remains in the default release graph (#115);
 - Run on Startup and Diagnostics lifecycle glue remain incomplete (#110/#111).
 

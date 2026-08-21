@@ -7,6 +7,7 @@
 #[allow(dead_code)]
 mod controller;
 mod diagnostics_backend;
+mod launch_context;
 mod preferences_backend;
 mod quick_controls_backend;
 
@@ -1717,8 +1718,18 @@ fn init_tracing() {
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }
 
+fn effective_uid() -> u32 {
+    rustix::process::geteuid().as_raw()
+}
+
 fn main() -> anyhow::Result<()> {
     let args = parse_args();
+    let launch_mode = if args.screenshot.is_some() {
+        launch_context::LaunchMode::Screenshot
+    } else {
+        launch_context::LaunchMode::Interactive
+    };
+    launch_context::LaunchContext::new(launch_mode, effective_uid()).validate()?;
     let mut state = state_for_scenario(&args.ui_state);
 
     if let Some(path) = args.screenshot {
