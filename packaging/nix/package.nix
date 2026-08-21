@@ -34,7 +34,7 @@ rustPlatform.buildRustPackage {
   # - data/** (.desktop + AppStream metadata installed by postInstall)
   # - clippy.toml, rustfmt.toml (конфиги проверок пакета)
   #
-  # Исключены: docs/**, README.md, packaging/** (кроме polkit policy), tools/**,
+  # Исключены: docs/**, README.md, packaging/** (кроме Nix packaging inputs), tools/**,
   # flake.nix, flake.lock, LICENSE, .github/**, .opencode/**, deny.toml
   # и прочее, не используемое сборкой/установкой.
   #
@@ -55,7 +55,7 @@ rustPlatform.buildRustPackage {
         rel == "" # корень
         || builtins.elem top [ "crates" "ui" "tests" "data" ]
         || builtins.elem rel [ "Cargo.toml" "Cargo.lock" "clippy.toml" "rustfmt.toml" ]
-        || lib.hasPrefix "packaging/nix/polkit/" rel;
+        || lib.hasPrefix "packaging/nix/" rel;
   };
 
   cargoLock = {
