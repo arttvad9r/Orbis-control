@@ -14,7 +14,9 @@ use hardware_controls_backend::{HardwareProductControlClient, ProductWriteStatus
 use orbis_core::display_output::DisplayOutputSnapshot;
 use orbis_core::keyboard_backlight::KeyboardBacklightState;
 use orbis_providers::error::ProviderError;
-use orbis_providers::traits::{DisplayOutputProvider, KeyboardBacklightProvider, TelemetryProvider};
+use orbis_providers::traits::{
+    DisplayOutputProvider, KeyboardBacklightProvider, TelemetryProvider,
+};
 use orbis_providers::{
     AsusKeyboardBacklightProvider, SysfsTelemetryProvider, WaylandCompositorOutputSource,
     WaylandDisplayOutputProvider,
@@ -137,18 +139,27 @@ pub(crate) fn wire_window(app: &AppWindow) {
         let request_context = context.clone();
         app.on_keyboard_brightness_requested(move |level| {
             let Some(context) = request_context.clone() else {
-                tracing::warn!(requested_level = level, "keyboard request ignored: runtime absent");
+                tracing::warn!(
+                    requested_level = level,
+                    "keyboard request ignored: runtime absent"
+                );
                 return;
             };
             let Ok(level) = u8::try_from(level) else {
-                tracing::warn!(requested_level = level, "keyboard request ignored: invalid level");
+                tracing::warn!(
+                    requested_level = level,
+                    "keyboard request ignored: invalid level"
+                );
                 return;
             };
             let Some(app) = weak.upgrade() else {
                 return;
             };
             if !app.get_keyboard_control_ready() {
-                tracing::warn!(requested_level = level, "keyboard request ignored: write evidence unavailable");
+                tracing::warn!(
+                    requested_level = level,
+                    "keyboard request ignored: write evidence unavailable"
+                );
                 return;
             }
 
@@ -177,7 +188,8 @@ pub(crate) fn wire_window(app: &AppWindow) {
                         Err(error) => {
                             tracing::warn!(error = ?error, "keyboard brightness mutation failed");
                             app.set_keyboard_status(
-                                format!("Keyboard write failed · {}", write_error_label(&error)).into(),
+                                format!("Keyboard write failed · {}", write_error_label(&error))
+                                    .into(),
                             );
                         }
                     }
@@ -357,11 +369,7 @@ fn display_state_from_snapshot(snapshot: &DisplayOutputSnapshot) -> DisplayUiSta
             DisplayUiState {
                 state_ready: true,
                 mode: display_mode_bucket(refresh_mhz),
-                status: format!(
-                    "{} · {} · read only",
-                    output.id,
-                    refresh_label(refresh_mhz)
-                ),
+                status: format!("{} · {} · read only", output.id, refresh_label(refresh_mhz)),
             }
         }
         outputs => DisplayUiState {
@@ -384,7 +392,7 @@ fn refresh_label(refresh_mhz: u32) -> String {
     if refresh_mhz == 0 {
         return "refresh unknown".into();
     }
-    if refresh_mhz % 1_000 == 0 {
+    if refresh_mhz.is_multiple_of(1_000) {
         return format!("{} Hz", refresh_mhz / 1_000);
     }
     format!("{:.2} Hz", refresh_mhz as f64 / 1_000.0)

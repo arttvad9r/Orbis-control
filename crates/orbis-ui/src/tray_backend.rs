@@ -15,7 +15,9 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::AppWindow;
 
+#[allow(dead_code)]
 const WATCHER_SERVICE: &str = "org.kde.StatusNotifierWatcher";
+#[allow(dead_code)]
 const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 const ITEM_PATH: &str = "/StatusNotifierItem";
 const RECHECK_INTERVAL: Duration = Duration::from_secs(15);
@@ -253,7 +255,10 @@ mod tests {
             ["set_", "gpu_mode"].concat(),
             ["set_", "fan_curve"].concat(),
         ] {
-            assert!(!source.contains(&forbidden), "unexpected tray surface: {forbidden}");
+            assert!(
+                !source.contains(&forbidden),
+                "unexpected tray surface: {forbidden}"
+            );
         }
     }
 }

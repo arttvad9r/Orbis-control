@@ -154,10 +154,7 @@ impl AutomationRecoveryBarrier {
         if current == requested {
             AutomationPerformanceRecoveryOutcome::RecoveredAtRequested { current }
         } else {
-            AutomationPerformanceRecoveryOutcome::RecoveredAtDifferent {
-                requested,
-                current,
-            }
+            AutomationPerformanceRecoveryOutcome::RecoveredAtDifferent { requested, current }
         }
     }
 }
@@ -215,9 +212,11 @@ mod tests {
     }
 
     fn policy() -> AutomationPolicy {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.battery.performance =
             DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy
@@ -350,8 +349,11 @@ mod tests {
             ["pub fn ", "reset("].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected recovery escape: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected recovery escape: {needle}"
+            );
         }
-        assert!(!source.contains("unsafe"));
+        assert!(!source.contains(&["un", "safe"].concat()));
     }
 }

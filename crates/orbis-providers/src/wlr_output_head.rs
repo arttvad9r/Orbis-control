@@ -50,15 +50,25 @@ pub enum WlrOutputHeadEvent {
     /// EDID-derived serial metadata supplied by compositor.
     SerialNumber(String),
     /// Physical dimensions in millimetres.
-    PhysicalSize { width: u32, height: u32 },
+    PhysicalSize {
+        /// Width in millimetres.
+        width: u32,
+        /// Height in millimetres.
+        height: u32,
+    },
     /// Whether the compositor currently enables this head.
     Enabled(bool),
     /// Advertised mode object and exact lossless refresh.
     Mode {
+        /// Opaque compositor mode identifier.
         key: WlrOutputModeKey,
+        /// Horizontal mode resolution in pixels.
         width: u32,
+        /// Vertical mode resolution in pixels.
         height: u32,
+        /// Exact refresh rate in millihertz.
         refresh_mhz: u32,
+        /// Whether the compositor marks this mode preferred.
         preferred: bool,
     },
     /// Which advertised mode object is currently active.
@@ -287,7 +297,9 @@ mod tests {
     fn identity_uses_sink_metadata_not_head_name() {
         let mut first = complete_head();
         let first_identity = first.identity_evidence();
-        first.apply(WlrOutputHeadEvent::Name("totally-different-runtime-name".into()));
+        first.apply(WlrOutputHeadEvent::Name(
+            "totally-different-runtime-name".into(),
+        ));
         assert_eq!(first.identity_evidence(), first_identity);
         assert_eq!(first.name(), Some("totally-different-runtime-name"));
     }
@@ -360,7 +372,9 @@ mod tests {
     #[test]
     fn removed_current_mode_invalidates_evidence() {
         let mut head = complete_head();
-        head.apply(WlrOutputHeadEvent::ModeRemoved(WlrOutputModeKey::new("m120")));
+        head.apply(WlrOutputHeadEvent::ModeRemoved(WlrOutputModeKey::new(
+            "m120",
+        )));
         assert_eq!(
             head.refresh_evidence(DisplayRefreshTargetRole::InternalPanelProven, false),
             Err(WlrHeadEvidenceBlock::CurrentModeUnknown)
@@ -378,8 +392,12 @@ mod tests {
             ["Command", "::new("].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected mutation/process token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected mutation/process token: {needle}"
+            );
         }
-        assert!(!source.contains("wayland_protocols_wlr"));
+        let forbidden_protocol = ["wayland_protocols", "_wlr"].concat();
+        assert!(!source.contains(&forbidden_protocol));
     }
 }

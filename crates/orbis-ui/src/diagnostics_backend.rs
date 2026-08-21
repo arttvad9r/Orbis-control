@@ -272,8 +272,7 @@ fn write_report_text_to_dir(
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("create diagnostics report {path:?}"));
+                return Err(error).with_context(|| format!("create diagnostics report {path:?}"));
             }
         };
 
@@ -355,7 +354,10 @@ mod tests {
             ["set_", "performance"].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected mutation token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected mutation token: {needle}"
+            );
         }
     }
 
@@ -369,8 +371,14 @@ mod tests {
             .expect("second export");
 
         assert_ne!(first, second);
-        assert_eq!(fs::read_to_string(&first).unwrap(), "{\"schema_version\":1}\n");
-        assert_eq!(fs::read_to_string(&second).unwrap(), "{\"schema_version\":1}\n");
+        assert_eq!(
+            fs::read_to_string(&first).unwrap(),
+            "{\"schema_version\":1}\n"
+        );
+        assert_eq!(
+            fs::read_to_string(&second).unwrap(),
+            "{\"schema_version\":1}\n"
+        );
 
         #[cfg(unix)]
         {
@@ -386,8 +394,8 @@ mod tests {
         let source = include_str!("diagnostics_backend.rs");
         assert!(source.contains("state_dir_checked"));
         assert!(source.contains("EXPORT_DIR_NAME"));
-        assert!(!source.contains("std::env::current_dir"));
-        assert!(!source.contains("Command::new"));
+        assert!(!source.contains(&["std::env::", "current_dir"].concat()));
+        assert!(!source.contains(&["Command", "::new"].concat()));
     }
 
     #[test]
@@ -404,8 +412,8 @@ mod tests {
         let source = include_str!("diagnostics_backend.rs");
         assert!(source.contains("window.set_copy_enabled(false);"));
         assert!(source.contains("window.set_copy_enabled(true);"));
-        assert!(!source.contains("wl-copy"));
-        assert!(!source.contains("xclip"));
+        assert!(!source.contains(&["wl", "-copy"].concat()));
+        assert!(!source.contains(&["x", "clip"].concat()));
     }
 
     #[test]
@@ -420,6 +428,6 @@ mod tests {
         let source = include_str!("diagnostics_backend.rs");
         assert!(source.contains("current_capabilities"));
         assert!(source.contains("capabilities_arc()"));
-        assert!(!source.contains("CapabilityRegistryBuilder"));
+        assert!(!source.contains(&["CapabilityRegistry", "Builder"].concat()));
     }
 }

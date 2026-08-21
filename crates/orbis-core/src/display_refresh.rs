@@ -317,8 +317,14 @@ mod tests {
                 true,
             );
             assert!(evidence.target_for(DisplayRefreshPreset::Hz60).is_some());
-            assert_eq!(evidence.writable_target_for(DisplayRefreshPreset::Hz60), None);
-            assert_eq!(evidence.writable_target_for(DisplayRefreshPreset::Auto), None);
+            assert_eq!(
+                evidence.writable_target_for(DisplayRefreshPreset::Hz60),
+                None
+            );
+            assert_eq!(
+                evidence.writable_target_for(DisplayRefreshPreset::Auto),
+                None
+            );
         }
     }
 
@@ -377,7 +383,10 @@ mod tests {
         );
         let constraints = evidence.constraints();
         assert_eq!(constraints.target.as_str(), "mutation-owner:panel-0");
-        assert_eq!(constraints.role, DisplayRefreshTargetRole::InternalPanelProven);
+        assert_eq!(
+            constraints.role,
+            DisplayRefreshTargetRole::InternalPanelProven
+        );
         assert_eq!(
             constraints.writable_target_for(DisplayRefreshPreset::Hz120),
             Some(DisplayRefreshPresetTarget::Hz120 {

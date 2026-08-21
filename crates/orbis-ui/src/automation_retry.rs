@@ -8,9 +8,7 @@
 
 use orbis_core::capability::{CapabilityStatus, FeatureId};
 
-use crate::automation_shadow_runtime::{
-    AutomationShadowBlock, AutomationShadowOutcome,
-};
+use crate::automation_shadow_runtime::{AutomationShadowBlock, AutomationShadowOutcome};
 use orbis_config::AutomationPreflightBlock;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,9 +34,7 @@ pub enum AutomationRetryDisposition {
     Terminal,
 }
 
-pub fn classify_automation_retry(
-    outcome: &AutomationShadowOutcome,
-) -> AutomationRetryDisposition {
+pub fn classify_automation_retry(outcome: &AutomationShadowOutcome) -> AutomationRetryDisposition {
     match outcome {
         AutomationShadowOutcome::Observation(_)
         | AutomationShadowOutcome::ReadyButExecutionDisabled { .. } => {
@@ -115,6 +111,8 @@ mod tests {
                     power_source: AutomationPowerSource::Battery,
                     actions: Vec::new(),
                     blocks: Vec::new(),
+                    reconcile_only: false,
+                    notify_transitions: false,
                 },
                 blocks,
             },
@@ -206,8 +204,11 @@ mod tests {
             ["set_", "gpu_mode("].concat(),
             ["Command", "::new("].concat(),
         ] {
-            assert!(!source.contains(&token), "unexpected execution surface: {token}");
+            assert!(
+                !source.contains(&token),
+                "unexpected execution surface: {token}"
+            );
         }
-        assert!(!source.contains("unsafe"));
+        assert!(!source.contains(&["un", "safe"].concat()));
     }
 }

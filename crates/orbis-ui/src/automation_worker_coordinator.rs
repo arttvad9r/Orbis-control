@@ -11,8 +11,10 @@ use orbis_application::PerformanceState;
 use orbis_capabilities::CapabilityRegistrySnapshot;
 use orbis_config::AutomationPolicy;
 use orbis_core::lifecycle::ResumeGateOutcome;
-use orbis_core::profile::PerformanceProfile;
 use orbis_core::telemetry::Telemetry;
+
+#[cfg(test)]
+use orbis_core::profile::PerformanceProfile;
 
 use crate::automation_execution_scope::AutomationPreparedKind;
 use crate::automation_lifecycle_revision::AutomationLifecycleRevision;
@@ -233,9 +235,11 @@ mod tests {
     }
 
     fn policy() -> AutomationPolicy {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.battery.performance =
             DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy
@@ -254,19 +258,23 @@ mod tests {
         snapshot: &CapabilityRegistrySnapshot,
         base: SystemTime,
     ) -> AutomationWorkerPrepared {
-        assert!(coordinator
-            .observe_telemetry(&telemetry(true, base), policy, snapshot, base)
-            .unwrap()
-            .is_none());
-        assert!(coordinator
-            .observe_telemetry(
-                &telemetry(false, base + Duration::from_secs(1)),
-                policy,
-                snapshot,
-                base + Duration::from_secs(1),
-            )
-            .unwrap()
-            .is_none());
+        assert!(
+            coordinator
+                .observe_telemetry(&telemetry(true, base), policy, snapshot, base)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            coordinator
+                .observe_telemetry(
+                    &telemetry(false, base + Duration::from_secs(1)),
+                    policy,
+                    snapshot,
+                    base + Duration::from_secs(1),
+                )
+                .unwrap()
+                .is_none()
+        );
         coordinator
             .observe_telemetry(
                 &telemetry(false, base + Duration::from_secs(2)),
@@ -390,8 +398,11 @@ mod tests {
             ["pub fn ", "reset_recovery"].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected coordinator escape: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected coordinator escape: {needle}"
+            );
         }
-        assert!(!source.contains("unsafe"));
+        assert!(!source.contains(&["un", "safe"].concat()));
     }
 }

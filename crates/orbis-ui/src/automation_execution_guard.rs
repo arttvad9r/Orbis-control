@@ -16,8 +16,7 @@ use std::time::{Duration, SystemTime};
 
 use orbis_capabilities::CapabilityRegistrySnapshot;
 use orbis_config::{
-    AutomationPlan, AutomationPolicy, AutomationPreflight,
-    preflight_automation_plan_for_dry_run,
+    AutomationPlan, AutomationPolicy, AutomationPreflight, preflight_automation_plan_for_dry_run,
 };
 use orbis_core::automation::{AutomationAction, AutomationTrigger};
 
@@ -172,20 +171,16 @@ pub fn revalidate_automation_candidate(
         Ok(_) => {}
     }
 
-    let rebuilt = current_policy.plan_for(
-        candidate.plan.trigger.clone(),
-        candidate.plan.power_source,
-    );
+    let rebuilt =
+        current_policy.plan_for(candidate.plan.trigger.clone(), candidate.plan.power_source);
     if rebuilt != candidate.plan {
         return AutomationExecutionGuardOutcome::Blocked(
             AutomationExecutionGuardBlock::PolicyChanged,
         );
     }
 
-    let preflight = preflight_automation_plan_for_dry_run(
-        rebuilt,
-        current_capabilities.device_capabilities(),
-    );
+    let preflight =
+        preflight_automation_plan_for_dry_run(rebuilt, current_capabilities.device_capabilities());
     if !preflight.is_ready() {
         return AutomationExecutionGuardOutcome::Blocked(
             AutomationExecutionGuardBlock::PreflightBlocked(preflight),
@@ -263,9 +258,11 @@ mod tests {
     }
 
     fn policy() -> AutomationPolicy {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.battery.performance =
             DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy
@@ -353,11 +350,10 @@ mod tests {
         let AutomationExecutionGuardOutcome::Ready(handoff) = outcome else {
             panic!("expected dry-run handoff");
         };
-        assert!(!preflight_automation_plan(
-            handoff.plan().clone(),
-            snapshot.device_capabilities(),
-        )
-        .is_ready());
+        assert!(
+            !preflight_automation_plan(handoff.plan().clone(), snapshot.device_capabilities(),)
+                .is_ready()
+        );
     }
 
     #[test]
@@ -417,9 +413,7 @@ mod tests {
                 base + Duration::from_secs(3),
                 Duration::from_secs(30),
             ),
-            AutomationExecutionGuardOutcome::Blocked(
-                AutomationExecutionGuardBlock::PolicyChanged
-            )
+            AutomationExecutionGuardOutcome::Blocked(AutomationExecutionGuardBlock::PolicyChanged)
         );
     }
 
@@ -514,8 +508,11 @@ mod tests {
             ["Command", "::new"].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected execution token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected execution token: {needle}"
+            );
         }
-        assert!(!source.contains("unsafe"));
+        assert!(!source.contains(&["un", "safe"].concat()));
     }
 }

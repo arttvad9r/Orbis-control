@@ -78,9 +78,7 @@ impl fmt::Display for DisplayRefreshCommandError {
                 f,
                 "DisplayRefresh mutation returned {result:?}, but authoritative read-back failed: {source}"
             ),
-            Self::ReadBackMismatch {
-                result, source, ..
-            } => write!(
+            Self::ReadBackMismatch { result, source, .. } => write!(
                 f,
                 "DisplayRefresh mutation returned {result:?}, but authoritative read-back did not match: {source}"
             ),
@@ -219,9 +217,7 @@ mod tests {
 
     #[async_trait]
     impl DisplayRefreshMutationOwner for FakeOwner {
-        async fn display_refresh_evidence(
-            &self,
-        ) -> Result<DisplayRefreshEvidence, ProviderError> {
+        async fn display_refresh_evidence(&self) -> Result<DisplayRefreshEvidence, ProviderError> {
             self.evidence.lock().unwrap().take().unwrap()
         }
 

@@ -3504,12 +3504,9 @@ dependencies = [
 name = "orbis-cli"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "clap",
- "orbis-capabilities",
  "orbis-core",
- "orbis-sessiond",
- "orbis-test-support",
+ "orbis-providers",
+ "orbis-session-client",
  "serde",
  "serde_json",
  "tokio",
@@ -3635,7 +3632,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap",
  "image",
  "orbis-application",
  "orbis-capabilities",
@@ -3645,7 +3641,6 @@ dependencies = [
  "orbis-session-client",
  "orbis-sessiond",
  "orbis-test-support",
- "serde",
  "serde_json",
  "slint",
  "slint-build",

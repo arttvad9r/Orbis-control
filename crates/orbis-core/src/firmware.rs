@@ -43,8 +43,14 @@ mod tests {
 
     #[test]
     fn boot_sound_wire_is_total_only_for_boolean_values() {
-        assert_eq!(BootSoundState::from_kernel_value(0), Some(BootSoundState::Disabled));
-        assert_eq!(BootSoundState::from_kernel_value(1), Some(BootSoundState::Enabled));
+        assert_eq!(
+            BootSoundState::from_kernel_value(0),
+            Some(BootSoundState::Disabled)
+        );
+        assert_eq!(
+            BootSoundState::from_kernel_value(1),
+            Some(BootSoundState::Enabled)
+        );
         assert_eq!(BootSoundState::from_kernel_value(2), None);
         assert_eq!(BootSoundState::Enabled.kernel_value(), 1);
     }

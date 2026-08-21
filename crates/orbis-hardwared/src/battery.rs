@@ -48,10 +48,7 @@ pub struct SysfsBatteryEffectiveReader {
 
 fn discovery_read_error(path: &Path, error: std::io::Error) -> ProviderError {
     if error.kind() == std::io::ErrorKind::PermissionDenied {
-        ProviderError::PermissionDenied(format!(
-            "battery discovery cannot read {}",
-            path.display()
-        ))
+        ProviderError::PermissionDenied(format!("battery discovery cannot read {}", path.display()))
     } else {
         ProviderError::Io(error)
     }
@@ -68,10 +65,8 @@ fn remember_discovery_error(
                 *permission_error = Some(detail);
             }
         }
-        ProviderError::Io(error) => {
-            if io_error.is_none() {
-                *io_error = Some(error);
-            }
+        ProviderError::Io(error) if io_error.is_none() => {
+            *io_error = Some(error);
         }
         _ => {}
     }
@@ -321,10 +316,8 @@ pub mod battery_mutation_wire {
 
 #[async_trait]
 pub trait BatteryMutationBackend: Send + Sync {
-    async fn set_charge_limit(
-        &self,
-        percent: u8,
-    ) -> Result<BatteryMutationReadback, ProviderError>;
+    async fn set_charge_limit(&self, percent: u8)
+    -> Result<BatteryMutationReadback, ProviderError>;
 
     /// Report the typed runtime availability of this mutation backend.
     ///
@@ -403,6 +396,7 @@ mod tests {
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     };
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
 

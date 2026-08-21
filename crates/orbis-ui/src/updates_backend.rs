@@ -297,15 +297,21 @@ mod tests {
     #[test]
     fn blockers_are_typed_per_installation_owner() {
         let nix = UpdateBackendAssessment::from_owner(InstallOwner::NixStore);
-        assert_eq!(nix.release_source_blocker, ReleaseSourceBlocker::CanonicalSourceMissing);
+        assert_eq!(
+            nix.release_source_blocker,
+            ReleaseSourceBlocker::CanonicalSourceMissing
+        );
         assert_eq!(nix.install_blocker, InstallBlocker::NixOwnedExternally);
         assert!(!nix.can_check());
         assert!(!nix.can_install());
 
-        let appimage = UpdateBackendAssessment::from_owner(InstallOwner::AppImage(
-            PathBuf::from("/tmp/Orbis.AppImage"),
-        ));
-        assert_eq!(appimage.install_blocker, InstallBlocker::AppImageInstallerMissing);
+        let appimage = UpdateBackendAssessment::from_owner(InstallOwner::AppImage(PathBuf::from(
+            "/tmp/Orbis.AppImage",
+        )));
+        assert_eq!(
+            appimage.install_blocker,
+            InstallBlocker::AppImageInstallerMissing
+        );
     }
 
     #[test]
@@ -320,7 +326,10 @@ mod tests {
             ["pacman", " -"].concat(),
         ];
         for token in forbidden {
-            assert!(!source.contains(&token), "unexpected update mutation surface: {token}");
+            assert!(
+                !source.contains(&token),
+                "unexpected update mutation surface: {token}"
+            );
         }
     }
 }

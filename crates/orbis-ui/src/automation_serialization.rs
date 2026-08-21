@@ -272,9 +272,11 @@ mod tests {
     }
 
     fn policy() -> AutomationPolicy {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.battery.performance =
             DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy
@@ -287,9 +289,7 @@ mod tests {
         telemetry
     }
 
-    fn handoff(
-        generation: u64,
-    ) -> (AutomationLifecycleRevision, AutomationRevisionHandoff) {
+    fn handoff(generation: u64) -> (AutomationLifecycleRevision, AutomationRevisionHandoff) {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let snapshot = snapshot(generation, base);
         let policy = policy();
@@ -440,7 +440,8 @@ mod tests {
         let mut clock = AutomationLifecycleClock::new();
         assert_eq!(clock.advance().unwrap(), first_revision);
         let second_revision = clock.advance().unwrap();
-        let candidate = AutomationRevisionCandidate::from_shadow(&outcome, second_revision).unwrap();
+        let candidate =
+            AutomationRevisionCandidate::from_shadow(&outcome, second_revision).unwrap();
         let guard = revalidate_revision_candidate(
             &candidate,
             second_revision,
@@ -475,8 +476,11 @@ mod tests {
             ["Command", "::new"].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected execution token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected execution token: {needle}"
+            );
         }
-        assert!(!source.contains("unsafe"));
+        assert!(!source.contains(&["un", "safe"].concat()));
     }
 }

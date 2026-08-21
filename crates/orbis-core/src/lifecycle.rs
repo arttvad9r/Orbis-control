@@ -288,7 +288,11 @@ mod tests {
         gate.observe_prepare_for_sleep(false, base + Duration::from_secs(1));
 
         assert_eq!(
-            gate.observe_telemetry(None, base + Duration::from_secs(2), base + Duration::from_secs(2)),
+            gate.observe_telemetry(
+                None,
+                base + Duration::from_secs(2),
+                base + Duration::from_secs(2)
+            ),
             ResumeGateOutcome::IgnoredUnknownPowerSource
         );
         assert!(gate.resume_pending());

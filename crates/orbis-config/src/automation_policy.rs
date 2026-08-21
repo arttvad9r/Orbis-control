@@ -259,7 +259,8 @@ impl AutomationPolicy {
                     .push(AutomationAction::SetRefreshPolicy(RefreshPolicy::Fixed(hz)));
             }
             DesiredDisplayPolicy::Hz120 => {
-                let hz = RefreshHz::new(120).expect("120 Hz is inside the validated RefreshHz range");
+                let hz =
+                    RefreshHz::new(120).expect("120 Hz is inside the validated RefreshHz range");
                 plan.actions
                     .push(AutomationAction::SetRefreshPolicy(RefreshPolicy::Fixed(hz)));
             }
@@ -295,9 +296,7 @@ pub struct OrbisDesiredState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        DesiredStateDocument, load_desired_state_from_dir, save_desired_state_to_dir,
-    };
+    use crate::{DesiredStateDocument, load_desired_state_from_dir, save_desired_state_to_dir};
 
     #[test]
     fn default_policy_is_hardware_inert() {
@@ -349,9 +348,11 @@ mod tests {
 
     #[test]
     fn ac_plan_is_typed_and_hardware_inert() {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.ac.performance = DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy.ac.gpu = DesiredGpuPolicy::Mode(GpuMode::Eco);
         policy.ac.display = DesiredDisplayPolicy::Hz60;
@@ -374,9 +375,11 @@ mod tests {
 
     #[test]
     fn planner_refuses_to_coerce_dim_or_normal_to_boolean_lighting() {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_resume = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_resume: true,
+            ..Default::default()
+        };
         policy.ac.lighting = DesiredLightingPolicy::Dim;
 
         let plan = policy.plan_for(AutomationTrigger::OnResume, AutomationPowerSource::Ac);
@@ -392,23 +395,24 @@ mod tests {
 
     #[test]
     fn transition_trigger_must_match_observed_power_source() {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.ac.performance = DesiredPerformancePolicy::Profile(PerformanceProfile::Turbo);
 
-        let plan = policy.plan_for(
-            AutomationTrigger::OnAc,
-            AutomationPowerSource::Battery,
-        );
+        let plan = policy.plan_for(AutomationTrigger::OnAc, AutomationPowerSource::Battery);
         assert_eq!(plan.blocks, vec![AutomationPlanBlock::PowerSourceMismatch]);
         assert!(plan.actions.is_empty());
     }
 
     #[test]
     fn unsupported_lifecycle_trigger_never_reuses_another_policy() {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
+        let policy = AutomationPolicy {
+            enabled: true,
+            ..Default::default()
+        };
         let plan = policy.plan_for(
             AutomationTrigger::ExternalDisplayConnected,
             AutomationPowerSource::Ac,

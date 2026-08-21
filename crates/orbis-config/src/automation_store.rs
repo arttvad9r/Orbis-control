@@ -98,8 +98,8 @@ pub fn load_automation_policy_from_dir(
 /// This performs no TOML parsing and never creates/writes the file. Callers use
 /// it only to decide whether a previously authoritative typed policy may be
 /// stale and therefore needs hardened reloading.
-pub fn automation_policy_source_fingerprint(
-) -> Result<AutomationPolicySourceFingerprint, DesiredStateError> {
+pub fn automation_policy_source_fingerprint()
+-> Result<AutomationPolicySourceFingerprint, DesiredStateError> {
     let path = desired_state_file()?;
     fingerprint_file(&path)
 }

@@ -57,11 +57,7 @@ mod tests {
     use super::*;
 
     fn mode(refresh: u32) -> DisplayMode {
-        DisplayMode::new(
-            2560,
-            1600,
-            RefreshMilliHz::new(refresh).expect("refresh"),
-        )
+        DisplayMode::new(2560, 1600, RefreshMilliHz::new(refresh).expect("refresh"))
     }
 
     #[test]

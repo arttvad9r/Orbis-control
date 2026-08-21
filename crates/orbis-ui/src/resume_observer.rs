@@ -8,7 +8,6 @@
 
 use std::time::{Duration, SystemTime};
 
-use slint::ComponentHandle;
 use zbus::export::ordered_stream::OrderedStreamExt;
 
 use crate::AppWindow;
@@ -36,13 +35,7 @@ pub(crate) fn spawn(runtime: tokio::runtime::Handle, app: slint::Weak<AppWindow>
 
 async fn listen_once(app: &slint::Weak<AppWindow>) -> zbus::Result<()> {
     let connection = zbus::Connection::system().await?;
-    let proxy = zbus::Proxy::new(
-        &connection,
-        LOGIND_SERVICE,
-        LOGIND_PATH,
-        LOGIND_MANAGER,
-    )
-    .await?;
+    let proxy = zbus::Proxy::new(&connection, LOGIND_SERVICE, LOGIND_PATH, LOGIND_MANAGER).await?;
     let mut signals = proxy.receive_signal(PREPARE_FOR_SLEEP).await?;
 
     while let Some(message) = signals.next().await {
@@ -58,7 +51,7 @@ async fn listen_once(app: &slint::Weak<AppWindow>) -> zbus::Result<()> {
         // Worker publication is thread-safe, typed and hardware-inert. The
         // receiver lives inside the same sequential owner as application
         // mutations/capability replacement. A missing worker fails closed.
-        if !crate::worker::publish_prepare_for_sleep(start, observed_at) {
+        if !orbis_ui::worker::publish_prepare_for_sleep(start, observed_at) {
             tracing::debug!(start, "Automation worker lifecycle receiver unavailable");
         }
 
@@ -104,7 +97,10 @@ mod tests {
             ["Command", "::new"].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected mutation token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected mutation token: {needle}"
+            );
         }
     }
 

@@ -13,9 +13,7 @@ use orbis_core::display_refresh::{
     DisplayRefreshEvidence, DisplayRefreshPresetTarget, DisplayRefreshTargetRole,
 };
 use orbis_core::display_refresh_request::DisplayRefreshRequest;
-use orbis_core::display_refresh_state::{
-    DisplayRefreshActivePolicy, DisplayRefreshAppliedState,
-};
+use orbis_core::display_refresh_state::{DisplayRefreshActivePolicy, DisplayRefreshAppliedState};
 
 use crate::error::ProviderError;
 
@@ -114,7 +112,8 @@ pub fn validate_display_refresh_readback(
             "display refresh target identity changed during mutation".into(),
         ));
     }
-    if after.current.width != before.current.width || after.current.height != before.current.height {
+    if after.current.width != before.current.width || after.current.height != before.current.height
+    {
         return Err(ProviderError::InvalidRequest(
             "display refresh mutation changed resolution".into(),
         ));
@@ -229,11 +228,7 @@ mod tests {
             DisplayRefreshPreset::Hz60,
         )
         .expect("request");
-        let unknown = evidence(
-            "owner:panel-0",
-            DisplayRefreshTargetRole::Unknown,
-            120_000,
-        );
+        let unknown = evidence("owner:panel-0", DisplayRefreshTargetRole::Unknown, 120_000);
         assert!(matches!(
             validate_display_refresh_request(&request, &unknown),
             Err(ProviderError::InvalidRequest(_))

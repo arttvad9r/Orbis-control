@@ -158,23 +158,16 @@ fn print_human(snapshot: &StatusSnapshot) {
 async fn collect_status() -> Result<StatusSnapshot, zbus::Error> {
     let connection = zbus::Connection::session().await?;
 
-    let battery = SessionChargeLimitProvider::new(ZbusSessionChargeLimitSource::new(
-        connection.clone(),
-    ));
-    let performance = SessionPerformanceProvider::new(ZbusSessionPerformanceSource::new(
-        connection.clone(),
-    ));
+    let battery =
+        SessionChargeLimitProvider::new(ZbusSessionChargeLimitSource::new(connection.clone()));
+    let performance =
+        SessionPerformanceProvider::new(ZbusSessionPerformanceSource::new(connection.clone()));
     let gpu_power = SessionGpuPowerProvider::new(ZbusSessionGpuSource::new(connection.clone()));
     let gpu_mux = SessionGpuMuxProvider::new(ZbusSessionGpuSource::new(connection.clone()));
     let gpu_access = SessionGpuAccessProvider::new(ZbusSessionGpuSource::new(connection));
 
     let charge_limit = observation_from_result(
-        bounded_provider_call(
-            &battery,
-            "battery.charge_limit",
-            battery.charge_limit(),
-        )
-        .await,
+        bounded_provider_call(&battery, "battery.charge_limit", battery.charge_limit()).await,
     );
 
     let current = observation_from_result(
@@ -283,10 +276,7 @@ mod tests {
 
     #[test]
     fn parser_rejects_unknown_or_extra_arguments() {
-        assert_eq!(
-            parse_args(["wat".into()]),
-            Command::Invalid("wat".into())
-        );
+        assert_eq!(parse_args(["wat".into()]), Command::Invalid("wat".into()));
         assert_eq!(
             parse_args(["status".into(), "extra".into()]),
             Command::Invalid("status".into())

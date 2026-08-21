@@ -15,9 +15,7 @@ use slint::{CloseRequestResponse, ComponentHandle, PhysicalPosition};
 use crate::AppWindow;
 
 pub(crate) fn position_runtime_supported() -> bool {
-    if std::env::var_os("WAYLAND_DISPLAY")
-        .is_some_and(|value| !value.is_empty())
-    {
+    if std::env::var_os("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty()) {
         return false;
     }
     if std::env::var("SLINT_BACKEND")
@@ -52,11 +50,19 @@ pub(crate) fn restore_position(app: &AppWindow) {
             if let Some(position) = load.state.position() {
                 app.window()
                     .set_position(PhysicalPosition::new(position.x, position.y));
-                tracing::debug!(x = position.x, y = position.y, "restored main window position");
+                tracing::debug!(
+                    x = position.x,
+                    y = position.y,
+                    "restored main window position"
+                );
             }
         }
-        Ok(load) => tracing::warn!(warning = ?load.warning, "invalid window-state source preserved; position not restored"),
-        Err(error) => tracing::warn!(error = %error, "window-state load failed; position not restored"),
+        Ok(load) => {
+            tracing::warn!(warning = ?load.warning, "invalid window-state source preserved; position not restored")
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "window-state load failed; position not restored")
+        }
     }
 }
 
@@ -83,7 +89,12 @@ pub(crate) fn persist_position(app: &AppWindow) -> bool {
     }));
     match save_window_state(&state) {
         Ok(path) => {
-            tracing::debug!(?path, x = position.x, y = position.y, "saved main window position");
+            tracing::debug!(
+                ?path,
+                x = position.x,
+                y = position.y,
+                "saved main window position"
+            );
             true
         }
         Err(error) => {
@@ -160,6 +171,6 @@ mod tests {
         assert!(source.contains("load_window_state"));
         assert!(source.contains("save_window_state"));
         assert!(source.contains("slint::quit_event_loop()"));
-        assert!(!source.contains("Command::new"));
+        assert!(!source.contains(&["Command", "::new"].concat()));
     }
 }

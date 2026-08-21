@@ -76,9 +76,9 @@ impl AutomationShadowRuntime {
         capabilities: &CapabilityRegistrySnapshot,
         now: SystemTime,
     ) -> AutomationShadowOutcome {
-        let observation =
-            self.power_source
-                .observe(telemetry.ac_online, telemetry.ts, now);
+        let observation = self
+            .power_source
+            .observe(telemetry.ac_online, telemetry.ts, now);
         let trigger = match observation {
             PowerSourceObservationOutcome::Trigger(ref trigger) => trigger.clone(),
             _ => return AutomationShadowOutcome::Observation(observation),
@@ -256,12 +256,13 @@ mod tests {
     }
 
     fn policy(on_resume: bool) -> AutomationPolicy {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
-        policy.on_resume = on_resume;
-        policy.ac.performance =
-            DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            on_resume,
+            ..Default::default()
+        };
+        policy.ac.performance = DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy.battery.performance =
             DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy
@@ -281,7 +282,9 @@ mod tests {
         let mut runtime = AutomationShadowRuntime::default();
         assert_eq!(
             runtime.observe_telemetry(&telemetry(Some(true), now), &policy(false), &snapshot, now),
-            AutomationShadowOutcome::Observation(PowerSourceObservationOutcome::BaselineEstablished)
+            AutomationShadowOutcome::Observation(
+                PowerSourceObservationOutcome::BaselineEstablished
+            )
         );
     }
 

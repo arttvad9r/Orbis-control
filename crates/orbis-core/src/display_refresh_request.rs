@@ -55,7 +55,7 @@ impl DisplayRefreshRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::display_refresh::{DisplayRefreshTargetRole, DisplayRefreshPresetTarget};
+    use crate::display_refresh::{DisplayRefreshPresetTarget, DisplayRefreshTargetRole};
     use crate::newtypes::RefreshMilliHz;
 
     fn constraints(role: DisplayRefreshTargetRole) -> DisplayRefreshConstraints {

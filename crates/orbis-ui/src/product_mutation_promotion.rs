@@ -100,9 +100,8 @@ pub fn assess_product_mutation_promotion(
         }
         PromotionScope::Unattended => {
             if !evidence.authoritative_hardware_readback {
-                blockers.push(
-                    ProductMutationPromotionBlocker::HardwareReadBackRequiredForUnattended,
-                );
+                blockers
+                    .push(ProductMutationPromotionBlocker::HardwareReadBackRequiredForUnattended);
             }
         }
     }
@@ -172,21 +171,24 @@ mod tests {
         ] {
             let evidence = current_source_evidence(mutation);
             assert!(evidence.non_mutating_preflight);
-            let assessment = assess_product_mutation_promotion(
-                mutation,
-                PromotionScope::Interactive,
-                evidence,
-            );
+            let assessment =
+                assess_product_mutation_promotion(mutation, PromotionScope::Interactive, evidence);
             assert!(!assessment.promotable());
-            assert!(assessment
-                .blockers
-                .contains(&ProductMutationPromotionBlocker::ExecutableValidationMissing));
-            assert!(assessment
-                .blockers
-                .contains(&ProductMutationPromotionBlocker::ProductPolicyNotApproved));
-            assert!(!assessment
-                .blockers
-                .contains(&ProductMutationPromotionBlocker::NonMutatingPreflightMissing));
+            assert!(
+                assessment
+                    .blockers
+                    .contains(&ProductMutationPromotionBlocker::ExecutableValidationMissing)
+            );
+            assert!(
+                assessment
+                    .blockers
+                    .contains(&ProductMutationPromotionBlocker::ProductPolicyNotApproved)
+            );
+            assert!(
+                !assessment
+                    .blockers
+                    .contains(&ProductMutationPromotionBlocker::NonMutatingPreflightMissing)
+            );
         }
     }
 
@@ -197,9 +199,11 @@ mod tests {
             PromotionScope::Unattended,
             current_source_evidence(ProductMutation::AuraStaticRgb),
         );
-        assert!(assessment.blockers.contains(
-            &ProductMutationPromotionBlocker::HardwareReadBackRequiredForUnattended
-        ));
+        assert!(
+            assessment
+                .blockers
+                .contains(&ProductMutationPromotionBlocker::HardwareReadBackRequiredForUnattended)
+        );
     }
 
     #[test]
@@ -232,7 +236,10 @@ mod tests {
             ["Command", "::new"].concat(),
         ];
         for token in forbidden {
-            assert!(!source.contains(&token), "unexpected promotion side effect: {token}");
+            assert!(
+                !source.contains(&token),
+                "unexpected promotion side effect: {token}"
+            );
         }
     }
 }

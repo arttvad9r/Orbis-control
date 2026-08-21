@@ -41,7 +41,10 @@ pub struct PendingValue<T> {
 impl<T> PendingValue<T> {
     /// Construct a typed pending target.
     pub fn new(target: T, requirement: ActionRequirement) -> Self {
-        Self { target, requirement }
+        Self {
+            target,
+            requirement,
+        }
     }
 }
 
@@ -116,7 +119,10 @@ mod tests {
         state.set_pending(PendingValue::new(80, ActionRequirement::None));
         state.set_observed(80);
         assert_eq!(state.observed, ObservedValue::Known(80));
-        assert_eq!(state.pending, Some(PendingValue::new(80, ActionRequirement::None)));
+        assert_eq!(
+            state.pending,
+            Some(PendingValue::new(80, ActionRequirement::None))
+        );
     }
 
     #[test]

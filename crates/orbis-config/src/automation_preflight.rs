@@ -127,9 +127,11 @@ pub fn preflight_automation_plan_with_display_constraints(
     match runtime_status {
         CapabilityStatus::Supported => {}
         CapabilityStatus::SupportedWithRequirement => {
-            blocks.push(AutomationPreflightBlock::ActionRequiresExplicitRequirement {
-                feature: FeatureId::Automation,
-            });
+            blocks.push(
+                AutomationPreflightBlock::ActionRequiresExplicitRequirement {
+                    feature: FeatureId::Automation,
+                },
+            );
         }
         status => blocks.push(AutomationPreflightBlock::AutomationRuntimeWriteUnavailable(
             status,
@@ -155,7 +157,11 @@ fn preflight_action(
             if !write_is_directly_supported(capabilities, feature, blocks) {
                 return;
             }
-            match capabilities.features.get(&feature).map(|cap| &cap.constraints) {
+            match capabilities
+                .features
+                .get(&feature)
+                .map(|cap| &cap.constraints)
+            {
                 Some(CapabilityConstraints::PerformanceProfiles(profiles)) => {
                     if !profiles.contains(profile) {
                         blocks.push(AutomationPreflightBlock::TargetNotAdvertised { feature });
@@ -169,7 +175,11 @@ fn preflight_action(
             if !write_is_directly_supported(capabilities, feature, blocks) {
                 return;
             }
-            match capabilities.features.get(&feature).map(|cap| &cap.constraints) {
+            match capabilities
+                .features
+                .get(&feature)
+                .map(|cap| &cap.constraints)
+            {
                 Some(CapabilityConstraints::GpuModes(modes)) => {
                     if !modes.contains(mode) {
                         blocks.push(AutomationPreflightBlock::TargetNotAdvertised { feature });
@@ -185,9 +195,8 @@ fn preflight_action(
             }
 
             let Some(preset) = display_preset(*policy) else {
-                blocks.push(AutomationPreflightBlock::DisplayRefreshPolicyNotRepresentable(
-                    *policy,
-                ));
+                blocks
+                    .push(AutomationPreflightBlock::DisplayRefreshPolicyNotRepresentable(*policy));
                 return;
             };
             let Some(constraints) = display_constraints else {
@@ -256,20 +265,13 @@ mod tests {
         DesiredPerformancePolicy,
     };
     use orbis_core::automation::AutomationTrigger;
-    use orbis_core::capability::{
-        Capability, CapabilityOperations, OperationCapability,
-    };
-    use orbis_core::display_refresh::{
-        DisplayRefreshPresetTarget, DisplayRefreshTargetId,
-    };
+    use orbis_core::capability::{Capability, CapabilityOperations, OperationCapability};
+    use orbis_core::display_refresh::{DisplayRefreshPresetTarget, DisplayRefreshTargetId};
     use orbis_core::gpu::GpuMode;
     use orbis_core::newtypes::{RefreshHz, RefreshMilliHz};
     use orbis_core::profile::PerformanceProfile;
 
-    fn capability(
-        write: CapabilityStatus,
-        constraints: CapabilityConstraints,
-    ) -> Capability {
+    fn capability(write: CapabilityStatus, constraints: CapabilityConstraints) -> Capability {
         Capability::new(write)
             .with_operations(CapabilityOperations {
                 read: OperationCapability::new(CapabilityStatus::Supported),
@@ -279,11 +281,12 @@ mod tests {
     }
 
     fn enabled_ac_policy() -> AutomationPolicy {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
-        policy.ac.performance =
-            DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
+        policy.ac.performance = DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy
     }
 
@@ -324,9 +327,7 @@ mod tests {
         assert!(!result.is_ready());
         assert!(result.actions_if_ready().is_none());
         assert!(result.blocks.contains(
-            &AutomationPreflightBlock::AutomationRuntimeWriteUnavailable(
-                CapabilityStatus::Unknown
-            )
+            &AutomationPreflightBlock::AutomationRuntimeWriteUnavailable(CapabilityStatus::Unknown)
         ));
     }
 
@@ -362,17 +363,23 @@ mod tests {
         );
 
         let result = preflight_automation_plan(plan, &caps);
-        assert!(result.blocks.contains(&AutomationPreflightBlock::TargetEvidenceMissing {
-            feature: FeatureId::Performance,
-        }));
+        assert!(
+            result
+                .blocks
+                .contains(&AutomationPreflightBlock::TargetEvidenceMissing {
+                    feature: FeatureId::Performance,
+                })
+        );
         assert!(result.actions_if_ready().is_none());
     }
 
     #[test]
     fn gpu_requirement_or_missing_mode_blocks_whole_plan() {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.ac.gpu = DesiredGpuPolicy::Mode(GpuMode::Eco);
         let plan = policy.plan_for(AutomationTrigger::OnAc, AutomationPowerSource::Ac);
 
@@ -396,9 +403,11 @@ mod tests {
 
     #[test]
     fn display_write_bit_alone_is_not_enough_for_unattended_target() {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.ac.display = DesiredDisplayPolicy::Hz120;
         let plan = policy.plan_for(AutomationTrigger::OnAc, AutomationPowerSource::Ac);
 
@@ -409,17 +418,23 @@ mod tests {
         );
 
         let result = preflight_automation_plan(plan, &caps);
-        assert!(result.blocks.contains(&AutomationPreflightBlock::TargetEvidenceMissing {
-            feature: FeatureId::DisplayRefresh,
-        }));
+        assert!(
+            result
+                .blocks
+                .contains(&AutomationPreflightBlock::TargetEvidenceMissing {
+                    feature: FeatureId::DisplayRefresh,
+                })
+        );
         assert!(result.actions_if_ready().is_none());
     }
 
     #[test]
     fn typed_internal_display_constraints_can_prove_exact_120_target() {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.ac.display = DesiredDisplayPolicy::Hz120;
         let plan = policy.plan_for(AutomationTrigger::OnAc, AutomationPowerSource::Ac);
         let mut caps = runtime_caps();
@@ -434,20 +449,19 @@ mod tests {
             }],
         );
 
-        let result = preflight_automation_plan_with_display_constraints(
-            plan,
-            &caps,
-            Some(&display),
-        );
+        let result =
+            preflight_automation_plan_with_display_constraints(plan, &caps, Some(&display));
         assert!(result.is_ready());
         assert!(result.actions_if_ready().is_some());
     }
 
     #[test]
     fn display_target_role_must_be_proven_internal_panel() {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.ac.display = DesiredDisplayPolicy::Hz60;
         let plan = policy.plan_for(AutomationTrigger::OnAc, AutomationPowerSource::Ac);
         let mut caps = runtime_caps();
@@ -462,24 +476,25 @@ mod tests {
             }],
         );
 
-        let result = preflight_automation_plan_with_display_constraints(
-            plan,
-            &caps,
-            Some(&display),
+        let result =
+            preflight_automation_plan_with_display_constraints(plan, &caps, Some(&display));
+        assert!(
+            result
+                .blocks
+                .contains(&AutomationPreflightBlock::TargetIdentityNotProven {
+                    feature: FeatureId::DisplayRefresh,
+                })
         );
-        assert!(result.blocks.contains(
-            &AutomationPreflightBlock::TargetIdentityNotProven {
-                feature: FeatureId::DisplayRefresh,
-            }
-        ));
         assert!(result.actions_if_ready().is_none());
     }
 
     #[test]
     fn display_preset_must_be_exactly_advertised() {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.ac.display = DesiredDisplayPolicy::Hz60;
         let plan = policy.plan_for(AutomationTrigger::OnAc, AutomationPowerSource::Ac);
         let mut caps = runtime_caps();
@@ -494,22 +509,25 @@ mod tests {
             }],
         );
 
-        let result = preflight_automation_plan_with_display_constraints(
-            plan,
-            &caps,
-            Some(&display),
+        let result =
+            preflight_automation_plan_with_display_constraints(plan, &caps, Some(&display));
+        assert!(
+            result
+                .blocks
+                .contains(&AutomationPreflightBlock::TargetNotAdvertised {
+                    feature: FeatureId::DisplayRefresh,
+                })
         );
-        assert!(result.blocks.contains(&AutomationPreflightBlock::TargetNotAdvertised {
-            feature: FeatureId::DisplayRefresh,
-        }));
         assert!(result.actions_if_ready().is_none());
     }
 
     #[test]
     fn auto_requires_explicit_owner_auto_evidence() {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.ac.display = DesiredDisplayPolicy::Auto;
         let plan = policy.plan_for(AutomationTrigger::OnAc, AutomationPowerSource::Ac);
         let mut caps = runtime_caps();
@@ -523,36 +541,37 @@ mod tests {
                 refresh: RefreshMilliHz::new(60_000).unwrap(),
             }],
         );
-        let blocked = preflight_automation_plan_with_display_constraints(
-            plan.clone(),
-            &caps,
-            Some(&no_auto),
+        let blocked =
+            preflight_automation_plan_with_display_constraints(plan.clone(), &caps, Some(&no_auto));
+        assert!(
+            blocked
+                .blocks
+                .contains(&AutomationPreflightBlock::TargetNotAdvertised {
+                    feature: FeatureId::DisplayRefresh,
+                })
         );
-        assert!(blocked.blocks.contains(&AutomationPreflightBlock::TargetNotAdvertised {
-            feature: FeatureId::DisplayRefresh,
-        }));
 
         let with_auto = display_constraints(
             DisplayRefreshTargetRole::InternalPanelProven,
             vec![DisplayRefreshPresetTarget::Auto],
         );
-        let ready = preflight_automation_plan_with_display_constraints(
-            plan,
-            &caps,
-            Some(&with_auto),
-        );
+        let ready =
+            preflight_automation_plan_with_display_constraints(plan, &caps, Some(&with_auto));
         assert!(ready.is_ready());
     }
 
     #[test]
     fn non_product_refresh_policy_is_never_coerced_to_a_preset() {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         let mut plan = policy.plan_for(AutomationTrigger::OnAc, AutomationPowerSource::Ac);
-        plan.actions.push(AutomationAction::SetRefreshPolicy(
-            RefreshPolicy::Fixed(RefreshHz::new(90).unwrap()),
-        ));
+        plan.actions
+            .push(AutomationAction::SetRefreshPolicy(RefreshPolicy::Fixed(
+                RefreshHz::new(90).unwrap(),
+            )));
         let mut caps = runtime_caps();
         caps.features.insert(
             FeatureId::DisplayRefresh,
@@ -565,15 +584,12 @@ mod tests {
             }],
         );
 
-        let result = preflight_automation_plan_with_display_constraints(
-            plan,
-            &caps,
-            Some(&display),
-        );
+        let result =
+            preflight_automation_plan_with_display_constraints(plan, &caps, Some(&display));
         assert!(result.blocks.contains(
-            &AutomationPreflightBlock::DisplayRefreshPolicyNotRepresentable(
-                RefreshPolicy::Fixed(RefreshHz::new(90).unwrap())
-            )
+            &AutomationPreflightBlock::DisplayRefreshPolicyNotRepresentable(RefreshPolicy::Fixed(
+                RefreshHz::new(90).unwrap()
+            ))
         ));
         assert!(result.actions_if_ready().is_none());
     }

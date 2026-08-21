@@ -286,11 +286,19 @@ mod tests {
             PowerSourceObservationOutcome::BaselineEstablished
         );
         assert_eq!(
-            detector.observe(Some(false), now + Duration::from_secs(1), now + Duration::from_secs(1)),
+            detector.observe(
+                Some(false),
+                now + Duration::from_secs(1),
+                now + Duration::from_secs(1)
+            ),
             PowerSourceObservationOutcome::Candidate
         );
         assert_eq!(
-            detector.observe(Some(false), now + Duration::from_secs(2), now + Duration::from_secs(2)),
+            detector.observe(
+                Some(false),
+                now + Duration::from_secs(2),
+                now + Duration::from_secs(2)
+            ),
             PowerSourceObservationOutcome::Trigger(AutomationTrigger::OnBattery)
         );
         assert_eq!(detector.stable_ac_online(), Some(false));
@@ -386,15 +394,27 @@ mod tests {
         let mut detector = PowerSourceEdgeDetector::default();
         detector.observe(Some(true), base, base);
         assert_eq!(
-            detector.observe(Some(false), base + Duration::from_secs(1), base + Duration::from_secs(1)),
+            detector.observe(
+                Some(false),
+                base + Duration::from_secs(1),
+                base + Duration::from_secs(1)
+            ),
             PowerSourceObservationOutcome::Candidate
         );
         assert_eq!(
-            detector.observe(None, base + Duration::from_secs(2), base + Duration::from_secs(2)),
+            detector.observe(
+                None,
+                base + Duration::from_secs(2),
+                base + Duration::from_secs(2)
+            ),
             PowerSourceObservationOutcome::IgnoredUnknown
         );
         assert_eq!(
-            detector.observe(Some(false), base + Duration::from_secs(3), base + Duration::from_secs(3)),
+            detector.observe(
+                Some(false),
+                base + Duration::from_secs(3),
+                base + Duration::from_secs(3)
+            ),
             PowerSourceObservationOutcome::Candidate
         );
 
@@ -405,7 +425,11 @@ mod tests {
             PowerSourceObservationOutcome::IgnoredStale
         );
         assert_eq!(
-            detector.observe(Some(false), base + Duration::from_secs(6), base + Duration::from_secs(6)),
+            detector.observe(
+                Some(false),
+                base + Duration::from_secs(6),
+                base + Duration::from_secs(6)
+            ),
             PowerSourceObservationOutcome::Candidate
         );
     }

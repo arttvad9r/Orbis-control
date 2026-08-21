@@ -187,8 +187,7 @@ impl AutomationRevisionHandoff {
         current_revision: AutomationLifecycleRevision,
         current_generation: u64,
     ) -> bool {
-        self.revision == current_revision
-            && self.inner.generation_still_matches(current_generation)
+        self.revision == current_revision && self.inner.generation_still_matches(current_generation)
     }
 }
 
@@ -277,9 +276,11 @@ mod tests {
     }
 
     fn policy() -> AutomationPolicy {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.battery.performance =
             DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy
@@ -389,11 +390,13 @@ mod tests {
         let policy = policy();
         let snapshot = snapshot(11, base);
         let outcome = ready_outcome(&policy, &snapshot, base);
-        assert!(AutomationRevisionCandidate::from_shadow(
-            &outcome,
-            AutomationLifecycleRevision::INITIAL,
-        )
-        .is_none());
+        assert!(
+            AutomationRevisionCandidate::from_shadow(
+                &outcome,
+                AutomationLifecycleRevision::INITIAL,
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -408,8 +411,11 @@ mod tests {
             ["Command", "::new"].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected execution token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected execution token: {needle}"
+            );
         }
-        assert!(!source.contains("unsafe"));
+        assert!(!source.contains(&["un", "safe"].concat()));
     }
 }

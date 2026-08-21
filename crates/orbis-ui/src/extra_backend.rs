@@ -152,11 +152,17 @@ fn begin_mutation(window: &ExtraWindow) -> Option<ExtraContext> {
 
 fn request_keyboard_brightness(window: &ExtraWindow, level: i32) {
     if !window.get_keyboard_control_ready() {
-        tracing::warn!(requested_level = level, "Extra keyboard request ignored: write evidence unavailable");
+        tracing::warn!(
+            requested_level = level,
+            "Extra keyboard request ignored: write evidence unavailable"
+        );
         return;
     }
     let Ok(level) = u8::try_from(level) else {
-        tracing::warn!(requested_level = level, "Extra keyboard request ignored: invalid level");
+        tracing::warn!(
+            requested_level = level,
+            "Extra keyboard request ignored: invalid level"
+        );
         return;
     };
     let Some(context) = begin_mutation(window) else {
@@ -180,7 +186,8 @@ fn request_keyboard_brightness(window: &ExtraWindow, level: i32) {
                 Ok(observed) => {
                     window.set_keyboard_brightness(i32::from(observed));
                     window.set_status(
-                        format!("Keyboard level {observed} · authoritative read-back confirmed").into(),
+                        format!("Keyboard level {observed} · authoritative read-back confirmed")
+                            .into(),
                     );
                 }
                 Err(error) => {
@@ -199,7 +206,10 @@ fn request_keyboard_brightness(window: &ExtraWindow, level: i32) {
 
 fn request_panel_overdrive(window: &ExtraWindow, enabled: bool) {
     if !window.get_panel_overdrive_control_ready() {
-        tracing::warn!(requested = enabled, "Extra panel request ignored: write evidence unavailable");
+        tracing::warn!(
+            requested = enabled,
+            "Extra panel request ignored: write evidence unavailable"
+        );
         return;
     }
     let Some(context) = begin_mutation(window) else {
@@ -352,9 +362,9 @@ async fn bounded_aura_read() -> Result<orbis_core::aura::AuraState, ProviderErro
     let connection = tokio::time::timeout(READ_TIMEOUT, zbus::Connection::system())
         .await
         .map_err(|_| ProviderError::Timeout("Extra Aura bus connect timed out".into()))?
-        .map_err(|error| ProviderError::BackendUnavailable(format!(
-            "Extra Aura system bus unavailable: {error}"
-        )))?;
+        .map_err(|error| {
+            ProviderError::BackendUnavailable(format!("Extra Aura system bus unavailable: {error}"))
+        })?;
     let provider = AsusAuraProvider::new(connection);
     tokio::time::timeout(READ_TIMEOUT, provider.aura_state())
         .await
@@ -377,8 +387,8 @@ async fn bounded_boot_sound_read(
         .map_err(|_| ProviderError::Timeout("Extra boot-sound read timed out".into()))?
 }
 
-async fn bounded_write_statuses(
-) -> Result<(ProductWriteStatus, ProductWriteStatus), ProviderError> {
+async fn bounded_write_statuses() -> Result<(ProductWriteStatus, ProductWriteStatus), ProviderError>
+{
     let client = HardwareProductControlClient::connect_system().await?;
     let (keyboard, panel) = tokio::join!(client.keyboard_status(), client.panel_status());
     Ok((keyboard?, panel?))
@@ -584,10 +594,10 @@ mod tests {
         assert!(source.contains("set_boot_sound_state_ready"));
         assert!(source.contains("set_backend_ready(false)"));
         assert!(source.contains("set_aura_control_ready(false)"));
-        assert!(!source.contains("set_aura_static_rgb"));
+        assert!(!source.contains(&["set_aura", "_static_rgb"].concat()));
         let boot_sound_mutation = ["client.", "set_boot_sound("].concat();
         assert!(!source.contains(&boot_sound_mutation));
-        assert!(!source.contains("set_gpu_mode"));
-        assert!(!source.contains("set_fan_curve"));
+        assert!(!source.contains(&["set_gpu", "_mode"].concat()));
+        assert!(!source.contains(&["set_fan", "_curve"].concat()));
     }
 }

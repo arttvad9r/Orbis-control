@@ -1,6 +1,6 @@
 //! Cross-source identity proof for DisplayRefresh mutation targets.
 //!
-//! A compositor head name such as `eDP-1` is not sufficient evidence that a
+//! A compositor head name such as an eDP connector label is not sufficient evidence that a
 //! mutation target is the built-in panel. Likewise a DRM connector's human
 //! readable name is not its authoritative connector type. This module therefore
 //! models a stricter correlation boundary:
@@ -366,9 +366,12 @@ mod tests {
     #[test]
     fn resolver_has_no_name_based_shortcut() {
         let source = include_str!("display_refresh_identity.rs");
-        assert!(!source.contains("eDP-1"));
-        assert!(!source.contains("starts_with(\"eDP"));
-        assert!(!source.contains("contains(\"eDP"));
+        let edp_name = ["e", "DP-1"].concat();
+        let starts_with_shortcut = ["starts_with(\"e", "DP"].concat();
+        let contains_shortcut = ["contains(\"e", "DP"].concat();
+        assert!(!source.contains(&edp_name));
+        assert!(!source.contains(&starts_with_shortcut));
+        assert!(!source.contains(&contains_shortcut));
         assert!(source.contains("connector_type"));
         assert!(source.contains("physical_size"));
         assert!(source.contains("sink"));

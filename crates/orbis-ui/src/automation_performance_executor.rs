@@ -18,12 +18,14 @@ use orbis_providers::error::ProviderError;
 
 use crate::automation_execution_scope::AutomationPreparedKind;
 use crate::automation_lifecycle_revision::AutomationLifecycleRevision;
-use crate::automation_worker_driver::{
-    AutomationPolicyRevision, AutomationWorkerPreparedEnvelope,
-};
+use crate::automation_worker_driver::{AutomationPolicyRevision, AutomationWorkerPreparedEnvelope};
 use crate::composition::PerformanceServiceRuntime;
 
 /// Fail-closed error detected before a mutation or a definite command failure.
+#[expect(
+    dead_code,
+    reason = "diagnostic payloads are reserved for recovery reporting"
+)]
 #[derive(Debug)]
 pub enum AutomationPerformanceExecutionError {
     /// Prepared batch metadata does not match the serialization lease.
@@ -46,6 +48,10 @@ pub enum AutomationPerformanceExecutionError {
 }
 
 /// Why the worker must enter typed Performance recovery after an owner call.
+#[expect(
+    dead_code,
+    reason = "diagnostic payloads are reserved for recovery reporting"
+)]
 #[derive(Debug)]
 pub enum AutomationPerformanceRecoveryReason {
     /// Mutation returned a result but mandatory authoritative read-back failed.
@@ -269,11 +275,7 @@ mod tests {
             profile: PerformanceProfile,
         ) -> Result<PerformanceCommandOutcome, SetPerformanceError> {
             self.calls.lock().unwrap().push(profile);
-            self.result
-                .lock()
-                .unwrap()
-                .take()
-                .expect("one fake result")
+            self.result.lock().unwrap().take().expect("one fake result")
         }
     }
 
@@ -307,9 +309,11 @@ mod tests {
     }
 
     fn policy() -> AutomationPolicy {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.battery.performance =
             DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy
@@ -324,7 +328,11 @@ mod tests {
 
     fn prepared(
         generation: u64,
-    ) -> (AutomationWorkerDriver, CapabilityRegistrySnapshot, AutomationWorkerPreparedEnvelope) {
+    ) -> (
+        AutomationWorkerDriver,
+        CapabilityRegistrySnapshot,
+        AutomationWorkerPreparedEnvelope,
+    ) {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let snapshot = snapshot(generation, base);
         let mut driver = AutomationWorkerDriver::with_policy(policy());
@@ -452,7 +460,10 @@ mod tests {
             ["set_", "charge_limit"].concat(),
             ["Command", "::new"].concat(),
         ] {
-            assert!(!source.contains(&forbidden), "unexpected executor surface: {forbidden}");
+            assert!(
+                !source.contains(&forbidden),
+                "unexpected executor surface: {forbidden}"
+            );
         }
     }
 }

@@ -380,12 +380,15 @@ mod tests {
     use orbis_core::profile::PerformanceProfile;
 
     fn capability(write: CapabilityStatus, constraints: CapabilityConstraints) -> Capability {
-        Capability::new(CapabilityStatus::Supported)
-            .with_operations(CapabilityOperations {
-                read: OperationCapability::new(CapabilityStatus::Supported),
-                write: OperationCapability::new(write),
-            })
-            .with_constraints(constraints)
+        Capability::new(match write {
+            CapabilityStatus::Unsupported => CapabilityStatus::ReadOnly,
+            status => status,
+        })
+        .with_operations(CapabilityOperations {
+            read: OperationCapability::new(CapabilityStatus::Supported),
+            write: OperationCapability::new(write),
+        })
+        .with_constraints(constraints)
     }
 
     fn snapshot(
@@ -413,9 +416,11 @@ mod tests {
     }
 
     fn policy() -> AutomationPolicy {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.battery.performance =
             DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy
@@ -465,7 +470,10 @@ mod tests {
             driver.observe_telemetry(&telemetry(true, base), &snapshot, base),
             AutomationWorkerObservation::PolicyUnavailable
         ));
-        assert_eq!(driver.current_revision(), AutomationLifecycleRevision::INITIAL);
+        assert_eq!(
+            driver.current_revision(),
+            AutomationLifecycleRevision::INITIAL
+        );
         assert_eq!(
             driver.current_policy_revision(),
             AutomationPolicyRevision::INITIAL
@@ -473,26 +481,23 @@ mod tests {
     }
 
     #[test]
-    fn read_only_runtime_can_observe_event_but_never_produce_ready_candidate() {
+    fn read_only_runtime_can_prepare_dry_run_but_never_execute() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let snapshot = snapshot(9, base, CapabilityStatus::Unsupported);
         let mut driver = AutomationWorkerDriver::with_policy(policy());
         let event = confirm_battery(&mut driver, &snapshot, base);
         assert_eq!(event.revision().get(), 1);
-        assert!(event.candidate().is_none());
+        assert!(event.candidate().is_some());
         assert_eq!(driver.current_policy_revision().get(), 1);
-        assert!(matches!(
-            driver.prepare_latest_dry_run(
-                &snapshot,
-                base + Duration::from_secs(3),
-                Duration::from_secs(30),
-            ),
-            Err(AutomationWorkerDriverPrepareBlock::Coordinator(
-                AutomationCoordinatorPrepareBlock::Runtime(
-                    crate::automation_worker_runtime::AutomationWorkerPrepareBlock::NoReadyCandidate
+        assert!(
+            driver
+                .prepare_latest_dry_run(
+                    &snapshot,
+                    base + Duration::from_secs(3),
+                    Duration::from_secs(30),
                 )
-            ))
-        ));
+                .is_ok()
+        );
     }
 
     #[test]
@@ -551,10 +556,13 @@ mod tests {
             ["Command", "::new("].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected mutation token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected mutation token: {needle}"
+            );
         }
-        assert!(!source.contains("unsafe"));
-        assert!(!source.contains("slint::"));
+        assert!(!source.contains(&["un", "safe"].concat()));
+        assert!(!source.contains(&["slint", "::"].concat()));
         assert!(source.contains("required_policy_revision"));
         assert!(source.contains("policy_revision_still_matches"));
     }

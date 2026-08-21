@@ -130,9 +130,7 @@ mod tests {
     #[test]
     fn exactly_one_performance_action_is_the_only_mutating_v1_scope() {
         assert_eq!(
-            classify_actions(&[AutomationAction::SetProfile(
-                PerformanceProfile::Balanced
-            )]),
+            classify_actions(&[AutomationAction::SetProfile(PerformanceProfile::Balanced)]),
             Ok(AutomationPreparedKind::Performance(
                 PerformanceProfile::Balanced
             ))
@@ -154,9 +152,7 @@ mod tests {
     fn every_unproven_owner_blocks_the_whole_batch() {
         let unsupported = [
             AutomationAction::SetGpuPolicy(GpuMode::Standard),
-            AutomationAction::SetRefreshPolicy(RefreshPolicy::Fixed(
-                RefreshHz::new(60).unwrap(),
-            )),
+            AutomationAction::SetRefreshPolicy(RefreshPolicy::Fixed(RefreshHz::new(60).unwrap())),
             AutomationAction::SetLighting(false),
             AutomationAction::CustomCommand(vec!["true".into()]),
         ];
@@ -184,8 +180,11 @@ mod tests {
             ["Command", "::new"].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected execution token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected execution token: {needle}"
+            );
         }
-        assert!(!source.contains("unsafe"));
+        assert!(!source.contains(&["un", "safe"].concat()));
     }
 }

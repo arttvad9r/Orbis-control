@@ -93,11 +93,12 @@ mod tests {
     }
 
     fn performance_policy() -> AutomationPlan {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
-        policy.ac.performance =
-            DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
+        policy.ac.performance = DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy.plan_for(AutomationTrigger::OnAc, AutomationPowerSource::Ac)
     }
 

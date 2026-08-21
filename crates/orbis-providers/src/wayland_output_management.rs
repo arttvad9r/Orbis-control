@@ -93,9 +93,7 @@ pub fn classify_wlr_output_management_globals(
 
     Ok(WlrOutputManagementSupport {
         advertised_version: manager.version,
-        compatible_version: manager
-            .version
-            .min(WLR_OUTPUT_MANAGER_CLIENT_MAX_VERSION),
+        compatible_version: manager.version.min(WLR_OUTPUT_MANAGER_CLIENT_MAX_VERSION),
     })
 }
 
@@ -103,9 +101,7 @@ pub fn classify_wlr_output_management_globals(
 #[async_trait]
 pub trait WlrOutputManagementSource: Send + Sync {
     /// Read one authoritative registry snapshot and classify manager support.
-    async fn output_management_support(
-        &self,
-    ) -> Result<WlrOutputManagementSupport, ProviderError>;
+    async fn output_management_support(&self) -> Result<WlrOutputManagementSupport, ProviderError>;
 }
 
 /// Production Wayland registry probe.
@@ -153,8 +149,9 @@ impl
 impl WaylandWlrOutputManagementSource {
     /// Perform the synchronous Wayland registry read.
     pub fn read_support_blocking(&self) -> Result<WlrOutputManagementSupport, ProviderError> {
-        let conn = wayland_client::Connection::connect_to_env()
-            .map_err(|error| ProviderError::BackendUnavailable(format!("wayland connect: {error}")))?;
+        let conn = wayland_client::Connection::connect_to_env().map_err(|error| {
+            ProviderError::BackendUnavailable(format!("wayland connect: {error}"))
+        })?;
         let (globals, _queue) =
             wayland_client::globals::registry_queue_init::<WlrRegistryProbeState>(&conn).map_err(
                 |error| {
@@ -189,9 +186,7 @@ impl WaylandWlrOutputManagementSource {
 
 #[async_trait]
 impl WlrOutputManagementSource for WaylandWlrOutputManagementSource {
-    async fn output_management_support(
-        &self,
-    ) -> Result<WlrOutputManagementSupport, ProviderError> {
+    async fn output_management_support(&self) -> Result<WlrOutputManagementSupport, ProviderError> {
         let source = *self;
         tokio::task::spawn_blocking(move || source.read_support_blocking())
             .await
@@ -235,11 +230,9 @@ mod tests {
 
     #[test]
     fn older_nonzero_manager_version_remains_transport_evidence() {
-        let support = classify_wlr_output_management_globals(&[global(
-            WLR_OUTPUT_MANAGER_INTERFACE,
-            2,
-        )])
-        .unwrap();
+        let support =
+            classify_wlr_output_management_globals(&[global(WLR_OUTPUT_MANAGER_INTERFACE, 2)])
+                .unwrap();
         assert_eq!(support.advertised_version(), 2);
         assert_eq!(support.compatible_version(), 2);
     }
@@ -247,10 +240,7 @@ mod tests {
     #[test]
     fn zero_version_fails_closed() {
         assert!(matches!(
-            classify_wlr_output_management_globals(&[global(
-                WLR_OUTPUT_MANAGER_INTERFACE,
-                0,
-            )]),
+            classify_wlr_output_management_globals(&[global(WLR_OUTPUT_MANAGER_INTERFACE, 0,)]),
             Err(ProviderError::Internal(_))
         ));
     }
@@ -275,13 +265,17 @@ mod tests {
             ["set_", "mode("].concat(),
             ["create_", "configuration("].concat(),
             ["Command", "::new("].concat(),
-            "wlr-randr".to_string(),
-            "kscreen-doctor".to_string(),
+            ["wlr", "-randr"].concat(),
+            ["kscreen", "-doctor"].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected mutation/process surface: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected mutation/process surface: {needle}"
+            );
         }
-        assert!(!source.contains("unsafe"));
+        let forbidden_token = ["un", "safe"].concat();
+        assert!(!source.contains(&forbidden_token));
         assert!(source.contains("registry_queue_init"));
         assert!(source.contains(WLR_OUTPUT_MANAGER_INTERFACE));
     }

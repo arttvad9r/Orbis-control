@@ -67,9 +67,7 @@ where
     let wrapped = async move { Ok::<_, ProviderError>(future.await) };
     match bounded_provider_call(provider, operation, wrapped).await {
         Ok(result) => result,
-        Err(ProviderError::Timeout(detail)) => {
-            Ok(timeout_capability(detail, timeout_write_status))
-        }
+        Err(ProviderError::Timeout(detail)) => Ok(timeout_capability(detail, timeout_write_status)),
         Err(error) => Err(ProbeError::Internal(format!(
             "bounded read-only probe wrapper returned unexpected provider error: {error}"
         ))),
@@ -446,12 +444,10 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn performance_timeout_is_per_read_and_classified_locally() {
-        let capability = probe_performance(
-            &HangingPerformanceProvider,
-            CapabilityStatus::Supported,
-        )
-        .await
-        .expect("provider timeout must become capability evidence");
+        let capability =
+            probe_performance(&HangingPerformanceProvider, CapabilityStatus::Supported)
+                .await
+                .expect("provider timeout must become capability evidence");
 
         assert_eq!(
             capability.operations.read.status,

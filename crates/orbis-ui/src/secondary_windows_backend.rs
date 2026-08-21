@@ -46,6 +46,10 @@ fn reset_automation_lifecycle_clock() {
     });
 }
 
+#[expect(
+    dead_code,
+    reason = "diagnostic lifecycle accessor reserved for window consumers"
+)]
 pub(crate) fn current_automation_revision() -> AutomationLifecycleRevision {
     AUTOMATION_LIFECYCLE_CLOCK.with(|clock| clock.borrow().current())
 }
@@ -54,7 +58,10 @@ fn advance_automation_revision() -> Option<AutomationLifecycleRevision> {
     AUTOMATION_LIFECYCLE_CLOCK.with(|clock| match clock.borrow_mut().advance() {
         Ok(revision) => Some(revision),
         Err(error) => {
-            tracing::error!(?error, "Automation lifecycle revision exhausted; execution remains disabled");
+            tracing::error!(
+                ?error,
+                "Automation lifecycle revision exhausted; execution remains disabled"
+            );
             None
         }
     })
@@ -266,7 +273,10 @@ mod tests {
             ["set_", "keyboard_backlight("].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected mutation token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected mutation token: {needle}"
+            );
         }
     }
 
@@ -284,9 +294,9 @@ mod tests {
         assert!(source.contains("slint::quit_event_loop()"));
         assert!(source.contains("tray_backend::wire_app(app)"));
         assert!(source.contains("wire_app_window(app)"));
-        assert!(!source.contains("app.on_perf_clicked"));
-        assert!(!source.contains("app.on_charge_changed"));
-        assert!(!source.contains("app.on_fans_clicked"));
+        assert!(!source.contains(&["app.on_", "perf_clicked"].concat()));
+        assert!(!source.contains(&["app.on_", "charge_changed"].concat()));
+        assert!(!source.contains(&["app.on_", "fans_clicked"].concat()));
     }
 
     #[test]

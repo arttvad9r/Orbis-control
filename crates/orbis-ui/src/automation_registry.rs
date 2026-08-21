@@ -32,8 +32,7 @@ pub fn has_read_only_automation_shadow(snapshot: &CapabilityRegistrySnapshot) ->
         return false;
     };
     capability.status == orbis_core::capability::CapabilityStatus::ReadOnly
-        && capability.operations.read.status
-            == orbis_core::capability::CapabilityStatus::Supported
+        && capability.operations.read.status == orbis_core::capability::CapabilityStatus::Supported
         && capability.operations.write.status
             == orbis_core::capability::CapabilityStatus::Unsupported
 }
@@ -97,8 +96,16 @@ mod tests {
     #[test]
     fn decorator_cannot_advertise_automation_write() {
         let source = include_str!("automation_registry.rs");
-        assert!(!source.contains("CapabilityStatus::Supported, write"));
-        assert!(!source.contains("FeatureId::Automation, Capability::new(CapabilityStatus::Supported"));
+        assert!(!source.contains(&["CapabilityStatus::Supported", ", write"].concat()));
+        assert!(
+            !source.contains(
+                &[
+                    "FeatureId::Automation, Capability::new(CapabilityStatus::",
+                    "Supported",
+                ]
+                .concat()
+            )
+        );
         assert!(source.contains("add_automation_shadow_capability"));
     }
 }

@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use orbis_core::gpu::GpuMode;
@@ -111,20 +111,13 @@ impl Default for AutomationConfig {
 }
 
 /// Секция батареи.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BatteryConfig {
     /// Желаемый лимит зарядки (пользовательское намерение; применяется после
     /// подтверждения backend-ом). `None` означает, что Orbis не управляет
     /// threshold; конкретное значение обязано соответствовать Hardware1 ABI.
     pub charge_limit: Option<u8>,
-}
-
-impl Default for BatteryConfig {
-    fn default() -> Self {
-        // No implicit hardware intent in a missing legacy config.
-        Self { charge_limit: None }
-    }
 }
 
 /// Экспериментальные возможности.
@@ -387,11 +380,17 @@ mod tests {
         let td = temp_test_env();
         let dir = td.path().join("cfg");
         let final_path = save_to_dir(&AppConfig::default(), &dir).unwrap();
-        assert_eq!(fs::metadata(&final_path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&final_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
 
         fs::set_permissions(&final_path, fs::Permissions::from_mode(0o640)).unwrap();
         save_to_dir(&AppConfig::default(), &dir).unwrap();
-        assert_eq!(fs::metadata(&final_path).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(
+            fs::metadata(&final_path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
     }
 
     #[test]

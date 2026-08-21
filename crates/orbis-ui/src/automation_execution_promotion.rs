@@ -62,10 +62,9 @@ pub fn authorize_prepared_execution(
     let required = envelope.prepared().lease().required_generation();
     let current = capabilities.generation();
     if current != required {
-        return Err(AutomationExecutionPromotionBlock::CapabilityGenerationChanged {
-            required,
-            current,
-        });
+        return Err(
+            AutomationExecutionPromotionBlock::CapabilityGenerationChanged { required, current },
+        );
     }
 
     match now.duration_since(capabilities.checked_at()) {
@@ -90,7 +89,9 @@ pub fn authorize_prepared_execution(
         );
     }
 
-    Ok(AutomationExecutionPermit { generation: current })
+    Ok(AutomationExecutionPermit {
+        generation: current,
+    })
 }
 
 #[cfg(test)]
@@ -129,10 +130,9 @@ mod tests {
             .add(
                 FeatureId::Automation,
                 capability(
-                    if automation_write == CapabilityStatus::Supported {
-                        CapabilityStatus::Supported
-                    } else {
-                        CapabilityStatus::ReadOnly
+                    match automation_write {
+                        CapabilityStatus::Unsupported => CapabilityStatus::ReadOnly,
+                        status => status,
                     },
                     automation_write,
                     CapabilityConstraints::None,
@@ -153,9 +153,11 @@ mod tests {
     }
 
     fn policy() -> AutomationPolicy {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.battery.performance =
             DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy
@@ -215,9 +217,11 @@ mod tests {
                 base + Duration::from_secs(3),
                 Duration::from_secs(30),
             ),
-            Err(AutomationExecutionPromotionBlock::AutomationRuntimeWriteUnavailable(
-                CapabilityStatus::Unsupported,
-            ))
+            Err(
+                AutomationExecutionPromotionBlock::AutomationRuntimeWriteUnavailable(
+                    CapabilityStatus::Unsupported,
+                )
+            )
         );
     }
 
@@ -248,9 +252,11 @@ mod tests {
                 base + Duration::from_secs(3),
                 Duration::from_secs(30),
             ),
-            Err(AutomationExecutionPromotionBlock::AutomationRuntimeWriteUnavailable(
-                CapabilityStatus::SupportedWithRequirement
-            ))
+            Err(
+                AutomationExecutionPromotionBlock::AutomationRuntimeWriteUnavailable(
+                    CapabilityStatus::SupportedWithRequirement
+                )
+            )
         ));
     }
 
@@ -259,7 +265,11 @@ mod tests {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let capabilities = snapshot(10, base, CapabilityStatus::Supported);
         let (_driver, envelope) = prepared(&capabilities, base);
-        let newer = snapshot(11, base + Duration::from_secs(1), CapabilityStatus::Supported);
+        let newer = snapshot(
+            11,
+            base + Duration::from_secs(1),
+            CapabilityStatus::Supported,
+        );
         assert!(matches!(
             authorize_prepared_execution(
                 &envelope,

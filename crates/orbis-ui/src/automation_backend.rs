@@ -117,12 +117,10 @@ pub(crate) fn observe_telemetry(telemetry: &Telemetry) -> Option<String> {
         let capabilities = shadow.capabilities.clone()?;
         let now = SystemTime::now();
 
-        let power_outcome = shadow.runtime.observe_telemetry(
-            telemetry,
-            &policy,
-            capabilities.as_ref(),
-            now,
-        );
+        let power_outcome =
+            shadow
+                .runtime
+                .observe_telemetry(telemetry, &policy, capabilities.as_ref(), now);
         let resume_gate_outcome =
             shadow
                 .resume
@@ -146,7 +144,7 @@ pub(crate) fn observe_telemetry(telemetry: &Telemetry) -> Option<String> {
         let notice = shadow_notice(&resume_outcome);
         if let Some(ref notice) = notice {
             tracing::info!(outcome = ?resume_outcome, "Automation shadow resume: {notice}");
-            return notice;
+            return Some(notice.clone());
         }
     }
 
@@ -198,12 +196,19 @@ fn shadow_notice(outcome: &AutomationShadowOutcome) -> Option<String> {
         } => Some(format!(
             "Shadow runtime · {trigger:?} · {} action{} ready · execution disabled · generation {generation}",
             preflight.plan.actions.len(),
-            if preflight.plan.actions.len() == 1 { "" } else { "s" }
+            if preflight.plan.actions.len() == 1 {
+                ""
+            } else {
+                "s"
+            }
         )),
     }
 }
 
-fn set_persisted_policy(shadow: &Arc<Mutex<AutomationShadowState>>, policy: Option<AutomationPolicy>) {
+fn set_persisted_policy(
+    shadow: &Arc<Mutex<AutomationShadowState>>,
+    policy: Option<AutomationPolicy>,
+) {
     match shadow.lock() {
         Ok(mut state) => state.persisted_policy = policy,
         Err(_) => tracing::warn!("Automation shadow state lock poisoned"),
@@ -221,8 +226,12 @@ fn performance_index(value: DesiredPerformancePolicy) -> i32 {
 
 fn performance_from_index(index: i32) -> Option<DesiredPerformancePolicy> {
     match index {
-        0 => Some(DesiredPerformancePolicy::Profile(PerformanceProfile::Silent)),
-        1 => Some(DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced)),
+        0 => Some(DesiredPerformancePolicy::Profile(
+            PerformanceProfile::Silent,
+        )),
+        1 => Some(DesiredPerformancePolicy::Profile(
+            PerformanceProfile::Balanced,
+        )),
         2 => Some(DesiredPerformancePolicy::Profile(PerformanceProfile::Turbo)),
         3 => Some(DesiredPerformancePolicy::KeepCurrent),
         _ => None,
@@ -543,14 +552,46 @@ pub(crate) fn wire_window(window: &AutomationWindow) {
         }};
     }
 
-    wire_index!(on_ac_profile_requested, |draft: &mut AutomationPolicy, value| draft.ac.performance = value, performance_from_index);
-    wire_index!(on_battery_profile_requested, |draft: &mut AutomationPolicy, value| draft.battery.performance = value, performance_from_index);
-    wire_index!(on_ac_gpu_requested, |draft: &mut AutomationPolicy, value| draft.ac.gpu = value, gpu_from_index);
-    wire_index!(on_battery_gpu_requested, |draft: &mut AutomationPolicy, value| draft.battery.gpu = value, gpu_from_index);
-    wire_index!(on_ac_display_requested, |draft: &mut AutomationPolicy, value| draft.ac.display = value, display_from_index);
-    wire_index!(on_battery_display_requested, |draft: &mut AutomationPolicy, value| draft.battery.display = value, display_from_index);
-    wire_index!(on_ac_lighting_requested, |draft: &mut AutomationPolicy, value| draft.ac.lighting = value, lighting_from_index);
-    wire_index!(on_battery_lighting_requested, |draft: &mut AutomationPolicy, value| draft.battery.lighting = value, lighting_from_index);
+    wire_index!(
+        on_ac_profile_requested,
+        |draft: &mut AutomationPolicy, value| draft.ac.performance = value,
+        performance_from_index
+    );
+    wire_index!(
+        on_battery_profile_requested,
+        |draft: &mut AutomationPolicy, value| draft.battery.performance = value,
+        performance_from_index
+    );
+    wire_index!(
+        on_ac_gpu_requested,
+        |draft: &mut AutomationPolicy, value| draft.ac.gpu = value,
+        gpu_from_index
+    );
+    wire_index!(
+        on_battery_gpu_requested,
+        |draft: &mut AutomationPolicy, value| draft.battery.gpu = value,
+        gpu_from_index
+    );
+    wire_index!(
+        on_ac_display_requested,
+        |draft: &mut AutomationPolicy, value| draft.ac.display = value,
+        display_from_index
+    );
+    wire_index!(
+        on_battery_display_requested,
+        |draft: &mut AutomationPolicy, value| draft.battery.display = value,
+        display_from_index
+    );
+    wire_index!(
+        on_ac_lighting_requested,
+        |draft: &mut AutomationPolicy, value| draft.ac.lighting = value,
+        lighting_from_index
+    );
+    wire_index!(
+        on_battery_lighting_requested,
+        |draft: &mut AutomationPolicy, value| draft.battery.lighting = value,
+        lighting_from_index
+    );
 
     macro_rules! wire_bool {
         ($callback:ident, $field:ident) => {{
@@ -673,7 +714,10 @@ mod tests {
             ["set_", "fan_curve("].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected execution token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected execution token: {needle}"
+            );
         }
         assert!(source.contains("ResumeTelemetryGate"));
         assert!(source.contains("observe_prepare_for_sleep"));

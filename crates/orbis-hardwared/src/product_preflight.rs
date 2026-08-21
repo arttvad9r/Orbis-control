@@ -9,7 +9,7 @@ use orbis_core::aura::AuraMode;
 use orbis_providers::error::ProviderError;
 use zbus::{Connection, fdo::DBusProxy, names::BusName};
 
-use orbis_hardwared::aura::{AsusdAuraClient, ASUSD_AURA_DESTINATION, ZbusAsusdAuraClient};
+use orbis_hardwared::aura::{ASUSD_AURA_DESTINATION, AsusdAuraClient, ZbusAsusdAuraClient};
 use orbis_hardwared::panel::{PanelOverdriveReader, discover_panel_overdrive_reader};
 
 /// Read-only result of a gated product mutation startup probe.
@@ -52,19 +52,20 @@ async fn name_has_owner(
     let bus_name = BusName::try_from(service).map_err(|error| {
         ProviderError::Internal(format!("invalid fixed D-Bus service {service}: {error}"))
     })?;
-    proxy.name_has_owner(bus_name).await.map_err(|error| match error {
-        zbus::fdo::Error::AccessDenied(message) => ProviderError::PermissionDenied(message),
-        other => ProviderError::Dbus(format!("NameHasOwner({service}): {other}")),
-    })
+    proxy
+        .name_has_owner(bus_name)
+        .await
+        .map_err(|error| match error {
+            zbus::fdo::Error::AccessDenied(message) => ProviderError::PermissionDenied(message),
+            other => ProviderError::Dbus(format!("NameHasOwner({service}): {other}")),
+        })
 }
 
 /// Prove Panel Overdrive structural readiness without mutation or asusd
 /// activation. Both the authoritative kernel attribute and a currently-running
 /// asusd owner are required because the typed mutation path intentionally uses
 /// asusd as its sole writer and kernel sysfs only for read-back.
-pub(crate) async fn preflight_panel_overdrive(
-    connection: &Connection,
-) -> ProductPreflightStatus {
+pub(crate) async fn preflight_panel_overdrive(connection: &Connection) -> ProductPreflightStatus {
     match name_has_owner(connection, "xyz.ljones.Asusd").await {
         Ok(true) => {}
         Ok(false) => return ProductPreflightStatus::TemporarilyUnavailable,
@@ -87,9 +88,7 @@ pub(crate) async fn preflight_panel_overdrive(
 /// `LedModeData` property must be readable. This remains interactive-only
 /// evidence: kernel Aura RGB state is write-only, so unattended hardware
 /// confirmation is still impossible.
-pub(crate) async fn preflight_aura_static_rgb(
-    connection: &Connection,
-) -> ProductPreflightStatus {
+pub(crate) async fn preflight_aura_static_rgb(connection: &Connection) -> ProductPreflightStatus {
     match name_has_owner(connection, ASUSD_AURA_DESTINATION).await {
         Ok(true) => {}
         Ok(false) => return ProductPreflightStatus::TemporarilyUnavailable,
@@ -144,7 +143,10 @@ mod tests {
             ["std::fs::", "write"].concat(),
             ["Command", "::new"].concat(),
         ] {
-            assert!(!source.contains(&forbidden), "unexpected preflight mutation: {forbidden}");
+            assert!(
+                !source.contains(&forbidden),
+                "unexpected preflight mutation: {forbidden}"
+            );
         }
         assert!(source.contains("name_has_owner"));
         assert!(source.contains("supported_basic_modes"));

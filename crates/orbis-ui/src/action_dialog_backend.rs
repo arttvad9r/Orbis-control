@@ -6,8 +6,6 @@
 //! reboot/logout/failure dialogs remain informational, and the legacy generic
 //! confirm kind remains unavailable.
 
-use slint::ComponentHandle;
-
 use crate::PreviewDialogWindow;
 
 /// Closed set of side effects that may be attached to a confirmation dialog.
@@ -16,6 +14,7 @@ use crate::PreviewDialogWindow;
 /// expose only "Later" informational dialogs and no typed system-action owner is
 /// attached to them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum ConfirmedAction {
     /// Explicitly terminate the Orbis application event loop.
     QuitApplication,
@@ -23,6 +22,7 @@ pub(crate) enum ConfirmedAction {
 
 /// Typed dialog context. Presentation kind and executable action are separate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum ActionDialogContext {
     RebootRequiredInfo,
     LogoutRequiredInfo,
@@ -103,7 +103,10 @@ mod tests {
     #[test]
     fn legacy_kinds_never_map_to_executable_actions() {
         for kind in [-1, 0, 1, 2, 3, 4, 99] {
-            assert!(!matches!(legacy_context(kind), ActionDialogContext::Confirm(_)));
+            assert!(!matches!(
+                legacy_context(kind),
+                ActionDialogContext::Confirm(_)
+            ));
         }
     }
 
@@ -133,7 +136,10 @@ mod tests {
             ["login1", ".call"].concat(),
         ];
         for token in forbidden {
-            assert!(!source.contains(&token), "unexpected action surface: {token}");
+            assert!(
+                !source.contains(&token),
+                "unexpected action surface: {token}"
+            );
         }
     }
 }

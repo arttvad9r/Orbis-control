@@ -6,9 +6,7 @@
 
 use std::time::SystemTime;
 
-use orbis_capabilities::{
-    CapabilityRegistryBuilder, CapabilityRegistrySnapshot, RegistryError,
-};
+use orbis_capabilities::{CapabilityRegistryBuilder, CapabilityRegistrySnapshot, RegistryError};
 use orbis_core::capability::{
     Capability, CapabilityConstraints, CapabilityOperations, CapabilityReason, CapabilityStatus,
     FeatureId, OperationCapability, RiskLevel,
@@ -199,7 +197,10 @@ mod tests {
 
         let capability = automation_shadow_capability(SystemTime::UNIX_EPOCH);
         assert_eq!(capability.status, CapabilityStatus::ReadOnly);
-        assert_eq!(capability.operations.write.status, CapabilityStatus::Unsupported);
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
     }
 
     #[test]
@@ -207,11 +208,20 @@ mod tests {
         let checked_at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(42);
         let capability = automation_shadow_capability(checked_at);
         assert_eq!(capability.status, CapabilityStatus::ReadOnly);
-        assert_eq!(capability.operations.read.status, CapabilityStatus::Supported);
-        assert_eq!(capability.operations.write.status, CapabilityStatus::Unsupported);
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
         assert_eq!(capability.constraints, CapabilityConstraints::None);
         assert_eq!(
-            capability.reason.as_ref().and_then(|reason| reason.checked_at),
+            capability
+                .reason
+                .as_ref()
+                .and_then(|reason| reason.checked_at),
             Some(checked_at)
         );
     }
@@ -224,7 +234,10 @@ mod tests {
         let snapshot = builder.build().unwrap();
         let capability = snapshot.capability(FeatureId::Automation).unwrap();
         assert_eq!(capability.status, CapabilityStatus::ReadOnly);
-        assert_eq!(capability.operations.write.status, CapabilityStatus::Unsupported);
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
     }
 
     #[test]
@@ -246,7 +259,10 @@ mod tests {
         );
         let automation = augmented.capability(FeatureId::Automation).unwrap();
         assert_eq!(automation.status, CapabilityStatus::ReadOnly);
-        assert_eq!(automation.operations.write.status, CapabilityStatus::Unsupported);
+        assert_eq!(
+            automation.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
     }
 
     #[test]
@@ -254,7 +270,9 @@ mod tests {
         let checked_at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(90);
         let mut builder = CapabilityRegistryBuilder::new(18, checked_at);
         let existing = supported_read_only_capability();
-        builder.add(FeatureId::Automation, existing.clone()).unwrap();
+        builder
+            .add(FeatureId::Automation, existing.clone())
+            .unwrap();
         let source = builder.build().unwrap();
 
         let augmented = augment_snapshot_with_automation_shadow(&source).unwrap();
@@ -279,11 +297,22 @@ mod tests {
     fn source_cannot_accidentally_advertise_supported_write() {
         let source = include_str!("automation_capability.rs");
         let risky = [
-            ["write: OperationCapability::new(CapabilityStatus::", "Supported)"].concat(),
-            ["write: OperationCapability::with_reason(CapabilityStatus::", "Supported"].concat(),
+            [
+                "write: OperationCapability::new(CapabilityStatus::",
+                "Supported)",
+            ]
+            .concat(),
+            [
+                "write: OperationCapability::with_reason(CapabilityStatus::",
+                "Supported",
+            ]
+            .concat(),
         ];
         for token in risky {
-            assert!(!source.contains(&token), "unexpected write promotion token: {token}");
+            assert!(
+                !source.contains(&token),
+                "unexpected write promotion token: {token}"
+            );
         }
     }
 }

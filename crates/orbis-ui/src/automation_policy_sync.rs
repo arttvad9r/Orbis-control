@@ -168,20 +168,21 @@ fn clear_if_present(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn synchronizer_is_non_clone_unique_source_owner() {
         let source = include_str!("automation_policy_sync.rs");
         assert!(source.contains("accepted_fingerprint"));
-        assert!(!source.contains("#[derive(Debug, Clone"));
+        assert!(!source.contains(&["#[derive(Debug", ", Clone"].concat()));
     }
 
     #[test]
     fn source_uses_exact_before_after_fingerprints_and_hardened_loader() {
         let source = include_str!("automation_policy_sync.rs");
         let first = source.find("let before =").unwrap();
-        let load = source.find("let loaded = load_automation_policy()").unwrap();
+        let load = source
+            .find("let loaded = load_automation_policy()")
+            .unwrap();
         let after = source.find("let after =").unwrap();
         let compare = source.find("if before != after").unwrap();
         assert!(first < load && load < after && after < compare);
@@ -208,8 +209,11 @@ mod tests {
             ["Command", "::new("].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected mutation/process token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected mutation/process token: {needle}"
+            );
         }
-        assert!(!source.contains("slint::"));
+        assert!(!source.contains(&["slint", "::"].concat()));
     }
 }

@@ -128,10 +128,16 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "1\n").unwrap();
         let provider = AsusBootSoundProvider::new(&root);
-        assert_eq!(provider.boot_sound_state().await.unwrap(), BootSoundState::Enabled);
+        assert_eq!(
+            provider.boot_sound_state().await.unwrap(),
+            BootSoundState::Enabled
+        );
 
         std::fs::write(&path, "0\n").unwrap();
-        assert_eq!(provider.boot_sound_state().await.unwrap(), BootSoundState::Disabled);
+        assert_eq!(
+            provider.boot_sound_state().await.unwrap(),
+            BootSoundState::Disabled
+        );
 
         std::fs::write(&path, "2\n").unwrap();
         assert!(matches!(
@@ -161,7 +167,10 @@ mod tests {
             ["Command", "::new"].concat(),
         ];
         for token in forbidden {
-            assert!(!source.contains(&token), "unexpected mutation surface: {token}");
+            assert!(
+                !source.contains(&token),
+                "unexpected mutation surface: {token}"
+            );
         }
     }
 }

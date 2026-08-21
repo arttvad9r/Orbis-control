@@ -124,7 +124,11 @@ impl HardwareProductControlClient {
     pub(crate) async fn set_panel_overdrive(&self, enabled: bool) -> Result<bool, ProviderError> {
         require_supported(self.panel_status().await?, "Panel Overdrive")?;
         let proxy = self.proxy().await?;
-        let raw = timed("Panel Overdrive mutation", proxy.set_panel_overdrive(enabled)).await?;
+        let raw = timed(
+            "Panel Overdrive mutation",
+            proxy.set_panel_overdrive(enabled),
+        )
+        .await?;
         let observed = match raw {
             0 => false,
             1 => true,
@@ -245,9 +249,7 @@ fn require_supported(status: ProductWriteStatus, feature: &str) -> Result<(), Pr
 fn zbus_error_to_provider(error: zbus::Error) -> ProviderError {
     if let zbus::Error::FDO(boxed) = &error {
         return match &**boxed {
-            zbus::fdo::Error::NotSupported(message) => {
-                ProviderError::Unsupported(message.clone())
-            }
+            zbus::fdo::Error::NotSupported(message) => ProviderError::Unsupported(message.clone()),
             zbus::fdo::Error::AccessDenied(message) => {
                 ProviderError::PermissionDenied(message.clone())
             }
@@ -266,9 +268,18 @@ mod tests {
 
     #[test]
     fn stable_status_wire_is_strict() {
-        assert_eq!(decode_status(0, "test").unwrap(), ProductWriteStatus::Supported);
-        assert_eq!(decode_status(1, "test").unwrap(), ProductWriteStatus::Unsupported);
-        assert_eq!(decode_status(4, "test").unwrap(), ProductWriteStatus::Unknown);
+        assert_eq!(
+            decode_status(0, "test").unwrap(),
+            ProductWriteStatus::Supported
+        );
+        assert_eq!(
+            decode_status(1, "test").unwrap(),
+            ProductWriteStatus::Unsupported
+        );
+        assert_eq!(
+            decode_status(4, "test").unwrap(),
+            ProductWriteStatus::Unknown
+        );
         assert!(decode_status(5, "test").is_err());
     }
 
@@ -295,7 +306,10 @@ mod tests {
             ["set_", "fan_curve"].concat(),
         ];
         for token in forbidden {
-            assert!(!source.contains(&token), "unexpected control surface: {token}");
+            assert!(
+                !source.contains(&token),
+                "unexpected control surface: {token}"
+            );
         }
     }
 }

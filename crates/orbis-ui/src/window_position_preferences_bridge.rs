@@ -29,7 +29,10 @@ pub(crate) fn wire(window: &PreferencesWindow, app: &AppWindow) {
             if !super::window_lifecycle_backend::position_runtime_supported()
                 || !window.get_remember_position_enabled()
             {
-                tracing::warn!(enabled, "Remember Position request ignored: positioning unavailable");
+                tracing::warn!(
+                    enabled,
+                    "Remember Position request ignored: positioning unavailable"
+                );
                 crate::sync_preferences_window(&window);
                 sync_close_capabilities(&window);
                 return;
@@ -71,7 +74,10 @@ pub(crate) fn wire(window: &PreferencesWindow, app: &AppWindow) {
                 return;
             };
             if !window.get_close_action_enabled() {
-                tracing::warn!(index, "Close Action request ignored: preferences source not writable");
+                tracing::warn!(
+                    index,
+                    "Close Action request ignored: preferences source not writable"
+                );
                 crate::sync_preferences_window(&window);
                 sync_close_capabilities(&window);
                 return;
@@ -141,7 +147,7 @@ mod tests {
         assert!(source.contains("set_hide_to_tray_enabled"));
         assert!(source.contains("0 => CloseAction::Quit"));
         assert!(source.contains("tray_backend::is_ready"));
-        assert!(!source.contains("WorkerCommand::Set"));
-        assert!(!source.contains("Command::new"));
+        assert!(!source.contains(&["WorkerCommand::", "Set"].concat()));
+        assert!(!source.contains(&["Command", "::new"].concat()));
     }
 }

@@ -142,9 +142,9 @@ impl AutomationWorkerRuntime {
         capabilities: &CapabilityRegistrySnapshot,
         now: SystemTime,
     ) -> Result<Option<AutomationConfirmedEvent>, AutomationWorkerObservationError> {
-        let power_outcome =
-            self.shadow
-                .observe_telemetry(telemetry, policy, capabilities, now);
+        let power_outcome = self
+            .shadow
+            .observe_telemetry(telemetry, policy, capabilities, now);
         let resume_gate = self
             .resume
             .observe_telemetry(telemetry.ac_online, telemetry.ts, now);
@@ -223,7 +223,10 @@ impl AutomationWorkerRuntime {
             Ok(batch) => Ok(AutomationWorkerPrepared { lease, batch }),
             Err(block) => {
                 let released = self.serialization.finish(lease);
-                debug_assert!(released, "freshly admitted lease must own serialization slot");
+                debug_assert!(
+                    released,
+                    "freshly admitted lease must own serialization slot"
+                );
                 Err(AutomationWorkerPrepareBlock::ExecutionScope(block))
             }
         }
@@ -282,9 +285,11 @@ mod tests {
     }
 
     fn policy() -> AutomationPolicy {
-        let mut policy = AutomationPolicy::default();
-        policy.enabled = true;
-        policy.on_ac_change = true;
+        let mut policy = AutomationPolicy {
+            enabled: true,
+            on_ac_change: true,
+            ..Default::default()
+        };
         policy.battery.performance =
             DesiredPerformancePolicy::Profile(PerformanceProfile::Balanced);
         policy
@@ -303,19 +308,23 @@ mod tests {
         snapshot: &CapabilityRegistrySnapshot,
         base: SystemTime,
     ) -> AutomationConfirmedEvent {
-        assert!(runtime
-            .observe_telemetry(&telemetry(true, base), policy, snapshot, base)
-            .unwrap()
-            .is_none());
-        assert!(runtime
-            .observe_telemetry(
-                &telemetry(false, base + Duration::from_secs(1)),
-                policy,
-                snapshot,
-                base + Duration::from_secs(1),
-            )
-            .unwrap()
-            .is_none());
+        assert!(
+            runtime
+                .observe_telemetry(&telemetry(true, base), policy, snapshot, base)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            runtime
+                .observe_telemetry(
+                    &telemetry(false, base + Duration::from_secs(1)),
+                    policy,
+                    snapshot,
+                    base + Duration::from_secs(1),
+                )
+                .unwrap()
+                .is_none()
+        );
         runtime
             .observe_telemetry(
                 &telemetry(false, base + Duration::from_secs(2)),
@@ -335,7 +344,10 @@ mod tests {
         let mut runtime = AutomationWorkerRuntime::new();
         let event = confirm_battery_event(&mut runtime, &policy, &snapshot, base);
         assert_eq!(event.revision().get(), 1);
-        assert_eq!(event.candidate().unwrap().trigger(), &AutomationTrigger::OnBattery);
+        assert_eq!(
+            event.candidate().unwrap().trigger(),
+            &AutomationTrigger::OnBattery
+        );
     }
 
     #[test]
@@ -345,32 +357,38 @@ mod tests {
         assert!(!policy.on_resume);
         let snapshot = snapshot(8, base);
         let mut runtime = AutomationWorkerRuntime::new();
-        assert!(runtime
-            .observe_telemetry(&telemetry(true, base), &policy, &snapshot, base)
-            .unwrap()
-            .is_none());
-        assert!(runtime
-            .observe_telemetry(
-                &telemetry(false, base + Duration::from_secs(1)),
-                &policy,
-                &snapshot,
-                base + Duration::from_secs(1),
-            )
-            .unwrap()
-            .is_none());
+        assert!(
+            runtime
+                .observe_telemetry(&telemetry(true, base), &policy, &snapshot, base)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            runtime
+                .observe_telemetry(
+                    &telemetry(false, base + Duration::from_secs(1)),
+                    &policy,
+                    &snapshot,
+                    base + Duration::from_secs(1),
+                )
+                .unwrap()
+                .is_none()
+        );
 
         runtime.observe_prepare_for_sleep(true, base + Duration::from_secs(2));
         runtime.observe_prepare_for_sleep(false, base + Duration::from_secs(3));
 
-        assert!(runtime
-            .observe_telemetry(
-                &telemetry(false, base + Duration::from_secs(3)),
-                &policy,
-                &snapshot,
-                base + Duration::from_secs(3),
-            )
-            .unwrap()
-            .is_none());
+        assert!(
+            runtime
+                .observe_telemetry(
+                    &telemetry(false, base + Duration::from_secs(3)),
+                    &policy,
+                    &snapshot,
+                    base + Duration::from_secs(3),
+                )
+                .unwrap()
+                .is_none()
+        );
         let event = runtime
             .observe_telemetry(
                 &telemetry(false, base + Duration::from_secs(4)),
@@ -381,7 +399,10 @@ mod tests {
             .unwrap()
             .expect("fresh post-resume battery edge");
         assert_eq!(event.revision().get(), 1);
-        assert_eq!(event.candidate().unwrap().trigger(), &AutomationTrigger::OnBattery);
+        assert_eq!(
+            event.candidate().unwrap().trigger(),
+            &AutomationTrigger::OnBattery
+        );
     }
 
     #[test]
@@ -425,20 +446,24 @@ mod tests {
         let mut policy = policy();
         let snapshot = snapshot(11, base);
         let mut runtime = AutomationWorkerRuntime::new();
-        assert!(confirm_battery_event(&mut runtime, &policy, &snapshot, base)
-            .candidate()
-            .is_some());
+        assert!(
+            confirm_battery_event(&mut runtime, &policy, &snapshot, base)
+                .candidate()
+                .is_some()
+        );
 
         policy.on_ac_change = false;
-        assert!(runtime
-            .observe_telemetry(
-                &telemetry(true, base + Duration::from_secs(3)),
-                &policy,
-                &snapshot,
-                base + Duration::from_secs(3),
-            )
-            .unwrap()
-            .is_none());
+        assert!(
+            runtime
+                .observe_telemetry(
+                    &telemetry(true, base + Duration::from_secs(3)),
+                    &policy,
+                    &snapshot,
+                    base + Duration::from_secs(3),
+                )
+                .unwrap()
+                .is_none()
+        );
         let second = runtime
             .observe_telemetry(
                 &telemetry(true, base + Duration::from_secs(4)),
@@ -504,8 +529,11 @@ mod tests {
             ["Command", "::new"].concat(),
         ];
         for needle in forbidden {
-            assert!(!source.contains(&needle), "unexpected execution token: {needle}");
+            assert!(
+                !source.contains(&needle),
+                "unexpected execution token: {needle}"
+            );
         }
-        assert!(!source.contains("unsafe"));
+        assert!(!source.contains(&["un", "safe"].concat()));
     }
 }

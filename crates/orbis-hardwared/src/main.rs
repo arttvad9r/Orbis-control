@@ -48,8 +48,7 @@ use zbus::{fdo::DBusProxy, names::BusName};
 
 const PRODUCT_MUTATION_DISABLED: &str =
     "mutation is disabled until the Orbis product contract and release evidence are proven";
-const FAN_MUTATION_DISABLED: &str =
-    "fan mutation is disabled until enabled-state preservation and factory-reset restoration are fixed";
+const FAN_MUTATION_DISABLED: &str = "fan mutation is disabled until enabled-state preservation and factory-reset restoration are fixed";
 
 struct DisabledGpuMutationBackend;
 
@@ -207,18 +206,21 @@ async fn asusd_has_owner(connection: &zbus::Connection) -> Result<bool, Provider
         .await
         .map_err(|error| ProviderError::Dbus(format!("system D-Bus daemon proxy: {error}")))?;
     let bus_name = BusName::try_from(ASUSD_BUS_NAME).map_err(|error| {
-        ProviderError::Internal(format!("invalid fixed asusd D-Bus name {ASUSD_BUS_NAME}: {error}"))
+        ProviderError::Internal(format!(
+            "invalid fixed asusd D-Bus name {ASUSD_BUS_NAME}: {error}"
+        ))
     })?;
 
-    proxy.name_has_owner(bus_name).await.map_err(|error| match error {
-        zbus::fdo::Error::AccessDenied(message) => ProviderError::PermissionDenied(message),
-        other => ProviderError::Dbus(format!("NameHasOwner({ASUSD_BUS_NAME}): {other}")),
-    })
+    proxy
+        .name_has_owner(bus_name)
+        .await
+        .map_err(|error| match error {
+            zbus::fdo::Error::AccessDenied(message) => ProviderError::PermissionDenied(message),
+            other => ProviderError::Dbus(format!("NameHasOwner({ASUSD_BUS_NAME}): {other}")),
+        })
 }
 
-async fn build_battery_backend(
-    connection: &zbus::Connection,
-) -> Box<dyn BatteryMutationBackend> {
+async fn build_battery_backend(connection: &zbus::Connection) -> Box<dyn BatteryMutationBackend> {
     let effective_reader = match discover_effective_reader() {
         Ok(reader) => reader,
         Err(error) => {
@@ -344,7 +346,8 @@ mod tests {
         let fan = DisabledFanMutationBackend;
         assert_eq!(fan.mutation_status().await, FanMutationStatus::Unsupported);
         assert!(matches!(
-            fan.reset_curves_to_defaults(AsusdFanProfile::Balanced).await,
+            fan.reset_curves_to_defaults(AsusdFanProfile::Balanced)
+                .await,
             Err(ProviderError::Unsupported(_))
         ));
 
@@ -465,11 +468,9 @@ mod tests {
             Some(AuraMutationStatus::Unsupported)
         );
         assert_eq!(
-            keyboard_backlight_mutation_wire::from_wire(
-                keyboard_backlight_mutation_wire::to_wire(
-                    KeyboardBacklightMutationStatus::Unsupported
-                )
-            ),
+            keyboard_backlight_mutation_wire::from_wire(keyboard_backlight_mutation_wire::to_wire(
+                KeyboardBacklightMutationStatus::Unsupported
+            )),
             Some(KeyboardBacklightMutationStatus::Unsupported)
         );
         assert_eq!(

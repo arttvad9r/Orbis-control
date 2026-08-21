@@ -89,9 +89,7 @@ fn close_action_index(action: CloseAction) -> i32 {
 }
 
 pub(crate) fn position_runtime_supported() -> bool {
-    if std::env::var_os("WAYLAND_DISPLAY")
-        .is_some_and(|value| !value.is_empty())
-    {
+    if std::env::var_os("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty()) {
         return false;
     }
     if std::env::var("SLINT_BACKEND")
@@ -126,7 +124,8 @@ pub(crate) fn map_window_preferences(load: PreferencesLoad) -> WindowPreferences
     }
 }
 
-pub(crate) fn read_window_preferences_state() -> Result<WindowPreferencesUiState, PreferencesError> {
+pub(crate) fn read_window_preferences_state() -> Result<WindowPreferencesUiState, PreferencesError>
+{
     load_preferences().map(map_window_preferences)
 }
 
@@ -236,7 +235,10 @@ mod tests {
         assert!(updated.window.start_minimized);
         assert!(!updated.window.remember_position);
         assert_eq!(updated.window.close_action, CloseAction::Ask);
-        assert_eq!(updated.appearance.theme, orbis_config::ThemePreference::Light);
+        assert_eq!(
+            updated.appearance.theme,
+            orbis_config::ThemePreference::Light
+        );
     }
 
     #[test]
@@ -255,7 +257,10 @@ mod tests {
         .expect("save remember position");
         assert!(!updated.window.remember_position);
         assert!(updated.window.start_minimized);
-        assert_eq!(updated.appearance.theme, orbis_config::ThemePreference::Light);
+        assert_eq!(
+            updated.appearance.theme,
+            orbis_config::ThemePreference::Light
+        );
     }
 
     #[test]

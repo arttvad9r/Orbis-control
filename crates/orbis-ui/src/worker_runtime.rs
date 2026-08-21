@@ -47,8 +47,13 @@ const AUTOMATION_MAX_CAPABILITY_AGE: Duration = Duration::from_secs(45);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerCommand {
     SetPerformance(PerformanceProfile),
-    SetGpuMode { mode: GpuMode, confirmed: bool },
-    SetChargeLimit { percent: u8 },
+    SetGpuMode {
+        mode: GpuMode,
+        confirmed: bool,
+    },
+    SetChargeLimit {
+        percent: u8,
+    },
     RefreshChargeLimit,
     RefreshGpuCapabilities,
     RefreshPerformance,
@@ -59,7 +64,10 @@ pub enum WorkerCommand {
         fan: FanId,
         curve: FanCurvePoints,
     },
-    RefreshFanCurve { profile: AsusdFanProfile, fan: FanId },
+    RefreshFanCurve {
+        profile: AsusdFanProfile,
+        fan: FanId,
+    },
 }
 
 /// Typed result emitted to the presentation boundary.
@@ -135,7 +143,9 @@ fn register_lifecycle_sender(
     if let Ok(mut slot) = lifecycle_registration().lock() {
         *slot = Some(LifecycleRegistration { id, sender });
     } else {
-        tracing::error!("Automation lifecycle sender registry poisoned; resume automation disabled");
+        tracing::error!(
+            "Automation lifecycle sender registry poisoned; resume automation disabled"
+        );
     }
     LifecycleRegistrationGuard { id }
 }
@@ -147,7 +157,9 @@ fn register_lifecycle_sender(
 /// Returns false when no worker is registered or its lifecycle receiver closed.
 pub fn publish_prepare_for_sleep(start: bool, observed_at: SystemTime) -> bool {
     let sender = match lifecycle_registration().lock() {
-        Ok(slot) => slot.as_ref().map(|registration| registration.sender.clone()),
+        Ok(slot) => slot
+            .as_ref()
+            .map(|registration| registration.sender.clone()),
         Err(_) => None,
     };
     let Some(sender) = sender else {
@@ -192,7 +204,10 @@ fn sync_persisted_automation_policy(driver: &mut AutomationWorkerDriver) {
                 return;
             }
             if let Err(error) = driver.replace_persisted_policy(policy) {
-                tracing::error!(?error, "Automation policy revision exhausted; execution disabled");
+                tracing::error!(
+                    ?error,
+                    "Automation policy revision exhausted; execution disabled"
+                );
             }
         }
         Err(error) => {
@@ -228,7 +243,10 @@ async fn observe_automation_telemetry<R>(
     let capabilities = match augment_snapshot_with_automation_shadow(source_capabilities) {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            tracing::error!(?error, "Automation capability view failed; observation skipped fail-closed");
+            tracing::error!(
+                ?error,
+                "Automation capability view failed; observation skipped fail-closed"
+            );
             return;
         }
     };
@@ -250,17 +268,14 @@ async fn observe_automation_telemetry<R>(
         }
     }
 
-    let envelope = match driver.prepare_latest_dry_run(
-        &capabilities,
-        now,
-        AUTOMATION_MAX_CAPABILITY_AGE,
-    ) {
-        Ok(envelope) => envelope,
-        Err(block) => {
-            tracing::debug!(?block, "Automation dry-run preparation blocked");
-            return;
-        }
-    };
+    let envelope =
+        match driver.prepare_latest_dry_run(&capabilities, now, AUTOMATION_MAX_CAPABILITY_AGE) {
+            Ok(envelope) => envelope,
+            Err(block) => {
+                tracing::debug!(?block, "Automation dry-run preparation blocked");
+                return;
+            }
+        };
 
     // This is the production dry-run boundary. Until the exact build is
     // promoted, even a future Supported Automation capability cannot reach the
@@ -334,13 +349,20 @@ async fn observe_automation_telemetry<R>(
             }
         }
         AutomationPerformanceExecutionOutcome::DefiniteFailure(error) => {
-            tracing::warn!(?error, "Automation Performance execution failed before unknown outcome");
+            tracing::warn!(
+                ?error,
+                "Automation Performance execution failed before unknown outcome"
+            );
             if let Err(finish_error) = driver.finish_dry_run(envelope) {
                 tracing::error!(?finish_error, "Automation failed lease release failed");
             }
         }
         AutomationPerformanceExecutionOutcome::RecoveryRequired { requested, reason } => {
-            tracing::error!(?requested, ?reason, "Automation Performance outcome unknown; recovery required");
+            tracing::error!(
+                ?requested,
+                ?reason,
+                "Automation Performance outcome unknown; recovery required"
+            );
             if let Err(error) = driver.finish_performance_unknown(envelope) {
                 tracing::error!(?error, "Automation could not enter recovery barrier");
                 return;
@@ -348,10 +370,16 @@ async fn observe_automation_telemetry<R>(
             match bounded_performance_state(performance).await {
                 Ok(state) => {
                     let recovered = driver.reconcile_performance(&state);
-                    tracing::warn!(?recovered, "Automation Performance recovery reconciled from fresh read");
+                    tracing::warn!(
+                        ?recovered,
+                        "Automation Performance recovery reconciled from fresh read"
+                    );
                 }
                 Err(error) => {
-                    tracing::error!(?error, "Automation Performance recovery read failed; barrier remains active");
+                    tracing::error!(
+                        ?error,
+                        "Automation Performance recovery read failed; barrier remains active"
+                    );
                 }
             }
         }
@@ -368,7 +396,10 @@ fn reconcile_automation_from_performance_result(
             outcome,
             crate::automation_recovery::AutomationPerformanceRecoveryOutcome::NotRequired
         ) {
-            tracing::warn!(?outcome, "Automation recovery cleared by authoritative Performance refresh");
+            tracing::warn!(
+                ?outcome,
+                "Automation recovery cleared by authoritative Performance refresh"
+            );
         }
     }
 }
@@ -384,7 +415,8 @@ where
         provider.current_profile(),
     )
     .await?;
-    let available = bounded_provider_call(provider, "performance.profiles", provider.profiles()).await?;
+    let available =
+        bounded_provider_call(provider, "performance.profiles", provider.profiles()).await?;
     Ok(PerformanceState { current, available })
 }
 
@@ -689,7 +721,9 @@ mod tests {
 
     #[test]
     fn execution_promotion_is_fail_closed_on_this_revision() {
-        assert!(!AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED);
+        const {
+            assert!(!AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED);
+        }
     }
 
     #[test]
