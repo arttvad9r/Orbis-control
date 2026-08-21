@@ -1287,6 +1287,7 @@ mod tests {
                 active: Scripted::Value(orbis_core::fan::FanCurve {
                     profile: PerformanceProfile::Balanced,
                     fan: orbis_core::fan::FanId::Cpu,
+                    enabled: Some(true),
                     points: vec![
                         orbis_core::fan::FanCurvePoint::new(
                             orbis_core::newtypes::TemperatureC::new(40).unwrap(),

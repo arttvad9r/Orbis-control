@@ -378,6 +378,8 @@ pub struct FanCurveInfo {
     pub temps: Vec<u8>,
     /// 8 raw PWM 0..255.
     pub pwms: Vec<u8>,
+    /// Whether the backend has this stored curve enabled.
+    pub enabled: bool,
 }
 
 #[cfg(test)]
@@ -518,6 +520,7 @@ mod tests {
             fan: fan_id::CPU,
             temps: temps.to_vec(),
             pwms: pwms.to_vec(),
+            enabled: true,
         };
         let a = sentinel(
             fan_profile::BALANCED,
@@ -545,8 +548,8 @@ mod tests {
 
     #[test]
     fn fan_dbus_signature_is_stable() {
-        // u32(u) y(y) 8-temperature array(ay) 8-pwm array(ay).
-        let expected: zbus::zvariant::Signature = "(uyayay)".try_into().expect("valid signature");
+        // u32(u) y(y) 8-temperature array(ay) 8-pwm array(ay) enabled (b).
+        let expected: zbus::zvariant::Signature = "(uyayayb)".try_into().expect("valid signature");
         assert_eq!(*FanCurveInfo::SIGNATURE, expected);
     }
 

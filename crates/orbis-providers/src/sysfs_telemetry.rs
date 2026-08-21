@@ -333,9 +333,12 @@ fn read_asus_fans(dir: &Path) -> Vec<FanTelemetry> {
             continue;
         };
         fans.push(FanTelemetry {
+            source: "asus-hwmon".into(),
             fan,
+            label,
             rpm,
             percent: None,
+            quality: orbis_core::telemetry::FanTelemetryQuality::Complete,
         });
     }
     fans
@@ -409,6 +412,8 @@ fn read_online(dir: &Path) -> Result<Option<bool>, ProviderError> {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
+    use orbis_core::telemetry::FanTelemetryQuality;
 
     use super::*;
 
@@ -498,6 +503,9 @@ mod tests {
             .expect("cpu fan");
         assert_eq!(cpu.rpm, Rpm::new(2600).expect("rpm"));
         assert_eq!(cpu.percent, None);
+        assert_eq!(cpu.label, "cpu_fan");
+        assert_eq!(cpu.source, "asus-hwmon");
+        assert_eq!(cpu.quality, FanTelemetryQuality::Complete);
         let gpu = t
             .fans
             .iter()
@@ -505,6 +513,9 @@ mod tests {
             .expect("gpu fan");
         assert_eq!(gpu.rpm, Rpm::new(2100).expect("rpm"));
         assert_eq!(gpu.percent, None);
+        assert_eq!(gpu.label, "gpu_fan");
+        assert_eq!(gpu.source, "asus-hwmon");
+        assert_eq!(gpu.quality, FanTelemetryQuality::Complete);
 
         let battery = t.battery.expect("battery");
         assert_eq!(battery.percent, Percent::new(100).expect("pct"));

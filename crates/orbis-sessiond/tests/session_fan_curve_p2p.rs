@@ -214,6 +214,10 @@ async fn session1_fan_curve_reads_profile_specific_sentinel_over_p2p() {
         assert_eq!(balanced.temps.len(), 8);
         assert_eq!(balanced.temps[0], 40);
         assert_eq!(balanced.pwms[7], 99);
+        assert!(
+            balanced.enabled,
+            "enabled state must survive Session1 transport"
+        );
 
         // RefreshFanCurve(Quiet, CPU) → кривая C.
         let quiet: FanCurveInfo = proxy

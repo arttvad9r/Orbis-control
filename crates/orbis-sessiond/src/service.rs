@@ -185,6 +185,7 @@ fn domain_from_asusd_curve(
     FanCurve {
         profile: PerformanceProfile::from(profile),
         fan: curve.fan,
+        enabled: Some(curve.enabled),
         points,
     }
 }
@@ -383,13 +384,13 @@ fn charge_limit_info_to_tuple(info: ChargeLimitInfo) -> ChargeLimitTuple {
     )
 }
 
-/// Wire-кодирование `FanCurveInfo` в D-Bus tuple `(uyayay)`.
+/// Wire-кодирование `FanCurveInfo` в D-Bus tuple `(uyayayb)`.
 ///
 /// Ту же причину, что и `ChargeLimitTuple`: кастомный struct не конвертируется
 /// в `Value` в server-side interface macro. Кортеж из четырёх полей имеет ту же
 /// D-Bus signature `(uyayay)`, что и `FanCurveInfo`, поэтому client proxy
 /// декодирует tuple в `FanCurveInfo`.
-type FanCurveTuple = (u32, u8, Vec<u8>, Vec<u8>);
+type FanCurveTuple = (u32, u8, Vec<u8>, Vec<u8>, bool);
 
 fn asusd_curve_to_wire_tuple(
     profile: AsusdFanProfile,
@@ -400,6 +401,7 @@ fn asusd_curve_to_wire_tuple(
         fan_id_to_wire(&curve.fan),
         curve.temps.iter().map(|t| t.get() as u8).collect(),
         curve.pwms.iter().map(|p| p.get()).collect(),
+        curve.enabled,
     )
 }
 
@@ -516,7 +518,9 @@ impl SessionService {
             fan,
             temps,
             pwms,
-            enabled: true,
+            enabled: curve.enabled.ok_or_else(|| {
+                zbus::fdo::Error::Failed("fan curve: enabled state unavailable".into())
+            })?,
         };
         Ok(asusd_curve_to_wire_tuple(profile, &asusd))
     }

@@ -17,12 +17,32 @@ use crate::warning::Warning;
 /// Телеметрия одного вентилятора.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FanTelemetry {
+    /// Source/backend that produced this RPM observation.
+    #[serde(default)]
+    pub source: String,
     /// Идентификатор.
     pub fan: FanId,
+    /// Original backend label, when available.
+    #[serde(default)]
+    pub label: String,
     /// RPM.
     pub rpm: Rpm,
     /// Процент от максимума (если доступен).
     pub percent: Option<Percent>,
+    /// Quality of this individual fan observation.
+    #[serde(default)]
+    pub quality: FanTelemetryQuality,
+}
+
+/// Quality of one fan RPM observation, independent from curve capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FanTelemetryQuality {
+    /// Source, identity/label and RPM are all known.
+    #[default]
+    Complete,
+    /// The RPM is usable but some source metadata is incomplete.
+    Partial,
 }
 
 /// Телеметрия мощности.
@@ -305,14 +325,20 @@ mod tests {
             gpu_temp: Some(TemperatureC::new(43).unwrap()),
             fans: vec![
                 FanTelemetry {
+                    source: "test".into(),
                     fan: FanId::Cpu,
+                    label: "cpu_fan".into(),
                     rpm: Rpm::new(2600).unwrap(),
                     percent: None,
+                    quality: FanTelemetryQuality::Complete,
                 },
                 FanTelemetry {
+                    source: "test".into(),
                     fan: FanId::Gpu,
+                    label: "gpu_fan".into(),
                     rpm: Rpm::new(2100).unwrap(),
                     percent: None,
+                    quality: FanTelemetryQuality::Complete,
                 },
             ],
             power: PowerTelemetry {
@@ -378,9 +404,12 @@ mod tests {
     fn fan_rpm_zero_roundtrip() {
         let mut t = Telemetry::empty();
         t.fans = vec![FanTelemetry {
+            source: "test".into(),
             fan: FanId::Cpu,
+            label: "cpu_fan".into(),
             rpm: Rpm::new(0).unwrap(),
             percent: None,
+            quality: FanTelemetryQuality::Complete,
         }];
         let json = serde_json::to_string(&t).unwrap();
         let back: Telemetry = serde_json::from_str(&json).unwrap();
@@ -394,9 +423,12 @@ mod tests {
         // Only GPU fan present → identity must remain Gpu, not renumbered.
         let mut t = Telemetry::empty();
         t.fans = vec![FanTelemetry {
+            source: "test".into(),
             fan: FanId::Gpu,
+            label: "gpu_fan".into(),
             rpm: Rpm::new(3200).unwrap(),
             percent: None,
+            quality: FanTelemetryQuality::Complete,
         }];
         let json = serde_json::to_string(&t).unwrap();
         let back: Telemetry = serde_json::from_str(&json).unwrap();
@@ -410,14 +442,20 @@ mod tests {
         let mut t = Telemetry::empty();
         t.fans = vec![
             FanTelemetry {
+                source: "test".into(),
                 fan: FanId::Gpu,
+                label: "gpu_fan".into(),
                 rpm: Rpm::new(3200).unwrap(),
                 percent: None,
+                quality: FanTelemetryQuality::Complete,
             },
             FanTelemetry {
+                source: "test".into(),
                 fan: FanId::Other("custom".into()),
+                label: "custom".into(),
                 rpm: Rpm::new(1500).unwrap(),
                 percent: None,
+                quality: FanTelemetryQuality::Complete,
             },
         ];
         let json = serde_json::to_string(&t).unwrap();
@@ -454,9 +492,12 @@ mod tests {
         t.gpu_temp = Some(TemperatureC::new(150).unwrap());
         t.power.gpu = Some(MilliWatt::new(10_000_000).unwrap());
         t.fans = vec![FanTelemetry {
+            source: "test".into(),
             fan: FanId::Cpu,
+            label: "cpu_fan".into(),
             rpm: Rpm::new(65535).unwrap(),
             percent: Some(Percent::new(100).unwrap()),
+            quality: FanTelemetryQuality::Complete,
         }];
         let json = serde_json::to_string(&t).unwrap();
         let back: Telemetry = serde_json::from_str(&json).unwrap();

@@ -503,9 +503,12 @@ fn telemetry_refresh_updates_ui_and_error_keeps_previous_state() {
         cpu_temp: Some(orbis_core::newtypes::TemperatureC::new(46).unwrap()),
         gpu_temp: Some(orbis_core::newtypes::TemperatureC::new(43).unwrap()),
         fans: vec![orbis_core::telemetry::FanTelemetry {
+            source: "test".into(),
             fan: orbis_core::fan::FanId::Cpu,
+            label: "cpu_fan".into(),
             rpm: orbis_core::newtypes::Rpm::new(2600).unwrap(),
             percent: None,
+            quality: orbis_core::telemetry::FanTelemetryQuality::Complete,
         }],
         power: orbis_core::telemetry::PowerTelemetry {
             ac: None,
@@ -878,6 +881,7 @@ fn fan_curve_load_fan_curve_sets_ready_and_populates_points() {
     let curve = FanCurve {
         profile: PerformanceProfile::Balanced,
         fan: FanId::Cpu,
+        enabled: None,
         points,
     };
     s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
@@ -934,6 +938,7 @@ fn fan_curve_refresh_ok_loads_curve_and_clears_error() {
     let curve = FanCurve {
         profile: PerformanceProfile::Balanced,
         fan: FanId::Cpu,
+        enabled: None,
         points: vec![
             FanCurvePoint::new(TemperatureC::new(50).unwrap(), FanPwm::new(0).unwrap()),
             FanCurvePoint::new(TemperatureC::new(85).unwrap(), FanPwm::new(100).unwrap()),

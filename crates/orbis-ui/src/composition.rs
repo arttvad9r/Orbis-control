@@ -15,6 +15,9 @@ use orbis_application::{
 use orbis_capabilities::{CapabilityRegistryBuilder, CapabilityRegistrySnapshot, ProbeError};
 use orbis_core::action::ApplyResult;
 use orbis_core::battery::ChargeLimit;
+use orbis_core::capability::{
+    Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, OperationCapability,
+};
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
@@ -832,8 +835,15 @@ where
         fan_mutation_status,
     )
     .await?;
+    let gpu_curve = orbis_providers::probe_fan_curve(
+        fan_provider,
+        &orbis_core::fan::FanId::Gpu,
+        fan_mutation_status,
+    )
+    .await?;
+    let fan_curves = aggregate_fan_curve_capability(cpu_curve, gpu_curve);
     builder
-        .add(orbis_core::FeatureId::FanCurves, cpu_curve)
+        .add(orbis_core::FeatureId::FanCurves, fan_curves)
         .map_err(|err| match err {
             orbis_capabilities::RegistryError::DuplicateCapability { feature } => {
                 ProbeError::ContractViolation(format!(
@@ -848,6 +858,29 @@ where
     builder
         .build()
         .map_err(|err| ProbeError::ContractViolation(err.to_string()))
+}
+
+/// Aggregate FanCurves only when both CPU and GPU curve-read contracts are
+/// proven. RPM telemetry is intentionally not an input to this capability.
+fn aggregate_fan_curve_capability(cpu: Capability, gpu: Capability) -> Capability {
+    if cpu.operations.read.status == CapabilityStatus::Supported
+        && gpu.operations.read.status == CapabilityStatus::Supported
+    {
+        return orbis_capabilities::capability_from_operations(cpu.operations, cpu.constraints);
+    }
+
+    let read = if cpu.operations.read.status != CapabilityStatus::Supported {
+        cpu.operations.read
+    } else {
+        gpu.operations.read
+    };
+    orbis_capabilities::capability_from_operations(
+        CapabilityOperations {
+            read,
+            write: OperationCapability::new(CapabilityStatus::Unsupported),
+        },
+        CapabilityConstraints::Unknown,
+    )
 }
 
 /// Assemble the initial capability registry snapshot for production.
@@ -1112,17 +1145,43 @@ pub fn mock_runtime() -> MockRuntime {
 mod tests {
     use super::{
         ApplicationRuntime, CapabilityRegistrySnapshot, GpuPrimitiveServices, GpuServices,
-        GpuServicesRuntime, MockRuntime, ProbeError, build_initial_registry_snapshot,
-        probe_capability_registry, refresh_capability_registry,
+        GpuServicesRuntime, MockRuntime, ProbeError, aggregate_fan_curve_capability,
+        build_initial_registry_snapshot, probe_capability_registry, refresh_capability_registry,
     };
     use orbis_application::{AppService, CommandError};
     use orbis_core::FeatureId;
-    use orbis_core::capability::CapabilityStatus;
+    use orbis_core::capability::{
+        Capability, CapabilityOperations, CapabilityStatus, OperationCapability,
+    };
     use orbis_core::gpu::GpuMode;
     use orbis_providers::error::ProviderError;
     use orbis_providers::mock::{MockErrorMode, MockProvider};
     use orbis_test_support::devices::build_state_arc;
     use std::sync::Arc;
+
+    #[test]
+    fn fan_curve_capability_requires_cpu_and_gpu_curve_reads() {
+        let cpu =
+            Capability::new(CapabilityStatus::Supported).with_operations(CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::Supported),
+                write: OperationCapability::new(CapabilityStatus::Supported),
+            });
+        let gpu_missing =
+            Capability::new(CapabilityStatus::Unsupported).with_operations(CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::Unsupported),
+                write: OperationCapability::new(CapabilityStatus::Unsupported),
+            });
+
+        let aggregate = aggregate_fan_curve_capability(cpu, gpu_missing);
+        assert_eq!(
+            aggregate.operations.read.status,
+            CapabilityStatus::Unsupported
+        );
+        assert_eq!(
+            aggregate.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
 
     #[tokio::test]
     async fn primitive_gpu_services_do_not_claim_product_mode_support() {

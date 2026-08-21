@@ -62,6 +62,9 @@ pub struct FanCurve {
     pub profile: PerformanceProfile,
     /// Вентилятор.
     pub fan: FanId,
+    /// Whether the backend reports this stored curve as enabled. `None` means
+    /// the read backend does not expose enabled-state evidence.
+    pub enabled: Option<bool>,
     /// Точки кривой. Количество точек задаёт backend (обычно 8).
     pub points: Vec<FanCurvePoint>,
 }
@@ -132,6 +135,7 @@ mod tests {
         FanCurve {
             profile: PerformanceProfile::Balanced,
             fan: FanId::Cpu,
+            enabled: Some(true),
             points: points
                 .into_iter()
                 .map(|(t_, p_)| FanCurvePoint::new(t(t_), p(p_)))

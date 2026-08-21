@@ -224,6 +224,7 @@ fn default_curve(profile: PerformanceProfile, fan: FanId) -> FanCurve {
     FanCurve {
         profile,
         fan,
+        enabled: Some(true),
         points,
     }
 }
@@ -471,6 +472,7 @@ impl FanCurveMutationProvider for MockProvider {
         let fan_curve = FanCurve {
             profile: perf,
             fan: fan.clone(),
+            enabled: Some(true),
             points: curve
                 .temps
                 .iter()

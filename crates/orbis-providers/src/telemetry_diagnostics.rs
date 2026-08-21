@@ -116,9 +116,12 @@ mod tests {
             cpu_temp: Some(TemperatureC::new(50).unwrap()),
             gpu_temp: Some(TemperatureC::new(55).unwrap()),
             fans: vec![FanTelemetry {
+                source: "test".into(),
                 fan: orbis_core::fan::FanId::Cpu,
+                label: "cpu_fan".into(),
                 rpm: Rpm::new(2000).unwrap(),
                 percent: Some(Percent::new(40).unwrap()),
+                quality: orbis_core::telemetry::FanTelemetryQuality::Complete,
             }],
             power: PowerTelemetry {
                 ac: Some(MilliWatt::new(50_000).unwrap()),

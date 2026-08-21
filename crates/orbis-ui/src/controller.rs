@@ -682,6 +682,7 @@ impl UiState {
         let curve = FanCurve {
             profile: PerformanceProfile::Silent, // profile doesn't affect validate
             fan: FanId::Cpu,
+            enabled: None,
             points: points
                 .temps
                 .iter()
@@ -1117,14 +1118,20 @@ mod tests {
             gpu_temp: Some(orbis_core::newtypes::TemperatureC::new(43).unwrap()),
             fans: vec![
                 orbis_core::telemetry::FanTelemetry {
+                    source: "test".into(),
                     fan: orbis_core::fan::FanId::Cpu,
+                    label: "cpu_fan".into(),
                     rpm: orbis_core::newtypes::Rpm::new(2600).unwrap(),
                     percent: None,
+                    quality: orbis_core::telemetry::FanTelemetryQuality::Complete,
                 },
                 orbis_core::telemetry::FanTelemetry {
+                    source: "test".into(),
                     fan: orbis_core::fan::FanId::Gpu,
+                    label: "gpu_fan".into(),
                     rpm: orbis_core::newtypes::Rpm::new(2100).unwrap(),
                     percent: None,
+                    quality: orbis_core::telemetry::FanTelemetryQuality::Complete,
                 },
             ],
             power: orbis_core::telemetry::PowerTelemetry {
@@ -1288,9 +1295,12 @@ mod tests {
 
         let mut t = sample_telemetry();
         t.fans = vec![orbis_core::telemetry::FanTelemetry {
+            source: "test".into(),
             fan: orbis_core::fan::FanId::Cpu,
+            label: "cpu_fan".into(),
             rpm: orbis_core::newtypes::Rpm::new(0).unwrap(),
             percent: None,
+            quality: orbis_core::telemetry::FanTelemetryQuality::Complete,
         }];
         s.update_telemetry(&t);
         assert_eq!(s.cpu_fan_rpm, "0 rpm");
@@ -1331,6 +1341,7 @@ mod tests {
         let curve = FanCurve {
             profile: PerformanceProfile::Balanced,
             fan: FanId::Cpu,
+            enabled: None,
             points: vec![
                 FanCurvePoint::new(TemperatureC::new(50).unwrap(), FanPwm::new(0).unwrap()),
                 FanCurvePoint::new(TemperatureC::new(85).unwrap(), FanPwm::new(100).unwrap()),
@@ -1366,6 +1377,7 @@ mod tests {
         let curve = FanCurve {
             profile: PerformanceProfile::Balanced,
             fan: FanId::Cpu,
+            enabled: None,
             points: vec![],
         };
         s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
@@ -1384,6 +1396,7 @@ mod tests {
         let curve = FanCurve {
             profile: PerformanceProfile::Silent,
             fan: FanId::Cpu,
+            enabled: None,
             points: vec![],
         };
 

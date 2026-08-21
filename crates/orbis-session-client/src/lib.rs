@@ -1408,6 +1408,7 @@ pub fn fan_curve_from_wire(
     Ok(FanCurve {
         profile: PerformanceProfile::from(wire_profile),
         fan,
+        enabled: Some(wire.enabled),
         points,
     })
 }
@@ -2742,6 +2743,7 @@ mod tests {
         FanCurve {
             profile: PerformanceProfile::Balanced,
             fan: FanId::Cpu,
+            enabled: None,
             points,
         }
     }
@@ -2756,12 +2758,23 @@ mod tests {
         temps: [u8; 8],
         pwms: [u8; 8],
     ) -> orbis_session_protocol::FanCurveInfo {
+        sentinel_wire_with_enabled(profile, fan, temps, pwms, true)
+    }
+
+    fn sentinel_wire_with_enabled(
+        profile: u32,
+        fan: u8,
+        temps: [u8; 8],
+        pwms: [u8; 8],
+        enabled: bool,
+    ) -> orbis_session_protocol::FanCurveInfo {
         use orbis_session_protocol::FanCurveInfo;
         FanCurveInfo {
             profile,
             fan,
             temps: temps.to_vec(),
             pwms: pwms.to_vec(),
+            enabled,
         }
     }
 
@@ -2788,6 +2801,24 @@ mod tests {
         assert_eq!(curve.points.len(), 8);
         assert_eq!(curve.points[0].temp.get(), 40);
         assert_eq!(curve.points[7].pwm.get(), 99);
+    }
+
+    #[test]
+    fn fan_curve_enabled_state_survives_session1_conversion() {
+        let curve = fan_curve_from_wire(
+            sentinel_wire_with_enabled(
+                orbis_session_protocol::fan_profile::BALANCED,
+                orbis_session_protocol::fan_id::GPU,
+                CURVE_A_TEMPS,
+                CURVE_A_PWMS,
+                false,
+            ),
+            AsusdFanProfile::Balanced,
+        )
+        .expect("decoded");
+
+        assert_eq!(curve.fan, FanId::Gpu);
+        assert_eq!(curve.enabled, Some(false));
     }
 
     #[test]
@@ -2875,6 +2906,7 @@ mod tests {
                 fan: orbis_session_protocol::fan_id::CPU,
                 temps: vec![45, 49],
                 pwms: vec![5, 22],
+                enabled: true,
             },
             AsusdFanProfile::Balanced,
         )
@@ -3007,6 +3039,7 @@ mod tests {
             Ok(FanCurve {
                 profile: PerformanceProfile::Balanced,
                 fan: FanId::Cpu,
+                enabled: None,
                 points,
             })
         }

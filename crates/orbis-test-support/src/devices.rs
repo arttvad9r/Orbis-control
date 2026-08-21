@@ -121,6 +121,7 @@ pub fn default_curve(profile: PerformanceProfile, fan: FanId) -> FanCurve {
     FanCurve {
         profile,
         fan,
+        enabled: Some(true),
         points,
     }
 }
@@ -144,9 +145,12 @@ fn telemetry(cpu: i16, gpu: i16, fans: Vec<(FanId, Rpm)>, battery: bool) -> Tele
         fans: fans
             .into_iter()
             .map(|(fan, rpm)| FanTelemetry {
+                source: "test-fixture".into(),
                 fan,
+                label: "fixture-fan".into(),
                 rpm,
                 percent: Some(Percent::new(40).expect("pwm")),
+                quality: orbis_core::telemetry::FanTelemetryQuality::Complete,
             })
             .collect(),
         power: PowerTelemetry {

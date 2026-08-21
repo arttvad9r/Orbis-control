@@ -337,6 +337,7 @@ impl SysfsFanCurveSource {
         Ok(FanCurve {
             profile: PerformanceProfile::Balanced, // placeholder, не используется
             fan,
+            enabled: None,
             points,
         })
     }
