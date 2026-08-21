@@ -1114,7 +1114,7 @@ mod tests {
     use orbis_core::capability::CapabilityStatus;
     use orbis_core::gpu::GpuMode;
     use orbis_providers::error::ProviderError;
-    use orbis_providers::mock::MockProvider;
+    use orbis_providers::mock::{MockErrorMode, MockProvider};
     use orbis_test_support::devices::build_state_arc;
     use std::sync::Arc;
 
@@ -1351,6 +1351,106 @@ mod tests {
         .expect("refresh must succeed");
         runtime.replace_capabilities(third);
         assert_eq!(runtime.capabilities().generation(), 3);
+    }
+
+    #[tokio::test]
+    async fn backend_disappearance_and_recovery_publish_new_generations() {
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let provider = Arc::new(MockProvider::new(state.clone()));
+        let initial = build_initial_snapshot_for_refresh(&provider).await;
+        assert_eq!(
+            initial
+                .capability(FeatureId::Performance)
+                .expect("performance")
+                .status,
+            CapabilityStatus::Supported
+        );
+
+        state.write().await.error_mode = MockErrorMode::BackendDown;
+        let unavailable = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+            initial.generation() + 1,
+        )
+        .await
+        .expect("backend failure is capability-local");
+        assert_eq!(unavailable.generation(), 2);
+        assert_eq!(
+            unavailable
+                .capability(FeatureId::Performance)
+                .expect("performance")
+                .status,
+            CapabilityStatus::BackendMissing
+        );
+        assert_eq!(
+            unavailable
+                .capability(FeatureId::ChargeLimit)
+                .expect("charge limit")
+                .status,
+            CapabilityStatus::BackendMissing
+        );
+
+        state.write().await.error_mode = MockErrorMode::Timeout;
+        let temporary = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+            unavailable.generation() + 1,
+        )
+        .await
+        .expect("timeout is capability-local");
+        assert_eq!(temporary.generation(), 3);
+        assert_eq!(
+            temporary
+                .capability(FeatureId::Performance)
+                .expect("performance")
+                .status,
+            CapabilityStatus::TemporarilyUnavailable
+        );
+
+        state.write().await.error_mode = MockErrorMode::None;
+        let recovered = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::Unsupported,
+            temporary.generation() + 1,
+        )
+        .await
+        .expect("backend recovery must be capability-local");
+        assert_eq!(recovered.generation(), 4);
+        assert_eq!(
+            recovered
+                .capability(FeatureId::Performance)
+                .expect("performance")
+                .status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            recovered
+                .capability(FeatureId::ChargeLimit)
+                .expect("charge limit")
+                .status,
+            CapabilityStatus::Supported
+        );
     }
 
     #[tokio::test]
