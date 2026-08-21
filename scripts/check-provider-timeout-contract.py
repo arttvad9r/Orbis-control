@@ -52,14 +52,20 @@ def run(root: Path) -> list[str]:
     sources = {key: read(root, path, errors) for key, path in FILES.items()}
 
     execution = sources["execution"]
+    # The timeout boundary is owned by the lower-level `bounded_operation`
+    # primitive, which applies the supplied deadline via Tokio and classifies
+    # expiry as `ProviderError::Timeout`. `bounded_provider_call` delegates to it
+    # with the provider-declared deadline. These structural markers verify the
+    # real timeout contract without depending on a specific inline layout.
     require(
         execution,
         FILES["execution"],
         (
-            "pub async fn bounded_provider_call",
-            "let limit = provider.timeout();",
+            "pub async fn bounded_operation",
             "tokio::time::timeout(limit, future).await",
             "ProviderError::Timeout",
+            "pub async fn bounded_provider_call",
+            "bounded_operation(provider.timeout()",
             "This function never retries",
             "never_completing_operation_becomes_timeout",
         ),
@@ -93,7 +99,7 @@ def run(root: Path) -> list[str]:
             "pub mod bounded_probes;",
             "pub mod execution;",
             "pub use bounded_probes::{",
-            "pub use execution::bounded_provider_call;",
+            "pub use execution::{bounded_operation, bounded_provider_call};",
         ),
         errors,
     )
