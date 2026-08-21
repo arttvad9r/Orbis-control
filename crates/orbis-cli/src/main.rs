@@ -1,12 +1,15 @@
 use std::fmt::Debug;
+use std::future::Future;
 use std::io::{self, Write};
 use std::process::ExitCode;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use orbis_core::battery::{BatteryThresholdEvidence, ChargeLimit};
 use orbis_core::capability::CapabilityStatus;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
+use orbis_providers::bounded_operation;
 use orbis_providers::bounded_provider_call;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
@@ -510,26 +513,93 @@ impl PlatformProfileValidationBackend for LivePlatformProfileValidationBackend {
     }
 }
 
+/// Deadline for one D-Bus bus connection attempt in `orbisctl validate`.
+///
+/// Bounds socket connect + authentication + hello. Expiry is an honest
+/// connection failure (exit FAILURE), never success and never retried.
+const VALIDATE_BUS_CONNECT_DEADLINE: Duration = Duration::from_secs(5);
+
+/// Deadline for one read-only Hardware1 status query in `orbisctl validate`.
+///
+/// Mirrors the bounded Hardware1 status requery deadline used by the GUI
+/// composition. Expiry maps to [`CapabilityStatus::Unknown`] — the honest
+/// no-evidence state these queries already use for every transport error.
+const VALIDATE_STATUS_DEADLINE: Duration = Duration::from_secs(2);
+
+/// Run one read-only Hardware1 status query within an explicit deadline.
+///
+/// A timeout is never reported as success and never retried; the proven
+/// statuses (`Supported`, `Unsupported`, `PermissionDenied`, ...) pass through
+/// unchanged so evidence classes are never mixed.
+async fn bounded_validate_status<F>(operation: &'static str, future: F) -> CapabilityStatus
+where
+    F: Future<Output = CapabilityStatus>,
+{
+    // The status queries resolve to a plain status rather than
+    // `Result<_, ProviderError>`; adapt them so the canonical bounded
+    // primitive owns the deadline.
+    let outcome = bounded_operation(
+        VALIDATE_STATUS_DEADLINE,
+        "orbisctl-validate",
+        operation,
+        async move { Ok::<_, ProviderError>(future.await) },
+    )
+    .await;
+    match outcome {
+        Ok(status) => status,
+        Err(_) => CapabilityStatus::Unknown,
+    }
+}
+
 async fn validate_platform_profile(
     apply_test: bool,
     requested: Option<PerformanceProfile>,
 ) -> ExitCode {
-    let session_connection = match zbus::Connection::session().await {
+    // Every stage before the interactive/mutation section is explicitly
+    // bounded (#123): a hung bus or service must fail the command within its
+    // deadline instead of blocking forever. Connection expiry is reported as a
+    // timeout and exits with FAILURE — never as success.
+    let session_connection = match bounded_operation(
+        VALIDATE_BUS_CONNECT_DEADLINE,
+        "orbisctl-validate",
+        "session_bus_connect",
+        async {
+            zbus::Connection::session()
+                .await
+                .map_err(|error| ProviderError::Internal(error.to_string()))
+        },
+    )
+    .await
+    {
         Ok(connection) => connection,
         Err(error) => {
             eprintln!("orbisctl: cannot connect to the user session bus: {error}");
             return ExitCode::FAILURE;
         }
     };
-    let system_connection = match zbus::Connection::system().await {
+    let system_connection = match bounded_operation(
+        VALIDATE_BUS_CONNECT_DEADLINE,
+        "orbisctl-validate",
+        "system_bus_connect",
+        async {
+            zbus::Connection::system()
+                .await
+                .map_err(|error| ProviderError::Internal(error.to_string()))
+        },
+    )
+    .await
+    {
         Ok(connection) => connection,
         Err(error) => {
             eprintln!("orbisctl: cannot connect to the system bus: {error}");
             return ExitCode::FAILURE;
         }
     };
-    let write_capability =
-        orbis_session_client::hardware1_performance_mutation_status(&system_connection).await;
+    let write_capability = bounded_validate_status(
+        "performance_mutation_status",
+        orbis_session_client::hardware1_performance_mutation_status(&system_connection),
+    )
+    .await;
     let backend = LivePlatformProfileValidationBackend {
         session: SessionPerformanceProvider::new(ZbusSessionPerformanceSource::new(
             session_connection,
@@ -581,10 +651,67 @@ async fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn hung_validate_status_resolves_unknown_within_deadline() {
+        let started = tokio::time::Instant::now();
+        let status =
+            bounded_validate_status("performance_mutation_status", std::future::pending()).await;
+
+        assert_eq!(status, CapabilityStatus::Unknown);
+        // The paused Tokio clock advances exactly to the deadline when the
+        // timeout fires, so equality proves the bound is actually applied.
+        assert_eq!(started.elapsed(), VALIDATE_STATUS_DEADLINE);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn validate_status_timeout_is_never_success_and_never_retried() {
+        let calls = Cell::new(0u32);
+        let status = bounded_validate_status("performance_mutation_status", async {
+            calls.set(calls.get() + 1);
+            std::future::pending::<CapabilityStatus>().await
+        })
+        .await;
+
+        assert_eq!(status, CapabilityStatus::Unknown);
+        assert_eq!(calls.get(), 1, "timeout must not retry the query");
+    }
+
+    #[tokio::test]
+    async fn proven_validate_statuses_pass_through_without_coercion() {
+        let proven = [
+            CapabilityStatus::Supported,
+            CapabilityStatus::Unsupported,
+            CapabilityStatus::PermissionDenied,
+        ];
+        for expected in proven {
+            let observed =
+                bounded_validate_status("performance_mutation_status", async move { expected })
+                    .await;
+            assert_eq!(observed, expected);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn hung_bus_connect_surfaces_as_timeout_error_not_success() {
+        let result: Result<(), ProviderError> = bounded_operation(
+            VALIDATE_BUS_CONNECT_DEADLINE,
+            "orbisctl-validate",
+            "session_bus_connect",
+            async { std::future::pending().await },
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(ProviderError::Timeout(_))),
+            "a hung bus connect must classify as Timeout, never Ok"
+        );
+    }
 
     struct FakeValidationBackend {
         current: Mutex<PerformanceProfile>,
