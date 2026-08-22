@@ -25,7 +25,7 @@ use crate::composition::{
 };
 use orbis_application::{
     ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome, PerformanceState,
-    SetChargeLimitError, SetGpuModeError, SetPerformanceError,
+    SetChargeLimitError, SetFanDefaultsError, SetGpuModeError, SetPerformanceError,
 };
 use orbis_core::action::ApplyResult;
 use orbis_core::fan::{FanCurve, FanId};
@@ -68,6 +68,9 @@ pub enum WorkerCommand {
         profile: AsusdFanProfile,
         fan: FanId,
     },
+    ResetFanCurvesToDefaults {
+        profile: AsusdFanProfile,
+    },
 }
 
 /// Typed result emitted to the presentation boundary.
@@ -92,6 +95,10 @@ pub enum WorkerEvent {
     FanCurveRefresh {
         profile: AsusdFanProfile,
         result: Result<FanCurve, ProviderError>,
+    },
+    FanCurveDefaults {
+        profile: AsusdFanProfile,
+        result: Result<ApplyResult, SetFanDefaultsError>,
     },
 }
 
@@ -746,6 +753,10 @@ async fn run_worker_inner<G, B, R, F>(
             WorkerCommand::RefreshFanCurve { profile, fan } => WorkerEvent::FanCurveRefresh {
                 profile,
                 result: bounded_fan_curve(runtime.fan.as_ref(), profile, &fan).await,
+            },
+            WorkerCommand::ResetFanCurvesToDefaults { profile } => WorkerEvent::FanCurveDefaults {
+                profile,
+                result: runtime.fan.reset_fan_curves_to_defaults(profile).await,
             },
             WorkerCommand::RefreshCapabilities | WorkerCommand::RefreshTelemetry => {
                 unreachable!("handled before service dispatch")

@@ -13,7 +13,6 @@ mod quick_controls_backend;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 
 use orbis_application::{
@@ -29,7 +28,6 @@ use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
-use orbis_providers::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 use orbis_ui::composition::build_production_runtime;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker_with_polling};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
@@ -50,16 +48,6 @@ thread_local! {
     static UPDATES_WINDOW: RefCell<Option<UpdatesWindow>> = const { RefCell::new(None) };
     static PREVIEW_DIALOG_WINDOW: RefCell<Option<PreviewDialogWindow>> = const { RefCell::new(None) };
     static THEME_LIGHT: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Context for the explicit Factory Defaults mutation. The provider keeps the
-/// original GUI process as the Hardware1 caller; the Tokio handle guarantees
-/// that the D-Bus/polkit operation never runs on a Slint callback thread.
-#[derive(Clone)]
-struct FanDefaultsContext {
-    runtime: tokio::runtime::Handle,
-    provider: Arc<dyn FanCurveDefaultsMutationProvider>,
-    worker_tx: UnboundedSender<WorkerCommand>,
 }
 
 /// Разобранные аргументы командной строки.
@@ -330,12 +318,11 @@ fn from_slint(state: &UiState) -> controller::UiState {
 fn build_app(
     state: &controller::UiState,
     worker_tx: Option<UnboundedSender<WorkerCommand>>,
-    fan_defaults: Option<FanDefaultsContext>,
 ) -> Result<AppWindow, slint::PlatformError> {
     let app = AppWindow::new()?;
     app.global::<ThemeState>().set_mode(current_theme_mode());
     app.set_ui_state(to_slint(state));
-    wire_callbacks(&app, worker_tx, fan_defaults);
+    wire_callbacks(&app, worker_tx);
     quick_controls_backend::wire_window(&app);
     Ok(app)
 }
@@ -981,8 +968,8 @@ fn apply_gpu_result(
             observation,
         }) => {
             // Итог неизвестен: не показываем ни успех, ни определённый failure.
-            // Состояние не меняется; вывод возможен только после read-back.
-            state.gpu_section_error = true;
+            // UI сохраняет прежнее состояние до последующего authoritative read-back.
+            // Не устанавливаем gpu_section_error — это не definitive failure.
             tracing::warn!(
                 "gpu: исход мутации неизвестен (ожидалось: {intent}; команда: {command:?}; read-back: {observation:?})"
             );
@@ -1241,10 +1228,55 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
                 state.fan_curve_error = true;
             }
         },
+        WorkerEvent::FanCurveDefaults { profile, result } => match result {
+            Ok(ApplyResult::Accepted) => {
+                tracing::debug!(
+                    "fan factory reset accepted for profile={profile:?}; confirmation of platform defaults unavailable"
+                );
+                // Command accepted but observed state not independently verified as platform defaults.
+                // Do not set fan_curve_error (not a definitive failure).
+                // Do not clear fan_curve_dirty (user may want to apply custom curve after reset).
+                // Refresh is enqueued in handle_worker_event.
+            }
+            Ok(other) => {
+                tracing::warn!("fan factory reset returned unexpected result: {other:?}");
+                state.fan_curve_error = true;
+            }
+            Err(CommandError::Unconfirmed {
+                intent,
+                command,
+                observation,
+            }) => {
+                // Unconfirmed: mutation may have dispatched but outcome unknown.
+                // Do NOT set fan_curve_error (not a definitive failure).
+                // Preserve UI state, log context for diagnostics.
+                tracing::warn!(
+                    "fan factory reset unconfirmed (intent={intent}; command={command:?}; observation={observation:?})"
+                );
+            }
+            Err(e) => {
+                // Definitive error (Unsupported, PermissionDenied, etc.)
+                // Do NOT set fan_curve_error - preserve UI state like other mutations.
+                tracing::warn!("fan factory reset failed definitively: {e:?}");
+            }
+        },
     }
 }
 
-fn handle_worker_event(app: &AppWindow, event: WorkerEvent) {
+fn handle_worker_event(
+    app: &AppWindow,
+    event: WorkerEvent,
+    worker_tx: &UnboundedSender<WorkerCommand>,
+) {
+    // Check if this is a factory reset accepted event and extract profile for refresh.
+    let refresh_fan_curve = match &event {
+        WorkerEvent::FanCurveDefaults {
+            profile,
+            result: Ok(ApplyResult::Accepted),
+        } => Some(*profile),
+        _ => None,
+    };
+
     let refresh_quick_controls = matches!(&event, WorkerEvent::TelemetryRefresh(_));
     if let WorkerEvent::RegistryChange(Ok((_generation, snapshot))) = &event {
         diagnostics_backend::replace_capabilities(snapshot.clone());
@@ -1256,13 +1288,20 @@ fn handle_worker_event(app: &AppWindow, event: WorkerEvent) {
     if refresh_quick_controls {
         quick_controls_backend::refresh_if_due(app, Duration::from_secs(10));
     }
+    // After factory reset, enqueue a refresh for the selected fan to load observed state.
+    if let Some(profile) = refresh_fan_curve {
+        if let Some(fan_id) = controller::UiState::fan_id_from_index(s.fan_selected) {
+            if let Err(e) = worker_tx.send(WorkerCommand::RefreshFanCurve {
+                profile,
+                fan: fan_id,
+            }) {
+                tracing::warn!("fan factory reset refresh enqueue failed: {e:?}");
+            }
+        }
+    }
 }
 
-fn wire_callbacks(
-    app: &AppWindow,
-    worker_tx: Option<UnboundedSender<WorkerCommand>>,
-    fan_defaults: Option<FanDefaultsContext>,
-) {
+fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerCommand>>) {
     let app_weak = app.as_weak();
     {
         let worker_tx = worker_tx.clone();
@@ -1546,7 +1585,6 @@ fn wire_callbacks(
     }
     {
         let worker_tx = worker_tx.clone();
-        let fan_defaults = fan_defaults.clone();
         let app_weak = app.as_weak();
         app.on_fan_apply_clicked(move |reset_defaults| {
             let Some(app) = app_weak.upgrade() else {
@@ -1571,81 +1609,31 @@ fn wire_callbacks(
                     );
                     return;
                 };
-                let Some(fan_id) = controller::UiState::fan_id_from_index(s.fan_selected) else {
-                    tracing::warn!("fan factory reset: invalid fan index {}", s.fan_selected);
-                    return;
-                };
-                let Some(ctx) = fan_defaults.clone() else {
-                    tracing::warn!("fan factory reset unavailable outside interactive mode");
-                    return;
-                };
-                let weak = app.as_weak();
-                ctx.runtime.spawn(async move {
-                    let result = ctx.provider.reset_fan_curves_to_defaults(profile).await;
-                    match result {
-                        Ok(ApplyResult::Applied) => {
-                            if let Err(error) = ctx.worker_tx.send(WorkerCommand::RefreshFanCurve {
-                                profile,
-                                fan: fan_id,
-                            }) {
-                                let weak = weak.clone();
-                                if let Err(ui_error) = weak.upgrade_in_event_loop(move |app| {
-                                    tracing::warn!(
-                                        "fan factory reset applied but refresh enqueue failed: {error:?}"
-                                    );
-                                    let mut state = from_slint(&app.get_ui_state());
-                                    state.fan_curve_error = true;
-                                    app.set_ui_state(to_slint(&state));
-                                    sync_fans_window(&app);
-                                }) {
-                                    tracing::warn!(
-                                        "fan factory reset: failed to report refresh enqueue error: {ui_error:?}"
-                                    );
-                                }
-                            }
-                        }
-                        Ok(other) => {
-                            let weak = weak.clone();
-                            if let Err(ui_error) = weak.upgrade_in_event_loop(move |app| {
-                                tracing::warn!(
-                                    "fan factory reset returned non-applied result: {other:?}"
-                                );
-                                let mut state = from_slint(&app.get_ui_state());
-                                state.fan_curve_error = true;
-                                app.set_ui_state(to_slint(&state));
-                                sync_fans_window(&app);
-                            }) {
-                                tracing::warn!(
-                                    "fan factory reset: failed to report non-applied result: {ui_error:?}"
-                                );
-                            }
-                        }
-                        Err(error) => {
-                            let weak = weak.clone();
-                            if let Err(ui_error) = weak.upgrade_in_event_loop(move |app| {
-                                tracing::warn!("fan factory reset failed: {error:?}");
-                                let mut state = from_slint(&app.get_ui_state());
-                                state.fan_curve_error = true;
-                                app.set_ui_state(to_slint(&state));
-                                sync_fans_window(&app);
-                            }) {
-                                tracing::warn!(
-                                    "fan factory reset: failed to report provider error: {ui_error:?}"
-                                );
-                            }
-                        }
+                // Requested profile is captured at command creation time and does not
+                // depend on subsequent UI selection.
+                if let Some(tx) = &worker_tx {
+                    if let Err(e) = tx.send(WorkerCommand::ResetFanCurvesToDefaults { profile }) {
+                        tracing::warn!("worker closed, fan factory reset not sent: {e:?}");
                     }
-                });
+                } else {
+                    tracing::warn!("fan factory reset unavailable outside interactive mode");
+                }
                 return;
             }
 
             if !s.fan_curve_can_mutate() {
-                tracing::warn!("fan-apply rejected: not writable, not dirty, error, or invalid curve");
+                tracing::warn!(
+                    "fan-apply rejected: not writable, not dirty, error, or invalid curve"
+                );
                 return;
             }
-            let Some(profile) = controller::UiState::asusd_profile_from_index(s.fan_profile_selected)
+            let Some(profile) =
+                controller::UiState::asusd_profile_from_index(s.fan_profile_selected)
             else {
-                tracing::warn!("fan-apply: invalid profile index {}", s.fan_profile_selected);
+                tracing::warn!(
+                    "fan-apply: invalid profile index {}",
+                    s.fan_profile_selected
+                );
                 return;
             };
             let Some(fan_id) = controller::UiState::fan_id_from_index(s.fan_selected) else {
@@ -1658,7 +1646,11 @@ fn wire_callbacks(
             };
             match &worker_tx {
                 Some(tx) => {
-                    if let Err(e) = tx.send(WorkerCommand::SetFanCurve { profile, fan: fan_id, curve }) {
+                    if let Err(e) = tx.send(WorkerCommand::SetFanCurve {
+                        profile,
+                        fan: fan_id,
+                        curve,
+                    }) {
                         tracing::warn!("worker закрыт, fan mutation не отправлена: {e:?}");
                     }
                 }
@@ -1732,7 +1724,7 @@ fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<
     }
     slint::platform::set_platform(Box::new(SoftwarePlatform { adapter })).expect("platform once");
 
-    let app = build_app(state, None, None)?;
+    let app = build_app(state, None)?;
     app.window()
         .set_size(LogicalSize::new(500.0, height as f32));
     app.show()?;
@@ -1794,8 +1786,6 @@ fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
     let diagnostics_session_connection = session_connection.clone();
     let diagnostics_system_connection = system_connection.clone();
-    let fan_defaults_provider: Arc<dyn FanCurveDefaultsMutationProvider> =
-        Arc::new(Hardware1FanDefaultsProvider::new(system_connection.clone()));
     let (application_runtime, _hardware_owner) = runtime.block_on(build_production_runtime(
         session_connection,
         system_connection,
@@ -1813,13 +1803,8 @@ fn main() -> anyhow::Result<()> {
     );
 
     let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();
-    let fan_defaults = FanDefaultsContext {
-        runtime: runtime.handle().clone(),
-        provider: fan_defaults_provider,
-        worker_tx: worker_tx.clone(),
-    };
 
-    let app = build_app(&state, Some(worker_tx.clone()), Some(fan_defaults))?;
+    let app = build_app(&state, Some(worker_tx.clone()))?;
     quick_controls_backend::force_refresh(&app);
     app.window().set_size(LogicalSize::new(500.0, 680.0));
     apply_start_minimized(startup_preferences.start_minimized, |minimized| {
@@ -1827,10 +1812,12 @@ fn main() -> anyhow::Result<()> {
     });
 
     let weak = app.as_weak();
+    let worker_tx_for_event = worker_tx.clone();
     let event_sink = move |event: WorkerEvent| {
         let weak = weak.clone();
+        let worker_tx_clone = worker_tx_for_event.clone();
         if let Err(e) = weak.upgrade_in_event_loop(move |app| {
-            handle_worker_event(&app, event);
+            handle_worker_event(&app, event, &worker_tx_clone);
         }) {
             tracing::warn!("не удалось вернуть событие worker-а в event loop: {e:?}");
         }

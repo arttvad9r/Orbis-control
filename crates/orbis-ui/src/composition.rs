@@ -10,8 +10,8 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use orbis_application::{
     AppService, ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome,
-    PerformanceCommandOutcome, PerformanceState, SetChargeLimitError, SetGpuModeError,
-    SetPerformanceError,
+    PerformanceCommandOutcome, PerformanceState, SetChargeLimitError, SetFanDefaultsError,
+    SetGpuModeError, SetPerformanceError,
 };
 use orbis_capabilities::{CapabilityRegistryBuilder, CapabilityRegistrySnapshot, ProbeError};
 use orbis_core::action::ApplyResult;
@@ -22,14 +22,15 @@ use orbis_core::capability::{
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
-use orbis_providers::bounded_operation;
-use orbis_providers::bounded_provider_call;
-use orbis_providers::error::ProviderError;
 #[cfg(test)]
 use orbis_providers::mock::MockProvider;
 use orbis_providers::traits::{
     BatteryProvider, FanCurveMutationProvider, FanCurvePoints, FanProvider, GpuAccessProvider,
     GpuMuxProvider, GpuPowerProvider, GpuProvider, PerformanceProvider,
+};
+use orbis_providers::{
+    FanCurveDefaultsMutationProvider, bounded_operation, bounded_provider_call,
+    error::ProviderError,
 };
 use orbis_session_client::{
     SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
@@ -407,6 +408,17 @@ pub trait FanServiceRuntime: Send + Sync {
         curve: FanCurvePoints,
     ) -> Result<ApplyResult, ProviderError>;
 
+    /// Restore platform factory defaults for all fan curves of a profile.
+    ///
+    /// This is a profile-wide operation. The mutation is sent directly to
+    /// Hardware1 (original caller identity preserved). The result is
+    /// `ApplyResult::Accepted` — the command was accepted but observed state
+    /// cannot be independently verified as platform factory defaults.
+    async fn reset_fan_curves_to_defaults(
+        &self,
+        profile: AsusdFanProfile,
+    ) -> Result<ApplyResult, SetFanDefaultsError>;
+
     /// Probe fan curve capability support metadata.
     ///
     /// Returns a typed `Capability` for the `FanCurves` feature. The write
@@ -425,7 +437,12 @@ pub trait FanServiceRuntime: Send + Sync {
 #[async_trait]
 impl<P> FanServiceRuntime for AppService<P>
 where
-    P: FanProvider + FanCurveMutationProvider + Send + Sync + 'static,
+    P: FanProvider
+        + FanCurveMutationProvider
+        + FanCurveDefaultsMutationProvider
+        + Send
+        + Sync
+        + 'static,
 {
     async fn active_curve(&self, fan: FanId) -> Result<FanCurve, ProviderError> {
         AppService::active_curve(self, &fan).await
@@ -446,6 +463,13 @@ where
         curve: FanCurvePoints,
     ) -> Result<ApplyResult, ProviderError> {
         AppService::set_fan_curve(self, profile, &fan, &curve).await
+    }
+
+    async fn reset_fan_curves_to_defaults(
+        &self,
+        profile: AsusdFanProfile,
+    ) -> Result<ApplyResult, SetFanDefaultsError> {
+        AppService::reset_fan_curves_to_defaults(self, profile).await
     }
 
     async fn probe_fan_capability(
