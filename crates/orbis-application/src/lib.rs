@@ -90,6 +90,22 @@ pub enum CommandError {
         /// Ошибка повторного чтения состояния.
         source: ProviderError,
     },
+    /// Мутация могла быть выполнена, но её итог неизвестен.
+    ///
+    /// Возникает, когда transport/запрос завершился timeout или потерял
+    /// ответ после возможной отправки mutating-вызова. Это не success и не
+    /// обычный failure: retry и автоматический rollback запрещены. Итог
+    /// определяется только последующим authoritative read-back.
+    Unconfirmed {
+        /// Описание желаемого результата (operation intent).
+        intent: String,
+        /// Ошибка исходной мутации (timeout/transport).
+        command: ProviderError,
+        /// Ошибка классифицирующего authoritative read-back, если он сам
+        /// не смог выполниться. `None` — read-back выполнился, но не
+        /// подтвердил желаемое состояние.
+        observation: Option<ProviderError>,
+    },
 }
 
 impl std::fmt::Display for CommandError {
@@ -100,6 +116,20 @@ impl std::fmt::Display for CommandError {
                 f,
                 "application-команда выполнена ({result:?}), но read-back не удался: {source}"
             ),
+            Self::Unconfirmed {
+                intent,
+                command,
+                observation,
+            } => {
+                write!(
+                    f,
+                    "результат мутации неизвестен (ожидалось: {intent}; ошибка команды: {command}"
+                )?;
+                if let Some(source) = observation {
+                    write!(f, "; классифицирующий read-back не удался: {source}")?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }
@@ -109,6 +139,13 @@ impl std::error::Error for CommandError {
         match self {
             Self::Command(e) => Some(e),
             Self::ReadBack { source, .. } => Some(source),
+            Self::Unconfirmed {
+                command,
+                observation,
+                ..
+            } => observation
+                .as_ref()
+                .map_or(Some(command), |source| Some(source)),
         }
     }
 }
@@ -126,6 +163,16 @@ pub type SetChargeLimitError = CommandError;
 /// какие provider traits реализует `P` (независимые impl-блоки).
 pub struct AppService<P> {
     provider: Arc<P>,
+}
+
+/// Классификация ошибки мутации: мог ли запрос быть отправлен backend-у.
+///
+/// Transport-level таймаут или потеря ответа после отправки оставляют
+/// hardware outcome неизвестным. Definitivные отказы до/без dispatch —
+/// `Unsupported`, `InvalidRequest`, `PermissionDenied`, `BackendUnavailable` —
+/// к unknown-outcome не относятся.
+fn mutation_may_have_dispatched(error: &ProviderError) -> bool {
+    matches!(error, ProviderError::Timeout(_) | ProviderError::Dbus(_))
 }
 
 impl<P> AppService<P> {
@@ -223,11 +270,13 @@ where
         &self,
         profile: PerformanceProfile,
     ) -> Result<PerformanceCommandOutcome, SetPerformanceError> {
-        let result = self
-            .provider
-            .set_profile(profile)
-            .await
-            .map_err(CommandError::Command)?;
+        let result = match self.provider.set_profile(profile).await {
+            Ok(result) => result,
+            Err(command) if mutation_may_have_dispatched(&command) => {
+                return self.recover_unknown_performance(profile, command).await;
+            }
+            Err(command) => return Err(CommandError::Command(command)),
+        };
         let state = self
             .performance_state()
             .await
@@ -236,6 +285,34 @@ where
                 source,
             })?;
         Ok(CommandOutcome { result, state })
+    }
+
+    /// Классифицировать исход мутации после возможного dispatch через один
+    /// authoritative read-back. Не выполняет retry и автоматический rollback:
+    /// итог признаётся Applied только при подтверждении authoritative
+    /// состоянием; иначе сохраняется честный `Unconfirmed`.
+    async fn recover_unknown_performance(
+        &self,
+        profile: PerformanceProfile,
+        command: ProviderError,
+    ) -> Result<PerformanceCommandOutcome, SetPerformanceError> {
+        let intent = format!("performance profile {profile:?}");
+        match self.performance_state().await {
+            Ok(state) if state.current == profile => Ok(CommandOutcome {
+                result: ApplyResult::Applied,
+                state,
+            }),
+            Ok(_state) => Err(CommandError::Unconfirmed {
+                intent,
+                command,
+                observation: None,
+            }),
+            Err(source) => Err(CommandError::Unconfirmed {
+                intent,
+                command,
+                observation: Some(source),
+            }),
+        }
     }
 }
 
@@ -269,11 +346,13 @@ where
         &self,
         percent: u8,
     ) -> Result<ChargeLimitCommandOutcome, SetChargeLimitError> {
-        let result = self
-            .provider
-            .set_charge_limit(percent)
-            .await
-            .map_err(CommandError::Command)?;
+        let result = match self.provider.set_charge_limit(percent).await {
+            Ok(result) => result,
+            Err(command) if mutation_may_have_dispatched(&command) => {
+                return self.recover_unknown_charge(percent, command).await;
+            }
+            Err(command) => return Err(CommandError::Command(command)),
+        };
         let state = self
             .charge_limit()
             .await
@@ -282,6 +361,43 @@ where
                 source,
             })?;
         Ok(CommandOutcome { result, state })
+    }
+
+    /// Классифицировать исход мутации после возможного dispatch через один
+    /// authoritative read-back. Не выполняет retry и автоматический rollback:
+    /// итог признаётся Applied только при подтверждении authoritative
+    /// состоянием; иначе сохраняется честный `Unconfirmed`.
+    async fn recover_unknown_charge(
+        &self,
+        percent: u8,
+        command: ProviderError,
+    ) -> Result<ChargeLimitCommandOutcome, SetChargeLimitError> {
+        let intent = format!("charge limit {percent}%");
+        match self.charge_limit().await {
+            Ok(state) => {
+                // raw-сравнение процентов: `Percent::new` — это Result, а
+                // `ChargeLimit` уже нормализован provider-ом.
+                let confirmed = state.configured_percent.is_some_and(|p| p.get() == percent)
+                    || state.effective_percent.is_some_and(|p| p.get() == percent);
+                if confirmed {
+                    Ok(CommandOutcome {
+                        result: ApplyResult::Applied,
+                        state,
+                    })
+                } else {
+                    Err(CommandError::Unconfirmed {
+                        intent,
+                        command,
+                        observation: None,
+                    })
+                }
+            }
+            Err(source) => Err(CommandError::Unconfirmed {
+                intent,
+                command,
+                observation: Some(source),
+            }),
+        }
     }
 }
 
@@ -1572,5 +1688,255 @@ mod tests {
                 .await,
             Err(ProviderError::PermissionDenied(_))
         ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Mutation unknown-outcome observation/recovery (hermetic, no D-Bus)
+    // -----------------------------------------------------------------------
+
+    /// Deterministic one-shot fake Battery provider for the unknown-outcome
+    /// contract. `set_result` is consumed on the first mutation; the read-back
+    /// script is consumed on the first `charge_limit()` read.
+    struct UnknownOutcomeBatteryProvider {
+        id: &'static str,
+        timeout: Duration,
+        set_result: std::sync::Mutex<Option<Result<ApplyResult, ProviderError>>>,
+        read_script: std::sync::Mutex<Option<Result<ChargeLimit, ProviderError>>>,
+        set_calls: std::sync::atomic::AtomicU32,
+        read_calls: std::sync::atomic::AtomicU32,
+    }
+
+    impl UnknownOutcomeBatteryProvider {
+        fn changing(
+            set_result: Result<ApplyResult, ProviderError>,
+            read_after: Option<Result<ChargeLimit, ProviderError>>,
+        ) -> Arc<Self> {
+            Arc::new(Self {
+                id: "unknown-outcome-battery",
+                timeout: Duration::from_secs(1),
+                set_result: std::sync::Mutex::new(Some(set_result)),
+                read_script: std::sync::Mutex::new(read_after),
+                set_calls: Default::default(),
+                read_calls: Default::default(),
+            })
+        }
+    }
+
+    impl orbis_providers::traits::Provider for UnknownOutcomeBatteryProvider {
+        fn id(&self) -> &'static str {
+            self.id
+        }
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple(self.id)
+        }
+        fn timeout(&self) -> Duration {
+            self.timeout
+        }
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("unknown-outcome battery: {feature}")
+        }
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl BatteryProvider for UnknownOutcomeBatteryProvider {
+        async fn charge_limit(&self) -> Result<ChargeLimit, ProviderError> {
+            self.read_calls.fetch_add(1, Ordering::SeqCst);
+            let Some(script) = self
+                .read_script
+                .lock()
+                .expect("read script lock poisoned")
+                .take()
+            else {
+                return Err(ProviderError::BackendUnavailable(
+                    "unknown-outcome battery: read script exhausted".into(),
+                ));
+            };
+            script
+        }
+
+        async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {
+            self.set_calls.fetch_add(1, Ordering::SeqCst);
+            let Some(result) = self
+                .set_result
+                .lock()
+                .expect("set result lock poisoned")
+                .take()
+            else {
+                return Err(ProviderError::Internal(
+                    "unknown-outcome battery: set script exhausted".into(),
+                ));
+            };
+            result
+        }
+
+        async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
+            Ok(ApplyResult::Applied)
+        }
+
+        fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
+            ValidationResult::ok()
+        }
+    }
+
+    fn scripted_charge_limit(percent: u8) -> ChargeLimit {
+        ChargeLimit {
+            enabled: true,
+            configured_percent: Some(Percent::new(percent).unwrap()),
+            effective_percent: Some(Percent::new(percent).unwrap()),
+            bounds: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_after_dispatch_recovers_to_applied_when_readback_confirms() {
+        let provider = UnknownOutcomeBatteryProvider::changing(
+            Err(ProviderError::Timeout("lost reply after dispatch".into())),
+            Some(Ok(scripted_charge_limit(40))),
+        );
+        let svc = AppService::new(provider.clone());
+
+        let outcome: ChargeLimitCommandOutcome = svc.set_charge_limit(40).await.unwrap();
+
+        assert!(outcome.result.is_applied());
+        assert_eq!(outcome.state.configured_percent.map(|p| p.get()), Some(40));
+        assert_eq!(provider.set_calls.load(Ordering::SeqCst), 1, "no retry");
+    }
+
+    #[tokio::test]
+    async fn timeout_after_dispatch_with_mismatch_is_unconfirmed_not_success() {
+        let provider = UnknownOutcomeBatteryProvider::changing(
+            Err(ProviderError::Timeout("dispatch ambiguous".into())),
+            Some(Ok(scripted_charge_limit(80))),
+        );
+        let svc = AppService::new(provider.clone());
+
+        let err = svc.set_charge_limit(40).await.unwrap_err();
+
+        match &err {
+            CommandError::Unconfirmed {
+                intent,
+                command,
+                observation,
+            } => {
+                assert!(intent.contains("40"));
+                assert!(matches!(command, ProviderError::Timeout(_)));
+                assert!(observation.is_none());
+            }
+            other => panic!("expected Unconfirmed, got {other:?}"),
+        }
+        assert_eq!(provider.set_calls.load(Ordering::SeqCst), 1, "no retry");
+    }
+
+    #[tokio::test]
+    async fn timeout_after_dispatch_with_failed_readback_keeps_observation() {
+        let provider = UnknownOutcomeBatteryProvider::changing(
+            Err(ProviderError::Dbus("connection dropped after send".into())),
+            Some(Err(ProviderError::Timeout(
+                "read-back also timed out".into(),
+            ))),
+        );
+        let svc = AppService::new(provider.clone());
+
+        let err = svc.set_charge_limit(100).await.unwrap_err();
+
+        match &err {
+            CommandError::Unconfirmed {
+                intent,
+                command,
+                observation: Some(source),
+            } => {
+                assert!(intent.contains("100"));
+                assert!(matches!(command, ProviderError::Dbus(_)));
+                assert!(matches!(source, ProviderError::Timeout(_)));
+            }
+            other => panic!("expected Unconfirmed with observation, got {other:?}"),
+        }
+        assert_eq!(provider.set_calls.load(Ordering::SeqCst), 1, "no retry");
+        assert_eq!(provider.read_calls.load(Ordering::SeqCst), 1, "single read");
+    }
+
+    #[tokio::test]
+    async fn timeout_does_not_trigger_automatic_rollback_or_second_mutation() {
+        let provider = UnknownOutcomeBatteryProvider::changing(
+            Err(ProviderError::Timeout("unknown outcome".into())),
+            Some(Ok(scripted_charge_limit(100))),
+        );
+        let svc = AppService::new(provider.clone());
+
+        let _ = svc.set_charge_limit(40).await;
+
+        assert_eq!(
+            provider.set_calls.load(Ordering::SeqCst),
+            1,
+            "no rollback mutation"
+        );
+    }
+
+    #[tokio::test]
+    async fn pre_dispatch_failures_are_plain_command_errors_without_recovery_read() {
+        let cases = [
+            ProviderError::Unsupported("not supported".into()),
+            ProviderError::PermissionDenied("denied before dispatch".into()),
+            ProviderError::InvalidRequest("bad percent".into()),
+            ProviderError::BackendUnavailable("hardwared absent".into()),
+        ];
+        for expected in cases {
+            let provider = UnknownOutcomeBatteryProvider::changing(
+                Err(expected),
+                Some(Ok(scripted_charge_limit(80))),
+            );
+            let svc = AppService::new(provider.clone());
+
+            let err = svc.set_charge_limit(80).await.unwrap_err();
+
+            assert!(matches!(err, CommandError::Command(_)));
+            assert_eq!(
+                provider.read_calls.load(Ordering::SeqCst),
+                0,
+                "pre-dispatch failure must not attempt recovery read"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn accepted_is_not_applied_through_battery_outcome() {
+        let provider = UnknownOutcomeBatteryProvider::changing(
+            Ok(ApplyResult::Accepted),
+            Some(Ok(scripted_charge_limit(60))),
+        );
+        let svc = AppService::new(provider.clone());
+
+        let outcome: ChargeLimitCommandOutcome = svc.set_charge_limit(60).await.unwrap();
+
+        assert_eq!(outcome.result, ApplyResult::Accepted);
+        assert!(!outcome.result.is_applied());
+    }
+
+    #[tokio::test]
+    async fn post_dispatch_timeout_readback_refutes_desired_keeps_unknown() {
+        // Dbus-ошибка после отправки; read-back отработал, но значение не
+        // совпало с желаемым: итог остаётся Unknown, а не признаётся успехом.
+        let provider = UnknownOutcomeBatteryProvider::changing(
+            Err(ProviderError::Dbus("lost reply".into())),
+            Some(Ok(scripted_charge_limit(80))),
+        );
+        let svc = AppService::new(provider.clone());
+
+        let err = svc.set_charge_limit(100).await.unwrap_err();
+
+        match &err {
+            CommandError::Unconfirmed {
+                intent,
+                observation: None,
+                ..
+            } => assert!(intent.contains("100")),
+            other => panic!("expected Unconfirmed without observation, got {other:?}"),
+        }
     }
 }

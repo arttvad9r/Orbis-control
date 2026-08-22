@@ -84,7 +84,7 @@ Still open:
 
 1. telemetry now exposes canonical provider identity/deadline through `TelemetryServiceRuntime` (`provider_id`/`snapshot_timeout`), and snapshot reads remain bounded via `provider.timeout()`; executable validation of the exact revision remains;
 2. Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`, timeout → `Unknown`);
-3. mutation timeout after possible dispatch is an **unknown outcome**, not an ordinary failure; it requires observation/recovery before any retry;
+3. mutation timeout after possible dispatch is now classified across interactive Performance/Battery and the Automation Performance executor as `CommandError::Unconfirmed`/recovery: never success, never retried, rollback not auto-triggered; the outcome is obtained only through a subsequent authoritative read-back that confirms or refutes the desired state;
 4. `orbisctl validate` bus connects and status query are bounded (`VALIDATE_BUS_CONNECT_DEADLINE`/`VALIDATE_STATUS_DEADLINE`); the interactive confirmation and the confirmed mutation itself remain intentionally outside generic timeout (unknown-outcome contract);
 5. hosted CI execution remains blocked (#106).
 

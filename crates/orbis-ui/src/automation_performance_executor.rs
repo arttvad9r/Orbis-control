@@ -59,6 +59,14 @@ pub enum AutomationPerformanceRecoveryReason {
         result: ApplyResult,
         source: ProviderError,
     },
+    /// Mutation transport failed after a possible dispatch; the hardware
+    /// outcome is unknown. Not a retry and not a rollback: the next step is an
+    /// authoritative read-back/recovery.
+    UnknownOutcome {
+        intent: String,
+        command: ProviderError,
+        observation: Option<ProviderError>,
+    },
     /// Application returned a non-`Applied` result. Unattended Automation never
     /// treats `Accepted`, `Pending`, `Failed` or `RolledBack` as confirmed.
     UnexpectedApplyResult {
@@ -200,6 +208,22 @@ where
                 reason: AutomationPerformanceRecoveryReason::ReadBackAfterMutation {
                     result,
                     source,
+                },
+            };
+        }
+        Err(CommandError::Unconfirmed {
+            intent,
+            command,
+            observation,
+        }) => {
+            // Mutation могла быть отправлена; итог неизвестен. Не retry,
+            // не rollback: переход в recovery-барьер до authoritative read-back.
+            return AutomationPerformanceExecutionOutcome::RecoveryRequired {
+                requested: profile,
+                reason: AutomationPerformanceRecoveryReason::UnknownOutcome {
+                    intent,
+                    command,
+                    observation,
                 },
             };
         }
@@ -448,6 +472,31 @@ mod tests {
             outcome,
             AutomationPerformanceExecutionOutcome::RecoveryRequired { .. }
         ));
+        assert_eq!(owner.call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn unknown_mutation_outcome_enters_recovery_barrier_not_failure_or_success() {
+        let (driver, snapshot, envelope) = prepared(12);
+        let owner = FakeOwner::new(Err(CommandError::Unconfirmed {
+            intent: "performance profile".into(),
+            command: ProviderError::Timeout("dispatch ambiguous".into()),
+            observation: None,
+        }));
+        let outcome = execute_prepared_performance(
+            &owner,
+            &envelope,
+            driver.current_policy_revision(),
+            driver.current_revision(),
+            snapshot.generation(),
+        )
+        .await;
+        // Не success и не DefiniteFailure: барьер RecoveryRequired.
+        assert!(matches!(
+            outcome,
+            AutomationPerformanceExecutionOutcome::RecoveryRequired { .. }
+        ));
+        // Ровно одна mutation попытка; retry отсутствует.
         assert_eq!(owner.call_count(), 1);
     }
 

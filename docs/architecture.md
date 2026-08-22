@@ -183,7 +183,7 @@ Remaining #123 boundary:
 
 - telemetry must expose/use a canonical deadline path;
 - Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`, timeout → `Unknown`); executable validation of the exact revision remains;
-- mutation timeout after possible dispatch is **unknown outcome** and must enter observation/recovery, never generic blind retry.
+- mutation timeout after possible dispatch is classified as `CommandError::Unconfirmed`/recovery: never success, never retried, rollback not auto-triggered; the outcome is obtained only through a subsequent authoritative read-back that confirms or refutes the desired state.
 
 ## 7. Battery model
 

@@ -975,6 +975,18 @@ fn apply_gpu_result(
                 "gpu: команда выполнена ({result:?}), но read-back не удался: {source:?}"
             );
         }
+        Err(CommandError::Unconfirmed {
+            intent,
+            command,
+            observation,
+        }) => {
+            // Итог неизвестен: не показываем ни успех, ни определённый failure.
+            // Состояние не меняется; вывод возможен только после read-back.
+            state.gpu_section_error = true;
+            tracing::warn!(
+                "gpu: исход мутации неизвестен (ожидалось: {intent}; команда: {command:?}; read-back: {observation:?})"
+            );
+        }
     }
 }
 
@@ -1006,6 +1018,17 @@ fn apply_charge_limit_result(
         Err(CommandError::ReadBack { result, source }) => {
             tracing::warn!(
                 "battery: команда выполнена ({result:?}), но read-back не удался: {source:?}"
+            );
+        }
+        Err(CommandError::Unconfirmed {
+            intent,
+            command,
+            observation,
+        }) => {
+            // Итог неизвестен: UI сохраняет прежнее состояние и помечает
+            // отсутствие подтверждения; Авторитетный read-back позже обновит.
+            tracing::warn!(
+                "battery: исход мутации неизвестен (ожидалось: {intent}; команда: {command:?}; read-back: {observation:?})"
             );
         }
     }
@@ -1160,6 +1183,17 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         WorkerEvent::Performance(Err(CommandError::ReadBack { result, source })) => {
             tracing::warn!(
                 "performance: команда выполнена ({result:?}), но read-back не удался: {source:?}"
+            );
+        }
+        WorkerEvent::Performance(Err(CommandError::Unconfirmed {
+            intent,
+            command,
+            observation,
+        })) => {
+            // Итог неизвестен: не заявляем ни успеха, ни определённой ошибки;
+            // UI сохраняет прежнее состояние до последующего read-back.
+            tracing::warn!(
+                "performance: исход мутации неизвестен (ожидалось: {intent}; команда: {command:?}; read-back: {observation:?})"
             );
         }
         WorkerEvent::Gpu(result) => apply_gpu_result(state, result),
