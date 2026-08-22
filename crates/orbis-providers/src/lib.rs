@@ -17,6 +17,7 @@
 pub mod asus_armoury;
 pub mod asus_boot_sound;
 pub mod asus_diagnostics;
+pub mod asus_gpu_mode;
 pub mod aura;
 pub mod bounded_probes;
 pub mod display_diagnostics;
@@ -50,6 +51,7 @@ pub use asus_boot_sound::*;
 pub use asus_diagnostics::{
     probe_asus_diagnostics_capabilities, probe_aura, probe_keyboard_backlight,
 };
+pub use asus_gpu_mode::{AsusGpuMode, decode_asus_gpu_mode};
 pub use aura::*;
 pub use bounded_probes::{
     probe_charge_limit, probe_display_output, probe_fan_curve, probe_gpu_access, probe_gpu_mux,

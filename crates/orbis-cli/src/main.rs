@@ -9,6 +9,7 @@ use orbis_core::battery::{BatteryThresholdEvidence, ChargeLimit};
 use orbis_core::capability::CapabilityStatus;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
+use orbis_providers::asus_gpu_mode::{AsusGpuModeSnapshot, AsusdGpuModeProvider};
 use orbis_providers::bounded_operation;
 use orbis_providers::bounded_provider_call;
 use orbis_providers::error::ProviderError;
@@ -23,7 +24,7 @@ use orbis_session_client::{
 };
 use serde::Serialize;
 
-const STATUS_SCHEMA_VERSION: u32 = 2;
+const STATUS_SCHEMA_VERSION: u32 = 3;
 const HELP: &str = "orbisctl — Orbis Control command-line client\n\nUSAGE:\n    orbisctl [OPTIONS] <COMMAND>\n\nOPTIONS:\n    -h, --help       Print help\n    -V, --version    Print version\n\nCOMMANDS:\n    status [--json]  Read current Session1 state without performing mutations\n    validate platform-profile [--profile PROFILE] [--apply-test]\n                    Validate the Hardware1 profile path (dry-run by default)\n\nVALIDATION:\n    --apply-test     Opt into one controlled profile write and restore\n    --profile NAME   Target quiet, balanced, or performance\n                    Interactive confirmation is required before any write\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +134,7 @@ struct PerformanceStatusSnapshot {
 
 #[derive(Debug, Serialize)]
 struct GpuStatusSnapshot {
+    product_mode: Observation<AsusGpuModeSnapshot>,
     power: Observation<GpuPowerState>,
     mux: Observation<GpuMuxState>,
     access: Observation<GpuAccessPolicy>,
@@ -190,6 +192,7 @@ fn print_human(snapshot: &StatusSnapshot) {
     );
     print_observation("performance.current", &snapshot.performance.current);
     print_observation("performance.available", &snapshot.performance.available);
+    print_observation("gpu.product_mode", &snapshot.gpu.product_mode);
     print_observation("gpu.power", &snapshot.gpu.power);
     print_observation("gpu.mux", &snapshot.gpu.mux);
     print_observation("gpu.access", &snapshot.gpu.access);
@@ -197,6 +200,7 @@ fn print_human(snapshot: &StatusSnapshot) {
 
 async fn collect_status() -> Result<StatusSnapshot, zbus::Error> {
     let connection = zbus::Connection::session().await?;
+    let system_connection = zbus::Connection::system().await?;
 
     let battery =
         SessionChargeLimitProvider::new(ZbusSessionChargeLimitSource::new(connection.clone()));
@@ -204,7 +208,17 @@ async fn collect_status() -> Result<StatusSnapshot, zbus::Error> {
         SessionPerformanceProvider::new(ZbusSessionPerformanceSource::new(connection.clone()));
     let gpu_power = SessionGpuPowerProvider::new(ZbusSessionGpuSource::new(connection.clone()));
     let gpu_mux = SessionGpuMuxProvider::new(ZbusSessionGpuSource::new(connection.clone()));
-    let gpu_access = SessionGpuAccessProvider::new(ZbusSessionGpuSource::new(connection));
+    let gpu_access = SessionGpuAccessProvider::new(ZbusSessionGpuSource::new(connection.clone()));
+
+    let product_mode = observation_from_result(
+        bounded_operation(
+            Duration::from_secs(1),
+            "asusd",
+            "gpu.product_mode",
+            AsusdGpuModeProvider::new(system_connection).read_snapshot(),
+        )
+        .await,
+    );
 
     let charge_limit = observation_from_result(
         bounded_provider_call(&battery, "battery.charge_limit", battery.charge_limit()).await,
@@ -254,7 +268,12 @@ async fn collect_status() -> Result<StatusSnapshot, zbus::Error> {
             threshold_evidence,
         },
         performance: PerformanceStatusSnapshot { current, available },
-        gpu: GpuStatusSnapshot { power, mux, access },
+        gpu: GpuStatusSnapshot {
+            product_mode,
+            power,
+            mux,
+            access,
+        },
     })
 }
 
@@ -865,6 +884,9 @@ mod tests {
                 },
             },
             gpu: GpuStatusSnapshot {
+                product_mode: Observation::Unknown {
+                    detail: "unknown".into(),
+                },
                 power: Observation::Unavailable {
                     detail: "backend down".into(),
                 },
@@ -882,6 +904,7 @@ mod tests {
         assert_eq!(json["battery"]["charge_limit"]["state"], "unsupported");
         assert_eq!(json["performance"]["current"]["state"], "available");
         assert_eq!(json["performance"]["current"]["value"], "balanced");
+        assert_eq!(json["gpu"]["product_mode"]["state"], "unknown");
         assert_eq!(json["gpu"]["access"]["state"], "permission_denied");
         assert_eq!(snapshot.successful_reads(), 2);
     }

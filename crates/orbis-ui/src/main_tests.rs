@@ -38,6 +38,40 @@ fn interactive_initial_state_has_no_fixture_values_or_write_access() {
     assert_eq!(state.mock_profile, "production");
 }
 
+#[test]
+fn real_read_only_gpu_states_are_rendered_without_write_access() {
+    let mut state = controller::UiState::production_initial();
+
+    apply_performance_refresh(
+        &mut state,
+        Ok(orbis_application::PerformanceState {
+            current: PerformanceProfile::Silent,
+            available: vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ],
+        }),
+    );
+    apply_gpu_mux_refresh(&mut state, Ok(GpuMuxState::Integrated));
+    apply_gpu_access_refresh(&mut state, Ok(GpuAccessPolicy::Unblocked));
+    apply_gpu_power_refresh(
+        &mut state,
+        Err(ProviderError::Dbus("supergfxd unavailable".into())),
+    );
+
+    assert_eq!(state.perf_state, controller::PerformanceHwState::Ready);
+    assert_eq!(state.perf_selected, 0);
+    assert_eq!(state.available_perf_mask, 0b111);
+    assert!(!state.perf_writable);
+    assert_eq!(state.gpu_mux, controller::GpuHwState::Ready);
+    assert_eq!(state.gpu_mux_value, 0);
+    assert_eq!(state.gpu_access, controller::GpuHwState::Ready);
+    assert_eq!(state.gpu_access_value, 0);
+    assert_eq!(state.gpu_power, controller::GpuHwState::Unavailable);
+    assert!(!state.gpu_mode_writable);
+}
+
 fn charge_outcome(percent: Option<u8>) -> ChargeLimitCommandOutcome {
     ChargeLimitCommandOutcome {
         result: ApplyResult::Applied,
