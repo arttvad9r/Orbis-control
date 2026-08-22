@@ -653,6 +653,12 @@ where
         provider.charge_limit().await
     }
 
+    async fn threshold_evidence(&self) -> Result<BatteryThresholdEvidence, ProviderError> {
+        let battery = self.discovery.discover().await?;
+        let provider = self.read_factory.build(&battery).await?;
+        provider.threshold_evidence().await
+    }
+
     async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {
         Err(ProviderError::Unsupported(
             "lazy-upower: set_charge_limit недоступна (read-only)".into(),

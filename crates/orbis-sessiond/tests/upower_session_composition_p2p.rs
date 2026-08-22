@@ -206,10 +206,33 @@ async fn composition_serves_upower_charge_limit() {
         assert_eq!(info.max_percent, 0);
         assert_eq!(info.step_percent, 0);
 
+        let evidence = proxy
+            .battery_threshold_evidence()
+            .await
+            .expect("threshold evidence");
+        assert_eq!(
+            evidence.0,
+            orbis_session_protocol::battery_threshold_state::CONFIRMED
+        );
+        assert_eq!(evidence.1.len(), 2);
+        assert_eq!(
+            evidence.1[0].0,
+            orbis_session_protocol::battery_threshold_source::ASUS_BACKEND
+        );
+        assert_eq!(evidence.1[0].1, 100);
+        assert_eq!(
+            evidence.1[1].0,
+            orbis_session_protocol::battery_threshold_source::SYSFS
+        );
+        assert_eq!(evidence.1[1].1, 100);
+
         let calls = state.lock().unwrap().calls.clone();
         assert_eq!(
             calls,
             vec![
+                FakeProperty::Supported,
+                FakeProperty::Enabled,
+                FakeProperty::EndThreshold,
                 FakeProperty::Supported,
                 FakeProperty::Enabled,
                 FakeProperty::EndThreshold,
