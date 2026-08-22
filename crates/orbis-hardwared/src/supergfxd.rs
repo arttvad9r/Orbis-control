@@ -94,6 +94,10 @@ where
         })
     }
 
+    pub async fn read_snapshot(&self) -> Result<SupergfxdSnapshot, ProviderError> {
+        self.fresh_snapshot().await
+    }
+
     async fn fresh_snapshot(&self) -> Result<SupergfxdSnapshot, ProviderError> {
         let current_mode = self.client.mode().await?;
         let pending_mode = self.client.pending_mode().await?;
