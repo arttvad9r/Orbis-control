@@ -28,11 +28,12 @@ use orbis_core::platform_profile::{
     PlatformProfileTelemetryQuality, PlatformProfileTransaction,
 };
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile, PlatformProfile};
-use orbis_providers::bounded_provider_call;
-use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
     BatteryProvider, FanCurveMutationProvider, FanCurvePoints, FanProvider, GpuAccessProvider,
     GpuMuxProvider, GpuPowerProvider, GpuProvider, PerformanceProvider,
+};
+use orbis_providers::{
+    FanCurveDefaultsMutationProvider, bounded_provider_call, error::ProviderError,
 };
 
 /// Authoritative состояние Performance Mode.
@@ -155,6 +156,9 @@ pub type SetPerformanceError = CommandError;
 
 /// Ошибка команды Battery Charge Limit (alias общего `CommandError`).
 pub type SetChargeLimitError = CommandError;
+
+/// Ошибка команды Fan Factory Defaults (alias общего `CommandError`).
+pub type SetFanDefaultsError = CommandError;
 
 /// Application service.
 ///
@@ -558,7 +562,7 @@ where
 
 impl<P> AppService<P>
 where
-    P: FanCurveMutationProvider + Send + Sync,
+    P: FanCurveMutationProvider + FanCurveDefaultsMutationProvider + Send + Sync,
 {
     /// Установить одну fan curve (lossless `AsusdFanProfile`).
     ///
@@ -572,6 +576,21 @@ where
         curve: &FanCurvePoints,
     ) -> Result<ApplyResult, ProviderError> {
         self.provider.set_fan_curve(profile, fan, curve).await
+    }
+
+    /// Вызывает `FanCurveMutationProvider::reset_fan_curves_to_defaults`.
+    ///
+    /// Mutation идёт напрямую к Hardware1 (original caller), не через sessiond.
+    /// Returns `ApplyResult::Accepted` — the command was accepted but observed
+    /// state cannot be independently verified as platform factory defaults.
+    pub async fn reset_fan_curves_to_defaults(
+        &self,
+        profile: AsusdFanProfile,
+    ) -> Result<ApplyResult, SetFanDefaultsError> {
+        self.provider
+            .reset_fan_curves_to_defaults(profile)
+            .await
+            .map_err(CommandError::Command)
     }
 }
 

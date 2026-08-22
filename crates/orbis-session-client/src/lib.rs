@@ -30,10 +30,13 @@ use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_hardwared::battery::validate_charge_limit;
 use orbis_hardwared::fans::{FanCurveWire, fan_profile_from_wire};
 use orbis_hardwared::{DBUS_OBJECT_PATH, Hardware1Proxy};
-use orbis_providers::error::{ProviderError, ValidationResult};
 use orbis_providers::traits::{
     BatteryProvider, FanCurveMutationProvider, FanCurvePoints, FanProvider, GpuAccessProvider,
     GpuMuxProvider, GpuPowerProvider, PerformanceProvider, Provider, ProviderHealth,
+};
+use orbis_providers::{
+    FanCurveDefaultsMutationProvider,
+    error::{ProviderError, ValidationResult},
 };
 use orbis_session_protocol::{
     BatteryThresholdEvidenceTuple, ChargeLimitInfo, PerformanceInfo, Session1Proxy,
@@ -732,6 +735,9 @@ pub trait HardwareFanCurveSource: Send + Sync {
         fan: u8,
         curve: orbis_hardwared::fans::FanCurveWire,
     ) -> Result<u32, ProviderError>;
+
+    /// Reset all fan curves of a profile to platform defaults via Hardware1.
+    async fn reset_fan_curves_to_defaults(&self, profile: u32) -> Result<u32, ProviderError>;
 }
 
 /// Реальный direct system-bus источник fan curve mutation через Hardware1.
@@ -766,6 +772,20 @@ impl HardwareFanCurveSource for ZbusHardwareFanCurveSource {
             .map_err(zbus_error_to_provider)?;
         proxy
             .set_fan_curve(profile, fan, curve)
+            .await
+            .map_err(zbus_error_to_provider)
+    }
+
+    async fn reset_fan_curves_to_defaults(&self, profile: u32) -> Result<u32, ProviderError> {
+        let proxy = Hardware1Proxy::builder(&self.connection)
+            .path(DBUS_OBJECT_PATH)
+            .expect("valid hardware object path")
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .reset_fan_curves_to_defaults(profile)
             .await
             .map_err(zbus_error_to_provider)
     }
@@ -1726,6 +1746,49 @@ where
     }
 }
 
+#[async_trait]
+impl<S, H> FanCurveDefaultsMutationProvider for SessionHardwareFanCurveProvider<S, H>
+where
+    S: FanProvider,
+    H: HardwareFanCurveSource,
+{
+    async fn reset_fan_curves_to_defaults(
+        &self,
+        profile: AsusdFanProfile,
+    ) -> Result<ApplyResult, ProviderError> {
+        let confirmed = match self
+            .hardware
+            .reset_fan_curves_to_defaults(profile.wire())
+            .await
+        {
+            Ok(confirmed) => {
+                tracing::debug!(
+                    requested_profile = profile.wire(),
+                    confirmed_profile = confirmed,
+                    "fan factory reset hardware mutation reply"
+                );
+                confirmed
+            }
+            Err(error) => {
+                tracing::debug!(
+                    requested_profile = profile.wire(),
+                    error = ?error,
+                    "fan factory reset hardware mutation error"
+                );
+                return Err(error);
+            }
+        };
+        if confirmed != profile.wire() {
+            return Err(ProviderError::Internal(format!(
+                "hardware protocol: подтверждён другой fan profile после factory reset: requested={profile:?}, confirmed={confirmed}"
+            )));
+        }
+        // Factory reset cannot prove observed state equals platform defaults;
+        // the mutation was accepted but authoritative confirmation of defaults is unavailable.
+        Ok(ApplyResult::Accepted)
+    }
+}
+
 /// Strict mapping `FanId` → wire `u8` (0=CPU, 1=GPU) для Hardware1.
 ///
 /// Hardware1 поддерживает только CPU/GPU; остальные `FanId` — `InvalidRequest`.
@@ -2585,6 +2648,8 @@ mod tests {
     struct ScriptedFanHardwareSource {
         result: Mutex<Option<Result<u32, ProviderError>>>,
         requests: Mutex<Vec<(u32, u8, FanCurveWire)>>,
+        reset_requests: Mutex<Vec<u32>>,
+        reset_result: Mutex<Option<Result<u32, ProviderError>>>,
     }
 
     impl ScriptedFanHardwareSource {
@@ -2592,6 +2657,8 @@ mod tests {
             Self {
                 result: Mutex::new(Some(result)),
                 requests: Mutex::new(Vec::new()),
+                reset_requests: Mutex::new(Vec::new()),
+                reset_result: Mutex::new(None),
             }
         }
     }
@@ -2610,6 +2677,15 @@ mod tests {
                 .unwrap()
                 .take()
                 .expect("scripted fan hardware source: one mutation expected")
+        }
+
+        async fn reset_fan_curves_to_defaults(&self, profile: u32) -> Result<u32, ProviderError> {
+            self.reset_requests.lock().unwrap().push(profile);
+            self.reset_result
+                .lock()
+                .unwrap()
+                .take()
+                .expect("scripted fan hardware source: one reset expected")
         }
     }
 
