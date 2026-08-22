@@ -43,6 +43,19 @@ pub enum AsusGpuMode {
     },
 }
 
+/// Result of comparing a requested product mode with authoritative ASUS state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProductGpuOutcome {
+    /// The current pair already matches the requested mode.
+    AlreadyActive,
+    /// The requested pair is queued and will require a reboot to apply.
+    RebootRequired,
+    /// The read-back is incomplete or contains an unknown value.
+    Unknown,
+    /// Read-back values are complete but contradict the requested state.
+    Inconsistent,
+}
+
 /// Read-only current and deferred ASUS GPU attribute state.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AsusGpuModeSnapshot {
@@ -229,9 +242,89 @@ pub fn decode_asus_gpu_mode(dgpu_disable: Option<u32>, gpu_mux_mode: Option<u32>
     }
 }
 
+/// Return the exact ASUS attribute values for a supported product mode.
+pub fn target_values(mode: AsusGpuMode) -> Option<(u32, u32)> {
+    match mode {
+        AsusGpuMode::Hybrid => Some((0, 1)),
+        AsusGpuMode::Integrated => Some((1, 1)),
+        AsusGpuMode::Ultimate => Some((0, 0)),
+        AsusGpuMode::Incomplete | AsusGpuMode::Unknown { .. } | AsusGpuMode::Conflicted { .. } => {
+            None
+        }
+    }
+}
+
+/// Classify current and deferred ASUS attribute values against a requested mode.
+pub fn classify_product_gpu_readback(
+    mode: AsusGpuMode,
+    snapshot: AsusGpuModeSnapshot,
+) -> ProductGpuOutcome {
+    let Some((target_dgpu_disable, target_gpu_mux_mode)) = target_values(mode) else {
+        return ProductGpuOutcome::Unknown;
+    };
+
+    match snapshot.current_mode {
+        AsusGpuMode::Incomplete | AsusGpuMode::Unknown { .. } => ProductGpuOutcome::Unknown,
+        AsusGpuMode::Conflicted { .. } => ProductGpuOutcome::Inconsistent,
+        _ => match (snapshot.queued_dgpu_disable, snapshot.queued_gpu_mux_mode) {
+            (Some(dgpu), Some(mux))
+                if dgpu == target_dgpu_disable && mux == target_gpu_mux_mode =>
+            {
+                ProductGpuOutcome::RebootRequired
+            }
+            (Some(dgpu), Some(mux)) => match decode_asus_gpu_mode(Some(dgpu), Some(mux)) {
+                AsusGpuMode::Unknown { .. } | AsusGpuMode::Incomplete => ProductGpuOutcome::Unknown,
+                AsusGpuMode::Conflicted { .. } => ProductGpuOutcome::Inconsistent,
+                _ => ProductGpuOutcome::Inconsistent,
+            },
+            (None, None) if snapshot.current_mode == mode => ProductGpuOutcome::AlreadyActive,
+            _ => ProductGpuOutcome::Unknown,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn snapshot(
+        current_dgpu_disable: u32,
+        current_gpu_mux_mode: u32,
+        queued_dgpu_disable: Option<u32>,
+        queued_gpu_mux_mode: Option<u32>,
+    ) -> AsusGpuModeSnapshot {
+        AsusGpuModeSnapshot::from_values(
+            Some(current_dgpu_disable),
+            Some(current_gpu_mux_mode),
+            queued_dgpu_disable,
+            queued_gpu_mux_mode,
+        )
+    }
+
+    #[test]
+    fn product_modes_have_exact_attribute_targets() {
+        assert_eq!(target_values(AsusGpuMode::Hybrid), Some((0, 1)));
+        assert_eq!(target_values(AsusGpuMode::Integrated), Some((1, 1)));
+        assert_eq!(target_values(AsusGpuMode::Ultimate), Some((0, 0)));
+        assert_eq!(target_values(AsusGpuMode::Incomplete), None);
+    }
+
+    #[test]
+    fn queued_target_requires_both_attributes_to_match() {
+        let target = AsusGpuMode::Integrated;
+        assert_eq!(
+            classify_product_gpu_readback(target, snapshot(1, 1, Some(1), Some(1))),
+            ProductGpuOutcome::RebootRequired
+        );
+        assert_eq!(
+            classify_product_gpu_readback(target, snapshot(1, 1, Some(1), None)),
+            ProductGpuOutcome::Unknown
+        );
+        assert_eq!(
+            classify_product_gpu_readback(target, snapshot(1, 1, Some(0), Some(1))),
+            ProductGpuOutcome::Inconsistent
+        );
+    }
 
     #[test]
     fn decodes_upstream_asus_three_mode_mapping() {
