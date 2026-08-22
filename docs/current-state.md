@@ -52,7 +52,7 @@ Production product path намеренно включает только док�
 | CLI | IMPLEMENTED READ-ONLY / VALIDATION OPEN — #119 | `status` + versioned `status --json` (schema 2 includes battery threshold evidence); typed states; no mutation commands. |
 | Telemetry | IMPLEMENTED / EVIDENCE GAP — #117 | Partial metrics are supported, but empty/useful/field-local failure coverage is not fully modeled. |
 | Fan reads | IMPLEMENTED / EVIDENCE GAPS — #109/#116 | Per-fan Session1 read exists; aggregate capability still CPU-centric and stored `enabled` is not carried end-to-end. |
-| Fan writes/reset | HARD-BLOCKED — #104/#105 | UI + polkit + production Hardware1 composition prevent the dormant unsafe write path. |
+| Fan writes/reset | HARD-BLOCKED — #104/#105 | UI + polkit + production Hardware1 composition prevent the dormant unsafe write path. Successful factory-reset semantics are hardened in source: `ApplyResult::Accepted` (never `Applied`), Timeout/Dbus after possible dispatch → unknown-outcome, serialized through the worker FIFO with custom fan writes. |
 | Panel write | HARD-BLOCKED | Typed API may exist; production backend status remains Unsupported/default-deny. |
 | Keyboard write | HARD-BLOCKED | Current production Hardware1 reports Unsupported; root sandbox does not expose keyboard write path. |
 | Aura write | HARD-BLOCKED | Static RGB typed writer is not promoted into product/unattended execution. |
@@ -84,7 +84,7 @@ Still open:
 
 1. telemetry now exposes canonical provider identity/deadline through `TelemetryServiceRuntime` (`provider_id`/`snapshot_timeout`), and snapshot reads remain bounded via `provider.timeout()`; executable validation of the exact revision remains;
 2. Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`, timeout → `Unknown`);
-3. mutation timeout after possible dispatch is now classified across interactive Performance/Battery and the Automation Performance executor as `CommandError::Unconfirmed`/recovery: never success, never retried, rollback not auto-triggered; the outcome is obtained only through a subsequent authoritative read-back that confirms or refutes the desired state;
+3. mutation timeout after possible dispatch is now classified across interactive Performance/Battery, the Automation Performance executor and the (gated) Fan Factory Reset path as `CommandError::Unconfirmed`/recovery: never success, never retried, rollback not auto-triggered; the outcome is obtained only through a subsequent authoritative read-back that confirms or refutes the desired state. Successful factory reset returns `ApplyResult::Accepted` (not `Applied`) because an independent default-evidence source does not exist;
 4. `orbisctl validate` bus connects and status query are bounded (`VALIDATE_BUS_CONNECT_DEADLINE`/`VALIDATE_STATUS_DEADLINE`); the interactive confirmation and the confirmed mutation itself remain intentionally outside generic timeout (unknown-outcome contract);
 5. hosted CI execution remains blocked (#106).
 

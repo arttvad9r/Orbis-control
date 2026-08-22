@@ -155,9 +155,9 @@ This path is correct for the remediation scope and must not be changed.
 
 ## 3.4 Factory Defaults — valid mutation plus currently correct refresh intent
 
-Factory Defaults is a separate explicit mutation path. The GUI-owned `Hardware1FanDefaultsProvider` calls Hardware1; hardwared uses `AsusdFanCurveMutationBackend::reset_curves_to_defaults(profile)`, then performs a fresh `FanCurveData(profile)` observation before returning `Applied`.
+Factory Defaults is a separate explicit mutation path. The GUI routes it through the worker FIFO (`WorkerCommand::ResetFanCurvesToDefaults`); hardwared uses `AsusdFanCurveMutationBackend::reset_curves_to_defaults(profile)`, then performs a fresh `FanCurveData(profile)` observation. Because no independent default-evidence source exists, the honest success result is `ApplyResult::Accepted` (not `Applied`).
 
-After `ApplyResult::Applied`, current `main.rs` already queues:
+After `ApplyResult::Accepted`, current `main.rs` already queues:
 
 `WorkerCommand::RefreshFanCurve { profile, fan }`.
 
@@ -392,9 +392,9 @@ Factory Defaults is different because the resulting default curve is not known f
 
 Current behavior is correct in principle:
 
-1. explicit user Apply triggers Hardware1 reset;
+1. explicit user Apply triggers the worker FIFO `ResetFanCurvesToDefaults` → Hardware1 reset;
 2. hardwared performs asusd reset and fresh `FanCurveData(profile)` observation;
-3. only on `ApplyResult::Applied`, GUI queues `RefreshFanCurve(profile, selected_fan)`;
+3. only on `ApplyResult::Accepted`, GUI queues `RefreshFanCurve(profile, selected_fan)` (refresh applies to `Accepted`; `Unconfirmed` never triggers a refresh);
 4. corrected profile-specific read must then load the actual default points into the editor.
 
 This post-reset refresh must remain and is a key targeted regression test.
@@ -536,7 +536,7 @@ Not required for the root defect.
 
 If product policy later requires every successful custom Apply to be reloaded through the same Session1 read path, implement it as a separate commit with explicit success ordering and profile/fan context. Do not queue a refresh unconditionally before mutation success is known.
 
-Factory Defaults already has the required post-`Applied` refresh and does not need this follow-up.
+Factory Defaults already has the required post-`Accepted` refresh and does not need this follow-up. A `Unconfirmed` reset result never triggers a refresh and is never escalated to success.
 
 ---
 
@@ -617,8 +617,9 @@ Preserve mutation tests proving:
 
 Add/retain UI orchestration test:
 
-- Factory Defaults queues `RefreshFanCurve(profile, fan)` **only after** `ApplyResult::Applied`;
-- that refresh receives the profile curve from the new Session1/asusd read path.
+- Factory Defaults queues `RefreshFanCurve(profile, fan)` **only after** `ApplyResult::Accepted`;
+- `Unconfirmed` factory reset preserves UI state and does not set a definitive error;
+- the refresh receives the profile curve from the new Session1/asusd read path.
 
 For custom Apply, retain the current authoritative `Applied` test. A second UI refresh is optional and should be tested only if implemented as the separate follow-up described above.
 
@@ -665,7 +666,7 @@ The defect is remediated only when all of the following are true:
 6. asusd absence/read failure produces unavailable/error state, never a default curve.
 7. unsupported and permission-denied evidence is not converted to successful data.
 8. Custom Apply still uses Hardware1 + polkit + typed asusd mutation + mandatory hardwared read-back.
-9. Factory Defaults still refreshes the selected profile/fan after confirmed `Applied`.
+9. Factory Defaults still refreshes the selected profile/fan after confirmed `Accepted`; `Unconfirmed` never refreshes and never claims success.
 10. No Session1 mutation method is introduced.
 11. No new privileged write path exists.
 12. No hardware write is required to validate the read-side implementation tests.

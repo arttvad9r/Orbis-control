@@ -266,7 +266,7 @@ Keep unchanged:
 - PolicyKit;
 - typed asusd mutation;
 - authoritative fresh post-write `FanCurveData(profile)` read-back;
-- Factory Defaults refresh only after `Applied`.
+- Factory Defaults refresh only after `Accepted` (never `Applied`; no independent default evidence).
 
 ### Beta-critical tests
 
@@ -596,7 +596,7 @@ Orbis may be called **beta-ready** only when all mandatory conditions below are 
 4. Performance and Battery production controls use authoritative reads and preserve existing Hardware1/PolicyKit/read-back semantics.
 5. **FAN-1 is fixed:** selected profile/fan reads return the correct asusd `FanCurveData(profile)` curve through the read-only Session1 path; active sysfs curve remains only the active/capability source.
 6. Fan read failures never create optimistic/default curves.
-7. Factory Defaults refreshes the selected profile only after confirmed `Applied` and receives the corrected profile-specific read.
+7. Factory Defaults refreshes the selected profile only after confirmed `Accepted` (not `Applied`) and receives the corrected profile-specific read; `Unconfirmed` never claims success.
 8. Product GPU mode remains unavailable/disabled unless a separate authoritative semantic design has landed; MUX/access/runtime power are never mislabeled as Eco/Standard/Ultimate/Optimized.
 9. Any other control not production-wired remains explicitly preview-only/disabled/unavailable rather than pretending success.
 
