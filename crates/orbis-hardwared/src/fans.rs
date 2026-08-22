@@ -1120,4 +1120,27 @@ mod tests {
         }
         assert_eq!(fan_mutation_wire::from_wire(99), None);
     }
+
+    /// Fan-curve mutation/reset must never switch the platform profile itself.
+    ///
+    /// #105: Factory Defaults (and custom fan writes) are fan-scoped operations.
+    /// Adding any platform-profile write surface here would introduce an
+    /// unguarded temporary profile switch whose restoration debt Orbis cannot
+    /// guarantee. The D-Bus backend (asusd) may switch profiles internally for
+    /// defaults; Orbis deliberately never does.
+    #[test]
+    fn fan_mutation_backend_never_switches_profile_state() {
+        let source = include_str!("fans.rs");
+        for forbidden in [
+            ["Platform", "Profile", "Writer"].concat(),
+            ["platform", "_profile"].concat(),
+            ["set_", "profile"].concat(),
+        ] {
+            assert!(
+                !source.contains(&forbidden),
+                "fan mutation backend must not touch platform profile: {forbidden}"
+            );
+        }
+        assert!(source.contains("reset_curves_to_defaults"));
+    }
 }
