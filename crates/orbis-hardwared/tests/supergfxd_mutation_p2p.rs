@@ -164,6 +164,14 @@ fn calls(state: &Arc<Mutex<FakeState>>) -> Vec<FakeCall> {
     state.lock().unwrap().calls.lock().unwrap().clone()
 }
 
+fn assert_one_set_mode_call(state: &Arc<Mutex<FakeState>>, requested_wire: u32) {
+    let set_mode_calls: Vec<_> = calls(state)
+        .into_iter()
+        .filter(|call| matches!(call, FakeCall::SetMode(_)))
+        .collect();
+    assert_eq!(set_mode_calls, vec![FakeCall::SetMode(requested_wire)]);
+}
+
 #[tokio::test]
 async fn read_snapshot_reads_all_fields_once_in_order() {
     let state = Arc::new(Mutex::new(state(snapshot(0, 6, 4), 4)));
@@ -188,16 +196,21 @@ async fn read_snapshot_reads_all_fields_once_in_order() {
 }
 
 #[tokio::test]
-async fn unsupported_is_rejected_before_set_mode() {
+async fn unsupported_request_is_rejected_before_set_mode() {
     let (state, result) = operation(state(snapshot(0, 6, 4), 4), SupergfxdMode::AsusEgpu).await;
     assert!(matches!(result, Err(ProviderError::Unsupported(_))));
-    assert_eq!(calls(&state), vec![FakeCall::Supported]);
+    assert!(
+        !calls(&state)
+            .iter()
+            .any(|call| matches!(call, FakeCall::SetMode(_)))
+    );
 }
 
 #[tokio::test]
 async fn immediate_applied_is_classified_from_fresh_snapshot() {
     let (state, result) = operation(state(snapshot(1, 6, 4), 4), SupergfxdMode::Integrated).await;
     assert_eq!(result.unwrap().state, SupergfxdStagedState::Applied);
+    assert_one_set_mode_call(&state, 1);
     assert_eq!(
         calls(&state),
         vec![
@@ -219,6 +232,7 @@ async fn logout_is_staged() {
         result.unwrap().state,
         SupergfxdStagedState::RequiresUserAction(SupergfxdUserAction::Logout)
     );
+    assert_one_set_mode_call(&state, 1);
     assert_eq!(
         calls(&state),
         vec![
@@ -237,6 +251,7 @@ async fn logout_is_staged() {
 async fn nothing_return_does_not_hide_pending_state() {
     let (state, result) = operation(state(snapshot(1, 0, 4), 4), SupergfxdMode::Hybrid).await;
     assert_eq!(result.unwrap().state, SupergfxdStagedState::Pending);
+    assert_one_set_mode_call(&state, 0);
     assert_eq!(
         calls(&state),
         vec![
@@ -258,6 +273,7 @@ async fn reboot_is_staged() {
         result.unwrap().state,
         SupergfxdStagedState::RequiresUserAction(SupergfxdUserAction::Reboot)
     );
+    assert_one_set_mode_call(&state, 5);
     assert_eq!(
         calls(&state),
         vec![
@@ -276,6 +292,7 @@ async fn reboot_is_staged() {
 async fn contradictory_readback_is_inconsistent() {
     let (state, result) = operation(state(snapshot(0, 5, 4), 4), SupergfxdMode::Integrated).await;
     assert_eq!(result.unwrap().state, SupergfxdStagedState::Inconsistent);
+    assert_one_set_mode_call(&state, 1);
     assert_eq!(
         calls(&state),
         vec![
@@ -294,6 +311,7 @@ async fn contradictory_readback_is_inconsistent() {
 async fn action_without_pending_is_inconsistent() {
     let (state, result) = operation(state(snapshot(0, 6, 0), 0), SupergfxdMode::Integrated).await;
     assert_eq!(result.unwrap().state, SupergfxdStagedState::Inconsistent);
+    assert_one_set_mode_call(&state, 1);
     assert_eq!(
         calls(&state),
         vec![
@@ -314,6 +332,7 @@ async fn set_mode_failure_is_not_retried() {
     fake.set_mode_error = true;
     let (state, result) = operation(fake, SupergfxdMode::Integrated).await;
     assert!(result.is_err());
+    assert_one_set_mode_call(&state, 1);
     assert_eq!(
         calls(&state),
         vec![FakeCall::Supported, FakeCall::SetMode(1)]
@@ -321,11 +340,12 @@ async fn set_mode_failure_is_not_retried() {
 }
 
 #[tokio::test]
-async fn readback_failure_is_not_retried() {
+async fn readback_failure_is_not_retried_or_reported_as_applied() {
     let mut fake = state(snapshot(0, 1, 0), 0);
     fake.read_error = Some("read-back failed".into());
     let (state, result) = operation(fake, SupergfxdMode::Integrated).await;
     assert!(result.is_err());
+    assert_one_set_mode_call(&state, 1);
     assert_eq!(
         calls(&state),
         vec![FakeCall::Supported, FakeCall::SetMode(1), FakeCall::Mode]
@@ -338,6 +358,7 @@ async fn future_wire_values_are_not_applied() {
     fake.supported = vec![0, 1, 99];
     let (state, result) = operation(fake, SupergfxdMode::Integrated).await;
     assert_eq!(result.unwrap().state, SupergfxdStagedState::Inconsistent);
+    assert_one_set_mode_call(&state, 1);
     assert_eq!(
         calls(&state),
         vec![
@@ -362,18 +383,20 @@ async fn future_requested_mode_is_rejected_without_set_mode() {
 #[tokio::test]
 async fn p2p_test_is_bounded() {
     tokio::time::timeout(Duration::from_secs(5), async {
-        let (_state, result) =
+        let (state, result) =
             operation(state(snapshot(1, 6, 4), 4), SupergfxdMode::Integrated).await;
         assert!(result.is_ok());
+        assert_one_set_mode_call(&state, 1);
     })
     .await
     .expect("bounded P2P test");
 }
 
 #[tokio::test]
-async fn returned_action_contradiction_is_inconsistent() {
+async fn returned_action_mismatch_is_inconsistent() {
     let (state, result) = operation(state(snapshot(0, 1, 0), 4), SupergfxdMode::Integrated).await;
     assert_eq!(result.unwrap().state, SupergfxdStagedState::Inconsistent);
+    assert_one_set_mode_call(&state, 1);
     assert_eq!(
         calls(&state),
         vec![
