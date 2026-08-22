@@ -33,14 +33,14 @@ export component FansWindow inherits Window {
         if (root.factory-reset-pending) { return "Factory defaults selected · not applied yet"; }
         if (!root.ui-state.fan-curve-writable) { return "Read only"; }
         if (root.ui-state.fan-curve-dirty) { return "Custom curve modified · not applied yet"; }
-        if (root.curve-enabled-known) { return root.curve-enabled ? "Custom curve enabled" : "Stored custom curve is disabled"; }
+        if (root.ui-state.fan-curve-enabled-known) { return root.ui-state.fan-curve-enabled ? "Custom curve enabled" : "Stored custom curve is disabled"; }
         return "Current stored curve · enabled state unknown";
     }
 
     function status-color() -> color {
         if (root.ui-state.fan-curve-error) { return Palette.error; }
-        if (root.mutation-safety-blocked || root.factory-reset-pending || root.ui-state.fan-curve-dirty || !root.curve-enabled-known) { return Palette.warning; }
-        return root.curve-enabled ? Palette.success : Palette.text-secondary;
+        if (root.mutation-safety-blocked || root.factory-reset-pending || root.ui-state.fan-curve-dirty || !root.ui-state.fan-curve-enabled-known) { return Palette.warning; }
+        return root.ui-state.fan-curve-enabled ? Palette.success : Palette.text-secondary;
     }
 
     ThemeBridge { }

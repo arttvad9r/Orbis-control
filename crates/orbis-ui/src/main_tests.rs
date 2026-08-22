@@ -1366,6 +1366,125 @@ fn fan_curve_load_fan_curve_sets_ready_and_populates_points() {
 }
 
 #[test]
+fn fan_curve_load_preserves_stored_enabled_evidence() {
+    use orbis_core::fan::{FanCurve, FanCurvePoint};
+    use orbis_core::newtypes::{FanPwm, TemperatureC};
+
+    fn points() -> Vec<FanCurvePoint> {
+        [
+            (50u16, 0u8),
+            (55, 8),
+            (60, 13),
+            (65, 26),
+            (70, 36),
+            (75, 54),
+            (79, 77),
+            (85, 100),
+        ]
+        .into_iter()
+        .map(|(t, p)| {
+            FanCurvePoint::new(
+                TemperatureC::new(t as i16).unwrap(),
+                FanPwm::new(p).unwrap(),
+            )
+        })
+        .collect()
+    }
+
+    // Some(true) preserved
+    let mut s = base_state();
+    let curve = FanCurve {
+        profile: PerformanceProfile::Balanced,
+        fan: FanId::Cpu,
+        enabled: Some(true),
+        points: points(),
+    };
+    s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
+    assert_eq!(s.fan_curve_enabled, Some(true));
+
+    // Some(false) preserved
+    let mut s = base_state();
+    let curve = FanCurve {
+        profile: PerformanceProfile::Balanced,
+        fan: FanId::Cpu,
+        enabled: Some(false),
+        points: points(),
+    };
+    s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
+    assert_eq!(s.fan_curve_enabled, Some(false));
+
+    // None (active sysfs read without enabled evidence) stays None
+    let mut s = base_state();
+    let curve = FanCurve {
+        profile: PerformanceProfile::Balanced,
+        fan: FanId::Cpu,
+        enabled: None,
+        points: points(),
+    };
+    s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
+    assert_eq!(s.fan_curve_enabled, None);
+}
+
+#[test]
+fn fan_curve_enabled_roundtrips_through_slint_state() {
+    use orbis_core::fan::{FanCurve, FanCurvePoint};
+    use orbis_core::newtypes::{FanPwm, TemperatureC};
+
+    let points: Vec<FanCurvePoint> = [(50u16, 0u8), (85, 100)]
+        .into_iter()
+        .map(|(t, p)| {
+            FanCurvePoint::new(
+                TemperatureC::new(t as i16).unwrap(),
+                FanPwm::new(p).unwrap(),
+            )
+        })
+        .collect();
+
+    // enabled=true: roundtrip to Slint UiState and back
+    let mut s = base_state();
+    let curve = FanCurve {
+        profile: PerformanceProfile::Balanced,
+        fan: FanId::Cpu,
+        enabled: Some(true),
+        points: points.clone(),
+    };
+    s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
+    let slint = to_slint(&s);
+    assert!(slint.fan_curve_enabled_known);
+    assert!(slint.fan_curve_enabled);
+    let back = from_slint(&slint);
+    assert_eq!(back.fan_curve_enabled, Some(true));
+
+    // enabled=false round-trips as known+false
+    let mut s = base_state();
+    let curve = FanCurve {
+        profile: PerformanceProfile::Balanced,
+        fan: FanId::Cpu,
+        enabled: Some(false),
+        points: points.clone(),
+    };
+    s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
+    let slint = to_slint(&s);
+    assert!(slint.fan_curve_enabled_known);
+    assert!(!slint.fan_curve_enabled);
+    assert_eq!(from_slint(&slint).fan_curve_enabled, Some(false));
+
+    // None: unknown, not silently converted to a known disabled state
+    let mut s = base_state();
+    let curve = FanCurve {
+        profile: PerformanceProfile::Balanced,
+        fan: FanId::Cpu,
+        enabled: None,
+        points,
+    };
+    s.load_fan_curve(&curve, orbis_core::profile::AsusdFanProfile::Balanced);
+    let slint = to_slint(&s);
+    assert!(!slint.fan_curve_enabled_known);
+    assert!(!slint.fan_curve_enabled);
+    assert_eq!(from_slint(&slint).fan_curve_enabled, None);
+}
+
+#[test]
 fn fan_curve_can_mutate_requires_writable_dirty_and_valid() {
     let mut s = base_state();
     assert!(!s.fan_curve_can_mutate());

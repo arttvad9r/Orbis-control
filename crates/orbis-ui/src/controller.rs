@@ -315,6 +315,12 @@ pub struct UiState {
     pub fan_curve_error: bool,
     /// Есть ли несохранённые изменения ( dirty flag для UI кнопки Apply).
     pub fan_curve_dirty: bool,
+    /// Stored curve enabled-state evidence from the authoritative read.
+    ///
+    /// `Some(enabled)` — backend reports this stored FanCurveData as
+    /// enabled/disabled; `None` — the read backend did not expose enabled state
+    /// (e.g. active sysfs curve). Preserved through Session1/client per #116.
+    pub fan_curve_enabled: Option<bool>,
 }
 
 /// Явное исчерпывающее сопоставление GPU-режима с индексом кнопки
@@ -475,6 +481,7 @@ impl UiState {
             fan_curve_pwms: [0; 8],
             fan_curve_error: false,
             fan_curve_dirty: false,
+            fan_curve_enabled: None,
         }
     }
 
@@ -675,6 +682,8 @@ impl UiState {
         self.fan_curve_temps = temps;
         self.fan_curve_pwms = pwms;
         self.fan_curve_dirty = false;
+        // Preserve stored enabled-state evidence from the authoritative read (#116).
+        self.fan_curve_enabled = curve.enabled;
     }
 
     /// Build `FanCurvePoints` from editor state for mutation.

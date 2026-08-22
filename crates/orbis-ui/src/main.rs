@@ -189,6 +189,8 @@ fn to_slint(state: &controller::UiState) -> UiState {
             .into(),
         fan_curve_error: state.fan_curve_error,
         fan_curve_dirty: state.fan_curve_dirty,
+        fan_curve_enabled_known: state.fan_curve_enabled.is_some(),
+        fan_curve_enabled: state.fan_curve_enabled.unwrap_or(false),
         fan_selected: state.fan_selected,
         fan_profile_selected: state.fan_profile_selected,
         fan_temp_0: state.fan_curve_temps[0],
@@ -289,6 +291,11 @@ fn from_slint(state: &UiState) -> controller::UiState {
         fan_curve_unavailable_reason: None,
         fan_curve_error: state.fan_curve_error,
         fan_curve_dirty: state.fan_curve_dirty,
+        fan_curve_enabled: if state.fan_curve_enabled_known {
+            Some(state.fan_curve_enabled)
+        } else {
+            None
+        },
         fan_selected: state.fan_selected,
         fan_profile_selected: state.fan_profile_selected,
         fan_curve_temps: [
