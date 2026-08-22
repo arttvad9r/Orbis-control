@@ -42,7 +42,7 @@ Production product path намеренно включает только док�
 | Autostart | IMPLEMENTED SOURCE — #110 closed | Owned XDG desktop entry read/write/read-back wired to Preferences. |
 | Window/tray lifecycle | IMPLEMENTED SOURCE — #121 closed | Start Minimized, X11-style position restore/save, Wayland fail-closed behavior, StatusNotifier tray gating and explicit Quit lifecycle. |
 | Diagnostics | IMPLEMENTED SOURCE — #111 closed | Runtime initialization, capability generation replacement, Refresh, privacy-bounded JSON export and Copy Summary wired; Open Logs intentionally disabled. |
-| Battery read | IMPLEMENTED / CONFLICT-AWARE | Session1 exposes UPower, ASUS backend and sysfs threshold evidence; disagreements are `Conflict`, not `Supported`. |
+| Battery read | IMPLEMENTED / ASUS+SYSFS CONSENSUS | Current charge/status come from UPower; configured/effective charge-limit state is accepted when ASUS/asusd and kernel sysfs agree. UPower threshold is diagnostic only. |
 | Battery mutation | HISTORICAL LIVE-VALIDATED / HARDENING OPEN | Controlled Hardware1 path; dynamic asusd owner/interface liveness remains #107. |
 | Performance read/write | HISTORICAL LIVE-VALIDATED / CURRENT SOURCE IMPLEMENTED | Session1 read + Hardware1/polkit write + read-back. |
 | GPU primitives | HISTORICAL LIVE-VALIDATED READS | Power, physical MUX and access policy remain separate read concepts. |

@@ -1768,7 +1768,11 @@ fn main() -> anyhow::Result<()> {
         launch_context::LaunchMode::Interactive
     };
     launch_context::LaunchContext::new(launch_mode, effective_uid()).validate()?;
-    let mut state = state_for_scenario(&args.ui_state);
+    let mut state = if args.screenshot.is_some() {
+        state_for_scenario(&args.ui_state)
+    } else {
+        controller::UiState::production_initial()
+    };
 
     if let Some(path) = args.screenshot {
         return render_screenshot(&state, &path);
@@ -1778,12 +1782,6 @@ fn main() -> anyhow::Result<()> {
     let startup_preferences = initialize_runtime_preferences();
     let runtime = tokio::runtime::Runtime::new()?;
     quick_controls_backend::initialize(runtime.handle().clone());
-
-    state.charge_limit_state = controller::ChargeLimitState::Loading;
-    state.perf_state = controller::PerformanceHwState::Loading;
-    state.reset_telemetry();
-    state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
-    state.gpu_mode_writable = false;
 
     let session_connection = runtime
         .block_on(zbus::Connection::session())

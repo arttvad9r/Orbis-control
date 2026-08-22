@@ -9,15 +9,9 @@ authors.workspace = true
 description = "Orbis Control: mock-профили устройств и тестовые утилиты"
 
 [dependencies]
-serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true }
 orbis-core = { workspace = true }
 orbis-capabilities = { workspace = true }
 # Test-support is the explicit owner of MockProvider/device fixtures. Workspace
 # production dependencies keep mock disabled by default.
 orbis-providers = { workspace = true, features = ["mock"] }
-
-[dev-dependencies]
-tempfile = { workspace = true }

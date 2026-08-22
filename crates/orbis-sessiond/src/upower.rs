@@ -1,7 +1,8 @@
-//! Read-only UPower adapter для Battery Charge Limit.
+//! Read-only Battery adapter over UPower, asusd and kernel sysfs.
 //!
-//! Реализует `BatteryProvider::charge_limit()` через read-only D-Bus property
-//! чтение интерфейса `org.freedesktop.UPower.Device`.
+//! Current battery state comes from UPower. Charge-limit configured/effective
+//! state is accepted only when asusd and kernel sysfs agree; UPower's threshold
+//! property remains diagnostic evidence and does not block that consensus.
 //!
 //! - `Connection` и object path батареи передаются извне; adapter сам не
 //!   открывает system/session bus и не создаёт service;
@@ -227,8 +228,8 @@ pub struct UPowerChargeLimitProvider<S> {
     source: S,
 }
 
-/// Production configured source: UPower supplies enabled/reported state,
-/// while asusd supplies the mutation-owned configured threshold.
+/// Production configured source: UPower supplies battery state, while asusd
+/// and kernel sysfs own the configured/effective threshold consensus.
 pub struct AsusdBatteryChargeLimitProvider<U, A, E> {
     upower: U,
     asusd: A,
@@ -308,9 +309,9 @@ where
             .map_err(|e| {
                 ProviderError::Internal(format!("kernel: невалидный effective threshold: {e}"))
             })?;
-        if configured.get() != upower_reported || configured != effective {
+        if configured != effective {
             return Err(ProviderError::Conflict(format!(
-                "battery thresholds disagree: UPower={upower_reported}%, ASUS={configured}%, sysfs={effective}%"
+                "battery thresholds disagree: ASUS={configured}%, sysfs={effective}% (UPower reports {upower_reported}% as diagnostic evidence)"
             )));
         }
         ChargeLimit::new(snapshot.enabled, Some(configured), Some(effective), None)
@@ -333,19 +334,6 @@ where
             })?;
         let observed_at = SystemTime::now();
         Ok(BatteryThresholdEvidence::from_observations(vec![
-            BatteryThresholdObservation {
-                source: BatteryThresholdSource::UPower,
-                value: Percent::new(u8::try_from(snapshot.end_threshold).map_err(|_| {
-                    ProviderError::Internal(format!(
-                        "UPower: end_threshold вне u8 диапазона: {}",
-                        snapshot.end_threshold
-                    ))
-                })?)
-                .map_err(|e| ProviderError::Internal(format!("UPower: invalid threshold: {e}")))?,
-                observed_at,
-                freshness: BatteryThresholdFreshness::Fresh,
-                confidence: BatteryThresholdConfidence::Medium,
-            },
             BatteryThresholdObservation {
                 source: BatteryThresholdSource::AsusBackend,
                 value: asus,
@@ -772,7 +760,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mismatched_upower_and_asusd_thresholds_are_conflicted() {
+    async fn matching_asus_and_sysfs_thresholds_override_stale_upower_threshold() {
         let p = asusd_provider(
             UPowerChargeLimitSnapshot {
                 supported: true,
@@ -783,10 +771,9 @@ mod tests {
             vec![Ok(100)],
             100,
         );
-        assert!(matches!(
-            p.charge_limit().await,
-            Err(ProviderError::Conflict(_))
-        ));
+        let limit = p.charge_limit().await.expect("ASUS and sysfs agree");
+        assert_eq!(limit.configured_percent.map(|value| value.get()), Some(100));
+        assert_eq!(limit.effective_percent.map(|value| value.get()), Some(100));
     }
 
     #[tokio::test]
@@ -803,15 +790,18 @@ mod tests {
         );
 
         let evidence = provider.threshold_evidence().await.expect("evidence");
-        assert_eq!(evidence.state, BatteryThresholdEvidenceState::Conflict);
-        assert_eq!(evidence.observations.len(), 3);
+        assert_eq!(evidence.state, BatteryThresholdEvidenceState::Confirmed);
+        assert_eq!(evidence.observations.len(), 2);
         assert_eq!(
             evidence.observations[0].source,
-            BatteryThresholdSource::UPower
+            BatteryThresholdSource::AsusBackend
         );
-        assert_eq!(evidence.observations[0].value.get(), 80);
+        assert_eq!(evidence.observations[0].value.get(), 100);
+        assert_eq!(
+            evidence.observations[1].source,
+            BatteryThresholdSource::Sysfs
+        );
         assert_eq!(evidence.observations[1].value.get(), 100);
-        assert_eq!(evidence.observations[2].value.get(), 100);
     }
 
     #[tokio::test]

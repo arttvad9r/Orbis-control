@@ -244,8 +244,13 @@ async fn composition_reads_fresh_upower_values() {
             st.end_threshold = 60;
         }
 
-        let second = proxy.charge_limit().await;
-        assert!(matches!(second, Err(zbus::Error::FDO(_))));
+        let second = proxy
+            .charge_limit()
+            .await
+            .expect("stale UPower threshold is diagnostic");
+        assert!(!second.enabled);
+        assert_eq!(second.configured_percent, 100);
+        assert_eq!(second.effective_percent, 100);
 
         let calls = state.lock().unwrap().calls.clone();
         assert_eq!(

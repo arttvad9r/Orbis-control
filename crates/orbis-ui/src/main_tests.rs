@@ -13,6 +13,31 @@ fn base_state() -> controller::UiState {
     controller::UiState::from_mock_profile("zephyrus-full")
 }
 
+#[test]
+fn interactive_initial_state_has_no_fixture_values_or_write_access() {
+    let state = controller::UiState::production_initial();
+
+    assert_eq!(state.perf_state, controller::PerformanceHwState::Loading);
+    assert_eq!(
+        state.charge_limit_state,
+        controller::ChargeLimitState::Loading
+    );
+    assert_eq!(
+        state.gpu_mode_state,
+        controller::GpuModeHwState::Unavailable
+    );
+    assert_eq!(state.fan_curve_state, controller::FanCurveHwState::Loading);
+    assert!(!state.perf_writable);
+    assert!(!state.charge_limit_writable);
+    assert!(!state.gpu_mode_writable);
+    assert!(!state.fan_curve_writable);
+    assert!(!state.telemetry_fresh);
+    assert_eq!(state.cpu_temp, "—");
+    assert_eq!(state.gpu_temp, "—");
+    assert_eq!(state.battery_percent, "—");
+    assert_eq!(state.mock_profile, "production");
+}
+
 fn charge_outcome(percent: Option<u8>) -> ChargeLimitCommandOutcome {
     ChargeLimitCommandOutcome {
         result: ApplyResult::Applied,

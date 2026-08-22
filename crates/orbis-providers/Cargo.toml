@@ -10,11 +10,9 @@ description = "Orbis Control: typed production provider interfaces and implement
 
 [dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
-tracing = { workspace = true }
 zbus = { workspace = true, features = ["p2p"] }
 # Mature typed Wayland client binding (уже в дереве зависимостей через
 # slint/winit). Используется только для read-only чтения wl_output; никакого

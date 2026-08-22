@@ -1,9 +1,4 @@
-//! Локальное состояние UI для визуального прототипа.
-//!
-//! Источник данных — mock-профиль `zephyrus-full` из `orbis-test-support`
-//! (публичный API). После загрузки UI работает полностью in-process:
-//! кнопки меняют только локальное состояние интерфейса, никаких аппаратных
-//! вызовов, системных интерфейсов и фоновых демонов здесь нет.
+//! Local UI state and presentation mappings.
 
 use orbis_core::capability::CapabilityStatus;
 use orbis_core::fan::FanId;
@@ -345,6 +340,70 @@ fn perf_index(p: PerformanceProfile) -> i32 {
 }
 
 impl UiState {
+    /// Safe initial state for the interactive production UI.
+    ///
+    /// Every hardware value remains unknown until the worker receives an
+    /// authoritative read. Screenshot and unit-test paths use
+    /// [`Self::from_mock_profile`] instead.
+    pub fn production_initial() -> Self {
+        Self {
+            capability_generation: 0,
+            perf_selected: 0,
+            available_perf_mask: 0,
+            perf_state: PerformanceHwState::Loading,
+            perf_writable: false,
+            gpu_selected: 0,
+            available_gpu_mask: 0,
+            gpu_ultimate_pending: false,
+            gpu_ultimate_disabled: true,
+            gpu_section_error: false,
+            gpu_mode_state: GpuModeHwState::Unavailable,
+            gpu_mode_writable: false,
+            charge_limit: 0,
+            charge_limit_enabled: false,
+            charge_limit_writable: false,
+            charge_limit_state: ChargeLimitState::Loading,
+            gpu_power: GpuHwState::Loading,
+            gpu_mux: GpuHwState::Loading,
+            gpu_access: GpuHwState::Loading,
+            gpu_power_value: 2,
+            gpu_mux_value: 2,
+            gpu_access_value: 3,
+            perf_capability: CapabilityAvailability::Unknown,
+            perf_unavailable_reason: Some("Availability is unknown".into()),
+            charge_limit_capability: CapabilityAvailability::Unknown,
+            charge_limit_unavailable_reason: Some("Availability is unknown".into()),
+            gpu_power_capability: CapabilityAvailability::Unknown,
+            gpu_mux_capability: CapabilityAvailability::Unknown,
+            gpu_access_capability: CapabilityAvailability::Unknown,
+            telemetry_fresh: false,
+            cpu_temp: "—".into(),
+            gpu_temp: "—".into(),
+            cpu_fan_rpm: "—".into(),
+            gpu_fan_rpm: "—".into(),
+            battery_percent: "—".into(),
+            battery_health: "—".into(),
+            battery_cycles: "—".into(),
+            battery_status: String::new(),
+            ac_online: "—".into(),
+            gpu_power_display: "—".into(),
+            power_ac: "—".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            mock_profile: "production".into(),
+            fan_curve_state: FanCurveHwState::Loading,
+            fan_curve_writable: false,
+            fan_curve_capability: CapabilityAvailability::Unknown,
+            fan_curve_unavailable_reason: Some("Availability is unknown".into()),
+            fan_selected: 0,
+            fan_profile_selected: 0,
+            fan_curve_temps: [0; 8],
+            fan_curve_pwms: [0; 8],
+            fan_curve_error: false,
+            fan_curve_dirty: false,
+            fan_curve_enabled: None,
+        }
+    }
+
     /// Начальное состояние из mock-профиля `zephyrus-full`.
     ///
     /// Используется существующий публичный API `orbis-test-support::devices::build_state`;
