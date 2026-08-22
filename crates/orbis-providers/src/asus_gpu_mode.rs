@@ -278,6 +278,7 @@ pub fn classify_product_gpu_readback(
                 _ => ProductGpuOutcome::Inconsistent,
             },
             (None, None) if snapshot.current_mode == mode => ProductGpuOutcome::AlreadyActive,
+            (None, None) => ProductGpuOutcome::Inconsistent,
             _ => ProductGpuOutcome::Unknown,
         },
     }
@@ -322,6 +323,14 @@ mod tests {
         );
         assert_eq!(
             classify_product_gpu_readback(target, snapshot(1, 1, Some(0), Some(1))),
+            ProductGpuOutcome::Inconsistent
+        );
+    }
+
+    #[test]
+    fn known_current_mode_differing_from_target_is_inconsistent_without_queue() {
+        assert_eq!(
+            classify_product_gpu_readback(AsusGpuMode::Integrated, snapshot(0, 1, None, None),),
             ProductGpuOutcome::Inconsistent
         );
     }
