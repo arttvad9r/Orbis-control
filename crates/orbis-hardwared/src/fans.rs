@@ -41,11 +41,16 @@ pub struct FanCurvePoints {
 #[async_trait]
 pub trait AsusdFanCurveClient: Send + Sync {
     /// Установить кривую для одного вентилятора профиля.
+    ///
+    /// `enabled` — authoritative stored enabled-state of this curve read back
+    /// from FanCurveData before the write. It is passed through to asusd so a
+    /// custom write does not silently flip the curve to disabled (#104).
     async fn set_fan_curve(
         &self,
         profile: AsusdFanProfile,
         fan: &FanId,
         curve: &FanCurvePoints,
+        enabled: bool,
     ) -> Result<(), ProviderError>;
 
     /// Reset all supported fan curves of one profile to platform defaults.
@@ -112,6 +117,7 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
         profile: AsusdFanProfile,
         fan: &FanId,
         curve: &FanCurvePoints,
+        enabled: bool,
     ) -> Result<(), ProviderError> {
         let name = fan_wire_name(fan)?;
         let mut temps = [0u8; 8];
@@ -125,10 +131,9 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
             })?;
             pwms[i] = p.get();
         }
-        // enabled: не изменяем (сохраняем текущее значение из read-back не
-        // требуется для setter — asusd сохраняет enabled отдельно). Для
-        // SetFanCurve передаём enabled=false (не трогаем enable state).
-        let wire = (name.to_string(), temps, pwms, false);
+        // enabled: pass through the authoritative stored enabled state so a
+        // custom write does not silently disable the curve (#104).
+        let wire = (name.to_string(), temps, pwms, enabled);
         self.proxy()
             .await?
             .set_fan_curve(profile.wire(), wire)
@@ -370,13 +375,32 @@ where
         validate_fan_curve(curve)?;
         let name = fan_wire_name(fan)?;
 
-        // 2. ровно один setter для выбранного fan.
-        self.asusd.set_fan_curve(profile, fan, curve).await?;
+        // 2. Read authoritative stored enabled state before the write so a
+        //    custom curve update preserves it instead of silently disabling
+        //    the curve (#104).
+        let raw_before = self.asusd.read_curves(profile).await?;
+        let stored_enabled = raw_before
+            .iter()
+            .find(|(n, _, _, _)| n == name)
+            .map(|(_, _, _, enabled)| *enabled)
+            .ok_or_else(|| {
+                ProviderError::BackendUnavailable(format!(
+                    "hardwared: не удалось прочитать сохранённый enabled для {name} (profile={profile:?})"
+                ))
+            })?;
 
-        // 3. fresh read-back.
+        // 3. ровно один setter для выбранного fan, с сохранённым enabled.
+        self.asusd
+            .set_fan_curve(profile, fan, curve, stored_enabled)
+            .await?;
+
+        // 4. fresh read-back: точки И enabled должны сохраниться.
         let raw = self.asusd.read_curves(profile).await?;
-        let matched = raw.iter().any(|(n, temps, pwms, _enabled)| {
+        let matched = raw.iter().any(|(n, temps, pwms, enabled)| {
             if n != name {
+                return false;
+            }
+            if *enabled != stored_enabled {
                 return false;
             }
             for (i, (t, p)) in curve.temps.iter().zip(curve.pwms.iter()).enumerate() {
@@ -390,8 +414,7 @@ where
 
         if !matched {
             return Err(ProviderError::BackendUnavailable(format!(
-                "hardwared: read-back не подтвердил fan curve для {name} (profile={:?})",
-                profile
+                "hardwared: read-back не подтвердил fan curve или enabled для {name} (profile={profile:?})"
             )));
         }
 
@@ -654,7 +677,7 @@ mod tests {
         ));
     }
 
-    type StoredCurves = std::collections::HashMap<(u32, String), (Vec<u8>, Vec<u8>)>;
+    type StoredCurves = std::collections::HashMap<(u32, String), (Vec<u8>, Vec<u8>, bool)>;
 
     struct FakeAsusd {
         stored: std::sync::Mutex<StoredCurves>,
@@ -663,6 +686,8 @@ mod tests {
         fail_readback: std::sync::atomic::AtomicBool,
         readback_dbus_error: std::sync::Mutex<Option<String>>,
         mismatch_readback: std::sync::atomic::AtomicBool,
+        invert_enabled_readback: std::sync::atomic::AtomicBool,
+        read_index: std::sync::atomic::AtomicUsize,
         setter_calls: std::sync::atomic::AtomicUsize,
         reset_calls: std::sync::atomic::AtomicUsize,
     }
@@ -676,9 +701,24 @@ mod tests {
                 fail_readback: std::sync::atomic::AtomicBool::new(false),
                 readback_dbus_error: std::sync::Mutex::new(None),
                 mismatch_readback: std::sync::atomic::AtomicBool::new(false),
+                invert_enabled_readback: std::sync::atomic::AtomicBool::new(false),
+                read_index: std::sync::atomic::AtomicUsize::new(0),
                 setter_calls: std::sync::atomic::AtomicUsize::new(0),
                 reset_calls: std::sync::atomic::AtomicUsize::new(0),
             }
+        }
+
+        /// Seed one stored curve so the mutation backend's pre-write enabled
+        /// read-back finds it. `enabled` is the authoritative stored enabled
+        /// state that a custom write must preserve (#104).
+        fn seed_curve(&self, profile: AsusdFanProfile, fan: &FanId, enabled: bool) {
+            let name = fan_wire_name(fan).expect("fan");
+            let temps: Vec<u8> = (0..8).map(|i| 50 + i * 5).collect();
+            let pwms: Vec<u8> = (0..8).map(|i| i * 15).collect();
+            self.stored
+                .lock()
+                .unwrap()
+                .insert((profile.wire(), name.to_string()), (temps, pwms, enabled));
         }
     }
 
@@ -689,6 +729,7 @@ mod tests {
             profile: AsusdFanProfile,
             fan: &FanId,
             curve: &FanCurvePoints,
+            enabled: bool,
         ) -> Result<(), ProviderError> {
             self.setter_calls
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -701,7 +742,7 @@ mod tests {
             self.stored
                 .lock()
                 .unwrap()
-                .insert((profile.wire(), name.to_string()), (temps, pwms));
+                .insert((profile.wire(), name.to_string()), (temps, pwms, enabled));
             Ok(())
         }
 
@@ -729,7 +770,7 @@ mod tests {
             ] {
                 stored.insert(
                     (profile.wire(), name.to_string()),
-                    (temps.to_vec(), pwms.to_vec()),
+                    (temps.to_vec(), pwms.to_vec(), true),
                 );
             }
             Ok(())
@@ -747,7 +788,16 @@ mod tests {
             }
             let stored = self.stored.lock().unwrap();
             let mut out = Vec::new();
-            for (name, (temps, pwms)) in stored.iter() {
+            // After the first (pre-write) read, force enabled to invert on the
+            // second (post-write) read-back to simulate enabled drift (#104).
+            let read_index = self
+                .read_index
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let invert_enabled = self
+                .invert_enabled_readback
+                .load(std::sync::atomic::Ordering::SeqCst)
+                && read_index >= 1;
+            for (name, (temps, pwms, enabled)) in stored.iter() {
                 if name.0 != profile.wire() {
                     continue;
                 }
@@ -761,7 +811,12 @@ mod tests {
                 {
                     p[7] = p[7].wrapping_add(1);
                 }
-                out.push((name.1.clone(), t, p, false));
+                out.push((
+                    name.1.clone(),
+                    t,
+                    p,
+                    if invert_enabled { !*enabled } else { *enabled },
+                ));
             }
             Ok(out)
         }
@@ -774,8 +829,9 @@ mod tests {
             profile: AsusdFanProfile,
             fan: &FanId,
             curve: &FanCurvePoints,
+            enabled: bool,
         ) -> Result<(), ProviderError> {
-            (**self).set_fan_curve(profile, fan, curve).await
+            (**self).set_fan_curve(profile, fan, curve, enabled).await
         }
 
         async fn reset_curves_to_defaults(
@@ -796,6 +852,7 @@ mod tests {
     #[tokio::test]
     async fn mutation_success_with_readback_match() {
         let asusd = FakeAsusd::new();
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Cpu, true);
         let backend = AsusdFanCurveMutationBackend::new(asusd);
         let curve = valid_curve();
         let result = backend
@@ -810,6 +867,7 @@ mod tests {
     #[tokio::test]
     async fn setter_called_only_for_selected_fan() {
         let asusd = FakeAsusd::new();
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Cpu, true);
         let backend = AsusdFanCurveMutationBackend::new(&asusd);
         let curve = valid_curve();
         backend
@@ -856,6 +914,7 @@ mod tests {
     #[tokio::test]
     async fn setter_error_propagates() {
         let asusd = FakeAsusd::new();
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Cpu, true);
         asusd
             .fail_setter
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -870,6 +929,7 @@ mod tests {
     #[tokio::test]
     async fn readback_error_propagates() {
         let asusd = FakeAsusd::new();
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Cpu, true);
         asusd
             .fail_readback
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -884,6 +944,7 @@ mod tests {
     #[tokio::test]
     async fn readback_mismatch_is_error() {
         let asusd = FakeAsusd::new();
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Cpu, true);
         asusd
             .mismatch_readback
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -917,11 +978,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn custom_write_preserves_enabled_true_from_authoritative_read() {
+        // #104: a custom curve write must pass through the stored enabled
+        // state so asusd does not silently disable the curve.
+        let asusd = FakeAsusd::new();
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Cpu, true);
+        let backend = AsusdFanCurveMutationBackend::new(&asusd);
+        let curve = valid_curve();
+        backend
+            .set_fan_curve(AsusdFanProfile::Balanced, &FanId::Cpu, &curve)
+            .await
+            .expect("success");
+
+        let raw = asusd.read_curves(AsusdFanProfile::Balanced).await.unwrap();
+        let cpu = raw.iter().find(|(n, _, _, _)| n == "CPU").expect("CPU");
+        assert!(
+            cpu.3,
+            "stored enabled=true must be preserved by custom write"
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_write_preserves_enabled_false() {
+        // #104: an explicitly disabled stored curve stays disabled after a
+        // custom write; Orbis must not flip it to enabled.
+        let asusd = FakeAsusd::new();
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Cpu, false);
+        let backend = AsusdFanCurveMutationBackend::new(&asusd);
+        let curve = valid_curve();
+        backend
+            .set_fan_curve(AsusdFanProfile::Balanced, &FanId::Cpu, &curve)
+            .await
+            .expect("success");
+
+        let raw = asusd.read_curves(AsusdFanProfile::Balanced).await.unwrap();
+        let cpu = raw.iter().find(|(n, _, _, _)| n == "CPU").expect("CPU");
+        assert!(
+            !cpu.3,
+            "stored enabled=false must be preserved by custom write"
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_write_readback_detects_enabled_drift() {
+        // #104 fail-closed guard: if the read-back enabled state does not
+        // match the pre-write authoritative value, the mutation is not Applied.
+        let asusd = FakeAsusd::new();
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Cpu, true);
+        // Force the post-write read-back to report inverted enabled state.
+        asusd
+            .invert_enabled_readback
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let backend = AsusdFanCurveMutationBackend::new(&asusd);
+
+        let err = backend
+            .set_fan_curve(AsusdFanProfile::Balanced, &FanId::Cpu, &valid_curve())
+            .await
+            .expect_err("enabled drift must fail the write");
+        assert!(matches!(err, ProviderError::BackendUnavailable(_)));
+    }
+
+    #[tokio::test]
     async fn rejects_temperature_above_wire_range() {
         // TemperatureC max is 150, which fits in u8. But we test the validation
         // path works correctly by checking the wire range guard exists.
         // The real narrowing bug is negative temperatures wrapping via `as u8`.
         let asusd = FakeAsusd::new();
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Cpu, true);
         let backend = AsusdFanCurveMutationBackend::new(&asusd);
         // Valid temps (all within 0..=255) should pass.
         let good = valid_curve();
@@ -973,6 +1096,7 @@ mod tests {
     #[tokio::test]
     async fn wire_roundtrip_pwm_above_100_preserves_arrays() {
         let asusd = FakeAsusd::new();
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Gpu, true);
         let backend = AsusdFanCurveMutationBackend::new(&asusd);
         let input = curve(
             [40, 42, 43, 60, 65, 69, 74, 78],
@@ -996,6 +1120,8 @@ mod tests {
     #[tokio::test]
     async fn per_fan_wire_roundtrip_pwm_above_100() {
         let asusd = FakeAsusd::new();
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Cpu, true);
+        asusd.seed_curve(AsusdFanProfile::Balanced, &FanId::Gpu, true);
         let backend = AsusdFanCurveMutationBackend::new(&asusd);
         let cpu_curve = curve(
             [45, 49, 54, 68, 74, 79, 84, 89],

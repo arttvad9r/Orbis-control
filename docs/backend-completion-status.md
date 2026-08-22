@@ -101,7 +101,8 @@ Remaining:
 
 - #109 — aggregate `FeatureId::FanCurves` requires both CPU and GPU read contracts; single-fan failure suppresses the aggregate (source-complete; executable validation still pending);
 - #116 — stored `FanCurveData.enabled` is carried end-to-end to UI (`fan-curve-enabled-known`/`enabled`) (source-complete; executable validation still pending);
-- #104/#105 — dormant write/reset safety defects remain mandatory before any future write promotion.
+- #104 — custom-write path now preserves authoritative `FanCurveData.enabled` in hardwared (read → pass-through → read-back confirms; source-complete, executable validation still pending);
+- #105 — factory-reset profile restoration enforced at Orbis source level (backend never switches platform profile; any temporary switch stays in asusd) (source-complete, executable validation still pending).
 
 ## Product/release-gated writers
 

@@ -64,7 +64,7 @@ Before any fan write promotion:
 
 1. #109 — aggregate `FeatureId::FanCurves` now requires both CPU and GPU read contracts; single-fan failure (including `BackendMissing`/`PermissionDenied`) suppresses the aggregate (source-complete; executable validation still required).
 2. #116 — stored `FanCurveData.enabled` now reaches typed Session1/client/UI evidence and is rendered from `UiState` in the FansWindow (source-complete; executable validation still required).
-3. #104 — dormant custom-write path must preserve authoritative `enabled` on write/read-back.
+3. #104 — dormant custom-write path now preserves authoritative `enabled` on write/read-back (hardwared read → pass-through → read-back confirm; source-complete, executable validation still required).
 4. #105 — Factory Defaults must restore original platform profile on every success/failure path or avoid temporary profile switching.
 5. executable tests on exact revision.
 6. controlled hardware validation with final fan/profile state proof.
