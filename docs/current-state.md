@@ -51,7 +51,7 @@ Production product path намеренно включает только док�
 | Provider execution | PARTIAL HARDENING — #123 | Canonical `bounded_provider_call`; public probes, CLI and main worker read refreshes use provider deadlines. Telemetry/status requery and mutation unknown-outcome boundary remain. |
 | CLI | IMPLEMENTED READ-ONLY / VALIDATION OPEN — #119 | `status` + versioned `status --json` (schema 2 includes battery threshold evidence); typed states; no mutation commands. |
 | Telemetry | IMPLEMENTED / EVIDENCE GAP — #117 | Partial metrics are supported, but empty/useful/field-local failure coverage is not fully modeled. |
-| Fan reads | IMPLEMENTED / STORED ENABLED CARRIED — #109 open | Per-fan Session1 read exists; stored `FanCurveData.enabled` is carried through Session1/client/UI evidence (#116 source-complete) and rendered from `UiState` in the FansWindow; aggregate capability still CPU-centric (#109). |
+| Fan reads | IMPLEMENTED / AGGREGATE TRUTH + STORED ENABLED CARRIED | Per-fan Session1 read exists; stored `FanCurveData.enabled` is carried through Session1/client/UI evidence (#116 source-complete) and rendered from `UiState` in the FansWindow; aggregate FanCurves requires both CPU and GPU read contracts (#109 source-complete). |
 | Fan writes/reset | HARD-BLOCKED — #104/#105 | UI + polkit + production Hardware1 composition prevent the dormant unsafe write path. Successful factory-reset semantics are hardened in source: `ApplyResult::Accepted` (never `Applied`), Timeout/Dbus after possible dispatch → unknown-outcome, serialized through the worker FIFO with custom fan writes. Orbis-side #105 contract enforced by source test: the fan mutation/reset backend never switches the platform profile itself (any temporary switch stays inside asusd). |
 | Panel write | HARD-BLOCKED | Typed API may exist; production backend status remains Unsupported/default-deny. |
 | Keyboard write | HARD-BLOCKED | Current production Hardware1 reports Unsupported; root sandbox does not expose keyboard write path. |
@@ -106,8 +106,8 @@ The old claim that a requested CPU read requires both CPU and GPU curves is no l
 
 Remaining fan evidence defects:
 
-- registry still publishes one aggregate `FeatureId::FanCurves` from a CPU probe, so CPU support can still overstate UI-visible GPU support (#109);
-- stored `FanCurveData.enabled` is still lost before the final Session1/client/UI observation (#116);
+- aggregate `FeatureId::FanCurves` is published only when both CPU and GPU read contracts are proven; a single-fan read failure suppresses the aggregate, so CPU support never overstates UI-visible GPU support (#109 source-complete);
+- stored `FanCurveData.enabled` is now carried end-to-end into `UiState` and the FansWindow (`fan-curve-enabled-known`/`enabled`) (#116 source-complete);
 - custom write preservation of `enabled` and factory-reset profile restoration remain mandatory future-write blockers (#104/#105).
 
 No fan writes should be enabled while these remain unresolved.

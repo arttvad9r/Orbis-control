@@ -1502,6 +1502,93 @@ mod tests {
         );
     }
 
+    #[test]
+    fn fan_curve_capability_does_not_infer_gpu_support_from_cpu_alone() {
+        // Symmetric #109 guard: CPU read proven, GPU read absent. The
+        // aggregate must not stay Supported; CPU evidence alone would overstate
+        // UI-visible GPU support.
+        let cpu =
+            Capability::new(CapabilityStatus::Supported).with_operations(CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::Supported),
+                write: OperationCapability::new(CapabilityStatus::Supported),
+            });
+        let gpu_missing = Capability::new(CapabilityStatus::BackendMissing).with_operations(
+            CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::BackendMissing),
+                write: OperationCapability::new(CapabilityStatus::BackendMissing),
+            },
+        );
+
+        let aggregate = aggregate_fan_curve_capability(cpu.clone(), gpu_missing);
+        assert_ne!(
+            aggregate.operations.read.status,
+            CapabilityStatus::Supported,
+            "CPU-only evidence must not publish aggregate FanCurves as read-Supported"
+        );
+        assert_ne!(
+            aggregate.operations.read.status,
+            CapabilityStatus::SupportedWithRequirement,
+            "CPU-only evidence must not publish aggregate FanCurves as read-SupportedWithRequirement"
+        );
+        assert_eq!(
+            aggregate.operations.write.status,
+            CapabilityStatus::Unsupported,
+            "write must not survive a partial-fan aggregate"
+        );
+
+        // Reverse: GPU proven, CPU missing must also not infer CPU support.
+        let cpu_missing = Capability::new(CapabilityStatus::BackendMissing).with_operations(
+            CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::BackendMissing),
+                write: OperationCapability::new(CapabilityStatus::BackendMissing),
+            },
+        );
+        let gpu =
+            Capability::new(CapabilityStatus::Supported).with_operations(CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::Supported),
+                write: OperationCapability::new(CapabilityStatus::Supported),
+            });
+        let aggregate = aggregate_fan_curve_capability(cpu_missing, gpu);
+        assert_ne!(
+            aggregate.operations.read.status,
+            CapabilityStatus::Supported,
+            "GPU-only evidence must not infer aggregate Fan read support"
+        );
+        assert_eq!(
+            aggregate.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
+
+    #[test]
+    fn fan_curve_aggregate_suppression_preserves_origin_error_class() {
+        // When either fan read fails, the surviving operation should keep the
+        // failing fan's honest error class instead of collapsing to a generic
+        // Unsupported that could hide BackendMissing vs PermissionDenied.
+        let cpu =
+            Capability::new(CapabilityStatus::Supported).with_operations(CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::Supported),
+                write: OperationCapability::new(CapabilityStatus::Supported),
+            });
+        let gpu_permission = Capability::new(CapabilityStatus::PermissionDenied).with_operations(
+            CapabilityOperations {
+                read: OperationCapability::new(CapabilityStatus::PermissionDenied),
+                write: OperationCapability::new(CapabilityStatus::PermissionDenied),
+            },
+        );
+
+        let aggregate = aggregate_fan_curve_capability(cpu, gpu_permission);
+        assert_eq!(
+            aggregate.operations.read.status,
+            CapabilityStatus::PermissionDenied,
+            "PermissionDenied on one fan must surface, not become Unsupported"
+        );
+        assert_eq!(
+            aggregate.operations.write.status,
+            CapabilityStatus::Unsupported
+        );
+    }
+
     #[tokio::test]
     async fn primitive_gpu_services_do_not_claim_product_mode_support() {
         let provider = Arc::new(MockProvider::new(

@@ -99,8 +99,8 @@ Per-fan profile reads are now concrete: a requested CPU curve no longer requires
 
 Remaining:
 
-- #109 — aggregate `FeatureId::FanCurves` is still published from a CPU-only probe and can overstate GPU availability;
-- #116 — stored `FanCurveData.enabled` is not carried end-to-end;
+- #109 — aggregate `FeatureId::FanCurves` requires both CPU and GPU read contracts; single-fan failure suppresses the aggregate (source-complete; executable validation still pending);
+- #116 — stored `FanCurveData.enabled` is carried end-to-end to UI (`fan-curve-enabled-known`/`enabled`) (source-complete; executable validation still pending);
 - #104/#105 — dormant write/reset safety defects remain mandatory before any future write promotion.
 
 ## Product/release-gated writers

@@ -53,7 +53,7 @@ REQUIRED = {
         "#111 closed",
         "#121 closed",
         "bounded_provider_call",
-        "aggregate capability still CPU-centric",
+        "aggregate FanCurves requires both CPU and GPU read contracts",
         "Effective product-policy truth (#120 complete)",
         "Draft integration PR: #129",
     ),

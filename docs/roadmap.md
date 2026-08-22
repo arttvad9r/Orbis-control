@@ -62,7 +62,7 @@ write or product capability to `Supported`.
 
 Before any fan write promotion:
 
-1. #109 — stop aggregate CPU→GPU support inference in the capability registry. Per-fan Session1 reads already exist; the remaining defect is capability aggregation.
+1. #109 — aggregate `FeatureId::FanCurves` now requires both CPU and GPU read contracts; single-fan failure (including `BackendMissing`/`PermissionDenied`) suppresses the aggregate (source-complete; executable validation still required).
 2. #116 — stored `FanCurveData.enabled` now reaches typed Session1/client/UI evidence and is rendered from `UiState` in the FansWindow (source-complete; executable validation still required).
 3. #104 — dormant custom-write path must preserve authoritative `enabled` on write/read-back.
 4. #105 — Factory Defaults must restore original platform profile on every success/failure path or avoid temporary profile switching.
