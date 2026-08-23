@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
 use orbis_providers::error::ProviderError;
 use zbus::Connection;
+use zbus::names::BusName;
 
 pub const ASUSD_BUS_NAME: &str = "xyz.ljones.Asusd";
 pub const ASUSD_OBJECT_PATH: &str = "/xyz/ljones";
@@ -33,6 +34,15 @@ pub fn validate_charge_limit(percent: u8) -> Result<(), ProviderError> {
 pub trait AsusdBatteryClient: Send + Sync {
     async fn set_charge_control_end_threshold(&self, percent: u8) -> Result<(), ProviderError>;
     async fn get_charge_control_end_threshold(&self) -> Result<u8, ProviderError>;
+
+    /// Non-activating runtime owner liveness probe for the fixed asusd name.
+    ///
+    /// Uses only the D-Bus daemon ownership table (`NameHasOwner`), so a
+    /// stopped-but-activatable asusd is never started as a probing side
+    /// effect. The default reports a confirmed owner for test fakes.
+    async fn asusd_owned(&self) -> Result<bool, ProviderError> {
+        Ok(true)
+    }
 }
 
 /// Fresh read-only effective kernel threshold source.
@@ -238,6 +248,22 @@ impl AsusdBatteryClient for ZbusAsusdBatteryClient {
             .await
             .map_err(|error| ProviderError::Dbus(format!("asusd configured read: {error}")))
     }
+
+    async fn asusd_owned(&self) -> Result<bool, ProviderError> {
+        let daemon = zbus::fdo::DBusProxy::new(&self.connection)
+            .await
+            .map_err(|error| ProviderError::Dbus(format!("system D-Bus daemon proxy: {error}")))?;
+        let bus_name = BusName::try_from(ASUSD_BUS_NAME).map_err(|error| {
+            ProviderError::Internal(format!("invalid fixed asusd D-Bus name: {error}"))
+        })?;
+        daemon
+            .name_has_owner(bus_name)
+            .await
+            .map_err(|error| match error {
+                zbus::fdo::Error::AccessDenied(message) => ProviderError::PermissionDenied(message),
+                other => ProviderError::Dbus(format!("NameHasOwner({ASUSD_BUS_NAME}): {other}")),
+            })
+    }
 }
 
 /// Fresh result of an asusd mutation and its two backend read-backs.
@@ -324,6 +350,13 @@ pub trait BatteryMutationBackend: Send + Sync {
     /// This is read-only evidence used by capability probing; it never
     /// performs I/O and never mutates hardware.
     fn mutation_status(&self) -> BatteryMutationStatus;
+
+    /// Runtime backend liveness re-check used to demote a stale `Supported`
+    /// status (#107). The default keeps the startup status authoritative for
+    /// backends without a dynamic probe.
+    async fn backend_alive(&self) -> Result<bool, ProviderError> {
+        Ok(true)
+    }
 }
 
 /// Internal compatibility backend; it never writes the kernel directly.
@@ -387,6 +420,10 @@ where
 
     fn mutation_status(&self) -> BatteryMutationStatus {
         BatteryMutationStatus::Supported
+    }
+
+    async fn backend_alive(&self) -> Result<bool, ProviderError> {
+        self.asusd.asusd_owned().await
     }
 }
 

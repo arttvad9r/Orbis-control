@@ -1045,14 +1045,36 @@ impl HardwareService {
     /// required and no hardware I/O occurs. The returned wire value is one of
     /// `battery::battery_mutation_wire::*` so the GUI can honestly gate its
     /// mutation controls instead of guessing from `validate_charge_limit`.
-    fn battery_mutation_status(&self) -> u8 {
+    ///
+    /// A startup `Supported` backend is re-checked for runtime asusd owner
+    /// liveness on every query (#107): a stopped backend is reported as
+    /// `TemporarilyUnavailable` and an inconclusive probe as `Unknown`.
+    /// Non-`Supported` startup statuses are structural/authorization
+    /// evidence and stay unchanged.
+    async fn battery_mutation_status(&self) -> u8 {
         use battery::battery_mutation_wire;
-        battery_mutation_wire::to_wire(
-            self.battery_backend
-                .as_deref()
-                .map(|b| b.mutation_status())
-                .unwrap_or(battery::BatteryMutationStatus::Unknown),
-        )
+        let startup = self
+            .battery_backend
+            .as_deref()
+            .map(|b| b.mutation_status())
+            .unwrap_or(battery::BatteryMutationStatus::Unknown);
+        let status = match startup {
+            battery::BatteryMutationStatus::Supported => {
+                match self
+                    .battery_backend
+                    .as_deref()
+                    .expect("backend present for Supported status")
+                    .backend_alive()
+                    .await
+                {
+                    Ok(true) => battery::BatteryMutationStatus::Supported,
+                    Ok(false) => battery::BatteryMutationStatus::TemporarilyUnavailable,
+                    Err(_) => battery::BatteryMutationStatus::Unknown,
+                }
+            }
+            other => other,
+        };
+        battery_mutation_wire::to_wire(status)
     }
 
     /// Установить одну fan curve (profile wire 0..3, fan 0/1, ровно 8 точек);
@@ -1766,6 +1788,7 @@ mod tests {
     struct FakeBatteryBackend {
         calls: AtomicUsize,
         outcome: Mutex<Result<BatteryMutationReadback, ProviderError>>,
+        alive: Result<bool, ()>,
     }
 
     #[async_trait]
@@ -1784,11 +1807,17 @@ mod tests {
         fn mutation_status(&self) -> battery::BatteryMutationStatus {
             battery::BatteryMutationStatus::Supported
         }
+
+        async fn backend_alive(&self) -> Result<bool, ProviderError> {
+            self.alive
+                .map_err(|()| ProviderError::Dbus("liveness probe failed".into()))
+        }
     }
 
     fn battery_backend(configured: u8, effective: u8) -> FakeBatteryBackend {
         FakeBatteryBackend {
             calls: AtomicUsize::new(0),
+            alive: Ok(true),
             outcome: Mutex::new(Ok(BatteryMutationReadback {
                 requested_percent: configured,
                 configured_percent: configured,
@@ -1847,6 +1876,7 @@ mod tests {
     async fn battery_backend_error_maps_to_failed_without_retry() {
         let backend = FakeBatteryBackend {
             calls: AtomicUsize::new(0),
+            alive: Ok(true),
             outcome: Mutex::new(Err(ProviderError::Dbus("asusd failed".into()))),
         };
         let authorizer = FakeAuthorizer::new(AuthOutcome::Ok);
@@ -1869,8 +1899,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn battery_mutation_status_reflects_backend_presence() {
+    #[tokio::test]
+    async fn battery_mutation_status_reflects_backend_presence() {
         // Proven backend installed → SUPPORTED wire evidence.
         let service = HardwareService::with_battery_backend(
             Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
@@ -1878,7 +1908,7 @@ mod tests {
             Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
         );
         assert_eq!(
-            service.battery_mutation_status(),
+            service.battery_mutation_status().await,
             battery::battery_mutation_wire::SUPPORTED
         );
 
@@ -1886,7 +1916,40 @@ mod tests {
         // guessed Supported).
         let service = HardwareService::new(Box::new(FakeAuthorizer::new(AuthOutcome::Ok)));
         assert_eq!(
-            service.battery_mutation_status(),
+            service.battery_mutation_status().await,
+            battery::battery_mutation_wire::UNKNOWN
+        );
+    }
+
+    #[tokio::test]
+    async fn battery_mutation_status_demotes_stale_supported_on_owner_loss() {
+        // #107: a startup-Supported backend whose asusd owner disappeared is
+        // reported dynamically as TemporarilyUnavailable, never Supported.
+        let mut backend = battery_backend(80, 100);
+        backend.alive = Ok(false);
+        let service = HardwareService::with_battery_backend(
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+            Box::new(backend),
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+        );
+        assert_eq!(
+            service.battery_mutation_status().await,
+            battery::battery_mutation_wire::TEMPORARILY_UNAVAILABLE
+        );
+    }
+
+    #[tokio::test]
+    async fn battery_mutation_status_inconclusive_liveness_probe_is_unknown() {
+        // A failed liveness probe is no evidence: Unknown, not Supported.
+        let mut backend = battery_backend(80, 100);
+        backend.alive = Err(());
+        let service = HardwareService::with_battery_backend(
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+            Box::new(backend),
+            Box::new(FakeAuthorizer::new(AuthOutcome::Ok)),
+        );
+        assert_eq!(
+            service.battery_mutation_status().await,
             battery::battery_mutation_wire::UNKNOWN
         );
     }
