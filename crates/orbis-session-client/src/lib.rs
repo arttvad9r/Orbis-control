@@ -30,6 +30,11 @@ use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_hardwared::battery::validate_charge_limit;
 use orbis_hardwared::fans::{FanCurveWire, fan_profile_from_wire};
 use orbis_hardwared::{DBUS_OBJECT_PATH, Hardware1Proxy};
+
+/// Re-export of the typed `Hardware1.SetProductGpuMode` reply so GUI-side
+/// consumers can name the Hardware1 wire contract without depending on the
+/// privileged daemon crate directly.
+pub use orbis_hardwared::ProductGpuMutationResult;
 use orbis_providers::traits::{
     BatteryProvider, FanCurveMutationProvider, FanCurvePoints, FanProvider, GpuAccessProvider,
     GpuMuxProvider, GpuPowerProvider, PerformanceProvider, Provider, ProviderHealth,

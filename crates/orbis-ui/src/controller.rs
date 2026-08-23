@@ -217,6 +217,14 @@ pub struct UiState {
     /// Отдельно от `gpu_mode_state`: production запрещает mutation, пока
     /// доказанный product-mode backend отсутствует.
     pub gpu_mode_writable: bool,
+    /// Authoritative queued ASUS product GPU target card index (-1 = none).
+    ///
+    /// Заполняется только из authoritative read-back `SetProductGpuMode`;
+    /// никогда не из запрошенного значения.
+    pub gpu_queued: i32,
+    /// Authoritative evidence: queued firmware state applies at next
+    /// shutdown/reboot.
+    pub gpu_reboot_required: bool,
     /// Configured/reported charge threshold, % (не показывать при state != Ready).
     pub charge_limit: i32,
     /// Состояние UPower `ChargeThresholdEnabled`.
@@ -329,6 +337,21 @@ fn gpu_index(m: GpuMode) -> i32 {
     }
 }
 
+/// Map an ASUS product GPU wire value to a UI mode-card index.
+///
+/// Hybrid renders on the Eco card (0), Integrated on Standard (1), Ultimate
+/// stays Ultimate (2). `Optimized` is never produced: the ASUS Armoury
+/// product API has no such mode, so unknown sentinels (`u32::MAX`) and any
+/// other value map to `None` and must not overwrite UI evidence.
+pub fn asus_product_gpu_index(raw: u32) -> Option<i32> {
+    match raw {
+        0 => Some(0),
+        1 => Some(1),
+        2 => Some(2),
+        _ => None,
+    }
+}
+
 /// Явное исчерпывающее сопоставление профиля с индексом кнопки
 /// (без wildcard-ветки, чтобы добавление новых режимов было заметным).
 fn perf_index(p: PerformanceProfile) -> i32 {
@@ -359,6 +382,8 @@ impl UiState {
             gpu_section_error: false,
             gpu_mode_state: GpuModeHwState::Unavailable,
             gpu_mode_writable: false,
+            gpu_queued: -1,
+            gpu_reboot_required: false,
             charge_limit: 0,
             charge_limit_enabled: false,
             charge_limit_writable: false,
@@ -490,6 +515,8 @@ impl UiState {
             // отдельно в main().
             gpu_mode_state: GpuModeHwState::Ready,
             gpu_mode_writable: true,
+            gpu_queued: -1,
+            gpu_reboot_required: false,
             charge_limit,
             charge_limit_enabled,
             // mock/offscreen/tests могут применять лимит (fake interactive semantics);

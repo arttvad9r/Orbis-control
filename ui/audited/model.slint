@@ -20,6 +20,8 @@ export struct UiState {
     gpu-section-error: bool,
     gpu-mode-state: GpuModeHwState,
     gpu-mode-writable: bool,
+    gpu-queued: int,
+    gpu-reboot-required: bool,
     charge-limit: int,
     charge-limit-enabled: bool,
     charge-limit-writable: bool,

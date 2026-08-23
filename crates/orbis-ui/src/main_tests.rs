@@ -295,10 +295,11 @@ fn performance_unconfirmed_error_preserves_ui() {
 
 #[test]
 fn gpu_index_mapping() {
-    assert_eq!(gpu_mode_from_index(0), Some(GpuMode::Eco));
-    assert_eq!(gpu_mode_from_index(1), Some(GpuMode::Standard));
-    assert_eq!(gpu_mode_from_index(2), Some(GpuMode::Ultimate));
-    assert_eq!(gpu_mode_from_index(3), Some(GpuMode::Optimized));
+    assert_eq!(gpu_mode_from_index(0), Some(0)); // Hybrid
+    assert_eq!(gpu_mode_from_index(1), Some(1)); // Integrated
+    assert_eq!(gpu_mode_from_index(2), Some(2)); // Ultimate
+    // The ASUS product API has no Optimized mode; card 3 issues no request.
+    assert_eq!(gpu_mode_from_index(3), None);
     assert_eq!(gpu_mode_from_index(-1), None);
     assert_eq!(gpu_mode_from_index(9), None);
 }
@@ -1879,4 +1880,192 @@ fn theme_save_error_preserves_runtime_theme_and_is_diagnosable() {
     assert!(current_theme_light());
     // Theme persistence has no worker/provider input, so this failure path cannot
     // enqueue a Hardware1/sessiond/hardwared operation.
+}
+
+// --- ASUS product GPU queue result mapping (plan 2026-08-22, Task 4) ---
+
+/// Wire outcome constants mirrored from `orbis-hardwared` `handle_set_product_gpu_mode`.
+const PRODUCT_GPU_OUTCOME_ALREADY_ACTIVE: u32 = 0;
+const PRODUCT_GPU_OUTCOME_REBOOT_REQUIRED: u32 = 1;
+const PRODUCT_GPU_OUTCOME_UNKNOWN: u32 = 2;
+const PRODUCT_GPU_OUTCOME_INCONSISTENT: u32 = 3;
+
+fn product_gpu_result(
+    current_mode: u32,
+    queued_mode: u32,
+    outcome: u32,
+    reboot_required: bool,
+) -> ProductGpuMutationResult {
+    ProductGpuMutationResult {
+        requested_mode: 1,
+        current_mode,
+        queued_mode,
+        outcome,
+        reboot_required,
+    }
+}
+
+#[test]
+fn product_gpu_wire_index_maps_only_three_product_modes() {
+    assert_eq!(controller::asus_product_gpu_index(0), Some(0)); // Hybrid == Eco card
+    assert_eq!(controller::asus_product_gpu_index(1), Some(1)); // Integrated == Standard card
+    assert_eq!(controller::asus_product_gpu_index(2), Some(2)); // Ultimate
+    // Optimized (3) is never generated: the ASUS Armoury product API has no
+    // such mode; unknown sentinels and arbitrary values are rejected too.
+    assert_eq!(controller::asus_product_gpu_index(3), None);
+    assert_eq!(controller::asus_product_gpu_index(u32::MAX), None);
+    assert_eq!(controller::asus_product_gpu_index(9), None);
+}
+
+#[test]
+fn product_gpu_current_read_back_selects_the_card() {
+    let mut s = base_state();
+    s.gpu_selected = 1;
+
+    apply_product_gpu_result(
+        &mut s,
+        Ok(product_gpu_result(
+            0,
+            u32::MAX,
+            PRODUCT_GPU_OUTCOME_REBOOT_REQUIRED,
+            true,
+        )),
+    );
+
+    assert_eq!(s.gpu_selected, 0);
+}
+
+#[test]
+fn product_gpu_queued_target_is_carried_and_reboot_required() {
+    let mut s = base_state();
+    s.gpu_queued = -1;
+    s.gpu_reboot_required = false;
+
+    apply_product_gpu_result(
+        &mut s,
+        Ok(product_gpu_result(
+            1,
+            2,
+            PRODUCT_GPU_OUTCOME_REBOOT_REQUIRED,
+            true,
+        )),
+    );
+
+    assert_eq!(s.gpu_queued, 2);
+    assert!(s.gpu_reboot_required);
+}
+
+#[test]
+fn product_gpu_unknown_values_keep_previous_ui_evidence() {
+    let mut s = base_state();
+    s.gpu_selected = 1;
+    s.gpu_queued = 2;
+    s.gpu_reboot_required = false;
+    s.gpu_section_error = false;
+
+    apply_product_gpu_result(
+        &mut s,
+        Ok(product_gpu_result(
+            u32::MAX,
+            u32::MAX,
+            PRODUCT_GPU_OUTCOME_UNKNOWN,
+            false,
+        )),
+    );
+
+    // Unknown read-back never overwrites known evidence and is not success.
+    assert_eq!(s.gpu_selected, 1);
+    assert_eq!(s.gpu_queued, 2);
+    assert!(!s.gpu_reboot_required);
+    assert!(!s.gpu_section_error);
+}
+
+#[test]
+fn product_gpu_optimized_current_is_never_applied_to_ui() {
+    let mut s = base_state();
+    s.gpu_selected = 1;
+
+    apply_product_gpu_result(
+        &mut s,
+        Ok(product_gpu_result(
+            3,
+            3,
+            PRODUCT_GPU_OUTCOME_REBOOT_REQUIRED,
+            true,
+        )),
+    );
+
+    assert_eq!(s.gpu_selected, 1);
+}
+
+#[test]
+fn product_gpu_definitive_outcomes_drive_section_error_honestly() {
+    let mut s = base_state();
+    s.gpu_section_error = true;
+
+    apply_product_gpu_result(
+        &mut s,
+        Ok(product_gpu_result(
+            1,
+            2,
+            PRODUCT_GPU_OUTCOME_ALREADY_ACTIVE,
+            false,
+        )),
+    );
+    assert!(!s.gpu_section_error);
+
+    s.gpu_section_error = false;
+    apply_product_gpu_result(
+        &mut s,
+        Ok(product_gpu_result(
+            1,
+            2,
+            PRODUCT_GPU_OUTCOME_INCONSISTENT,
+            false,
+        )),
+    );
+    assert!(s.gpu_section_error);
+}
+
+#[test]
+fn product_gpu_command_error_marks_section_unconfirmed() {
+    let mut s = base_state();
+    s.gpu_section_error = false;
+
+    apply_product_gpu_result(
+        &mut s,
+        Err(ProviderError::Unsupported(
+            "ASUS product GPU backend unavailable".into(),
+        )),
+    );
+
+    assert!(s.gpu_section_error);
+}
+
+#[test]
+fn production_initial_has_no_queued_target_or_reboot_claim() {
+    let s = controller::UiState::production_initial();
+    assert_eq!(s.gpu_queued, -1);
+    assert!(!s.gpu_reboot_required);
+}
+
+#[test]
+fn main_window_renders_queued_target_and_reboot_state() {
+    let source = include_str!("../../../ui/audited/main-window.slint");
+    // Queued target renders as pending on the exact queued card.
+    assert!(source.contains("gpu-queued == 0"));
+    assert!(source.contains("gpu-queued == 1"));
+    assert!(source.contains("gpu-queued == 2"));
+    // Reboot-required status line exists; Optimized never gains a queued binding.
+    assert!(source.contains("shutdown/reboot"));
+    let optimized_line_start = source.find("title: \"Optimized\"").expect("Optimized card");
+    let optimized_line_end = source[optimized_line_start..]
+        .find('\n')
+        .map(|end| optimized_line_start + end)
+        .expect("Optimized card line ends");
+    let optimized_line = &source[optimized_line_start..optimized_line_end];
+    assert!(
+        !optimized_line.contains("pending:"),
+        "Optimized must never render a product-queue pending state"
+    );
 }

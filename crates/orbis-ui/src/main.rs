@@ -28,8 +28,11 @@ use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::error::ProviderError;
+use orbis_session_client::{
+    HardwareProductGpuSource, ProductGpuMutationResult, ZbusHardwareProductGpuSource,
+};
 use orbis_ui::composition::build_production_runtime;
-use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker_with_polling};
+use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker_with_product_gpu};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
 use slint::{ComponentHandle, LogicalSize, PhysicalSize, Rgb8Pixel, WindowSize};
 use tokio::sync::mpsc::UnboundedSender;
@@ -131,6 +134,8 @@ fn to_slint(state: &controller::UiState) -> UiState {
             controller::GpuModeHwState::Unavailable => GpuModeHwState::Unavailable,
         },
         gpu_mode_writable: state.gpu_mode_writable,
+        gpu_queued: state.gpu_queued,
+        gpu_reboot_required: state.gpu_reboot_required,
         charge_limit: state.charge_limit,
         charge_limit_enabled: state.charge_limit_enabled,
         charge_limit_writable: state.charge_limit_writable,
@@ -234,6 +239,8 @@ fn from_slint(state: &UiState) -> controller::UiState {
             GpuModeHwState::Unavailable => controller::GpuModeHwState::Unavailable,
         },
         gpu_mode_writable: state.gpu_mode_writable,
+        gpu_queued: state.gpu_queued,
+        gpu_reboot_required: state.gpu_reboot_required,
         charge_limit: state.charge_limit,
         charge_limit_enabled: state.charge_limit_enabled,
         charge_limit_writable: state.charge_limit_writable,
@@ -877,12 +884,15 @@ fn gpu_mode_card_disabled(state: &controller::UiState, _index: i32, mask_bit: i3
         || state.available_gpu_mask & mask_bit == 0
 }
 
-fn gpu_mode_from_index(index: i32) -> Option<GpuMode> {
+fn gpu_mode_from_index(index: i32) -> Option<u32> {
+    // Exact product wire targets for Hardware1.SetProductGpuMode.
+    //
+    // The ASUS Armoury product API has no `Optimized` mode, so card 3 never
+    // issues a product request.
     match index {
-        0 => Some(GpuMode::Eco),
-        1 => Some(GpuMode::Standard),
-        2 => Some(GpuMode::Ultimate),
-        3 => Some(GpuMode::Optimized),
+        0 => Some(0), // Hybrid
+        1 => Some(1), // Integrated
+        2 => Some(2), // Ultimate
         _ => None,
     }
 }
@@ -980,6 +990,58 @@ fn apply_gpu_result(
             tracing::warn!(
                 "gpu: исход мутации неизвестен (ожидалось: {intent}; команда: {command:?}; read-back: {observation:?})"
             );
+        }
+    }
+}
+
+fn apply_product_gpu_result(
+    state: &mut controller::UiState,
+    result: Result<ProductGpuMutationResult, ProviderError>,
+) {
+    // Wire outcome encoding of `Hardware1.SetProductGpuMode` (orbis-hardwared).
+    const OUTCOME_ALREADY_ACTIVE: u32 = 0;
+    const OUTCOME_REBOOT_REQUIRED: u32 = 1;
+    const OUTCOME_INCONSISTENT: u32 = 3;
+
+    match result {
+        Ok(reply) => {
+            // Apply only authoritative current/queued read-back values; a
+            // successful queued result never claims an applied mode and
+            // unknown wire sentinels keep previous UI evidence.
+            if let Some(index) = controller::asus_product_gpu_index(reply.current_mode) {
+                state.gpu_selected = index;
+            }
+            if let Some(index) = controller::asus_product_gpu_index(reply.queued_mode) {
+                state.gpu_queued = index;
+            }
+            state.gpu_reboot_required = reply.reboot_required;
+            match reply.outcome {
+                OUTCOME_ALREADY_ACTIVE | OUTCOME_REBOOT_REQUIRED => {
+                    state.gpu_section_error = false;
+                    tracing::debug!(
+                        "product gpu: queued state confirmed: requested={}, current={}, queued={}, reboot_required={}",
+                        reply.requested_mode,
+                        reply.current_mode,
+                        reply.queued_mode,
+                        reply.reboot_required
+                    );
+                }
+                OUTCOME_INCONSISTENT => {
+                    state.gpu_section_error = true;
+                    tracing::warn!("product gpu: read-back inconsistent: {reply:?}");
+                }
+                _ => {
+                    // Unknown outcome is not a definitive failure and not a
+                    // success: UI keeps previous section state.
+                    tracing::warn!(
+                        "product gpu: outcome unknown; UI keeps previous evidence: {reply:?}"
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            state.gpu_section_error = true;
+            tracing::warn!("product gpu: команда не выполнена: {e:?}");
         }
     }
 }
@@ -1191,6 +1253,7 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             );
         }
         WorkerEvent::Gpu(result) => apply_gpu_result(state, result),
+        WorkerEvent::ProductGpu(result) => apply_product_gpu_result(state, result),
         WorkerEvent::ChargeLimit(result) => apply_charge_limit_result(state, result),
         WorkerEvent::ChargeLimitRefresh(result) => apply_charge_limit_refresh(state, result),
         WorkerEvent::GpuPowerRefresh(result) => apply_gpu_power_refresh(state, result),
@@ -1338,8 +1401,8 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
     {
         let worker_tx = worker_tx.clone();
         app.on_gpu_clicked(move |i| {
-            let Some(mode) = gpu_mode_from_index(i) else {
-                tracing::warn!("gpu-clicked с неизвестным индексом: {i}");
+            let Some(raw) = gpu_mode_from_index(i) else {
+                tracing::warn!("gpu-clicked с неизвестным/непродуктовым индексом: {i}");
                 return;
             };
             if let Some(app) = app_weak.upgrade() {
@@ -1351,10 +1414,9 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                     return;
                 }
             }
-            let confirmed = false;
             match &worker_tx {
                 Some(tx) => {
-                    if let Err(e) = tx.send(WorkerCommand::SetGpuMode { mode, confirmed }) {
+                    if let Err(e) = tx.send(WorkerCommand::SetProductGpuMode { raw }) {
                         tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
                     }
                 }
@@ -1791,6 +1853,11 @@ fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
     let diagnostics_session_connection = session_connection.clone();
     let diagnostics_system_connection = system_connection.clone();
+    // Original application caller identity for the ASUS product GPU Hardware1
+    // operation: the GUI owns this connection and passes it through the worker
+    // FIFO. The operation stays fail-closed until polkit/backend promotion.
+    let product_gpu_source: std::sync::Arc<dyn HardwareProductGpuSource> =
+        std::sync::Arc::new(ZbusHardwareProductGpuSource::new(system_connection.clone()));
     let (application_runtime, _hardware_owner) = runtime.block_on(build_production_runtime(
         session_connection,
         system_connection,
@@ -1827,11 +1894,12 @@ fn main() -> anyhow::Result<()> {
             tracing::warn!("не удалось вернуть событие worker-а в event loop: {e:?}");
         }
     };
-    runtime.spawn(run_worker_with_polling(
+    runtime.spawn(run_worker_with_product_gpu(
         application_runtime,
         worker_rx,
         event_sink,
-        poll_interval,
+        Some(poll_interval),
+        Some(product_gpu_source),
     ));
 
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshChargeLimit) {

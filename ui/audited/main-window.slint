@@ -15,6 +15,7 @@ export component AppWindow inherits Window {
         perf-selected: 1, available-perf-mask: 0, perf-state: PerformanceHwState.Loading, perf-writable: false, perf-unavailable-reason: "",
         gpu-selected: 1, available-gpu-mask: 0, gpu-ultimate-pending: false, gpu-ultimate-disabled: false,
         gpu-section-error: false, gpu-mode-state: GpuModeHwState.Loading, gpu-mode-writable: false,
+        gpu-queued: -1, gpu-reboot-required: false,
         charge-limit: 80, charge-limit-enabled: false, charge-limit-writable: false, charge-limit-unavailable-reason: "", charge-limit-state: ChargeLimitState.Loading,
         gpu-power-state: GpuHwState.Loading, gpu-mux-state: GpuHwState.Loading, gpu-access-state: GpuHwState.Loading,
         gpu-power-value: 0, gpu-mux-value: 0, gpu-access-value: 0,
@@ -109,12 +110,13 @@ export component AppWindow inherits Window {
             SectionTitle { title: root.gpu-label(); detail: root.gpu-detail(); }
             HorizontalLayout {
                 height: 54px; spacing: 6px;
-                ModeCard { title: "Eco"; compact: true; accent: Palette.eco; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1); clicked => { root.gpu-clicked(0); } }
-                ModeCard { title: "Standard"; compact: true; accent: Palette.standard; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2); clicked => { root.gpu-clicked(1); } }
-                ModeCard { title: "Ultimate"; compact: true; accent: Palette.ultimate; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2; pending: root.ui-state.gpu-ultimate-pending; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4); clicked => { root.gpu-clicked(2); } }
+                ModeCard { title: "Eco"; compact: true; accent: Palette.eco; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0; pending: root.ui-state.gpu-queued == 0; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1); clicked => { root.gpu-clicked(0); } }
+                ModeCard { title: "Standard"; compact: true; accent: Palette.standard; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1; pending: root.ui-state.gpu-queued == 1; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2); clicked => { root.gpu-clicked(1); } }
+                ModeCard { title: "Ultimate"; compact: true; accent: Palette.ultimate; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2; pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4); clicked => { root.gpu-clicked(2); } }
                 ModeCard { title: "Optimized"; compact: true; accent: Palette.optimized; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 8); clicked => { root.gpu-clicked(3); } }
             }
             if (root.ui-state.gpu-section-error) : LocalStatus { text: "GPU mode change was not confirmed"; accent: Palette.error; }
+            if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : LocalStatus { text: "GPU mode queued · applied at next shutdown/reboot"; accent: Palette.warning; }
         }
 
         VerticalLayout {

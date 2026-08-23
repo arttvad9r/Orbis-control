@@ -34,6 +34,7 @@ use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_providers::bounded_provider_call;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::FanCurvePoints;
+use orbis_session_client::{HardwareProductGpuSource, ProductGpuMutationResult};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -50,6 +51,13 @@ pub enum WorkerCommand {
     SetGpuMode {
         mode: GpuMode,
         confirmed: bool,
+    },
+    /// Queue an ASUS product GPU mode through the typed Hardware1 operation.
+    ///
+    /// `raw` is the exact product wire target (0=Hybrid, 1=Integrated,
+    /// 2=Ultimate); validation happens at the Hardware1 boundary.
+    SetProductGpuMode {
+        raw: u32,
     },
     SetChargeLimit {
         percent: u8,
@@ -78,6 +86,8 @@ pub enum WorkerCommand {
 pub enum WorkerEvent {
     Performance(Result<PerformanceCommandOutcome, SetPerformanceError>),
     Gpu(Result<GpuCommandOutcome, SetGpuModeError>),
+    /// Authoritative result of the ASUS product GPU queue operation.
+    ProductGpu(Result<ProductGpuMutationResult, ProviderError>),
     ChargeLimit(Result<ChargeLimitCommandOutcome, SetChargeLimitError>),
     ChargeLimitRefresh(Result<orbis_core::battery::ChargeLimit, ProviderError>),
     GpuPowerRefresh(Result<GpuPowerState, ProviderError>),
@@ -187,7 +197,7 @@ pub async fn run_worker<G, B, R, F>(
     R: PerformanceServiceRuntime + Sync + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
-    run_worker_inner(runtime, receiver, emit, None).await;
+    run_worker_with_product_gpu(runtime, receiver, emit, None, None).await;
 }
 
 pub async fn run_worker_with_polling<G, B, R, F>(
@@ -201,7 +211,28 @@ pub async fn run_worker_with_polling<G, B, R, F>(
     R: PerformanceServiceRuntime + Sync + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
-    run_worker_inner(runtime, receiver, emit, Some(poll_interval)).await;
+    run_worker_with_product_gpu(runtime, receiver, emit, Some(poll_interval), None).await;
+}
+
+/// Worker entry point with an optional ASUS product GPU Hardware1 source.
+///
+/// The source is composed by the production main so the original application
+/// caller identity is preserved. `None` keeps the operation fail-closed:
+/// the command is answered with a typed `Unsupported` error instead of a
+/// simulated success.
+pub async fn run_worker_with_product_gpu<G, B, R, F>(
+    runtime: ApplicationRuntime<G, B, R>,
+    receiver: UnboundedReceiver<WorkerCommand>,
+    emit: F,
+    poll_interval: Option<Duration>,
+    product_gpu: Option<std::sync::Arc<dyn HardwareProductGpuSource>>,
+) where
+    G: GpuServicesRuntime + 'static,
+    B: BatteryServiceRuntime + 'static,
+    R: PerformanceServiceRuntime + Sync + 'static,
+    F: FnMut(WorkerEvent) + Send + 'static,
+{
+    run_worker_inner(runtime, receiver, emit, poll_interval, product_gpu).await;
 }
 
 fn sync_persisted_automation_policy(driver: &mut AutomationWorkerDriver) {
@@ -545,6 +576,7 @@ async fn run_worker_inner<G, B, R, F>(
     mut receiver: UnboundedReceiver<WorkerCommand>,
     mut emit: F,
     poll_interval: Option<Duration>,
+    product_gpu: Option<std::sync::Arc<dyn HardwareProductGpuSource>>,
 ) where
     G: GpuServicesRuntime + 'static,
     B: BatteryServiceRuntime + 'static,
@@ -714,6 +746,15 @@ async fn run_worker_inner<G, B, R, F>(
             WorkerCommand::SetGpuMode { mode, confirmed } => {
                 WorkerEvent::Gpu(runtime.gpu.set_gpu_mode(mode, confirmed).await)
             }
+            WorkerCommand::SetProductGpuMode { raw } => {
+                let result = match product_gpu.as_deref() {
+                    Some(source) => source.set_product_gpu_mode(raw).await,
+                    None => Err(ProviderError::Unsupported(
+                        "ASUS product GPU mutation is not promoted on this build".into(),
+                    )),
+                };
+                WorkerEvent::ProductGpu(result)
+            }
             WorkerCommand::SetChargeLimit { percent } => {
                 let mut latest_percent = percent;
                 loop {
@@ -831,6 +872,14 @@ mod tests {
         assert!(!source.contains("set_gpu_mode_for_automation"));
         assert!(!source.contains("set_fan_curve_for_automation"));
         assert!(!source.contains("set_charge_limit_for_automation"));
+    }
+
+    #[test]
+    fn product_gpu_request_is_fifo_only_and_never_automated() {
+        let source = production_source();
+        assert!(source.contains("WorkerCommand::SetProductGpuMode { raw }"));
+        assert!(source.contains("source.set_product_gpu_mode(raw).await"));
+        assert!(!source.contains("set_product_gpu_mode_for_automation"));
     }
 
     #[test]
