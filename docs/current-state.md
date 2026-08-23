@@ -43,13 +43,13 @@ Production product path намеренно включает только док�
 | Window/tray lifecycle | IMPLEMENTED SOURCE — #121 closed | Start Minimized, X11-style position restore/save, Wayland fail-closed behavior, StatusNotifier tray gating and explicit Quit lifecycle. |
 | Diagnostics | IMPLEMENTED SOURCE — #111 closed | Runtime initialization, capability generation replacement, Refresh, privacy-bounded JSON export and Copy Summary wired; Open Logs intentionally disabled. |
 | Battery read | IMPLEMENTED / ASUS+SYSFS CONSENSUS | Current charge/status come from UPower; configured/effective charge-limit state is accepted when ASUS/asusd and kernel sysfs agree. UPower threshold is diagnostic only. |
-| Battery mutation | HISTORICAL LIVE-VALIDATED / HARDENING OPEN | Controlled Hardware1 path; dynamic asusd owner/interface liveness remains #107. |
+| Battery mutation | HISTORICAL LIVE-VALIDATED / HARDENING OPEN | Controlled Hardware1 path. Dynamic asusd owner liveness is implemented (#107): `Hardware1.BatteryMutationStatus` re-checks the non-activating `NameHasOwner` probe per query and demotes stale `Supported` to `TemporarilyUnavailable` (inconclusive probe → `Unknown`). Interface-level drift remains covered by typed mutation failures and the startup preflight. |
 | Performance read/write | HISTORICAL LIVE-VALIDATED / CURRENT SOURCE IMPLEMENTED | Session1 read + Hardware1/polkit write + read-back. |
 | GPU primitives | HISTORICAL LIVE-VALIDATED READS | Power, physical MUX and access policy remain separate read concepts. |
 | GPU product mode read | IMPLEMENTED SOURCE / ASUSD ARMOURY | Read-only `dgpu_disable + gpu_mux_mode` decoder reports Hybrid/Integrated/Ultimate; Optimized is not inferred. Current host reports Hybrid (fresh read-only Armoury snapshot 2026-08-24: `CurrentValue` pair `(0,1)`, both `QueuedGpuValue=-1`). |
 | ASUS product GPU queue operation | IMPLEMENTED / REVISION-SCOPED TESTED / PACKAGED — PRODUCTION BLOCKED | Typed `Hardware1.SetProductGpuMode` exists end-to-end (provider outcome/mismatch classification → hardwared paired queue backend + P2P tests → session-client caller-preserving source → worker FIFO command/event → UI queued-target + reboot-required rendering). Polkit action `io.github.orbiscontrol.hardware.set-product-gpu-mode` ships `allow_active=no`; hardwared production composition keeps the backend unattached (`NotSupported`); UI controls stay disabled without `Supported` write evidence. No real host write was issued; controlled live validation requires explicit user confirmation. |
 | GPU product/raw mutation | BLOCKED | Product modes are policy, not raw backend enum. Production mutation remains disabled; ASUS GPU attributes are queued/deferred until shutdown and require reboot semantics. Raw `Hardware1.SetGpuMode` supergfxd semantics unchanged. |
-| Capability registry | IMPLEMENTED / RESILIENCE COVERED | Whole-swap immutable generations; explicit and periodic refresh share canonical mutation-status requery (#112 source-complete); backend loss/timeout and recovery publish capability-local availability transitions. UI/Diagnostics/support-policy source audit #120 is complete; Battery owner evidence remains #107. |
+| Capability registry | IMPLEMENTED / RESILIENCE COVERED | Whole-swap immutable generations; explicit and periodic refresh share canonical mutation-status requery (#112 source-complete); backend loss/timeout and recovery publish capability-local availability transitions. UI/Diagnostics/support-policy source audit #120 is complete; Battery owner evidence is now dynamic (#107 owner liveness). |
 | Provider execution | PARTIAL HARDENING — #123 | Canonical `bounded_provider_call`; public probes, CLI and main worker read refreshes use provider deadlines. Telemetry/status requery and mutation unknown-outcome boundary remain. |
 | CLI | IMPLEMENTED READ-ONLY / VALIDATION OPEN — #119 | `status` + versioned `status --json` (schema 2 includes battery threshold evidence); typed states; no mutation commands. |
 | Telemetry | IMPLEMENTED / EVIDENCE GAP — #117 | Partial metrics are supported, but empty/useful/field-local failure coverage is not fully modeled. |
@@ -175,7 +175,7 @@ All of them are exported from crate public APIs but have **no runtime consumers*
 1. #106 executable CI/tooling recovery.
 2. #125 GUI root guard.
 3. #123 remaining telemetry/status/mutation unknown-outcome timeout design.
-4. #107 dynamic Battery mutation owner/interface liveness.
+4. #107 residual: asusd interface-level drift detection (owner liveness is dynamic in source).
 5. #117 telemetry coverage/freshness semantics.
 6. #109 aggregate CPU/GPU fan capability truth.
 7. #116 fan stored-enabled read evidence.
