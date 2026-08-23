@@ -429,10 +429,12 @@ impl UiState {
         }
     }
 
-    /// Начальное состояние из mock-профиля `zephyrus-full`.
+    /// Начальное состояние из mock-профиля (fixture-derived).
     ///
-    /// Используется существующий публичный API `orbis-test-support::devices::build_state`;
-    /// `MockProvider` для прототипа не требуется.
+    /// Не входит в release-граф (#115): используется только unit-тестами и
+    /// UI-review/скриншот сборками с фичей `ui-review`. Production startup
+    /// использует [`Self::production_initial`].
+    #[cfg(any(test, feature = "ui-review"))]
     pub fn from_mock_profile(profile_name: &str) -> Self {
         let state =
             orbis_test_support::devices::build_state(profile_name).expect("mock profile exists");

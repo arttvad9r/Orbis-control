@@ -29,10 +29,11 @@ orbis-application = { path = "../orbis-application", version = "0.1.0" }
 orbis-session-client = { path = "../orbis-session-client", version = "0.1.0" }
 orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false }
 orbis-sessiond = { workspace = true }
-# Still a production dependency only because UiState::from_mock_profile is used
-# by the current shared production/offscreen bootstrap. Removing this dependency
-# is the remaining #115 UI-state refactor.
-orbis-test-support = { workspace = true }
+# Fixture-derived UiState bootstrap is no longer part of the release graph
+# (#115): production startup uses `UiState::production_initial`. The fixture
+# crate remains available to unit tests (dev-dependency) and to explicit UI
+# review/screenshot builds via the `ui-review` feature.
+orbis-test-support = { workspace = true, optional = true }
 image = { workspace = true }
 
 [build-dependencies]
@@ -41,10 +42,14 @@ slint-build = "1"
 [dev-dependencies]
 async-trait = { workspace = true }
 tempfile = { workspace = true }
+orbis-test-support = { workspace = true }
 orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }
 
 [features]
 # Explicit compatibility feature for dedicated mock/dev builds. Production
 # default no longer turns on sessiond/mock.
 mock = ["orbis-providers/mock", "orbis-sessiond/mock"]
+# UI review builds: enables `--screenshot` scenario states derived from the
+# shared device fixtures. Never enabled by production packaging.
+ui-review = ["dep:orbis-test-support"]
 default = []

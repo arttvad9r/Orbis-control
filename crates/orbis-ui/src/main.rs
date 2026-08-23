@@ -80,11 +80,15 @@ fn parse_args() -> Args {
     }
 }
 
-fn state_for_scenario(name: &str) -> controller::UiState {
+/// Scenario state for UI-review screenshot builds (`ui-review` feature).
+#[cfg(any(test, feature = "ui-review"))]
+fn scenario_state(name: &str) -> anyhow::Result<controller::UiState> {
     let mut s = controller::UiState::from_mock_profile("zephyrus-full");
     match name {
         "default" => {}
         "pending" => {
+            s.gpu_queued = 2;
+            s.gpu_reboot_required = true;
             s.gpu_selected = 2;
             s.gpu_ultimate_pending = true;
         }
@@ -92,7 +96,13 @@ fn state_for_scenario(name: &str) -> controller::UiState {
         "error" => s.gpu_section_error = true,
         other => eprintln!("orbis-control: неизвестное состояние '{other}', использую default"),
     }
-    s
+    Ok(s)
+}
+
+/// Release builds keep no fixture-derived scenario states (#115).
+#[cfg(not(any(test, feature = "ui-review")))]
+fn scenario_state(_name: &str) -> anyhow::Result<controller::UiState> {
+    anyhow::bail!("--screenshot/--ui-state scenarios require a build with --features ui-review")
 }
 
 /// Высота главного окна. До добавления встроенного Fan Curve редактора
@@ -1831,7 +1841,7 @@ fn main() -> anyhow::Result<()> {
     };
     launch_context::LaunchContext::new(launch_mode, effective_uid()).validate()?;
     let mut state = if args.screenshot.is_some() {
-        state_for_scenario(&args.ui_state)
+        scenario_state(&args.ui_state)?
     } else {
         controller::UiState::production_initial()
     };
