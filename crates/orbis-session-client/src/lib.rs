@@ -718,6 +718,16 @@ pub trait HardwarePerformanceSource: Send + Sync {
     async fn set_performance(&self, profile: u8) -> Result<u8, ProviderError>;
 }
 
+/// Testable direct Hardware1 source for ASUS product GPU mutation.
+#[async_trait]
+pub trait HardwareProductGpuSource: Send + Sync {
+    /// Queue an exact product GPU wire target and preserve the complete reply.
+    async fn set_product_gpu_mode(
+        &self,
+        requested_mode: u32,
+    ) -> Result<orbis_hardwared::ProductGpuMutationResult, ProviderError>;
+}
+
 /// Testable direct system-bus source для Battery mutation через Hardware1.
 #[async_trait]
 pub trait HardwareBatterySource: Send + Sync {
@@ -1014,6 +1024,40 @@ impl HardwarePerformanceSource for ZbusHardwarePerformanceSource {
             .map_err(zbus_error_to_provider)?;
         proxy
             .set_performance_profile(profile)
+            .await
+            .map_err(zbus_error_to_provider)
+    }
+}
+
+/// Direct Hardware1 source for ASUS product GPU mutation.
+///
+/// The caller supplies and owns the connection, preserving its Hardware1
+/// identity. This source does not decode or reinterpret result wire values.
+pub struct ZbusHardwareProductGpuSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusHardwareProductGpuSource {
+    /// Create a source over an existing caller-owned connection.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl HardwareProductGpuSource for ZbusHardwareProductGpuSource {
+    async fn set_product_gpu_mode(
+        &self,
+        requested_mode: u32,
+    ) -> Result<orbis_hardwared::ProductGpuMutationResult, ProviderError> {
+        let proxy = Hardware1Proxy::builder(&self.connection)
+            .path(DBUS_OBJECT_PATH)
+            .expect("valid hardware object path")
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .set_product_gpu_mode(requested_mode)
             .await
             .map_err(zbus_error_to_provider)
     }

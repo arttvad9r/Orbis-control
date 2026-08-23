@@ -37,6 +37,17 @@
       <allow_active>no</allow_active>
     </defaults>
   </action>
+  <action id="io.github.orbiscontrol.hardware.set-product-gpu-mode">
+    <description>Queue an ASUS product GPU mode in Orbis Control</description>
+    <description xml:lang="ru">Поставить в очередь продуктовый режим ASUS GPU в Orbis Control</description>
+    <message>ASUS product GPU mutation is disabled until controlled validation is complete</message>
+    <message xml:lang="ru">Запись продуктового режима ASUS GPU отключена до завершения контролируемой валидации</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>no</allow_active>
+    </defaults>
+  </action>
   <action id="io.github.orbiscontrol.hardware.set-fan-curve">
     <description>Change the Orbis Control fan curve</description>
     <description xml:lang="ru">Изменить кривую вентилятора Orbis Control</description>

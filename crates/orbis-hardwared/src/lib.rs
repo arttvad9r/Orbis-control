@@ -19,9 +19,11 @@ use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
 use orbis_core::aura::AuraRgb;
 use orbis_core::profile::PerformanceProfile;
+use orbis_providers::asus_gpu_mode::{AsusGpuMode, ProductGpuOutcome};
 use orbis_providers::error::ProviderError;
 use orbis_providers::supergfxd::{SupergfxdMode, SupergfxdStagedState, SupergfxdUserAction};
 
+pub mod asus_gpu_mode;
 pub mod aura;
 pub mod battery;
 pub mod fans;
@@ -221,6 +223,8 @@ pub const KEYBOARD_BACKLIGHT_POLKIT_ACTION: &str =
 /// Polkit action id for Aura Static RGB mutation (separate RGB capability/
 /// security domain; mirrors per-capability action pattern).
 pub const AURA_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-aura-static-rgb";
+/// Polkit action id for ASUS Armoury product GPU mode queueing.
+pub const PRODUCT_GPU_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-product-gpu-mode";
 
 /// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
 pub mod wire {
@@ -638,6 +642,78 @@ pub async fn handle_set_gpu_mode(
     })
 }
 
+/// Result of the ASUS Armoury product GPU queue operation.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, zbus::zvariant::Type,
+)]
+pub struct ProductGpuMutationResult {
+    pub requested_mode: u32,
+    pub current_mode: u32,
+    pub queued_mode: u32,
+    pub outcome: u32,
+    pub reboot_required: bool,
+}
+
+pub async fn handle_set_product_gpu_mode(
+    authorizer: &dyn Authorizer,
+    backend: Option<&dyn asus_gpu_mode::AsusProductGpuMutationOperation>,
+    raw: u32,
+    sender: &str,
+) -> zbus::fdo::Result<ProductGpuMutationResult> {
+    let requested = match raw {
+        0 => AsusGpuMode::Hybrid,
+        1 => AsusGpuMode::Integrated,
+        2 => AsusGpuMode::Ultimate,
+        _ => {
+            return Err(zbus::fdo::Error::InvalidArgs(format!(
+                "unknown ASUS product GPU mode {raw}"
+            )));
+        }
+    };
+    authorizer
+        .authorize(sender)
+        .await
+        .map_err(|error| match error {
+            AuthorizeError::Denied(message) => zbus::fdo::Error::AccessDenied(message),
+            AuthorizeError::Failed(message) => zbus::fdo::Error::Failed(message),
+        })?;
+    let backend = backend.ok_or_else(|| {
+        zbus::fdo::Error::NotSupported("ASUS product GPU backend unavailable".into())
+    })?;
+    let result = backend
+        .set_mode(requested)
+        .await
+        .map_err(provider_error_to_dbus)?;
+    let queued_mode = result
+        .snapshot
+        .queued_mode
+        .and_then(|mode| match mode {
+            AsusGpuMode::Hybrid => Some(0),
+            AsusGpuMode::Integrated => Some(1),
+            AsusGpuMode::Ultimate => Some(2),
+            _ => None,
+        })
+        .unwrap_or(u32::MAX);
+    let outcome = match result.outcome {
+        ProductGpuOutcome::AlreadyActive => 0,
+        ProductGpuOutcome::RebootRequired => 1,
+        ProductGpuOutcome::Unknown => 2,
+        ProductGpuOutcome::Inconsistent => 3,
+    };
+    Ok(ProductGpuMutationResult {
+        requested_mode: raw,
+        current_mode: match result.snapshot.current_mode {
+            AsusGpuMode::Hybrid => 0,
+            AsusGpuMode::Integrated => 1,
+            AsusGpuMode::Ultimate => 2,
+            _ => u32::MAX,
+        },
+        queued_mode,
+        outcome,
+        reboot_required: result.snapshot.reboot_required(),
+    })
+}
+
 /// Service object интерфейса `io.github.orbiscontrol.Hardware1`.
 pub struct HardwareService {
     authorizer: Box<dyn Authorizer>,
@@ -647,6 +723,8 @@ pub struct HardwareService {
     gpu_authorizer: Box<dyn Authorizer>,
     gpu_backend: Option<Box<dyn supergfxd::SupergfxdMutationOperation>>,
     gpu_sender_fallback: Option<String>,
+    product_gpu_authorizer: Box<dyn Authorizer>,
+    product_gpu_backend: Option<Box<dyn asus_gpu_mode::AsusProductGpuMutationOperation>>,
     fan_authorizer: Box<dyn Authorizer>,
     fan_backend: Option<Box<dyn fans::FanCurveMutationOperation>>,
     panel_authorizer: Box<dyn Authorizer>,
@@ -667,6 +745,8 @@ impl HardwareService {
             gpu_authorizer: Box::new(DisabledAuthorizer),
             gpu_backend: None,
             gpu_sender_fallback: None,
+            product_gpu_authorizer: Box::new(DisabledAuthorizer),
+            product_gpu_backend: None,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
             panel_authorizer: Box::new(DisabledAuthorizer),
@@ -691,6 +771,8 @@ impl HardwareService {
             gpu_authorizer: Box::new(DisabledAuthorizer),
             gpu_backend: None,
             gpu_sender_fallback: None,
+            product_gpu_authorizer: Box::new(DisabledAuthorizer),
+            product_gpu_backend: None,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
             panel_authorizer: Box::new(DisabledAuthorizer),
@@ -717,6 +799,8 @@ impl HardwareService {
             gpu_authorizer,
             gpu_backend: Some(gpu_backend),
             gpu_sender_fallback: None,
+            product_gpu_authorizer: Box::new(DisabledAuthorizer),
+            product_gpu_backend: None,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
             panel_authorizer: Box::new(DisabledAuthorizer),
@@ -741,6 +825,8 @@ impl HardwareService {
             gpu_authorizer: Box::new(DisabledAuthorizer),
             gpu_backend: None,
             gpu_sender_fallback: None,
+            product_gpu_authorizer: Box::new(DisabledAuthorizer),
+            product_gpu_backend: None,
             fan_authorizer,
             fan_backend: Some(fan_backend),
             panel_authorizer: Box::new(DisabledAuthorizer),
@@ -769,6 +855,8 @@ impl HardwareService {
             gpu_authorizer,
             gpu_backend: Some(gpu_backend),
             gpu_sender_fallback: None,
+            product_gpu_authorizer: Box::new(DisabledAuthorizer),
+            product_gpu_backend: None,
             fan_authorizer,
             fan_backend: Some(fan_backend),
             panel_authorizer: Box::new(DisabledAuthorizer),
@@ -794,6 +882,8 @@ impl HardwareService {
             gpu_authorizer,
             gpu_backend: Some(gpu_backend),
             gpu_sender_fallback: p2p_sender,
+            product_gpu_authorizer: Box::new(DisabledAuthorizer),
+            product_gpu_backend: None,
             fan_authorizer: Box::new(DisabledAuthorizer),
             fan_backend: None,
             panel_authorizer: Box::new(DisabledAuthorizer),
@@ -843,6 +933,18 @@ impl HardwareService {
     ) -> Self {
         self.aura_backend = Some(aura_backend);
         self.aura_authorizer = aura_authorizer;
+        self
+    }
+
+    /// Attach the ASUS product-GPU queue backend explicitly. Production keeps
+    /// this unattached until the capability-specific promotion gate is met.
+    pub fn with_product_gpu_backend(
+        mut self,
+        backend: Box<dyn asus_gpu_mode::AsusProductGpuMutationOperation>,
+        authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.product_gpu_backend = Some(backend);
+        self.product_gpu_authorizer = authorizer;
         self
     }
 }
@@ -913,6 +1015,24 @@ impl HardwareService {
         handle_set_gpu_mode(
             self.gpu_authorizer.as_ref(),
             self.gpu_backend.as_deref(),
+            raw,
+            &sender,
+        )
+        .await
+    }
+
+    async fn set_product_gpu_mode(
+        &self,
+        raw: u32,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<ProductGpuMutationResult> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        handle_set_product_gpu_mode(
+            self.product_gpu_authorizer.as_ref(),
+            self.product_gpu_backend.as_deref(),
             raw,
             &sender,
         )
@@ -1126,6 +1246,7 @@ pub trait Hardware1 {
     /// configured percent, effective value остаётся отдельным read-model field.
     fn set_charge_limit(&self, percent: u8) -> zbus::Result<u8>;
     fn set_gpu_mode(&self, requested_mode: u32) -> zbus::Result<GpuMutationResult>;
+    fn set_product_gpu_mode(&self, requested_mode: u32) -> zbus::Result<ProductGpuMutationResult>;
     /// Read-only typed Battery mutation backend availability (wire enum).
     fn battery_mutation_status(&self) -> zbus::Result<u8>;
 
@@ -1501,6 +1622,94 @@ mod tests {
         assert!(matches!(err, zbus::fdo::Error::InvalidArgs(_)));
         assert_eq!(w.io.writes(), 0);
         assert_eq!(auth.calls(), 0);
+    }
+
+    struct FakeProductGpuBackend {
+        calls: AtomicUsize,
+        result: Mutex<Option<Result<asus_gpu_mode::AsusGpuMutationReadback, ProviderError>>>,
+    }
+
+    #[async_trait]
+    impl asus_gpu_mode::AsusProductGpuMutationOperation for FakeProductGpuBackend {
+        async fn set_mode(
+            &self,
+            _requested: AsusGpuMode,
+        ) -> Result<asus_gpu_mode::AsusGpuMutationReadback, ProviderError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.result.lock().unwrap().take().unwrap()
+        }
+    }
+
+    fn product_gpu_readback() -> asus_gpu_mode::AsusGpuMutationReadback {
+        let snapshot = orbis_providers::asus_gpu_mode::AsusGpuModeSnapshot::from_values(
+            Some(0),
+            Some(1),
+            Some(1),
+            Some(1),
+        );
+        asus_gpu_mode::AsusGpuMutationReadback {
+            requested: AsusGpuMode::Integrated,
+            outcome: ProductGpuOutcome::RebootRequired,
+            snapshot,
+        }
+    }
+
+    #[tokio::test]
+    async fn product_gpu_unknown_wire_is_invalid_args_before_authorization() {
+        assert_eq!(
+            PRODUCT_GPU_POLKIT_ACTION,
+            "io.github.orbiscontrol.hardware.set-product-gpu-mode"
+        );
+        let auth = FakeAuthorizer::new(AuthOutcome::Ok);
+        let backend = FakeProductGpuBackend {
+            calls: AtomicUsize::new(0),
+            result: Mutex::new(Some(Ok(product_gpu_readback()))),
+        };
+
+        let error = handle_set_product_gpu_mode(&auth, Some(&backend), 99, ":1.42")
+            .await
+            .expect_err("unknown product GPU wire value");
+
+        assert!(matches!(error, zbus::fdo::Error::InvalidArgs(_)));
+        assert_eq!(auth.calls(), 0);
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn product_gpu_authorization_happens_before_backend_call() {
+        let auth = FakeAuthorizer::new(AuthOutcome::Denied);
+        let backend = FakeProductGpuBackend {
+            calls: AtomicUsize::new(0),
+            result: Mutex::new(Some(Ok(product_gpu_readback()))),
+        };
+
+        let error = handle_set_product_gpu_mode(&auth, Some(&backend), 1, ":1.42")
+            .await
+            .expect_err("denied product GPU request");
+
+        assert!(matches!(error, zbus::fdo::Error::AccessDenied(_)));
+        assert_eq!(auth.last_sender(), Some(":1.42".to_string()));
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn product_gpu_result_uses_typed_wire_fields() {
+        let auth = FakeAuthorizer::new(AuthOutcome::Ok);
+        let backend = FakeProductGpuBackend {
+            calls: AtomicUsize::new(0),
+            result: Mutex::new(Some(Ok(product_gpu_readback()))),
+        };
+
+        let result = handle_set_product_gpu_mode(&auth, Some(&backend), 1, ":1.42")
+            .await
+            .expect("product GPU queue result");
+
+        assert_eq!(result.requested_mode, 1);
+        assert_eq!(result.current_mode, 0);
+        assert_eq!(result.queued_mode, 1);
+        assert_eq!(result.outcome, 1);
+        assert!(result.reboot_required);
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

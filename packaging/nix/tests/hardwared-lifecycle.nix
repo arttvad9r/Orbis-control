@@ -114,6 +114,7 @@
         "io.github.orbiscontrol.hardware.set-performance-profile": "yes",
         "io.github.orbiscontrol.hardware.set-charge-limit": "yes",
         "io.github.orbiscontrol.hardware.set-gpu-mode": "no",
+        "io.github.orbiscontrol.hardware.set-product-gpu-mode": "no",
         "io.github.orbiscontrol.hardware.set-fan-curve": "no",
         "io.github.orbiscontrol.hardware.set-panel-overdrive": "no",
         "io.github.orbiscontrol.hardware.set-keyboard-backlight": "no",
