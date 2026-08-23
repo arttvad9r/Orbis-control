@@ -75,12 +75,12 @@ No fan write should be enabled to “test” these contracts.
 
 ## Milestone 3 — Release graph and production bootstrap
 
-**Status: OPEN**
+**Status: SOURCE COMPLETE (#115); executable re-validation rides the next full check run**
 
-- #115 — introduce production-native `UiState` startup with explicit Loading/Unknown/non-writable defaults and compile-time package version;
-- move `orbis-test-support` out of the normal GUI release dependency graph;
-- keep deterministic screenshot/mock construction in dev/test-only paths;
-- verify release dependency graph and UI compilation once toolchain is available.
+- [x] #115 — production-native `UiState` startup with explicit Loading/Unknown/non-writable defaults and compile-time package version (`production_initial`);
+- [x] `orbis-test-support` moved out of the normal GUI release dependency graph (dev-dependency + optional `ui-review` feature only; proven by `cargo tree -e normal`);
+- [x] deterministic screenshot/mock construction kept in dev/test-only paths (`--screenshot` requires `--features ui-review`);
+- [ ] final release dependency graph and UI compilation claim recorded from the next full executable check run.
 
 This also reduces the amount of production startup code that must sanitize fixture-derived state.
 

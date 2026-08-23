@@ -61,7 +61,7 @@ Production product path намеренно включает только док�
 | Automation | IMPLEMENTED SHADOW/EXECUTOR CONTRACT, EXECUTION BLOCKED | Worker owns policy/lifecycle/debounce/recovery/serialization; resume performs read-only provider/capability refresh and never restores desired hardware state. Performance executor compiled but promotion=false. Other executors disabled. |
 | Display Refresh | IMPLEMENTED CONTRACT / NO MUTATION OWNER | Typed target/request/read-back design exists; no concrete compositor configuration owner is enabled. |
 | Updates | FAIL-CLOSED | Installation owner detection + typed blockers exist; no invented release feed/downloader/installer. |
-| Release dependency graph | OPEN — #115 | GUI still has normal `orbis-test-support` dependency because production/offscreen startup share fixture-derived UiState bootstrap. |
+| Release dependency graph | CLOSED IN SOURCE — #115 | GUI release graph no longer contains `orbis-test-support` (`cargo tree -e normal` proof on this revision): production startup uses `UiState::production_initial`; fixture bootstrap is dev-only + optional `ui-review` feature for screenshot builds. |
 | GUI root boundary | IMPLEMENTED SOURCE — #125 | Interactive launch rejects euid 0 before preferences/runtime/bus setup; screenshot/offscreen paths remain allowed. |
 | Hardwared sandbox | STRUCTURALLY MINIMIZED / VALIDATION OPEN — #126 | Intended direct sysfs write surface is `platform_profile` only; executable package/VM proof awaits #106/tooling. |
 | ASUS FA707NV live read baseline | OBSERVED / READ-ONLY | `platform_profile`, asusd/asusctl profile, UPower, DRM/sysfs GPU, hwmon, thermal and power_supply reads were observed on FA707NV; Session1/Hardware1/hardwared and supergfxd were unavailable. This does not promote write support. |
@@ -179,13 +179,12 @@ All of them are exported from crate public APIs but have **no runtime consumers*
 5. #117 telemetry coverage/freshness semantics.
 6. #109 aggregate CPU/GPU fan capability truth.
 7. #116 fan stored-enabled read evidence.
-8. #115 production-native UiState + release dependency graph cleanup.
-9. #113 removal of deprecated legacy config/path API after executable compatibility validation.
-10. #119 CLI integration/executable validation.
-11. #126 package/VM sandbox validation.
-12. #124 application identity decision.
-13. #118 old remote branch cleanup when delete-ref access exists.
-14. #114 required checks after #106.
+8. #113 removal of deprecated legacy config/path API after executable compatibility validation.
+9. #119 CLI integration/executable validation.
+10. #126 package/VM sandbox validation.
+11. #124 application identity decision.
+12. #118 old remote branch cleanup when delete-ref access exists.
+13. #114 required checks after #106.
 
 ## Historical live evidence retained
 

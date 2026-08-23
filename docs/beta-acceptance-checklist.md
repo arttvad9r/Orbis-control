@@ -88,9 +88,9 @@ Use [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 ## Production dependency graph
 
 - [x] Providers/sessiond defaults no longer implicitly enable mock features.
-- [ ] #115: GUI production startup no longer constructs fixture-derived initial state.
-- [ ] #115: `orbis-test-support` is removed from the normal GUI release dependency graph.
-- [ ] UI uses compile-time package version rather than fixture hardcoding.
+- [x] #115: GUI production startup no longer constructs fixture-derived initial state.
+- [x] #115: `orbis-test-support` is removed from the normal GUI release dependency graph.
+- [x] UI uses compile-time package version rather than fixture hardcoding.
 
 ## Automation / future writes
 

@@ -46,7 +46,7 @@ Primary crate ownership:
 | `orbis-hardwared` | Narrow privileged service |
 | `orbis-ui` | Slint surfaces, production composition, worker runtime |
 | `orbis-cli` | Read-only status CLI and explicit Hardware1 validation tool |
-| `orbis-test-support` | Fixtures/screenshots/tests; release-graph cleanup remains #115 |
+| `orbis-test-support` | Fixtures/screenshots/tests; release-graph cleanup #115 closed in source |
 
 The active production worker is `crates/orbis-ui/src/worker_runtime.rs`. Legacy large worker files are not the source of truth for new runtime fixes.
 
@@ -320,7 +320,7 @@ Ambiguous ASUS controls stay disabled until exact upstream/domain ownership and 
 
 Mock/fixture data is test/development evidence only. Production cannot treat fixture values as hardware observations.
 
-The remaining release-graph defect is #115: the GUI still has a normal `orbis-test-support` dependency because screenshot and production bootstrap share fixture-derived `UiState` construction. The intended fix is a production-native Loading/Unknown/non-writable constructor plus dev/test-only fixture construction.
+The release-graph defect #115 is closed in source: the production GUI depends on neither `orbis-test-support` nor fixture-derived bootstrap. Interactive startup constructs `UiState::production_initial` (Loading/Unknown/non-writable, compile-time package version); fixture construction exists only as a dev-dependency and behind the explicit `ui-review` feature used by screenshot/review builds.
 
 ## 18. Release boundary
 
