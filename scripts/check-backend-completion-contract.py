@@ -101,7 +101,7 @@ def run(root: Path) -> list[str]:
     require(diagnostics_model, "row.write_status", diagnostics_model_rel, errors)
     require(diagnostics_model, "row.read_status", diagnostics_model_rel, errors)
 
-    extra_ui_rel = "ui/audited/sections/hardware.slint"
+    extra_ui_rel = "ui/audited/sections/extra.slint"
     extra_ui = read(root, extra_ui_rel, errors)
     require(extra_ui, "panel-overdrive-requested", extra_ui_rel, errors)
     require(extra_ui, "RequestToggleRow", extra_ui_rel, errors)
@@ -109,10 +109,6 @@ def run(root: Path) -> list[str]:
     require(extra_ui, 'label: "Boot sound";', extra_ui_rel, errors)
     require(extra_ui, "disabled: true;", extra_ui_rel, errors)
     require(extra_ui, "enabled: false; model: [\"Static\"", extra_ui_rel, errors)
-
-    dashboard_ui_rel = "ui/audited/sections/dashboard.slint"
-    dashboard_ui = read(root, dashboard_ui_rel, errors)
-    require(dashboard_ui, "keyboard-brightness-requested", dashboard_ui_rel, errors)
 
     extra_rel = "crates/orbis-ui/src/extra_backend.rs"
     extra = read(root, extra_rel, errors)
@@ -159,7 +155,7 @@ def run(root: Path) -> list[str]:
     forbid(promotion, "CapabilityStatus::Supported", promotion_rel, errors)
     forbid(promotion, "Command::new", promotion_rel, errors)
 
-    pref_ui_rel = "ui/audited/sections/settings.slint"
+    pref_ui_rel = "ui/audited/sections/extra.slint"
     pref_ui = read(root, pref_ui_rel, errors)
     require(pref_ui, "hide-to-tray-enabled", pref_ui_rel, errors)
     require(pref_ui, "enabled: root.close-action-enabled;", pref_ui_rel, errors)

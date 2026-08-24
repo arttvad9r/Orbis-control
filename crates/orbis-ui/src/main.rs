@@ -1535,12 +1535,12 @@ fn render_screenshot(
     path: &str,
     ui_section: Option<&str>,
 ) -> anyhow::Result<()> {
-    let height = 600u32;
+    let height = 620u32;
     let renderer = Rc::new(slint::platform::software_renderer::SoftwareRenderer::new());
     let adapter = Rc::new(SoftwareWindowAdapter {
         renderer: renderer.clone(),
         window: OnceCell::new(),
-        size: Cell::new(PhysicalSize::new(760, height)),
+        size: Cell::new(PhysicalSize::new(425, height)),
     });
     {
         let dyn_adapter: Rc<dyn WindowAdapter> = adapter.clone();
@@ -1553,12 +1553,11 @@ fn render_screenshot(
     let app = build_app(state, None)?;
     match ui_section {
         Some("fans") => app.set_active_section(Section::Fans),
-        Some("hardware") => app.set_active_section(Section::Hardware),
-        Some("settings") => app.set_active_section(Section::Settings),
-        _ => app.set_active_section(Section::Dashboard),
+        Some("extra") => app.set_active_section(Section::Extra),
+        _ => app.set_active_section(Section::Performance),
     }
     app.window()
-        .set_size(LogicalSize::new(760.0, height as f32));
+        .set_size(LogicalSize::new(425.0, height as f32));
     app.show()?;
 
     let size = app.window().size();

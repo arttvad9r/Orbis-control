@@ -128,14 +128,6 @@ pub(crate) fn wire_window(app: &AppWindow) {
     app.set_keyboard_state_ready(false);
     app.set_keyboard_control_ready(false);
     app.set_keyboard_brightness(-1);
-    app.set_keyboard_status(
-        if runtime_ready {
-            "Reading keyboard state…"
-        } else {
-            "Keyboard backend unavailable"
-        }
-        .into(),
-    );
 
     app.on_display_mode_requested(|mode| {
         tracing::warn!(
@@ -178,7 +170,6 @@ pub(crate) fn wire_window(app: &AppWindow) {
             // fresh read-back. The client re-checks mutation status just before
             // the setter, so a stale UI readiness bit cannot authorize a write.
             app.set_keyboard_control_ready(false);
-            app.set_keyboard_status("Applying keyboard brightness…".into());
             let weak = app.as_weak();
             context.runtime.spawn(async move {
                 let result = async {
@@ -191,16 +182,9 @@ pub(crate) fn wire_window(app: &AppWindow) {
                     match result {
                         Ok(observed) => {
                             app.set_keyboard_brightness(i32::from(observed));
-                            app.set_keyboard_status(
-                                format!("Level {observed} · Hardware1 read-back confirmed").into(),
-                            );
                         }
                         Err(error) => {
                             tracing::warn!(error = ?error, "keyboard brightness mutation failed");
-                            app.set_keyboard_status(
-                                format!("Keyboard write failed · {}", write_error_label(&error))
-                                    .into(),
-                            );
                         }
                     }
                     // Re-read both observed state and current mutation evidence;
@@ -285,7 +269,6 @@ fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
         app.set_display_status("Display backend unavailable".into());
         app.set_keyboard_state_ready(false);
         app.set_keyboard_control_ready(false);
-        app.set_keyboard_status("Keyboard backend unavailable".into());
         return;
     };
 
@@ -330,7 +313,6 @@ fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
             app.set_keyboard_state_ready(keyboard.state_ready);
             app.set_keyboard_control_ready(keyboard.control_ready);
             app.set_keyboard_brightness(keyboard.brightness);
-            app.set_keyboard_status(keyboard.status.into());
         }) {
             tracing::warn!(error = ?error, "failed to publish quick-control state to UI");
         }

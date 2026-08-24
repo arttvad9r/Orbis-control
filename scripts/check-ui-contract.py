@@ -22,27 +22,26 @@ PRODUCTION_SURFACES = {
     ],
     "ui/audited/main-window.slint": [
         "no-frame: true",
-        "display-mode-requested",
-        "keyboard-brightness-requested",
         "titlebar-close-requested",
         "titlebar-drag-started",
+    ],
+    "ui/audited/sections/performance.slint": [
+        "display-mode-requested",
         "startup-changed",
+    ],
+    "ui/audited/sections/extra.slint": [
+        "ThemeBridge {",
+        "keyboard-brightness-requested",
+        "RequestToggleRow",
+        "backend-ready",
+        "reload-requested",
+        "apply-requested",
+        "diagnostics-summary",
         "start-minimized-changed",
         "remember-position-changed",
         "close-action-changed",
         "diagnostics-refresh-requested",
         "diagnostics-export-requested",
-    ],
-    "ui/audited/sections/settings.slint": [
-        "ThemeBridge {",
-        "diagnostics-summary",
-    ],
-    "ui/audited/sections/hardware.slint": [
-        "ThemeBridge {",
-        "RequestToggleRow",
-        "backend-ready",
-        "reload-requested",
-        "apply-requested",
     ],
     "ui/audited/sections/fans.slint": [
         "mutation-safety-blocked",
@@ -280,8 +279,7 @@ def check_secondary_geometry(root: Path, errors: list[str]) -> None:
 
 def check_authoritative_controls(root: Path, errors: list[str]) -> None:
     for rel in (
-        "ui/audited/sections/hardware.slint",
-        "ui/audited/sections/settings.slint",
+        "ui/audited/sections/extra.slint",
     ):
         text = read(root / rel, errors)
         if re.search(r"\bToggleRow\s*\{", text):

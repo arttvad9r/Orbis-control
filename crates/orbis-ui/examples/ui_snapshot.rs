@@ -110,13 +110,13 @@ fn main() -> anyhow::Result<()> {
     // The shell is fixed-size; the dialog keeps its own compact canvas.
     let (width, height) = match kind.as_str() {
         "dialog" => (430, 220),
-        _ => (760, 600),
+        _ => (425, 620),
     };
 
     let renderer = setup(width, height);
 
     match kind.as_str() {
-        "dashboard" | "fans" | "hardware" | "settings" => {
+        "performance" | "fans" | "extra" => {
             let component = AppWindow::new()?;
             component.global::<ThemeState>().set_mode(if light {
                 ThemeMode::Light
@@ -150,9 +150,8 @@ fn main() -> anyhow::Result<()> {
             }
             let section = match kind.as_str() {
                 "fans" => Section::Fans,
-                "hardware" => Section::Hardware,
-                "settings" => Section::Settings,
-                _ => Section::Dashboard,
+                "extra" => Section::Extra,
+                _ => Section::Performance,
             };
             component.set_active_section(section);
             component

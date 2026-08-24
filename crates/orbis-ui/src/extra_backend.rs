@@ -69,7 +69,6 @@ fn reset_readiness(window: &AppWindow) {
     window.set_backend_ready(false);
     window.set_applying(false);
     window.set_aura_state_ready(false);
-    window.set_aura_control_ready(false);
     window.set_panel_overdrive_state_ready(false);
     window.set_panel_overdrive_control_ready(false);
     window.set_boot_sound_state_ready(false);
@@ -192,7 +191,6 @@ pub(crate) fn refresh(window: &AppWindow) {
 
     window.set_backend_ready(false);
     window.set_keyboard_control_ready(false);
-    window.set_aura_control_ready(false);
     window.set_panel_overdrive_control_ready(false);
     window.set_status("Refreshing advanced hardware state…".into());
 
@@ -226,7 +224,6 @@ pub(crate) fn refresh(window: &AppWindow) {
             window.set_applying(false);
 
             window.set_aura_state_ready(aura.ready);
-            window.set_aura_control_ready(false);
             window.set_keyboard_effect(aura.effect);
             window.set_keyboard_speed(aura.speed);
 

@@ -148,9 +148,12 @@ mod tests {
     use super::*;
 
     fn fixture_root() -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "orbis-providers-kbd-backlight-{}-{}",
+            "orbis-providers-kbd-backlight-{}-{}-{}",
             std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

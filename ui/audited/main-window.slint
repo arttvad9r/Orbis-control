@@ -1,18 +1,16 @@
-// AppWindow shell: frameless single window with a sidebar and four sections
-// (spec §2). The shell owns ui-state and re-exports every section surface 1:1
-// so Rust keeps the same property/callback names it wired before.
+// AppWindow — G-Helper-style single window (spec docs/ui-reference.md):
+// 425 logical wide, custom 34px title bar, top tab strip
+// [Performance | Fans | Extra], flat panels on formBack. No sidebar.
 import { UiState, Section, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState } from "model.slint";
 import { TitleBar } from "../components/title-bar.slint";
-import { Sidebar } from "../components/sidebar.slint";
-import { DashboardSection } from "sections/dashboard.slint";
+import { PerformanceSection } from "sections/performance.slint";
 import { FansSection } from "sections/fans.slint";
-import { HardwareSection } from "sections/hardware.slint";
-import { SettingsSection } from "sections/settings.slint";
+import { ExtraSection } from "sections/extra.slint";
 import { Palette } from "../themes/dark.slint";
 
 export component AppWindow inherits Window {
-    width: 760px;
-    height: 600px;
+    width: 425px;
+    height: 620px;
     no-frame: true;
     background: transparent;
     title: "Orbis Control";
@@ -35,13 +33,13 @@ export component AppWindow inherits Window {
         fan-pwm-0: 0, fan-pwm-1: 0, fan-pwm-2: 0, fan-pwm-3: 0, fan-pwm-4: 0, fan-pwm-5: 0, fan-pwm-6: 0, fan-pwm-7: 0,
     };
 
-    in-out property <Section> active-section: Section.Dashboard;
+    in-out property <Section> active-section: Section.Performance;
     callback section-selected(Section);
     callback titlebar-minimize-requested;
     callback titlebar-close-requested;
     callback titlebar-drag-started;
 
-    // ---- Dashboard surface (1:1 with the previous main-window controls) ----
+    // Performance page surface.
     callback perf-clicked(int);
     callback gpu-clicked(int);
     callback charge-changed(float);
@@ -53,10 +51,14 @@ export component AppWindow inherits Window {
     in property <bool> keyboard-state-ready: false;
     in property <bool> keyboard-control-ready: false;
     in property <int> keyboard-brightness: -1;
-    in property <string> keyboard-status: "Unavailable";
     callback keyboard-brightness-requested(int);
+    callback startup-changed(bool);
+    in-out property <bool> startup: false;
+    in-out property <bool> startup-enabled: false;
+    in property <string> startup-status: "Unavailable";
+    callback quit-requested;
 
-    // ---- Fans surface (former FansWindow) ----
+    // Fans page surface.
     in property <bool> mutation-safety-blocked: true;
     in property <bool> factory-reset-available: false;
     in property <string> policy-status: "Fan writes are safety-blocked";
@@ -66,12 +68,11 @@ export component AppWindow inherits Window {
     callback fan-pwm-point-changed(int, int);
     callback fan-apply-clicked(bool);
 
-    // ---- Hardware surface (former ExtraWindow, minus dashboard keyboard row) ----
+    // Extra page surface (hardware + app settings).
     in property <bool> backend-ready: false;
     in property <bool> applying: false;
     in property <string> status: "Advanced controls backend unavailable";
     in property <bool> aura-state-ready: false;
-    in property <bool> aura-control-ready: false;
     in property <bool> panel-overdrive-state-ready: false;
     in property <bool> panel-overdrive-control-ready: false;
     in property <bool> boot-sound-state-ready: false;
@@ -95,16 +96,10 @@ export component AppWindow inherits Window {
     callback reload-requested;
     callback apply-requested;
     callback panel-overdrive-requested(bool);
-
-    // ---- Settings surface (former PreferencesWindow + diagnostics actions) ----
     callback theme-changed(bool);
-    callback startup-changed(bool);
     callback start-minimized-changed(bool);
     callback remember-position-changed(bool);
     callback close-action-changed(int);
-    in-out property <bool> startup: false;
-    in-out property <bool> startup-enabled: false;
-    in property <string> startup-status: "Unavailable";
     in property <bool> start-minimized: false;
     in property <bool> start-minimized-enabled: false;
     in property <bool> remember-position: false;
@@ -124,118 +119,177 @@ export component AppWindow inherits Window {
     callback preview-dialog-clicked(int);
 
     root-rect := Rectangle {
-        border-radius: 10px;
+        border-radius: 8px;
         clip: true;
         background: Palette.window-background;
 
         VerticalLayout {
             TitleBar {
-                section-title: root.active-section == Section.Dashboard ? "Dashboard"
-                    : root.active-section == Section.Fans ? "Fans"
-                    : root.active-section == Section.Hardware ? "Hardware" : "Settings";
+                height: 34px;
+                section-title: "Orbis Control";
                 minimize-requested => { root.titlebar-minimize-requested(); }
                 close-requested => { root.titlebar-close-requested(); }
                 drag-started => { root.titlebar-drag-started(); }
             }
 
+            // Tab strip (G-Helper: flat equal tabs, selected = buttonMain).
             HorizontalLayout {
-                Sidebar {
-                    active <=> root.active-section;
-                    section-selected(s) => {
-                        root.active-section = s;
-                        root.section-selected(s);
+                height: 36px;
+                spacing: 2px;
+
+                perf-tab := Rectangle {
+                    horizontal-stretch: 1;
+                    property <bool> is-active: root.active-section == Section.Performance;
+                    property <bool> hover: perf-touch.has-hover;
+                    background: perf-tab.is-active ? Palette.surface-default
+                        : perf-tab.hover ? Palette.surface-hover : transparent;
+                    border-radius: 5.5px;
+                    Text {
+                        text: "Performance";
+                        font-size: 13px;
+                        font-weight: perf-tab.is-active ? 650 : 500;
+                        color: perf-tab.is-active ? Palette.text-primary : Palette.text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    perf-touch := TouchArea {
+                        clicked => {
+                            root.active-section = Section.Performance;
+                            root.section-selected(Section.Performance);
+                        }
                     }
                 }
-
-                Rectangle {
+                fans-tab := Rectangle {
                     horizontal-stretch: 1;
-                    clip: true;
-                    background: Palette.window-background;
+                    property <bool> is-active: root.active-section == Section.Fans;
+                    property <bool> hover: fans-touch.has-hover;
+                    background: perf-tab.is-active ? Palette.surface-default
+                        : perf-tab.hover ? Palette.surface-hover : transparent;
+                    border-radius: 5.5px;
+                    Text {
+                        text: "Fans";
+                        font-size: 13px;
+                        font-weight: fans-tab.is-active ? 650 : 500;
+                        color: fans-tab.is-active ? Palette.text-primary : Palette.text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    fans-touch := TouchArea {
+                        clicked => {
+                            root.active-section = Section.Fans;
+                            root.section-selected(Section.Fans);
+                        }
+                    }
+                }
+                extra-tab := Rectangle {
+                    horizontal-stretch: 1;
+                    property <bool> is-active: root.active-section == Section.Extra;
+                    property <bool> hover: extra-touch.has-hover;
+                    background: perf-tab.is-active ? Palette.surface-default
+                        : perf-tab.hover ? Palette.surface-hover : transparent;
+                    border-radius: 5.5px;
+                    Text {
+                        text: "Extra";
+                        font-size: 13px;
+                        font-weight: extra-tab.is-active ? 650 : 500;
+                        color: extra-tab.is-active ? Palette.text-primary : Palette.text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    extra-touch := TouchArea {
+                        clicked => {
+                            root.active-section = Section.Extra;
+                            root.section-selected(Section.Extra);
+                        }
+                    }
+                }
+            }
 
-                    if (root.active-section == Section.Dashboard) : DashboardSection {
-                        ui-state <=> root.ui-state;
-                        display-state-ready <=> root.display-state-ready;
-                        display-control-ready <=> root.display-control-ready;
-                        display-mode <=> root.display-mode;
-                        display-status <=> root.display-status;
-                        display-mode-requested(i) => { root.display-mode-requested(i); }
-                        keyboard-state-ready <=> root.keyboard-state-ready;
-                        keyboard-control-ready <=> root.keyboard-control-ready;
-                        keyboard-brightness <=> root.keyboard-brightness;
-                        keyboard-status <=> root.keyboard-status;
-                        keyboard-brightness-requested(i) => { root.keyboard-brightness-requested(i); }
-                        perf-clicked(i) => { root.perf-clicked(i); }
-                        gpu-clicked(i) => { root.gpu-clicked(i); }
-                        charge-changed(v) => { root.charge-changed(v); }
-                    }
-                    if (root.active-section == Section.Fans) : FansSection {
-                        ui-state <=> root.ui-state;
-                        mutation-safety-blocked <=> root.mutation-safety-blocked;
-                        factory-reset-available <=> root.factory-reset-available;
-                        policy-status <=> root.policy-status;
-                        fan-changed(i) => { root.fan-changed(i); }
-                        fan-profile-changed(i) => { root.fan-profile-changed(i); }
-                        fan-temp-point-changed(i, v) => { root.fan-temp-point-changed(i, v); }
-                        fan-pwm-point-changed(i, v) => { root.fan-pwm-point-changed(i, v); }
-                        fan-apply-clicked(reset) => { root.fan-apply-clicked(reset); }
-                    }
-                    if (root.active-section == Section.Hardware) : HardwareSection {
-                        backend-ready <=> root.backend-ready;
-                        applying <=> root.applying;
-                        status <=> root.status;
-                        keyboard-state-ready <=> root.keyboard-state-ready;
-                        aura-state-ready <=> root.aura-state-ready;
-                        panel-overdrive-state-ready <=> root.panel-overdrive-state-ready;
-                        panel-overdrive-control-ready <=> root.panel-overdrive-control-ready;
-                        boot-sound-state-ready <=> root.boot-sound-state-ready;
-                        m1-action <=> root.m1-action;
-                        m2-action <=> root.m2-action;
-                        m3-action <=> root.m3-action;
-                        m4-action <=> root.m4-action;
-                        m5-action <=> root.m5-action;
-                        keyboard-effect <=> root.keyboard-effect;
-                        keyboard-speed <=> root.keyboard-speed;
-                        boot-sound <=> root.boot-sound;
-                        status-led <=> root.status-led;
-                        panel-overdrive <=> root.panel-overdrive;
-                        auto-clamshell <=> root.auto-clamshell;
-                        disable-aspm <=> root.disable-aspm;
-                        disable-standby-networking <=> root.disable-standby-networking;
-                        igpu-memory <=> root.igpu-memory;
-                        hibernate-after <=> root.hibernate-after;
-                        p-cores <=> root.p-cores;
-                        e-cores <=> root.e-cores;
-                        reload-requested => { root.reload-requested(); }
-                        apply-requested => { root.apply-requested(); }
-                        panel-overdrive-requested(v) => { root.panel-overdrive-requested(v); }
-                    }
-                    if (root.active-section == Section.Settings) : SettingsSection {
-                        theme-changed(light) => { root.theme-changed(light); }
-                        startup <=> root.startup;
-                        startup-enabled <=> root.startup-enabled;
-                        startup-status <=> root.startup-status;
-                        startup-changed(v) => { root.startup-changed(v); }
-                        start-minimized <=> root.start-minimized;
-                        start-minimized-enabled <=> root.start-minimized-enabled;
-                        start-minimized-changed(v) => { root.start-minimized-changed(v); }
-                        remember-position <=> root.remember-position;
-                        remember-position-enabled <=> root.remember-position-enabled;
-                        remember-position-changed(v) => { root.remember-position-changed(v); }
-                        close-action <=> root.close-action;
-                        close-action-enabled <=> root.close-action-enabled;
-                        hide-to-tray-enabled <=> root.hide-to-tray-enabled;
-                        close-action-changed(v) => { root.close-action-changed(v); }
-                        refresh-enabled <=> root.refresh-enabled;
-                        refresh-pending <=> root.refresh-pending;
-                        diagnostics-summary <=> root.diagnostics-summary;
-                        export-enabled <=> root.export-enabled;
-                        diagnostics-status <=> root.diagnostics-status;
-                        refresh-requested => { root.diagnostics-refresh-requested(); }
-                        export-report-requested => { root.diagnostics-export-requested(); }
-                        version: root.ui-state.version;
-                        mock-profile: root.ui-state.mock-profile;
-                        local-status <=> root.settings-local-status;
-                    }
+            Rectangle {
+                horizontal-stretch: 1;
+                clip: true;
+                background: Palette.window-background;
+
+                if (root.active-section == Section.Performance) : PerformanceSection {
+                    ui-state <=> root.ui-state;
+                    display-state-ready <=> root.display-state-ready;
+                    display-control-ready <=> root.display-control-ready;
+                    display-mode <=> root.display-mode;
+                    display-status <=> root.display-status;
+                    display-mode-requested(i) => { root.display-mode-requested(i); }
+                    perf-clicked(i) => { root.perf-clicked(i); }
+                    gpu-clicked(i) => { root.gpu-clicked(i); }
+                    charge-changed(v) => { root.charge-changed(v); }
+                    fans-open-requested => { root.active-section = Section.Fans; root.section-selected(Section.Fans); }
+                    startup <=> root.startup;
+                    startup-enabled <=> root.startup-enabled;
+                    startup-status <=> root.startup-status;
+                    startup-changed(v) => { root.startup-changed(v); }
+                    version: root.ui-state.version;
+                    quit-requested => { root.titlebar-close-requested(); }
+                }
+                if (root.active-section == Section.Fans) : FansSection {
+                    ui-state <=> root.ui-state;
+                    mutation-safety-blocked <=> root.mutation-safety-blocked;
+                    factory-reset-available <=> root.factory-reset-available;
+                    policy-status <=> root.policy-status;
+                    fan-changed(i) => { root.fan-changed(i); }
+                    fan-profile-changed(i) => { root.fan-profile-changed(i); }
+                    fan-temp-point-changed(i, v) => { root.fan-temp-point-changed(i, v); }
+                    fan-pwm-point-changed(i, v) => { root.fan-pwm-point-changed(i, v); }
+                    fan-apply-clicked(reset) => { root.fan-apply-clicked(reset); }
+                }
+                if (root.active-section == Section.Extra) : ExtraSection {
+                    backend-ready <=> root.backend-ready;
+                    applying <=> root.applying;
+                    status <=> root.status;
+                    keyboard-state-ready <=> root.keyboard-state-ready;
+                    keyboard-control-ready <=> root.keyboard-control-ready;
+                    keyboard-brightness <=> root.keyboard-brightness;
+                    keyboard-brightness-requested(i) => { root.keyboard-brightness-requested(i); }
+                    aura-state-ready <=> root.aura-state-ready;
+                    panel-overdrive-state-ready <=> root.panel-overdrive-state-ready;
+                    panel-overdrive-control-ready <=> root.panel-overdrive-control-ready;
+                    boot-sound-state-ready <=> root.boot-sound-state-ready;
+                    m1-action <=> root.m1-action;
+                    m2-action <=> root.m2-action;
+                    m3-action <=> root.m3-action;
+                    m4-action <=> root.m4-action;
+                    m5-action <=> root.m5-action;
+                    keyboard-effect <=> root.keyboard-effect;
+                    keyboard-speed <=> root.keyboard-speed;
+                    boot-sound <=> root.boot-sound;
+                    status-led <=> root.status-led;
+                    panel-overdrive <=> root.panel-overdrive;
+                    auto-clamshell <=> root.auto-clamshell;
+                    disable-aspm <=> root.disable-aspm;
+                    disable-standby-networking <=> root.disable-standby-networking;
+                    igpu-memory <=> root.igpu-memory;
+                    hibernate-after <=> root.hibernate-after;
+                    p-cores <=> root.p-cores;
+                    e-cores <=> root.e-cores;
+                    reload-requested => { root.reload-requested(); }
+                    apply-requested => { root.apply-requested(); }
+                    panel-overdrive-requested(v) => { root.panel-overdrive-requested(v); }
+                    theme-changed(light) => { root.theme-changed(light); }
+                    start-minimized <=> root.start-minimized;
+                    start-minimized-enabled <=> root.start-minimized-enabled;
+                    start-minimized-changed(v) => { root.start-minimized-changed(v); }
+                    remember-position <=> root.remember-position;
+                    remember-position-enabled <=> root.remember-position-enabled;
+                    remember-position-changed(v) => { root.remember-position-changed(v); }
+                    close-action <=> root.close-action;
+                    close-action-enabled <=> root.close-action-enabled;
+                    hide-to-tray-enabled <=> root.hide-to-tray-enabled;
+                    close-action-changed(v) => { root.close-action-changed(v); }
+                    refresh-enabled <=> root.refresh-enabled;
+                    refresh-pending <=> root.refresh-pending;
+                    diagnostics-summary <=> root.diagnostics-summary;
+                    export-enabled <=> root.export-enabled;
+                    diagnostics-status <=> root.diagnostics-status;
+                    diagnostics-refresh-requested => { root.diagnostics-refresh-requested(); }
+                    diagnostics-export-requested => { root.diagnostics-export-requested(); }
+                    settings-local-status <=> root.settings-local-status;
                 }
             }
         }

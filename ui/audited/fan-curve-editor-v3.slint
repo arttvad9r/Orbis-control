@@ -38,7 +38,8 @@ component TempStepper inherits Rectangle {
     in property <bool> editable: false;
     callback changed(int, int);
 
-    width: 48px;
+    min-width: 40px;
+    horizontal-stretch: 1;
     height: 48px;
     border-radius: 7px;
     border-width: 1px;
@@ -396,7 +397,6 @@ export component FanCurveEditor inherits Rectangle {
         HorizontalLayout {
             height: 48px;
             spacing: 5px;
-            alignment: center;
             TempStepper { index: 0; value: root.temp-0; editable: root.writable && root.state == FanCurveHwState.Ready; changed(i,v) => { root.temp-point-changed(i,v); } }
             TempStepper { index: 1; value: root.temp-1; editable: root.writable && root.state == FanCurveHwState.Ready; changed(i,v) => { root.temp-point-changed(i,v); } }
             TempStepper { index: 2; value: root.temp-2; editable: root.writable && root.state == FanCurveHwState.Ready; changed(i,v) => { root.temp-point-changed(i,v); } }

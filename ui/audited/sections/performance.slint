@@ -1,0 +1,143 @@
+// Performance page — pixel-perfect G-Helper main layout (spec §3/§4):
+// flat panels on formBack, 94×60 mode tiles (gap 4, padding 10), GPU table
+// rows [Eco][_][Standard][Ultimate]/[Optimized], screen buttons 94×36,
+// battery slider 353.5×20 + Full 36.5×18, startup row, version, Quit footer.
+import { UiState, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState } from "../model.slint";
+import { ModeCard } from "../../components/mode-card.slint";
+import { ValueSlider } from "../../components/value-slider.slint";
+import { RequestToggleRow } from "../../components/request-toggle-row.slint";
+import { ActionButton } from "../common.slint";
+import { Palette } from "../../themes/dark.slint";
+
+export component PerformanceSection inherits Rectangle {
+    in property <UiState> ui-state;
+    in property <bool> display-state-ready: false;
+    in property <bool> display-control-ready: false;
+    in property <int> display-mode: -1;
+    in property <string> display-status: "Unavailable";
+    callback display-mode-requested(int);
+    callback perf-clicked(int);
+    callback gpu-clicked(int);
+    callback charge-changed(float);
+    callback fans-open-requested;
+    callback startup-changed(bool);
+    in-out property <bool> startup: false;
+    in-out property <bool> startup-enabled: false;
+    in property <string> startup-status: "Unavailable";
+    in property <string> version: "0.0.0";
+    callback quit-requested;
+
+    function bit-set(mask: int, bit: int) -> bool {
+        let shifted = Math.floor(mask / bit);
+        return shifted - 2 * Math.floor(shifted / 2) == 1;
+    }
+
+    function perf-reason() -> string {
+        if (root.ui-state.perf-state == PerformanceHwState.Ready) {
+            return root.ui-state.perf-writable ? "" : "Read only";
+        }
+        return root.ui-state.perf-unavailable-reason;
+    }
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        // Performance panel (413.5×104): title + 4 tiles 94×60.
+        VerticalLayout {
+            spacing: 4px;
+            HorizontalLayout {
+                height: 20px;
+                Text { text: "Performance mode"; font-size: 13px; font-weight: 600; color: Palette.text-primary; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text { text: root.perf-reason(); font-size: 12px; color: Palette.text-secondary; vertical-alignment: center; }
+            }
+            HorizontalLayout {
+                height: 64px;
+                spacing: 4px;
+                ModeCard { title: "Silent"; icon-kind: 0; accent: Palette.silent; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0; disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 1); clicked => { root.perf-clicked(0); } }
+                ModeCard { title: "Balanced"; icon-kind: 1; accent: Palette.balanced; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1; disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 2); clicked => { root.perf-clicked(1); } }
+                ModeCard { title: "Turbo"; icon-kind: 2; accent: Palette.turbo; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 2; disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 4); clicked => { root.perf-clicked(2); } }
+                ModeCard { title: "Fans"; icon-kind: 3; accent: Palette.accent-default; clicked => { root.fans-open-requested(); } }
+            }
+        }
+
+        // GPU panel: title + rows [Eco][_][Standard][Ultimate] / [Optimized].
+        VerticalLayout {
+            spacing: 4px;
+            HorizontalLayout {
+                height: 20px;
+                Text { text: "GPU Mode"; font-size: 13px; font-weight: 600; color: Palette.text-primary; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text { text: root.ui-state.gpu-mode-state == GpuModeHwState.Ready ? (root.ui-state.gpu-mode-writable ? "" : "Read only") : "Unavailable"; font-size: 12px; color: Palette.text-secondary; vertical-alignment: center; }
+            }
+            HorizontalLayout {
+                height: 64px;
+                spacing: 4px;
+                ModeCard { title: "Eco"; icon-kind: 4; width: 94px; accent: Palette.eco; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0; pending: root.ui-state.gpu-queued == 0; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1); clicked => { root.gpu-clicked(0); } }
+                Rectangle { horizontal-stretch: 1; }
+                ModeCard { title: "Standard"; icon-kind: 4; width: 94px; accent: Palette.standard; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1; pending: root.ui-state.gpu-queued == 1; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2); clicked => { root.gpu-clicked(1); } }
+                ModeCard { title: "Ultimate"; icon-kind: 4; width: 95px; accent: Palette.ultimate; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2; pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4); clicked => { root.gpu-clicked(2); } }
+            }
+            HorizontalLayout {
+                height: 64px;
+                spacing: 4px;
+                ModeCard { title: "Optimized"; icon-kind: 4; width: 94px; accent: Palette.optimized; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 8); clicked => { root.gpu-clicked(3); } }
+                Rectangle { horizontal-stretch: 3; }
+            }
+            if (root.ui-state.gpu-section-error) : Text { text: "GPU mode change was not confirmed"; font-size: 12px; color: Palette.error; }
+            if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : Text { text: "GPU mode queued · applied at next shutdown/reboot"; font-size: 12px; color: Palette.warning; }
+        }
+
+        // Screen panel: title + 94×36 buttons.
+        VerticalLayout {
+            spacing: 4px;
+            HorizontalLayout {
+                height: 20px;
+                Text { text: "Laptop Screen"; font-size: 13px; font-weight: 600; color: Palette.text-primary; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text { text: root.display-status; font-size: 12px; color: root.display-state-ready ? Palette.text-secondary : Palette.text-disabled; vertical-alignment: center; }
+            }
+            HorizontalLayout {
+                height: 36px;
+                spacing: 4px;
+                ModeCard { title: "Auto"; icon-kind: 4; icon-visible: false; min-height: 36px; width: 94px; accent: Palette.accent-default; selected: root.display-control-ready && root.display-mode == 0; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(0); } }
+                ModeCard { title: "60 Hz"; icon-kind: 4; icon-visible: false; min-height: 36px; width: 94px; accent: Palette.accent-default; selected: root.display-control-ready && root.display-mode == 1; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(1); } }
+                ModeCard { title: "120 Hz"; icon-kind: 4; icon-visible: false; min-height: 36px; width: 94px; accent: Palette.accent-default; selected: root.display-control-ready && root.display-mode == 2; disabled: !root.display-control-ready; clicked => { root.display-mode-requested(2); } }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+
+        // Battery panel: title + slider 353.5×20 + Full 36.5×18.
+        VerticalLayout {
+            spacing: 4px;
+            Text { text: "Battery Charge Limit"; font-size: 13px; font-weight: 600; color: Palette.text-primary; }
+            HorizontalLayout {
+                height: 24px;
+                spacing: 8px;
+                alignment: center;
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : ValueSlider { horizontal-stretch: 1; min: 20; max: 100; step: 1; value: root.ui-state.charge-limit; disabled: !root.ui-state.charge-limit-writable; changed(v) => { root.charge-changed(v); } }
+                if (root.ui-state.charge-limit-state != ChargeLimitState.Ready) : Text { horizontal-stretch: 1; text: root.ui-state.charge-limit-state == ChargeLimitState.Loading ? "Reading battery threshold…" : "Battery threshold unavailable"; font-size: 12px; color: Palette.text-secondary; vertical-alignment: center; }
+                ActionButton { width: 48px; label: "Full"; disabled: root.ui-state.charge-limit-state != ChargeLimitState.Ready || !root.ui-state.charge-limit-writable; clicked => { root.charge-changed(100); } }
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; background: transparent; }
+
+        // Startup + version + footer (donate/updates intentionally absent).
+        RequestToggleRow {
+            label: "Run on startup";
+            description: root.startup-enabled ? "Start Orbis with the user session" : "Waiting for autostart backend";
+            checked: root.startup;
+            disabled: !root.startup-enabled;
+            toggled(value) => { root.startup-changed(value); }
+        }
+        HorizontalLayout {
+            height: 24px;
+            spacing: 6px;
+            Text { text: "Orbis Control v" + root.version; font-size: 12px; color: Palette.text-disabled; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            ActionButton { width: 127px; label: "Quit"; clicked => { root.quit-requested(); } }
+        }
+    }
+}
