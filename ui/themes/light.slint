@@ -1,37 +1,38 @@
 // Orbis Control — light-theme semantic tokens.
 // Light mode mirrors the same visual hierarchy as dark mode instead of being a
 // white inversion: quiet window chrome, clear cards and one restrained accent.
+// Light: Catppuccin Latte — https://catppuccin.com
 
 export global LightPalette {
-    // surfaces
-    in property <color> window-background: #F4F5F7;
-    in property <color> titlebar-background: #F4F5F7;
-    in property <color> surface-default: #FFFFFF;
-    in property <color> surface-hover: #F0F3F6;
-    in property <color> surface-pressed: #E7EBEF;
-    in property <color> surface-selected: #EDF4FC;
-    in property <color> surface-disabled: #ECEFF3;
-    in property <color> border-default: #D5DBE2;
-    in property <color> border-strong: #AEB7C2;
+    // surfaces (Catppuccin Latte: base/mantle/surface0-2)
+    in property <color> window-background: #EFF1F5;
+    in property <color> titlebar-background: #E6E9EF;
+    in property <color> surface-default: #CCD0DA;
+    in property <color> surface-hover: #BCC0CC;
+    in property <color> surface-pressed: #DCE0E8;
+    in property <color> surface-selected: #C6CEE0;
+    in property <color> surface-disabled: #E0E3EA;
+    in property <color> border-default: #9CA0B0;
+    in property <color> border-strong: #7C7F93;
 
     // text
-    in property <color> text-primary: #171A1E;
-    in property <color> text-secondary: #5F6873;
-    in property <color> text-disabled: #98A0AA;
-    in property <color> text-on-accent: #FFFFFF;
+    in property <color> text-primary: #4C4F69;
+    in property <color> text-secondary: #6C6F85;
+    in property <color> text-disabled: #9CA0B0;
+    in property <color> text-on-accent: #EFF1F5;
 
     // semantic accents
-    in property <color> accent-default: #2678E8;
-    in property <color> warning: #A66C12;
-    in property <color> error: #C84455;
-    in property <color> success: #1E8064;
+    in property <color> accent-default: #1E66F5;
+    in property <color> warning: #DF8E1D;
+    in property <color> error: #D20F39;
+    in property <color> success: #40A02B;
 
     // mode accents
-    in property <color> silent: #258B70;
-    in property <color> balanced: #2678E8;
-    in property <color> turbo: #D94E60;
-    in property <color> eco: #3C914B;
-    in property <color> standard: #2678E8;
-    in property <color> ultimate: #AF741D;
-    in property <color> optimized: #337FC7;
+    in property <color> silent: #40A02B;
+    in property <color> balanced: #1E66F5;
+    in property <color> turbo: #D20F39;
+    in property <color> eco: #40A02B;
+    in property <color> standard: #1E66F5;
+    in property <color> ultimate: #FE640B;
+    in property <color> optimized: #179299;
 }
