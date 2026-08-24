@@ -1069,8 +1069,19 @@ impl HardwareService {
                     .await
                 {
                     Ok(true) => battery::BatteryMutationStatus::Supported,
-                    Ok(false) => battery::BatteryMutationStatus::TemporarilyUnavailable,
-                    Err(_) => battery::BatteryMutationStatus::Unknown,
+                    Ok(false) => {
+                        tracing::info!(
+                            "battery backend demoted by runtime liveness/contract probe (#107)"
+                        );
+                        battery::BatteryMutationStatus::TemporarilyUnavailable
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            ?error,
+                            "battery runtime probe inconclusive; reporting Unknown"
+                        );
+                        battery::BatteryMutationStatus::Unknown
+                    }
                 }
             }
             other => other,

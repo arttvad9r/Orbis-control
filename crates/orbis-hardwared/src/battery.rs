@@ -276,11 +276,23 @@ fn platform_error_name_is_contract_drift(error_name: &str) -> bool {
 }
 
 /// Classify one Platform property-read failure as proven interface drift.
+///
+/// zbus surfaces peer error replies either as a raw method-error name or
+/// pre-decoded into its typed standard-fdo variant; both shapes must map to
+/// the same verdict. Transport, authorization and decoding failures stay
+/// inconclusive so the status layer can keep them `Unknown` instead of
+/// claiming a known backend state.
 fn platform_read_error_is_contract_drift(error: &zbus::Error) -> bool {
     match error {
         zbus::Error::MethodError(name, _, _) => {
             platform_error_name_is_contract_drift(name.as_str())
         }
+        zbus::Error::FDO(fdo_error) => matches!(
+            fdo_error.as_ref(),
+            zbus::fdo::Error::UnknownObject(_)
+                | zbus::fdo::Error::UnknownInterface(_)
+                | zbus::fdo::Error::UnknownProperty(_)
+        ),
         _ => false,
     }
 }
@@ -846,6 +858,18 @@ mod tests {
         assert!(!platform_read_error_is_contract_drift(
             &zbus::Error::Failure("probe timed out".into())
         ));
+    }
+
+    #[test]
+    fn typed_fdo_structural_absence_is_proven_drift() {
+        // zbus pre-decodes standard peer error names into the typed FDO
+        // variant; this is the shape observed against real dbus-python peers.
+        assert!(platform_read_error_is_contract_drift(&zbus::Error::FDO(
+            Box::new(zbus::fdo::Error::UnknownProperty("simulated drift".into()))
+        )));
+        assert!(!platform_read_error_is_contract_drift(&zbus::Error::FDO(
+            Box::new(zbus::fdo::Error::AccessDenied("denied".into()))
+        )));
     }
 
     #[tokio::test]

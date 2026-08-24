@@ -2,6 +2,9 @@
 
 let
   fakeRoot = "/var/lib/orbis-control-test/battery";
+  # Lives in the world-writable-for-runner runtime dir so the unprivileged
+  # test script can toggle simulated interface drift for the root daemon.
+  driftFlag = "/run/orbis-control-test/asusd-drift";
   fakePowerSupply = "${fakeRoot}/BAT0";
   fakeConfigured = "${fakeRoot}/configured";
   fakeSetterCalls = "${fakeRoot}/setter-calls";
@@ -11,6 +14,7 @@ let
   fakeAsusd = pkgs.writeText "orbis-control-test-fake-asusd.py" ''
     import dbus
     import dbus.service
+    import os
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository import GLib
 
@@ -20,6 +24,10 @@ let
     PROPERTIES = "org.freedesktop.DBus.Properties"
     configured_file = "${fakeConfigured}"
     calls_file = "${fakeSetterCalls}"
+    # While this flag exists the daemon owns its bus name but no longer serves
+    # the typed threshold property: Properties.Get reports standard structural
+    # absence, which is exactly the interface-drift evidence class (#107).
+    drift_flag = "${driftFlag}"
 
     def read_value():
         with open(configured_file) as handle:
@@ -41,6 +49,11 @@ let
 
         @dbus.service.method(PROPERTIES, in_signature="ss", out_signature="v")
         def Get(self, interface, name):
+            if os.path.exists(drift_flag):
+                raise dbus.exceptions.DBusException(
+                    "simulated interface drift",
+                    name="org.freedesktop.DBus.Error.UnknownProperty",
+                )
             if interface != IFACE or name != "ChargeControlEndThreshold":
                 raise dbus.exceptions.DBusException(
                     "unknown property", name="org.freedesktop.DBus.Error.InvalidArgs"
@@ -185,6 +198,29 @@ let
       sleep 0.5
     done
     test "$restored" = 0
+
+    # Proven interface drift (#107): with the owner alive and confirmed, the
+    # daemon stops serving the typed threshold property. The demotion to wire
+    # 2 can then only come from the contract read, not from owner liveness.
+    touch ${driftFlag}
+    busctl --system list | grep -Fq xyz.ljones.Asusd
+    drifted=unknown
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      drifted=$(battery_status)
+      test "$drifted" = 2 && break
+      sleep 0.5
+    done
+    test "$drifted" = 2
+
+    # Removing the drift flag heals the contract without any restart.
+    rm -f ${driftFlag}
+    healed=unknown
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      healed=$(battery_status)
+      test "$healed" = 0 && break
+      sleep 0.5
+    done
+    test "$healed" = 0
 
     printf 'PASS\n' > "$result"
     cp "$log" /run/orbis-control-test/battery-result.log

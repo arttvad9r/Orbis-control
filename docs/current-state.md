@@ -43,7 +43,7 @@ Production product path намеренно включает только док�
 | Window/tray lifecycle | IMPLEMENTED SOURCE — #121 closed | Start Minimized, X11-style position restore/save, Wayland fail-closed behavior, StatusNotifier tray gating and explicit Quit lifecycle. |
 | Diagnostics | IMPLEMENTED SOURCE — #111 closed | Runtime initialization, capability generation replacement, Refresh, privacy-bounded JSON export and Copy Summary wired; Open Logs intentionally disabled. |
 | Battery read | IMPLEMENTED / ASUS+SYSFS CONSENSUS | Current charge/status come from UPower; configured/effective charge-limit state is accepted when ASUS/asusd and kernel sysfs agree. UPower threshold is diagnostic only. |
-| Battery mutation | HISTORICAL LIVE-VALIDATED / SOURCE-COMPLETE — #107 | Controlled Hardware1 path. Dynamic asusd evidence is implemented (#107): `Hardware1.BatteryMutationStatus` re-checks owner liveness per query (non-activating `NameHasOwner`) and, with an owner confirmed, performs one fresh uncached `Properties.Get` of `ChargeControlEndThreshold`; peer-reported UnknownObject/UnknownInterface/UnknownProperty is proven interface drift → `TemporarilyUnavailable`, other failures stay inconclusive (`Unknown`). Startup preflight keeps the strict non-activating guarantee; only the racy refresh window may address the well-known name. Fake-system `battery-mutation-vm` executes supported→owner-loss→restore status generations locally on this revision; interface-drift demotion through a mis-serving daemon remains VM/live work. |
+| Battery mutation | HISTORICAL LIVE-VALIDATED / SOURCE-COMPLETE — #107 | Controlled Hardware1 path. Dynamic asusd evidence is implemented (#107): `Hardware1.BatteryMutationStatus` re-checks owner liveness per query (non-activating `NameHasOwner`) and, with an owner confirmed, performs one fresh uncached `Properties.Get` of `ChargeControlEndThreshold`; peer-reported UnknownObject/UnknownInterface/UnknownProperty (raw or typed-FDO shape) is proven interface drift → `TemporarilyUnavailable`, other failures stay inconclusive (`Unknown`). Startup preflight keeps the strict non-activating guarantee; only the racy refresh window may address the well-known name. Fake-system `battery-mutation-vm` executes supported → owner-loss → restore → live interface-drift (mis-serving daemon raising `UnknownProperty` with the owner present) → heal status generations locally on this revision; real-asusd/live-device confirmation remains future work. |
 | Performance read/write | HISTORICAL LIVE-VALIDATED / CURRENT SOURCE IMPLEMENTED | Session1 read + Hardware1/polkit write + read-back. |
 | GPU primitives | HISTORICAL LIVE-VALIDATED READS | Power, physical MUX and access policy remain separate read concepts. |
 | GPU product mode read | IMPLEMENTED SOURCE / ASUSD ARMOURY | Read-only `dgpu_disable + gpu_mux_mode` decoder reports Hybrid/Integrated/Ultimate; Optimized is not inferred. Current host reports Hybrid (fresh read-only Armoury snapshot 2026-08-24: `CurrentValue` pair `(0,1)`, both `QueuedGpuValue=-1`). |
@@ -169,6 +169,12 @@ hardwared owner preflight lost that race and stayed fail-closed for the whole ru
 the re-run shows no preflight warning and exactly one clean runner pass. This is a
 test-fixture ordering fix only; product startup semantics are unchanged.
 
+On the #107 contract-probe revision `battery-mutation-vm` was extended and
+re-executed green: supported → owner-loss demote → restore → live interface-drift
+demote (mis-serving daemon raising `UnknownProperty` while ownership stays
+confirmed) → heal, all observed through `Hardware1.BatteryMutationStatus`
+without restarting hardwared.
+
 This is revision-scoped `TESTED` evidence only. It does not restore trustworthy hosted CI (#106), does not prove full packaging acceptance (`nix flake check` was not run as a whole on this revision), and does not create live hardware evidence for this branch.
 
 Safe source work may continue when it does not widen unvalidated hardware writes:
@@ -201,14 +207,13 @@ All of them are exported from crate public APIs but have **no runtime consumers*
 ## Active blockers / next work
 
 1. #106 executable CI/tooling recovery.
-2. #107 residual: interface-drift demotion exercised through a mis-serving asusd daemon (probe implemented and VM-executed for owner-loss/restore generations).
-3. #117 remainder: field-local denied/malformed/unavailable telemetry evidence classes.
-4. #109 aggregate CPU/GPU fan capability truth.
-5. #116 fan stored-enabled read evidence.
-6. #126 package/VM sandbox validation.
-7. #124 application identity decision.
-8. #118 old remote branch cleanup when delete-ref access exists.
-9. #114 required checks after #106.
+2. #117 remainder: field-local denied/malformed/unavailable telemetry evidence classes.
+3. #109 aggregate CPU/GPU fan capability truth.
+4. #116 fan stored-enabled read evidence.
+5. #126 package/VM sandbox validation.
+6. #124 application identity decision.
+7. #118 old remote branch cleanup when delete-ref access exists.
+8. #114 required checks after #106.
 
 ## Historical live evidence retained
 
