@@ -74,6 +74,21 @@ let
     GLib.MainLoop().run()
   '';
   python = pkgs.python3.withPackages (ps: [ ps.dbus-python ps.pygobject3 ]);
+  # Type=simple marks the unit "started" when the process spawns, but the bus
+  # name is acquired only after python imports finish. Without this readiness
+  # gate the hardwared one-shot owner preflight can lose that race, install no
+  # mutation backend (fail-closed) and every SetChargeLimit fails until restart.
+  fakeAsusdReady = pkgs.writeShellScript "orbis-control-test-fake-asusd-ready" ''
+    for _ in $(seq 1 100); do
+      if ${pkgs.systemd}/bin/busctl --system list \
+          | ${pkgs.gnugrep}/bin/grep -Fq xyz.ljones.Asusd; then
+        exit 0
+      fi
+      ${pkgs.coreutils}/bin/sleep 0.1
+    done
+    echo "fake asusd did not acquire xyz.ljones.Asusd within 10s" >&2
+    exit 1
+  '';
   fakeAsusdPolicy = pkgs.writeTextDir "share/dbus-1/system.d/orbis-control-test-asusd.conf" ''
     <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
       "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
@@ -188,6 +203,7 @@ in
         serviceConfig = {
           Type = "simple";
           ExecStart = "${python}/bin/python ${fakeAsusd}";
+          ExecStartPost = fakeAsusdReady;
           Restart = "on-failure";
         };
       };
