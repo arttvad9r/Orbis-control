@@ -55,7 +55,12 @@ export component DashboardSection inherits Rectangle {
     }
 
     VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 14px;
         spacing: 10px;
+        alignment: space-between;
 
         VerticalLayout {
             spacing: 4px;
@@ -80,22 +85,25 @@ export component DashboardSection inherits Rectangle {
             if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : LocalStatus { text: "GPU mode queued · applied at next shutdown/reboot"; accent: Palette.warning; }
         }
 
-        DropdownRow {
-            label: "Display";
-            options: ["Auto", "60 Hz", "120 Hz"];
-            current-index: root.display-mode < 0 ? 0 : root.display-mode;
-            enabled-row: root.display-control-ready;
-            status: root.display-row-status();
-            row-changed(i) => { root.display-mode-requested(i); }
-        }
+        VerticalLayout {
+            spacing: 6px;
+            DropdownRow {
+                label: "Display";
+                options: ["Auto", "60 Hz", "120 Hz"];
+                current-index: root.display-mode < 0 ? 0 : root.display-mode;
+                enabled-row: root.display-control-ready;
+                status: root.display-row-status();
+                row-changed(i) => { root.display-mode-requested(i); }
+            }
 
-        DropdownRow {
-            label: "Keyboard";
-            options: ["Off", "1", "2", "3"];
-            current-index: root.keyboard-brightness < 0 ? 0 : root.keyboard-brightness;
-            enabled-row: root.keyboard-control-ready;
-            status: root.keyboard-row-status();
-            row-changed(i) => { root.keyboard-brightness-requested(i); }
+            DropdownRow {
+                label: "Keyboard";
+                options: ["Off", "1", "2", "3"];
+                current-index: root.keyboard-brightness < 0 ? 0 : root.keyboard-brightness;
+                enabled-row: root.keyboard-control-ready;
+                status: root.keyboard-row-status();
+                row-changed(i) => { root.keyboard-brightness-requested(i); }
+            }
         }
 
         VerticalLayout {

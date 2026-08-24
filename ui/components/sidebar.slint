@@ -15,9 +15,8 @@ component NavItem inherits Rectangle {
     background: root.is-active ? Palette.surface-selected
         : touch.has-hover ? Palette.surface-hover : transparent;
     HorizontalLayout {
-        padding-left: 10px;
+        padding-left: 12px;
         spacing: 10px;
-        alignment: center;
 
         // 16x16 icon area.
         icons := Rectangle {

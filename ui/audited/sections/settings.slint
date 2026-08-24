@@ -103,7 +103,6 @@ export component SettingsSection inherits Rectangle {
                 HorizontalLayout {
                     height: 30px;
                     spacing: 6px;
-                    alignment: center;
                     Text { width: 148px; text: "Close button"; font-size: 10px; color: root.close-action-enabled ? Palette.text-primary : Palette.text-disabled; vertical-alignment: center; }
                     ComboBox {
                         width: 200px;
@@ -132,7 +131,6 @@ export component SettingsSection inherits Rectangle {
                 HorizontalLayout {
                     height: 30px;
                     spacing: 6px;
-                    alignment: center;
                     ActionButton { width: 96px; label: root.refresh-pending ? "Refreshing…" : "Refresh"; disabled: !root.refresh-enabled || root.refresh-pending; clicked => { root.refresh-requested(); } }
                     ActionButton {
                         width: 96px;

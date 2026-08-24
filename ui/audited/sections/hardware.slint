@@ -61,8 +61,12 @@ export component HardwareSection inherits Rectangle {
 
         scroll := ScrollView {
             vertical-stretch: 1;
+            viewport-width: scroll.width - 12px;
+            viewport-height: 780px;
 
             VerticalLayout {
+                width: scroll.width - 12px;
+                height: 780px;
                 spacing: 10px;
 
                 SectionCard {
