@@ -606,6 +606,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn all_discovered_sources_failing_yields_ok_empty_snapshot() {
+        // #117: discovery finds every source, but every selected value read
+        // fails. The snapshot stays Ok with no useful data (quality Empty) —
+        // never fake values and never a provider error — so consumers can
+        // distinguish "no observations" from a successful collection.
+        let root = fixture_root();
+        full_fixture(&root);
+        for rel in [
+            "class/hwmon/hwmon0/temp1_input",
+            "class/hwmon/hwmon1/temp1_input",
+            "class/hwmon/hwmon1/power1_input",
+            "class/hwmon/hwmon2/fan1_input",
+            "class/hwmon/hwmon2/fan2_input",
+            "class/power_supply/BAT1/capacity",
+            "class/power_supply/ACAD/online",
+        ] {
+            write_fixture(&root, rel, "garbage\n");
+        }
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot stays Ok");
+        assert_eq!(t.quality(), orbis_core::telemetry::TelemetryQuality::Empty);
+        assert_eq!(t.cpu_temp, None);
+        assert_eq!(t.gpu_temp, None);
+        assert_eq!(t.power.gpu, None);
+        assert!(t.fans.is_empty());
+        assert_eq!(t.battery, None);
+        assert_eq!(t.ac_online, None);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn unreadable_source_degrades_field_locally() {
+        // #117: a permission-denied selected source becomes field-local
+        // absence (None); independent metrics stay intact. Skipped when the
+        // process can bypass file permissions (root).
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = fixture_root();
+        full_fixture(&root);
+        let temp = root.join("class/hwmon/hwmon0/temp1_input");
+        std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+        if std::fs::read_to_string(&temp).is_ok() {
+            return; // running privileged; permission simulation not observable
+        }
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot stays Ok");
+        assert_eq!(t.cpu_temp, None);
+        // Independent fields survive.
+        assert_eq!(t.gpu_temp, Some(TemperatureC::new(43).expect("c")));
+        assert_eq!(
+            t.battery.expect("battery").percent,
+            Percent::new(100).expect("pct")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn malformed_cpu_temp_degrades_to_none() {
         let root = fixture_root();
         write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
