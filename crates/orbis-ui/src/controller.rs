@@ -670,8 +670,19 @@ impl UiState {
     /// Каждое поле обновляется независимо: отсутствующие (None) поля
     /// становятся "—", но не ломают остальные значения. Ошибка snapshot-а
     /// обновление не вызывает (caller сохраняет последний успешный state).
+    ///
+    /// #117: успешный snapshot без единого наблюдаемого поля — это
+    /// доказанное отсутствие данных, а не свежее наблюдение. Такой snapshot
+    /// не помечает telemetry fresh и сохраняет последние хорошие значения
+    /// (тот же контракт, что у неудачного refresh).
     pub fn update_telemetry(&mut self, telemetry: &orbis_core::telemetry::Telemetry) {
         use orbis_core::fan::FanId;
+        use orbis_core::telemetry::TelemetryQuality;
+
+        if telemetry.quality() == TelemetryQuality::Empty {
+            self.telemetry_fresh = false;
+            return;
+        }
 
         self.telemetry_fresh = true;
         self.cpu_temp = format_celsius(telemetry.cpu_temp);
@@ -1418,6 +1429,30 @@ mod tests {
         assert!(!s.telemetry_fresh);
         assert_eq!(s.cpu_temp, "46°C"); // last successful value preserved
         assert_eq!(s.battery_percent, "100%");
+    }
+
+    #[test]
+    fn empty_snapshot_is_absence_evidence_not_freshness() {
+        // #117: an Ok snapshot with no observed field is proof of absence,
+        // not a fresh observation. It must not claim freshness and must
+        // preserve the last-good rendered values (same contract as a failed
+        // refresh); a partial snapshot is a useful observation again.
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.reset_telemetry();
+        s.update_telemetry(&sample_telemetry());
+        assert!(s.telemetry_fresh);
+
+        s.update_telemetry(&orbis_core::telemetry::Telemetry::empty());
+        assert!(!s.telemetry_fresh);
+        assert_eq!(s.cpu_temp, "46°C");
+        assert_eq!(s.battery_percent, "100%");
+        assert_eq!(s.ac_online, "On AC");
+
+        let mut partial = sample_telemetry();
+        partial.battery = None;
+        partial.fans.clear();
+        s.update_telemetry(&partial);
+        assert!(s.telemetry_fresh);
     }
 
     #[test]
