@@ -52,7 +52,7 @@ write or product capability to `Supported`.
    - explicit mutation unknown-outcome/recovery semantics;
    - no blind retries.
 3. **#107 Battery owner/interface liveness** — dynamic bounded non-mutating evidence across daemon restart/disappearance.
-4. **#117 telemetry coverage/freshness** — useful observation vs empty/partial/field-local failures.
+4. **#117 telemetry coverage/freshness** — partially delivered (`dd5e2ae`): UI `telemetry_fresh` now means a recent useful observation (empty snapshot = absence evidence, last-good preserved); provider snapshot contracts pinned by tests. Remaining: field-local denied/malformed/unavailable evidence classes on the provider/protocol surface.
 
 #112 is source-complete: explicit and periodic capability refresh share the same canonical mutation-status requery path. It remains validation-only work until executable CI returns.
 
