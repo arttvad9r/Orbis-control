@@ -1,5 +1,5 @@
 import { UiState, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState } from "model.slint";
-import { ModeCard } from "../components/mode-card.slint";
+import { SegmentedTrack, Segment } from "../components/segmented-control.slint";
 import { ValueSlider } from "../components/value-slider.slint";
 import { ChoiceChip } from "../components/visual-controls.slint";
 import { SectionCard, SectionTitle, ActionButton, LocalStatus } from "common.slint";
@@ -96,24 +96,22 @@ export component AppWindow inherits Window {
         VerticalLayout {
             spacing: 4px;
             SectionTitle { title: root.perf-label(); detail: root.perf-detail(); }
-            HorizontalLayout {
-                height: 54px; spacing: 6px;
-                ModeCard { title: "Silent"; compact: true; accent: Palette.silent; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0; disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 1); clicked => { root.perf-clicked(0); } }
-                ModeCard { title: "Balanced"; compact: true; accent: Palette.balanced; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1; disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 2); clicked => { root.perf-clicked(1); } }
-                ModeCard { title: "Turbo"; compact: true; accent: Palette.turbo; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 2; disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 4); clicked => { root.perf-clicked(2); } }
-                ModeCard { title: "Fans + Power"; compact: true; accent: Palette.accent-default; clicked => { root.fans-clicked(); } }
+            SegmentedTrack {
+                Segment { label: "Silent"; accent: Palette.silent; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0; segment-disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 1); activate => { root.perf-clicked(0); } }
+                Segment { label: "Balanced"; accent: Palette.balanced; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1; segment-disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 2); activate => { root.perf-clicked(1); } }
+                Segment { label: "Turbo"; accent: Palette.turbo; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 2; segment-disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 4); activate => { root.perf-clicked(2); } }
+                Segment { label: "Fans + Power"; activate => { root.fans-clicked(); } }
             }
         }
 
         VerticalLayout {
             spacing: 4px;
             SectionTitle { title: root.gpu-label(); detail: root.gpu-detail(); }
-            HorizontalLayout {
-                height: 54px; spacing: 6px;
-                ModeCard { title: "Eco"; compact: true; accent: Palette.eco; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0; pending: root.ui-state.gpu-queued == 0; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1); clicked => { root.gpu-clicked(0); } }
-                ModeCard { title: "Standard"; compact: true; accent: Palette.standard; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1; pending: root.ui-state.gpu-queued == 1; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2); clicked => { root.gpu-clicked(1); } }
-                ModeCard { title: "Ultimate"; compact: true; accent: Palette.ultimate; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2; pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4); clicked => { root.gpu-clicked(2); } }
-                ModeCard { title: "Optimized"; compact: true; accent: Palette.optimized; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3; disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 8); clicked => { root.gpu-clicked(3); } }
+            SegmentedTrack {
+                Segment { label: "Eco"; accent: Palette.eco; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0; pending: root.ui-state.gpu-queued == 0; segment-disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1); activate => { root.gpu-clicked(0); } }
+                Segment { label: "Standard"; accent: Palette.standard; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1; pending: root.ui-state.gpu-queued == 1; segment-disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2); activate => { root.gpu-clicked(1); } }
+                Segment { label: "Ultimate"; accent: Palette.ultimate; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2; pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2; segment-disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4); activate => { root.gpu-clicked(2); } }
+                Segment { label: "Optimized"; accent: Palette.optimized; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3; segment-disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 8); activate => { root.gpu-clicked(3); } }
             }
             if (root.ui-state.gpu-section-error) : LocalStatus { text: "GPU mode change was not confirmed"; accent: Palette.error; }
             if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : LocalStatus { text: "GPU mode queued · applied at next shutdown/reboot"; accent: Palette.warning; }

@@ -1,0 +1,78 @@
+// SegmentedControl — full-width mode switch used by the main window sections.
+//
+// Replaces the per-mode card row: one quiet track with equal segments, the
+// selected segment filled with its mode accent. States stay truthful — a
+// disabled segment never looks writable, a pending segment keeps its note.
+
+import { Palette } from "../themes/dark.slint";
+
+// Track container; place `Segment` items inside via @children.
+export component SegmentedTrack inherits Rectangle {
+    height: 48px;
+    border-radius: 8px;
+    background: Palette.surface-default;
+    clip: true;
+
+    HorizontalLayout {
+        padding: 3px;
+        spacing: 3px;
+        @children
+    }
+}
+
+export component Segment inherits Rectangle {
+    in property <string> label;
+    in property <color> accent: Palette.accent-default;
+    in property <bool> selected: false;
+    in property <bool> pending: false;
+    in property <bool> segment-disabled: false;
+    in property <string> pending-note: "Reboot required";
+    callback activate;
+
+    horizontal-stretch: 1;
+    preferred-width: 0px;
+    min-width: 0px;
+    border-radius: 6px;
+    border-width: root.pending && !root.segment-disabled ? 1px : 0px;
+
+    property <bool> hover: touch.has-hover;
+
+    background: root.segment-disabled ? Palette.surface-disabled
+        : touch.pressed ? Palette.surface-pressed
+        : root.pending ? Palette.surface-selected
+        : root.selected ? root.accent
+        : hover ? Palette.surface-hover
+        : transparent;
+
+    border-color: root.accent;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        Text {
+            text: root.label;
+            font-size: 11px;
+            font-weight: root.selected ? 700 : 600;
+            color: root.segment-disabled ? Palette.text-disabled
+                : root.selected ? Palette.text-on-accent
+                : Palette.text-primary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if (root.pending && !root.segment-disabled) : Text {
+            text: root.pending-note;
+            font-size: 8px;
+            color: root.selected ? Palette.text-on-accent : root.accent;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: !root.segment-disabled;
+        clicked => { root.activate(); }
+    }
+}

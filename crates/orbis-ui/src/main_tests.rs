@@ -2053,17 +2053,17 @@ fn production_initial_has_no_queued_target_or_reboot_claim() {
 #[test]
 fn main_window_renders_queued_target_and_reboot_state() {
     let source = include_str!("../../../ui/audited/main-window.slint");
-    // Queued target renders as pending on the exact queued card.
+    // Queued target renders as pending on the exact queued segment.
     assert!(source.contains("gpu-queued == 0"));
     assert!(source.contains("gpu-queued == 1"));
     assert!(source.contains("gpu-queued == 2"));
     // Reboot-required status line exists; Optimized never gains a queued binding.
     assert!(source.contains("shutdown/reboot"));
-    let optimized_line_start = source.find("title: \"Optimized\"").expect("Optimized card");
+    let optimized_line_start = source.find("label: \"Optimized\"").expect("Optimized segment");
     let optimized_line_end = source[optimized_line_start..]
         .find('\n')
         .map(|end| optimized_line_start + end)
-        .expect("Optimized card line ends");
+        .expect("Optimized segment line ends");
     let optimized_line = &source[optimized_line_start..optimized_line_end];
     assert!(
         !optimized_line.contains("pending:"),

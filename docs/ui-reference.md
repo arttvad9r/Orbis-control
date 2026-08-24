@@ -1,12 +1,94 @@
 # UI Reference — Orbis Control
 
-> Дата: 2026-08-06.
+> Дата: 2026-08-06. Normative reconciliation: 2026-08-24 (#128).
 > Источник измерений: исходники G-Helper `e439349f` (app/Settings.Designer.cs,
 > app/Fans.Designer.cs, app/Extra.Designer.cs, app/UI/RForm.cs, app/Settings.cs).
 > Методика: WinForms `AutoScaleDimensions = 192×192` → нормализованные 96-DPI
 > логические пиксели (деление на 2), далее сверка со скриншотами (запланировано).
 
-## 1. Методология
+## 0. Normative Orbis UI specification (2026-08-24)
+
+Orbis Control **не является клоном G-Helper**. Разделы 1–9 ниже — исторический
+источник измерений, из которого вырос первоначальный дизайн; нормативом
+является эта секция. Компилируемый UI живёт в `ui/audited/` (+ `ui/components/`,
+`ui/themes/`); `ui/app-window.slint` — легаси и не компилируется.
+
+### Дизайн-принципы
+
+- Одно компактное окно быстрых управлений: Performance → GPU Mode →
+  Quick Controls → Battery Charge Limit → футер; вторичные поверхности —
+  отдельные окна (`ui/audited/*-window.slint`).
+- Состояния честные: disabled/pending/unavailable выводятся из typed evidence,
+  никогда не симулируются.
+- Тёмная палитра — «cool charcoal» система Orbis (ниже); light-вариант в
+  `ui/themes/light.slint`.
+
+### Нормативная геометрия (реализация = спецификация)
+
+| Параметр | Значение |
+|---|---|
+| Главное окно | 452×526 logical px, фиксированное |
+| Padding окна / spacing секций | 12 / 10 |
+| Mode-переключатель | `SegmentedTrack` 48px: трек radius 8, сегменты radius 6, gap 3 |
+| Секционная карточка | `SectionCard` radius 8, border 1 |
+| Заголовок секции | `SectionTitle` 22px, 11px semibold + detail справа |
+| Кнопки действий | `ActionButton` высота 30, radius 8 |
+| Статусная строка | `LocalStatus` высота 26, radius 8 |
+| Quick Controls | `ChoiceChip` radius 8, ряды 32px |
+
+### Нормативная палитра (dark; light — зеркально в `light.slint`)
+
+```json
+{
+  "window.background": "#17191C",
+  "titlebar.background": "#17191C",
+  "surface.default": "#202328",
+  "surface.hover": "#272B31",
+  "surface.pressed": "#1B1E22",
+  "surface.selected": "#242A30",
+  "surface.disabled": "#1D2024",
+  "border.default": "#343940",
+  "border.strong": "#4A515B",
+  "text.primary": "#F4F6F8",
+  "text.secondary": "#AAB2BD",
+  "text.disabled": "#68717D",
+  "text.on-accent": "#FFFFFF",
+  "accent.default": "#4DA3FF",
+  "warning": "#E4A853",
+  "error": "#F06B78",
+  "success": "#55C79A",
+  "mode.silent": "#5CC8A5",
+  "mode.balanced": "#4DA3FF",
+  "mode.turbo": "#FF6B78",
+  "mode.eco": "#75C77A",
+  "mode.standard": "#4DA3FF",
+  "mode.ultimate": "#E7AC57",
+  "mode.optimized": "#6AB6FF"
+}
+```
+
+Выбранный режим подсвечивается заливкой акцента режима (единственное крупное
+цветовое пятно в окне); акценты нигде больше не заливают поверхности.
+
+### Структурные решения (отличия от G-Helper — сознательные)
+
+- Нативный titlebar ОС (Wayland CSD), не кастомная RForm-панель.
+- GPU Mode — один ряд из четырёх сегментов, а не 2 ряда с пустой колонкой.
+- Высота окна фиксированная: все секции видны всегда, неподдерживаемые
+  состояния показываются честными статусными строками, а не скрытием секций.
+- Quick Controls (Display/Keyboard) — секция Orbis; контролы disabled без
+  typed write evidence.
+- «Fans + Power» — неотключаемый сегмент-действие (открывает FansWindow),
+  никогда не отображает selected.
+
+### Visual regression
+
+Скриншот-проверки (`--features ui-review`, `--screenshot`, сценарии
+`--ui-state default/pending/disabled`) остаются механизмом верификации
+(§10); базовые сценарии актуальны, эталонные значения пересчитываются от
+нормативной геометрии этой секции, а не от G-Helper-замеров.
+
+## 1. Методология (историческая)
 
 1. Из `*.Designer.cs` извлекаются `ClientSize`, `Location`, `Size`, `Padding`,
    `Margin`, `RowStyles`, `ColumnStyles`, шрифты, радиусы, цвета, visible/hidden.
