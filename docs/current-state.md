@@ -63,7 +63,7 @@ Production product path намеренно включает только док�
 | Updates | FAIL-CLOSED | Installation owner detection + typed blockers exist; no invented release feed/downloader/installer. |
 | Release dependency graph | EXECUTED LOCALLY — #115 closed | GUI release graph contains no `orbis-test-support` (re-proven by `cargo tree -e normal --locked` on this revision): production startup uses `UiState::production_initial`; fixture bootstrap is dev-only + optional `ui-review` feature for screenshot builds (`cargo check -p orbis-ui --features ui-review` green). |
 | GUI root boundary | EXECUTED LOCALLY — #125 closed | Interactive launch rejects euid 0 before preferences/runtime/bus setup (`LaunchContext::validate`, rustix geteuid); screenshot/offscreen paths remain explicit exceptions; decision unit tests executed green on this revision. Hosted CI re-proof rides #106. |
-| Hardwared sandbox | STRUCTURALLY MINIMIZED / VALIDATION OPEN — #126 | Intended direct sysfs write surface is `platform_profile` only; executable package/VM proof awaits #106/tooling. |
+| Hardwared sandbox | STRUCTURALLY MINIMIZED / VM-VALIDATED — #126 residual live-host | Intended direct sysfs write surface is `platform_profile` only. Executed on the contract-probe revision: all three system-integration VM checks green (`hardwared-lifecycle`, `performance-mutation-vm`, `battery-mutation-vm` incl. #107 status generations); a source-level parity contract (`scripts/check-hardwared-unit-parity.py` in `verify-static`, drift-catching verified) pins the standalone unit to the identical module sandbox/write surface. Remaining before close: one live `deploy-dev-hardwared.sh` run against a real/dev host (owner-side, needs sudo). |
 | ASUS FA707NV live read baseline | OBSERVED / READ-ONLY | `platform_profile`, asusd/asusctl profile, UPower, DRM/sysfs GPU, hwmon, thermal and power_supply reads were observed on FA707NV; Session1/Hardware1/hardwared and supergfxd were unavailable. This does not promote write support. |
 | ASUS FA707NV platform profile mutation | LIVE-VALIDATED (revision-scoped) | Controlled Hardware1 apply/read-back/restore was validated on-device; see [`hardware-evidence/fa707nv-platform-profile-validation.md`](hardware-evidence/fa707nv-platform-profile-validation.md). Evidence is scoped to that revision and environment; it does not extend to later changes or other capabilities. |
 | Research foundations (policy/preset/reconciliation/fan-policy/transaction/readiness/system-telemetry) | FOUNDATION | Merged modules are exported from `orbis-core`/`orbis-config`/`orbis-providers` public APIs but have no runtime consumers: worker, UI, sessiond and hardwared do not call them. Loading config remains hardware-inert. See "Research-foundation status" below. |
@@ -161,6 +161,15 @@ nix build .#checks.x86_64-linux.hardwared-lifecycle     → PASS (fake-system Ha
 nix build .#checks.x86_64-linux.performance-mutation-vm → PASS (polkit active session + typed profile mutation/read-back)
 nix build .#checks.x86_64-linux.battery-mutation-vm     → PASS (after ce9ddab readiness gate; see below)
 ```
+
+All three were re-executed green on 2026-08-24 at the #107/#126 revision
+(`battery-mutation-vm` including the drift generations). Re-running
+`performance-mutation-vm` exposed a pre-existing fixture race: getty autologin
+respawns the runner script after PASS, so a fresh generation replayed
+mutations while the driver read final state (`platform_profile` observed as
+`quiet`). Both mutation fixtures now write a completion sentinel before
+publishing PASS; later autologin generations idle (`exec sleep infinity`)
+instead of replaying the scenario.
 
 `battery-mutation-vm` initially failed at `a752be6`: the fake asusd unit was
 Type=simple "started" before python acquired `xyz.ljones.Asusd`, so the one-shot

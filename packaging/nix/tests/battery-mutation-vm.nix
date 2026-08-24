@@ -119,6 +119,13 @@ let
     set -eu
     result=/run/orbis-control-test/battery-result
     log=/run/orbis-control-test/battery-runner.log
+    # Getty autologin respawns this script per session; after one generation
+    # completed the scenario, later generations idle instead of replaying
+    # status/mutation generations against the driver's post-PASS checks.
+    complete=/run/orbis-control-test/battery-scenario-complete
+    if [[ -e $complete ]]; then
+      exec sleep infinity
+    fi
     exec >"$log" 2>&1
 
     test "$(id -u)" != 0
@@ -222,6 +229,9 @@ let
     done
     test "$healed" = 0
 
+    # Mark completion before publishing PASS: the sentinel is the retry gate
+    # for later autologin generations, so only a fully passed run sets it.
+    : > "$complete"
     printf 'PASS\n' > "$result"
     cp "$log" /run/orbis-control-test/battery-result.log
   '';

@@ -10,6 +10,14 @@ let
     result=/run/orbis-control-test/result
     log=/run/orbis-control-test/runner.log
     identity=/run/orbis-control-test/identity
+    # Getty autologin respawns this script for every login session. Once one
+    # generation completed the scenario, later generations must idle instead
+    # of replaying mutations, otherwise a fresh generation races the driver's
+    # post-PASS observations (observed: final profile read as 'quiet').
+    complete=/run/orbis-control-test/scenario-complete
+    if [[ -e $complete ]]; then
+      exec sleep infinity
+    fi
     exec >"$log" 2>&1
 
     test "$(id -u)" != 0
@@ -73,6 +81,9 @@ let
     printf '%s\n' "$invalid" | grep -E 'InvalidArgs|unknown performance wire value|неизвестный performance wire value'
     assert_state balanced 1
     systemctl --user is-active orbis-sessiond.service
+    # Mark completion before publishing PASS: the sentinel is the retry gate
+    # for later autologin generations, so only a fully passed run sets it.
+    : > "$complete"
     printf 'PASS\n'
     cp "$log" "$result"
   '';
@@ -192,7 +203,9 @@ in
         raise
     result = machine.succeed("cat /run/orbis-control-test/result")
     assert "PASS" in result, result
-    assert machine.succeed(f"cat {profile_file}").strip() == "balanced"
+    profile = machine.succeed(f"cat {profile_file}").strip()
+    machine.log(f"final platform_profile={profile!r}")
+    assert profile == "balanced", profile
 
     # Both daemons remain alive after all valid and invalid calls.
     machine.succeed("systemctl is-active orbis-hardwared.service")
