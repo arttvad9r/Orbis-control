@@ -46,11 +46,7 @@ write or product capability to `Supported`.
 **Status: HIGHEST PRIORITY**
 
 1. **#125 GUI root boundary** — reject interactive euid 0 before preferences, runtime or D-Bus setup. Screenshot/offscreen behavior must remain explicit and testable.
-2. **#123 bounded execution** — source work already covers public probes, CLI and core worker reads. Remaining:
-   - telemetry timeout ownership;
-   - bounded Hardware1 mutation-status requery;
-   - explicit mutation unknown-outcome/recovery semantics;
-   - no blind retries.
+2. **#123 bounded execution — CLOSED (2026-08-24)**: telemetry owns provider identity/deadline, Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`), mutation unknown outcomes classify as `Unconfirmed` with no blind retries; all executed green locally (workspace `--locked` suite), hosted CI re-proof rides #106.
 3. **#107 Battery owner/interface liveness** — dynamic bounded non-mutating evidence across daemon restart/disappearance.
 4. **#117 telemetry coverage/freshness** — partially delivered (`dd5e2ae`): UI `telemetry_fresh` now means a recent useful observation (empty snapshot = absence evidence, last-good preserved); provider snapshot contracts pinned by tests. Remaining: field-local denied/malformed/unavailable evidence classes on the provider/protocol surface.
 

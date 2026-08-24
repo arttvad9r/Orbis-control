@@ -50,7 +50,7 @@ Production product path намеренно включает только док�
 | ASUS product GPU queue operation | IMPLEMENTED / REVISION-SCOPED TESTED / PACKAGED — PRODUCTION BLOCKED | Typed `Hardware1.SetProductGpuMode` exists end-to-end (provider outcome/mismatch classification → hardwared paired queue backend + P2P tests → session-client caller-preserving source → worker FIFO command/event → UI queued-target + reboot-required rendering). Polkit action `io.github.orbiscontrol.hardware.set-product-gpu-mode` ships `allow_active=no`; hardwared production composition keeps the backend unattached (`NotSupported`); UI controls stay disabled without `Supported` write evidence. No real host write was issued; controlled live validation requires explicit user confirmation. |
 | GPU product/raw mutation | BLOCKED | Product modes are policy, not raw backend enum. Production mutation remains disabled; ASUS GPU attributes are queued/deferred until shutdown and require reboot semantics. Raw `Hardware1.SetGpuMode` supergfxd semantics unchanged. |
 | Capability registry | IMPLEMENTED / RESILIENCE COVERED | Whole-swap immutable generations; explicit and periodic refresh share canonical mutation-status requery (#112 source-complete); backend loss/timeout and recovery publish capability-local availability transitions. UI/Diagnostics/support-policy source audit #120 is complete; Battery owner evidence is now dynamic (#107 owner liveness). |
-| Provider execution | PARTIAL HARDENING — #123 | Canonical `bounded_provider_call`; public probes, CLI and main worker read refreshes use provider deadlines. Telemetry/status requery and mutation unknown-outcome boundary remain. |
+| Provider execution | EXECUTED LOCALLY — #123 closed | Canonical `bounded_provider_call`; public probes, CLI and main worker read refreshes use provider deadlines; telemetry owns provider identity/deadline (`provider_id`/`snapshot_timeout`); Hardware1 status requery bounded (`HARDWARE1_STATUS_DEADLINE`); mutation unknown outcome classified `Unconfirmed` without retry. Workspace checks executed green on this revision; hosted CI re-proof rides #106. |
 | CLI | IMPLEMENTED READ-ONLY / LOCALLY EXECUTED — #119 closed | `status` + versioned `status --json` (schema 3 includes battery threshold evidence); typed states; no mutation commands. Executable local validation + executable service-absent integration test (`ebba8ea`) recorded; hosted CI re-proof still rides #106. |
 | Telemetry | IMPLEMENTED / PARTIAL COVERAGE — #117 open | Partial metrics are supported. UI freshness now honors snapshot quality: an `Ok` snapshot with no observed field is absence evidence (`telemetry_fresh=false`, last-good values preserved), not a fresh observation; provider contracts for empty root, all-sources-failing and permission-denied field-local degradation are pinned by tests. Still open: explicit field-local denied/malformed/unavailable evidence classes on the wire/provider API. |
 | Fan reads | IMPLEMENTED / AGGREGATE TRUTH + STORED ENABLED CARRIED | Per-fan Session1 read exists; stored `FanCurveData.enabled` is carried through Session1/client/UI evidence (#116 source-complete) and rendered from `UiState` in the FansWindow; aggregate FanCurves requires both CPU and GPU read contracts (#109 source-complete). |
@@ -82,13 +82,13 @@ Implemented in source:
 - GPU power/MUX/access reads execute independently with `tokio::join!`;
 - explicit and periodic capability refresh use the same canonical refresh helper.
 
-Still open:
+Closure status (2026-08-24, #123 closed):
 
-1. telemetry now exposes canonical provider identity/deadline through `TelemetryServiceRuntime` (`provider_id`/`snapshot_timeout`), and snapshot reads remain bounded via `provider.timeout()`; executable validation of the exact revision remains;
+1. telemetry owns canonical provider identity/deadline through `TelemetryServiceRuntime` (`provider_id`/`snapshot_timeout`); snapshot reads stay bounded via `provider.timeout()` (unit-tested);
 2. Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`, timeout → `Unknown`);
-3. mutation timeout after possible dispatch is now classified across interactive Performance/Battery, the Automation Performance executor and the (gated) Fan Factory Reset path as `CommandError::Unconfirmed`/recovery: never success, never retried, rollback not auto-triggered; the outcome is obtained only through a subsequent authoritative read-back that confirms or refutes the desired state. Successful factory reset returns `ApplyResult::Accepted` (not `Applied`) because an independent default-evidence source does not exist;
+3. mutation timeout after possible dispatch is classified across interactive Performance/Battery, the Automation Performance executor and the (gated) Fan Factory Reset path as `CommandError::Unconfirmed`/recovery: never success, never retried, rollback not auto-triggered; the outcome is obtained only through a subsequent authoritative read-back that confirms or refutes the desired state. Successful factory reset returns `ApplyResult::Accepted` (not `Applied`) because an independent default-evidence source does not exist;
 4. `orbisctl validate` bus connects and status query are bounded (`VALIDATE_BUS_CONNECT_DEADLINE`/`VALIDATE_STATUS_DEADLINE`); the interactive confirmation and the confirmed mutation itself remain intentionally outside generic timeout (unknown-outcome contract);
-5. hosted CI execution remains blocked (#106).
+5. hosted CI execution remains blocked (#106); local workspace `fmt/check/test/clippy --locked` evidence for these paths was executed green on this revision line (see «Work still possible» above).
 
 ## Effective product-policy truth (#120 complete)
 
@@ -201,18 +201,15 @@ All of them are exported from crate public APIs but have **no runtime consumers*
 ## Active blockers / next work
 
 1. #106 executable CI/tooling recovery.
-2. #125 GUI root guard.
-3. #123 remaining telemetry/status/mutation unknown-outcome timeout design.
-4. #107 residual: asusd interface-level drift detection (owner liveness is dynamic in source).
-5. #117 telemetry coverage/freshness semantics.
-6. #109 aggregate CPU/GPU fan capability truth.
-7. #116 fan stored-enabled read evidence.
-8. #113 removal of deprecated legacy config/path API after executable compatibility validation.
-9. #119 CLI integration/executable validation.
-10. #126 package/VM sandbox validation.
-11. #124 application identity decision.
-12. #118 old remote branch cleanup when delete-ref access exists.
-13. #114 required checks after #106.
+2. #107 residual: asusd interface-level drift detection (owner liveness is dynamic in source).
+3. #117 remainder: field-local denied/malformed/unavailable telemetry evidence classes.
+4. #109 aggregate CPU/GPU fan capability truth.
+5. #116 fan stored-enabled read evidence.
+6. #113 removal of deprecated legacy config/path API after executable compatibility validation.
+7. #126 package/VM sandbox validation.
+8. #124 application identity decision.
+9. #118 old remote branch cleanup when delete-ref access exists.
+10. #114 required checks after #106.
 
 ## Historical live evidence retained
 
