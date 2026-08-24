@@ -21,7 +21,7 @@ zbus = { workspace = true }
 rustix = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-slint = { workspace = true }
+slint = { workspace = true, features = ["unstable-winit-030"] }
 orbis-core = { workspace = true }
 orbis-config = { workspace = true }
 orbis-capabilities = { workspace = true }
