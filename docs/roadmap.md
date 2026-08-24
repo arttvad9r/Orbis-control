@@ -1,7 +1,7 @@
 # Roadmap
 
 > Роль: **FUTURE PLAN**. Очередность работ без календарных обещаний.
-> Обновлено: **2026-08-21**.
+> Обновлено: **2026-08-24**.
 > Фактическое состояние — [`current-state.md`](current-state.md).
 
 ## Principles
@@ -75,12 +75,12 @@ No fan write should be enabled to “test” these contracts.
 
 ## Milestone 3 — Release graph and production bootstrap
 
-**Status: SOURCE COMPLETE (#115); executable re-validation rides the next full check run**
+**Status: SOURCE COMPLETE (#115); executable claim recorded locally at `a752be6` (2026-08-24); hosted CI re-proof still rides #106**
 
 - [x] #115 — production-native `UiState` startup with explicit Loading/Unknown/non-writable defaults and compile-time package version (`production_initial`);
 - [x] `orbis-test-support` moved out of the normal GUI release dependency graph (dev-dependency + optional `ui-review` feature only; proven by `cargo tree -e normal`);
 - [x] deterministic screenshot/mock construction kept in dev/test-only paths (`--screenshot` requires `--features ui-review`);
-- [ ] final release dependency graph and UI compilation claim recorded from the next full executable check run.
+- [x] final release dependency graph and UI compilation claim recorded from the next full executable check run (2026-08-24, revision `a752be6`: workspace `fmt/check/test/clippy --locked` green, release tree clean of `orbis-test-support`, `cargo check -p orbis-ui --features ui-review --locked` green; evidence in [`current-state.md`](current-state.md)).
 
 This also reduces the amount of production startup code that must sanitize fixture-derived state.
 

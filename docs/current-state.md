@@ -1,7 +1,7 @@
 # Current State
 
 > Роль: **CURRENT STATUS**.
-> Обновлено: **2026-08-21**.
+> Обновлено: **2026-08-24**.
 > Source snapshot: development branch (consolidates `asus-hardware-validation-20260821` / PR #129 head `e8b611e`).
 >
 > `main` остаётся последней консолидированной baseline до отдельной интеграции этой ветки. Claims используют [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md): `IMPLEMENTED / TESTED / PACKAGED / LIVE-VALIDATED / BLOCKED / UNKNOWN`.
@@ -14,7 +14,7 @@ Privileged mutation architecture остаётся узкой: original caller �
 
 Production product path намеренно включает только доказанные writes. Performance и условно Battery — live mutation owners; raw GPU, Fan, Panel, Keyboard и Aura остаются product/policy blocked. Automation execution promotion=false, Display modeset не имеет concrete owner, Updates не имеет canonical signed feed/installer owner.
 
-Главный release blocker — #106: GitHub Actions не предоставляет trustworthy executable validation. Локальный Rust/Cargo toolchain (flake devShell) доступен: на текущей ревизии `cargo fmt/check/test/clippy --locked` выполнены успешно, `python3 scripts/verify-static` проходит после `317f22d`, а `nix flake check --no-build` подтверждает только evaluation. Поэтому изменения текущей ветки можно называть `IMPLEMENTED`/`TESTED` по source и локальному executable evidence точной ревизии, но это не `PACKAGED`, не `LIVE-VALIDATED` и не восстановление hosted CI.
+Главный release blocker — #106: GitHub Actions не предоставляет trustworthy executable validation. Локальный Rust/Cargo toolchain (flake devShell) доступен: на ревизии `a752be6` (2026-08-24) `cargo fmt/check/test/clippy --workspace --all-targets --locked` выполнены успешно и `python3 scripts/verify-static` проходит (см. «Work still possible» ниже), а `nix flake check --no-build` подтверждает только evaluation. Поэтому изменения текущей ветки можно называть `IMPLEMENTED`/`TESTED` по source и локальному executable evidence точной ревизии, но это не `PACKAGED`, не `LIVE-VALIDATED` и не восстановление hosted CI.
 
 ## Repository status
 
@@ -141,7 +141,20 @@ Current product block remains defense-in-depth: UI gating + Hardware1 disabled b
 
 ## Work still possible while GitHub Actions remain blocked (#106)
 
-Local executable Rust checks are available in the flake devShell and were executed green on this revision (`cargo fmt/check/test/clippy --locked`; `python3 scripts/verify-static` PASS after `317f22d`). This is revision-scoped `TESTED` evidence only. It does not restore trustworthy hosted CI (#106), does not prove packaging/VM acceptance, and does not create live hardware evidence for this branch.
+Local executable Rust checks are available in the flake devShell and were executed green on this revision (`a752be6`, 2026-08-24, NixOS flake devShell, rustc 1.97.1):
+
+```text
+python3 scripts/verify-static                              → PASS
+cargo fmt --all -- --check                                 → PASS
+cargo check --workspace --all-targets --locked             → PASS
+cargo test --workspace --locked                            → PASS (502 passed / 0 failed / 3 ignored)
+cargo clippy --workspace --all-targets --locked -- -D warnings → PASS
+git diff --check                                           → PASS
+cargo tree -p orbis-ui -e normal --locked                  → no orbis-test-support (#115)
+cargo check -p orbis-ui --features ui-review --locked      → PASS
+```
+
+This is revision-scoped `TESTED` evidence only. It does not restore trustworthy hosted CI (#106), does not prove packaging/VM acceptance (`nix flake check` was not re-run on this revision), and does not create live hardware evidence for this branch.
 
 Safe source work may continue when it does not widen unvalidated hardware writes:
 
