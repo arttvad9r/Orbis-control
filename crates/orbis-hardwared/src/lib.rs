@@ -1046,9 +1046,10 @@ impl HardwareService {
     /// `battery::battery_mutation_wire::*` so the GUI can honestly gate its
     /// mutation controls instead of guessing from `validate_charge_limit`.
     ///
-    /// A startup `Supported` backend is re-checked for runtime asusd owner
-    /// liveness on every query (#107): a stopped backend is reported as
-    /// `TemporarilyUnavailable` and an inconclusive probe as `Unknown`.
+    /// A startup `Supported` backend is re-checked on every query (#107):
+    /// a stopped asusd owner **or** an owner that no longer serves the exact
+    /// `xyz.ljones.Platform` threshold contract is demoted to
+    /// `TemporarilyUnavailable`, and an inconclusive probe reports `Unknown`.
     /// Non-`Supported` startup statuses are structural/authorization
     /// evidence and stay unchanged.
     async fn battery_mutation_status(&self) -> u8 {

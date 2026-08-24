@@ -14,6 +14,10 @@ use zbus::names::BusName;
 pub const ASUSD_BUS_NAME: &str = "xyz.ljones.Asusd";
 pub const ASUSD_OBJECT_PATH: &str = "/xyz/ljones";
 pub const ASUSD_INTERFACE: &str = "xyz.ljones.Platform";
+/// Wire (PascalCase) name of the threshold property; must stay identical to
+/// the name the typed [`AsusdPlatform`] proxy generates from
+/// `charge_control_end_threshold`.
+pub const ASUSD_THRESHOLD_PROPERTY: &str = "ChargeControlEndThreshold";
 pub const EFFECTIVE_THRESHOLD_FILE: &str = "charge_control_end_threshold";
 const POWER_SUPPLY_ROOT: &str = "/sys/class/power_supply";
 const MIN_CHARGE_LIMIT: u8 = 20;
@@ -42,6 +46,29 @@ pub trait AsusdBatteryClient: Send + Sync {
     /// effect. The default reports a confirmed owner for test fakes.
     async fn asusd_owned(&self) -> Result<bool, ProviderError> {
         Ok(true)
+    }
+
+    /// Non-activating runtime contract probe for the exact Platform threshold
+    /// interface (#107).
+    ///
+    /// An owned name alone does not prove that the running daemon still serves
+    /// the object path, interface and readable threshold property this
+    /// mutation path depends on. The production probe first consults only the
+    /// daemon ownership table (never activating a stopped service) and then,
+    /// with an owner confirmed, performs one fresh uncached `Properties.Get`
+    /// of the typed property. `Ok(false)` means the owner is gone or proven
+    /// interface drift; inconclusive transport/authorization failures stay
+    /// typed errors (`Unknown` upstream). The default degrades to the
+    /// owner-liveness probe.
+    ///
+    /// ponytail note: the second step addresses the well-known name because
+    /// default system-bus policy denies method calls to unique names; if the
+    /// daemon exits in the window between both steps and D-Bus activation is
+    /// configured for it, the bus may start it — a probing side effect bounded
+    /// to this racy window, never a hardware write. Startup preflight keeps
+    /// the strict non-activating guarantee.
+    async fn asusd_contract_available(&self) -> Result<bool, ProviderError> {
+        self.asusd_owned().await
     }
 }
 
@@ -231,6 +258,33 @@ impl ZbusAsusdBatteryClient {
     }
 }
 
+/// Standard D-Bus error names that prove a property read hit an object which
+/// no longer serves the expected Platform contract (interface drift).
+const PLATFORM_CONTRACT_DRIFT_ERROR_NAMES: [&str; 3] = [
+    "org.freedesktop.DBus.Error.UnknownObject",
+    "org.freedesktop.DBus.Error.UnknownInterface",
+    "org.freedesktop.DBus.Error.UnknownProperty",
+];
+
+/// Classify one D-Bus error name as proven Platform interface drift.
+///
+/// Only peer-reported structural absence is drift. Transport, authorization
+/// and decoding failures stay inconclusive so the status layer can keep them
+/// `Unknown` instead of claiming a known backend state.
+fn platform_error_name_is_contract_drift(error_name: &str) -> bool {
+    PLATFORM_CONTRACT_DRIFT_ERROR_NAMES.contains(&error_name)
+}
+
+/// Classify one Platform property-read failure as proven interface drift.
+fn platform_read_error_is_contract_drift(error: &zbus::Error) -> bool {
+    match error {
+        zbus::Error::MethodError(name, _, _) => {
+            platform_error_name_is_contract_drift(name.as_str())
+        }
+        _ => false,
+    }
+}
+
 #[async_trait]
 impl AsusdBatteryClient for ZbusAsusdBatteryClient {
     async fn set_charge_control_end_threshold(&self, percent: u8) -> Result<(), ProviderError> {
@@ -263,6 +317,38 @@ impl AsusdBatteryClient for ZbusAsusdBatteryClient {
                 zbus::fdo::Error::AccessDenied(message) => ProviderError::PermissionDenied(message),
                 other => ProviderError::Dbus(format!("NameHasOwner({ASUSD_BUS_NAME}): {other}")),
             })
+    }
+
+    async fn asusd_contract_available(&self) -> Result<bool, ProviderError> {
+        // Step 1 stays strictly non-activating: only the daemon ownership
+        // table decides whether an interface read happens at all.
+        if !self.asusd_owned().await? {
+            return Ok(false);
+        }
+
+        // Step 2: one fresh uncached Properties.Get of the exact property the
+        // mutation read-back depends on. The system-bus default policy denies
+        // method calls to unique names, so this addresses the well-known name
+        // after ownership was just confirmed (see the trait-level tradeoff).
+        let builder = zbus::proxy::Builder::<zbus::Proxy>::new(&self.connection)
+            .destination(ASUSD_BUS_NAME)
+            .and_then(|builder| builder.path(ASUSD_OBJECT_PATH))
+            .and_then(|builder| builder.interface(ASUSD_INTERFACE))
+            .map(|builder| builder.cache_properties(zbus::proxy::CacheProperties::No))
+            .map_err(|error| ProviderError::Dbus(format!("asusd contract probe proxy: {error}")))?;
+
+        let proxy = builder
+            .build()
+            .await
+            .map_err(|error| ProviderError::Dbus(format!("asusd contract probe proxy: {error}")))?;
+
+        match proxy.get_property::<u8>(ASUSD_THRESHOLD_PROPERTY).await {
+            Ok(_) => Ok(true),
+            Err(error) if platform_read_error_is_contract_drift(&error) => Ok(false),
+            Err(error) => Err(ProviderError::Dbus(format!(
+                "asusd Platform contract probe: {error}"
+            ))),
+        }
     }
 }
 
@@ -352,7 +438,10 @@ pub trait BatteryMutationBackend: Send + Sync {
     fn mutation_status(&self) -> BatteryMutationStatus;
 
     /// Runtime backend liveness re-check used to demote a stale `Supported`
-    /// status (#107). The default keeps the startup status authoritative for
+    /// status (#107). Proves both that the fixed asusd name still has an owner
+    /// and that the owner still serves the exact Platform threshold contract;
+    /// either failure makes the previously proven backend temporarily
+    /// unusable. The default keeps the startup status authoritative for
     /// backends without a dynamic probe.
     async fn backend_alive(&self) -> Result<bool, ProviderError> {
         Ok(true)
@@ -423,7 +512,7 @@ where
     }
 
     async fn backend_alive(&self) -> Result<bool, ProviderError> {
-        self.asusd.asusd_owned().await
+        self.asusd.asusd_contract_available().await
     }
 }
 
@@ -444,6 +533,7 @@ mod tests {
         setter_error: Arc<Mutex<Option<String>>>,
         getter_error: Arc<Mutex<Option<String>>>,
         configured_override: Arc<Mutex<Option<u8>>>,
+        contract_probe: Arc<Mutex<Option<Result<bool, String>>>>,
     }
 
     impl FakeAsusd {
@@ -454,6 +544,7 @@ mod tests {
                 setter_error: Arc::new(Mutex::new(None)),
                 getter_error: Arc::new(Mutex::new(None)),
                 configured_override: Arc::new(Mutex::new(None)),
+                contract_probe: Arc::new(Mutex::new(None)),
             }
         }
 
@@ -482,6 +573,14 @@ mod tests {
                 .lock()
                 .unwrap()
                 .unwrap_or(*self.configured.lock().unwrap()))
+        }
+
+        async fn asusd_contract_available(&self) -> Result<bool, ProviderError> {
+            let probe = self.contract_probe.lock().unwrap().clone();
+            match probe {
+                Some(probe) => probe.map_err(ProviderError::Dbus),
+                None => AsusdBatteryClient::asusd_owned(self).await,
+            }
         }
     }
 
@@ -721,5 +820,57 @@ mod tests {
         assert_eq!(ASUSD_OBJECT_PATH, "/xyz/ljones");
         assert_eq!(ASUSD_INTERFACE, "xyz.ljones.Platform");
         assert_eq!(EFFECTIVE_THRESHOLD_FILE, "charge_control_end_threshold");
+        // The raw contract probe must address the same wire property the
+        // typed proxy generates from `charge_control_end_threshold`.
+        assert_eq!(ASUSD_THRESHOLD_PROPERTY, "ChargeControlEndThreshold");
+    }
+
+    #[test]
+    fn structural_absence_error_names_are_proven_contract_drift() {
+        assert!(platform_error_name_is_contract_drift(
+            "org.freedesktop.DBus.Error.UnknownObject"
+        ));
+        assert!(platform_error_name_is_contract_drift(
+            "org.freedesktop.DBus.Error.UnknownInterface"
+        ));
+        assert!(platform_error_name_is_contract_drift(
+            "org.freedesktop.DBus.Error.UnknownProperty"
+        ));
+    }
+
+    #[test]
+    fn transport_and_authorization_errors_are_inconclusive_not_drift() {
+        assert!(!platform_error_name_is_contract_drift(
+            "org.freedesktop.DBus.Error.AccessDenied"
+        ));
+        assert!(!platform_read_error_is_contract_drift(
+            &zbus::Error::Failure("probe timed out".into())
+        ));
+    }
+
+    #[tokio::test]
+    async fn backend_alive_demotes_on_proven_interface_drift() {
+        let asusd = FakeAsusd::new(80);
+        *asusd.contract_probe.lock().unwrap() = Some(Ok(false));
+        let backend = AsusdBatteryMutationBackend::new(asusd, FakeEffective::new(Ok(80)));
+        assert!(!backend.backend_alive().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn backend_alive_keeps_inconclusive_contract_probe_typed() {
+        let asusd = FakeAsusd::new(80);
+        *asusd.contract_probe.lock().unwrap() = Some(Err("contract probe failed".into()));
+        let backend = AsusdBatteryMutationBackend::new(asusd, FakeEffective::new(Ok(80)));
+        assert!(matches!(
+            backend.backend_alive().await,
+            Err(ProviderError::Dbus(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn backend_alive_degrades_to_owner_liveness_without_interface_probe() {
+        let backend =
+            AsusdBatteryMutationBackend::new(FakeAsusd::new(80), FakeEffective::new(Ok(80)));
+        assert!(backend.backend_alive().await.unwrap());
     }
 }

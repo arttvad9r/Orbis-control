@@ -153,6 +153,39 @@ let
     printf '%s\n' "$failed" | grep -E 'Failed|simulated setter failure'
     test "$(cat ${fakeSetterCalls})" = 3
 
+    # Runtime contract probe (#107): the running fake asusd serves the exact
+    # Platform threshold contract, so Battery mutation stays proven.
+    battery_status() {
+      busctl --system call \
+        io.github.orbiscontrol.Hardware \
+        /io/github/orbiscontrol/Hardware \
+        io.github.orbiscontrol.Hardware1 BatteryMutationStatus | awk '{print $2}'
+    }
+    test "$(battery_status)" = 0
+
+    # Owner disappearance between generations is demoted to
+    # TEMPORARILY_UNAVAILABLE (wire 2). Name-release propagation into the
+    # daemon ownership table is asynchronous, hence the bounded poll with a
+    # mandatory final assertion.
+    systemctl stop orbis-control-test-fake-asusd.service
+    demoted=unknown
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      demoted=$(battery_status)
+      test "$demoted" = 2 && break
+      sleep 0.5
+    done
+    test "$demoted" = 2
+
+    # Owner return restores the proven status without restarting hardwared.
+    systemctl start orbis-control-test-fake-asusd.service
+    restored=unknown
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      restored=$(battery_status)
+      test "$restored" = 0 && break
+      sleep 0.5
+    done
+    test "$restored" = 0
+
     printf 'PASS\n' > "$result"
     cp "$log" /run/orbis-control-test/battery-result.log
   '';
@@ -168,6 +201,17 @@ in
       services.dbus.enable = true;
       services.dbus.packages = [ fakeAsusdPolicy ];
       security.polkit.enable = true;
+      # The unprivileged test runner drives owner-loss/return generations of
+      # the fake asusd unit only (#107); no other systemd management exists.
+      security.polkit.extraConfig = ''
+        polkit.addRule(function(action, subject) {
+          if (action.id == "org.freedesktop.systemd1.manage-units" &&
+              subject.user == "orbis-test" &&
+              action.lookup("unit") == "orbis-control-test-fake-asusd.service") {
+            return polkit.Result.YES;
+          }
+        });
+      '';
 
       users.users.orbis-test = {
         isNormalUser = true;
@@ -210,7 +254,10 @@ in
 
       systemd.services.orbis-hardwared = {
         wantedBy = lib.mkForce [ "multi-user.target" ];
-        requires = [ "orbis-control-test-fake-asusd.service" ];
+        # `wants` (not `requires`) so stopping the fake asusd for the #107
+        # owner-loss generation does not also stop hardwared; the daemon's own
+        # dynamic status requery is exactly what must observe the loss.
+        wants = [ "orbis-control-test-fake-asusd.service" ];
         after = [ "orbis-control-test-fake-asusd.service" ];
         serviceConfig = {
           TemporaryFileSystem = [ "/sys/class/power_supply" ];
