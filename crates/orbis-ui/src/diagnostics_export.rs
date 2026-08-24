@@ -9,7 +9,7 @@ use std::fmt::Debug;
 use orbis_core::diagnostics::DiagnosticObservation;
 use serde_json::{Value, json};
 
-use crate::diagnostics_dto::DiagnosticsUiDto;
+use crate::diagnostics_dto::{DiagnosticsUiDto, telemetry_field_gap_labels};
 
 const UNKNOWN: &str = "unknown";
 
@@ -96,6 +96,14 @@ pub fn summary_text(dto: &DiagnosticsUiDto) -> String {
         "sample_present={}\n",
         dto.telemetry.latest.is_some()
     ));
+    let gap_labels = telemetry_field_gap_labels(dto);
+    if gap_labels.is_empty() {
+        out.push_str("field_gaps=none\n");
+    } else {
+        for (field, gap) in gap_labels {
+            out.push_str(&format!("field_gap_{field}={gap}\n"));
+        }
+    }
 
     out.push_str("\n[display]\n");
     match &dto.display.outputs {
@@ -179,6 +187,10 @@ pub fn report_json_value(dto: &DiagnosticsUiDto) -> Value {
             "quality": format!("{:?}", dto.telemetry.quality()),
             "freshness": format!("{:?}", dto.telemetry.freshness),
             "sample_present": dto.telemetry.latest.is_some(),
+            "field_gaps": telemetry_field_gap_labels(dto)
+                .iter()
+                .map(|(field, gap)| json!({ "field": field, "gap": gap }))
+                .collect::<Vec<_>>(),
         },
         "display": display,
     })
@@ -289,5 +301,28 @@ mod tests {
         assert!(text.contains("access_policy=PermissionDenied"));
         assert!(text.contains("runtime_power=Unavailable"));
         assert!(text.contains("freshness=Unknown"));
+    }
+
+    #[test]
+    fn telemetry_gap_absence_and_evidence_are_exported() {
+        // No sample → explicit absence of gap evidence, stable schema.
+        let text = summary_text(&dto());
+        assert!(text.contains("field_gaps=none"));
+        let value = report_json_value(&dto());
+        assert_eq!(value["telemetry"]["field_gaps"], serde_json::json!([]));
+
+        // A sample with failed discovered sources exports each gap.
+        let mut with_gaps = dto();
+        let mut sample = orbis_core::telemetry::Telemetry::empty();
+        sample.field_gaps = vec![(
+            orbis_core::telemetry::TelemetryField::CpuTemp,
+            orbis_core::telemetry::TelemetryFieldGap::Denied,
+        )];
+        with_gaps.telemetry.latest = Some(sample);
+        let text = summary_text(&with_gaps);
+        assert!(text.contains("field_gap_CpuTemp=Denied"));
+        let value = report_json_value(&with_gaps);
+        assert_eq!(value["telemetry"]["field_gaps"][0]["field"], "CpuTemp");
+        assert_eq!(value["telemetry"]["field_gaps"][0]["gap"], "Denied");
     }
 }

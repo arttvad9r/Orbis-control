@@ -52,7 +52,7 @@ Production product path намеренно включает только док�
 | Capability registry | IMPLEMENTED / RESILIENCE COVERED | Whole-swap immutable generations; explicit and periodic refresh share canonical mutation-status requery (#112 closed with an executed P2P integration test proving a real status transition through explicit refresh); backend loss/timeout and recovery publish capability-local availability transitions. UI/Diagnostics/support-policy source audit #120 is complete; Battery owner evidence is now dynamic (#107 owner liveness). |
 | Provider execution | EXECUTED LOCALLY — #123 closed | Canonical `bounded_provider_call`; public probes, CLI and main worker read refreshes use provider deadlines; telemetry owns provider identity/deadline (`provider_id`/`snapshot_timeout`); Hardware1 status requery bounded (`HARDWARE1_STATUS_DEADLINE`); mutation unknown outcome classified `Unconfirmed` without retry. Workspace checks executed green on this revision; hosted CI re-proof rides #106. |
 | CLI | IMPLEMENTED READ-ONLY / LOCALLY EXECUTED — #119 closed | `status` + versioned `status --json` (schema 3 includes battery threshold evidence); typed states; no mutation commands. Executable local validation + executable service-absent integration test (`ebba8ea`) recorded; hosted CI re-proof still rides #106. |
-| Telemetry | IMPLEMENTED / PARTIAL COVERAGE — #117 open | Partial metrics are supported. UI freshness now honors snapshot quality: an `Ok` snapshot with no observed field is absence evidence (`telemetry_fresh=false`, last-good values preserved), not a fresh observation; provider contracts for empty root, all-sources-failing and permission-denied field-local degradation are pinned by tests. Field-local gap evidence is now on the provider API: failed reads of discovered sources record `Telemetry.field_gaps` entries (`Denied`/`Malformed`/`Unavailable`) per group while structural absence stays plain `None`; wire shape is snake_case and roundtrip-pinned. Still open: presenting gap evidence in Diagnostics/UI surfaces. |
+| Telemetry | IMPLEMENTED / FIELD EVIDENCE COMPLETE — #117 source-complete | Partial metrics are supported. UI freshness honors snapshot quality: an `Ok` snapshot with no observed field is absence evidence (`telemetry_fresh=false`, last-good values preserved); provider contracts for empty root, all-sources-failing and permission-denied field-local degradation are pinned by tests. Field-local gap evidence is on the provider API (`Telemetry.field_gaps`: `Denied`/`Malformed`/`Unavailable` per discovered group; structural absence stays plain `None`; snake_case wire shape roundtrip-pinned) and is presented in the Diagnostics window, Copy Summary text and JSON export (`gaps: none` when absent). Hosted-CI re-proof rides #106. |
 | Fan reads | IMPLEMENTED / AGGREGATE TRUTH + STORED ENABLED CARRIED | Per-fan Session1 read exists; stored `FanCurveData.enabled` is carried through Session1/client/UI evidence (#116 source-complete) and rendered from `UiState` in the FansWindow; aggregate FanCurves requires both CPU and GPU read contracts (#109 source-complete). |
 | Fan writes/reset | HARD-BLOCKED — write gate stays; #104/#105 source contracts in place | UI + polkit + production Hardware1 composition prevent the dormant unsafe write path. Successful factory-reset semantics are hardened in source: `ApplyResult::Accepted` (never `Applied`), Timeout/Dbus after possible dispatch → unknown-outcome, serialized through the worker FIFO with custom fan writes. Orbis-side #105 contract enforced by source test: the fan mutation/reset backend never switches the platform profile itself (any temporary switch stays inside asusd). #104 source-complete: hardwared preserves the authoritative stored `enabled` on custom writes (read → pass-through → read-back confirms). |
 | Panel write | HARD-BLOCKED | Typed API may exist; production backend status remains Unsupported/default-deny. |
@@ -207,13 +207,12 @@ All of them are exported from crate public APIs but have **no runtime consumers*
 ## Active blockers / next work
 
 1. #106 executable CI/tooling recovery.
-2. #117 remainder: presenting field-local gap evidence in Diagnostics/UI surfaces.
-3. #109 aggregate CPU/GPU fan capability truth.
-4. #116 fan stored-enabled read evidence.
-5. #126 package/VM sandbox validation.
-6. #124 application identity decision.
-7. #118 old remote branch cleanup when delete-ref access exists.
-8. #114 required checks after #106.
+2. #109 aggregate CPU/GPU fan capability truth.
+3. #116 fan stored-enabled read evidence.
+4. #126 package/VM sandbox validation.
+5. #124 application identity decision.
+6. #118 old remote branch cleanup when delete-ref access exists.
+7. #114 required checks after #106.
 
 ## Historical live evidence retained
 

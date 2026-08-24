@@ -118,7 +118,7 @@ impl DiagnosticsWindowModel {
             observation_label(&dto.gpu.runtime_power),
         );
 
-        let telemetry = format!(
+        let mut telemetry = format!(
             "status={:?} · quality={:?} · freshness={:?} · sample={}",
             dto.telemetry.status,
             dto.telemetry.quality(),
@@ -129,6 +129,19 @@ impl DiagnosticsWindowModel {
                 "none"
             }
         );
+        let gap_labels = crate::diagnostics_dto::telemetry_field_gap_labels(dto);
+        if gap_labels.is_empty() {
+            telemetry.push_str(" · gaps: none");
+        } else {
+            telemetry.push_str(&format!(
+                "\ngaps: {}",
+                gap_labels
+                    .iter()
+                    .map(|(field, gap)| format!("{field}={gap}"))
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+            ));
+        }
 
         let display = match &dto.display.outputs {
             DiagnosticObservation::Value(outputs) => {
@@ -262,5 +275,32 @@ mod tests {
         assert_eq!(model.platform, "Unknown");
         assert_eq!(model.kernel, "Unknown");
         assert!(!model.platform.contains("ASUS"));
+    }
+
+    #[test]
+    fn telemetry_without_sample_reports_explicit_gap_absence() {
+        let model = DiagnosticsWindowModel::from_dto(&dto());
+        assert!(model.telemetry.contains("gaps: none"));
+    }
+
+    #[test]
+    fn telemetry_field_gaps_are_rendered_field_by_field() {
+        let mut value = dto();
+        let mut sample = orbis_core::telemetry::Telemetry::empty();
+        sample.field_gaps = vec![
+            (
+                orbis_core::telemetry::TelemetryField::CpuTemp,
+                orbis_core::telemetry::TelemetryFieldGap::Denied,
+            ),
+            (
+                orbis_core::telemetry::TelemetryField::Battery,
+                orbis_core::telemetry::TelemetryFieldGap::Malformed,
+            ),
+        ];
+        value.telemetry.latest = Some(sample);
+        let model = DiagnosticsWindowModel::from_dto(&value);
+        assert!(model.telemetry.contains("CpuTemp=Denied"));
+        assert!(model.telemetry.contains("Battery=Malformed"));
+        assert!(!model.telemetry.contains("gaps: none"));
     }
 }

@@ -48,7 +48,7 @@ write or product capability to `Supported`.
 1. **#125 GUI root boundary** — reject interactive euid 0 before preferences, runtime or D-Bus setup. Screenshot/offscreen behavior must remain explicit and testable.
 2. **#123 bounded execution — CLOSED (2026-08-24)**: telemetry owns provider identity/deadline, Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`), mutation unknown outcomes classify as `Unconfirmed` with no blind retries; all executed green locally (workspace `--locked` suite), hosted CI re-proof rides #106.
 3. **#107 Battery owner/interface liveness** — source-complete with executed fake-system evidence: dynamic bounded non-mutating owner probe plus, with an owner confirmed, a fresh uncached `ChargeControlEndThreshold` read; peer-reported structural absence (UnknownObject/Interface/Property, raw or typed-FDO) is proven drift → `TemporarilyUnavailable`, other failures stay `Unknown`. Executed: unit contracts + extended `battery-mutation-vm` status generations (supported → owner-loss demote → restore → live interface-drift demote with owner present → heal). Remaining: hosted-CI re-proof rides #106; optional live-device confirmation.
-4. **#117 telemetry coverage/freshness** — largely delivered: UI `telemetry_fresh` means a recent useful observation (empty snapshot = absence evidence, last-good preserved); provider snapshot contracts pinned by tests; field-local denied/malformed/unavailable evidence classes implemented as `Telemetry.field_gaps` on the provider API with roundtrip-pinned snake_case wire shape and structural absence kept distinct. Remaining: presenting gap evidence in Diagnostics/UI surfaces.
+4. **#117 telemetry coverage/freshness — SOURCE-COMPLETE (2026-08-24)**: UI `telemetry_fresh` means a recent useful observation (empty snapshot = absence evidence, last-good preserved); provider snapshot contracts pinned by tests; field-local denied/malformed/unavailable classes implemented as `Telemetry.field_gaps` with structural absence kept distinct; gap evidence presented in the Diagnostics window, Copy Summary and JSON export. Hosted-CI re-proof rides #106.
 
 #112 is source-complete and now carries executed evidence: explicit and periodic capability refresh share the same canonical mutation-status requery path, and a private-P2P integration test proves a real BackendMissing→Supported→Unknown transition through explicit refresh (2026-08-24). Hosted CI re-proof rides #106.
 
@@ -110,7 +110,7 @@ Completed source slices:
 Remaining:
 
 - #119 closed: executable local workspace validation plus an executable service-absent integration test recorded (`ebba8ea`); hosted CI re-proof rides #106;
-- #117 telemetry truth improvements should flow into Diagnostics/UI without fake freshness;
+- #117 telemetry truth improvements delivered: freshness honors snapshot quality and field-local gap evidence reaches Diagnostics/UI without fake freshness (2026-08-24);
 - final packaged desktop/AppStream/tray/preferences acceptance on release revision.
 
 ## Milestone 6 — Product GPU and extended ASUS controls

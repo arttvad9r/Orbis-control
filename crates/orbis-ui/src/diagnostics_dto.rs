@@ -100,6 +100,22 @@ pub struct DiagnosticsUiDto {
     pub display: DisplayDiagnostics,
 }
 
+/// Field-local telemetry gap evidence as stable display labels (#117).
+///
+/// Reads the typed `Telemetry.field_gaps` carried by the latest sample; a
+/// missing sample yields an empty list. Labels use the existing `{:?}` style
+/// of the surrounding diagnostics text; no paths or identifiers are involved.
+pub fn telemetry_field_gap_labels(dto: &DiagnosticsUiDto) -> Vec<(String, String)> {
+    match &dto.telemetry.latest {
+        Some(sample) => sample
+            .field_gaps
+            .iter()
+            .map(|(field, gap)| (format!("{field:?}"), format!("{gap:?}")))
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
 impl DiagnosticsUiDto {
     /// Project a frozen diagnostics snapshot into owned presentation data.
     ///
