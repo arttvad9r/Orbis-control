@@ -6,87 +6,91 @@
 > Методика: WinForms `AutoScaleDimensions = 192×192` → нормализованные 96-DPI
 > логические пиксели (деление на 2), далее сверка со скриншотами (запланировано).
 
-## 0. Normative Orbis UI specification (2026-08-24)
+## 0. Normative Orbis UI specification (2026-08-24, redesign #128)
 
-Orbis Control **не является клоном G-Helper**. Разделы 1–9 ниже — исторический
-источник измерений, из которого вырос первоначальный дизайн; нормативом
-является эта секция. Компилируемый UI живёт в `ui/audited/` (+ `ui/components/`,
-`ui/themes/`); `ui/app-window.slint` — легаси и не компилируется.
+Orbis Control — **не клон G-Helper**: одно окно, четыре раздела, своя
+навигация. Владелец утвердил редизайн (spec:
+`docs/superpowers/specs/2026-08-24-ui-redesign-design.md`); разделы 1–9 ниже —
+исторический источник измерений G-Helper. Компилируемый UI: `ui/app-entry.slint`
+→ `ui/audited/main-window.slint` (шелл) + `ui/audited/sections/*` +
+`ui/components/*` + `ui/themes/*`.
 
-### Дизайн-принципы
-
-- Одно компактное окно быстрых управлений: Performance → GPU Mode →
-  Quick Controls → Battery Charge Limit → футер; вторичные поверхности —
-  отдельные окна (`ui/audited/*-window.slint`).
-- Состояния честные: disabled/pending/unavailable выводятся из typed evidence,
-  никогда не симулируются.
-- Тёмная палитра — «cool charcoal» система Orbis (ниже); light-вариант в
-  `ui/themes/light.slint`.
-
-### Нормативная геометрия (реализация = спецификация)
+### Каркас
 
 | Параметр | Значение |
 |---|---|
-| Главное окно | 452×526 logical px, фиксированное |
-| Padding окна / spacing секций | 12 / 10 |
-| Mode-переключатель | `SegmentedTrack` 48px: трек radius 8, сегменты radius 6, gap 3 |
-| Секционная карточка | `SectionCard` radius 8, border 1 |
-| Заголовок секции | `SectionTitle` 22px, 11px semibold + detail справа |
-| Кнопки действий | `ActionButton` высота 30, radius 8 |
-| Статусная строка | `LocalStatus` высота 26, radius 8 |
-| Quick Controls | `ChoiceChip` radius 8, ряды 32px |
+| Окно | 760×600 logical px, фиксированное, `no-frame`, `background: transparent` |
+| Скругление | корневой Rectangle radius 10 + clip (все углы) |
+| Титлбар | 40px, `TitleBar`: имя раздела + drag-область + «свернуть»/«закрыть» (глифы – / ×; close hover — error) |
+| Drag | slint `unstable-winit-030` → winit `drag_window()` по pointer-down |
+| Close | общий close-action путь (`window_lifecycle_backend::handle_close_request`: tray/quit) |
+| Сайдбар | `Sidebar` 168px: Dashboard / Fans / Hardware / Settings; Rectangle-глифы 16px (accent при активности) |
+| Контракт окна | `check-ui-contract.py`: 400≤w≤800, 400≤h≤640 |
 
-### Нормативная палитра (dark; light — зеркально в `light.slint`)
+Важно: **software-renderer Slint не рендерит `Path`** — иконки и глифы строятся
+из Rectangle/Text-примитивов (spec §8, фолбэк применён).
 
-```json
-{
-  "window.background": "#17191C",
-  "titlebar.background": "#17191C",
-  "surface.default": "#202328",
-  "surface.hover": "#272B31",
-  "surface.pressed": "#1B1E22",
-  "surface.selected": "#242A30",
-  "surface.disabled": "#1D2024",
-  "border.default": "#343940",
-  "border.strong": "#4A515B",
-  "text.primary": "#F4F6F8",
-  "text.secondary": "#AAB2BD",
-  "text.disabled": "#68717D",
-  "text.on-accent": "#FFFFFF",
-  "accent.default": "#4DA3FF",
-  "warning": "#E4A853",
-  "error": "#F06B78",
-  "success": "#55C79A",
-  "mode.silent": "#5CC8A5",
-  "mode.balanced": "#4DA3FF",
-  "mode.turbo": "#FF6B78",
-  "mode.eco": "#75C77A",
-  "mode.standard": "#4DA3FF",
-  "mode.ultimate": "#E7AC57",
-  "mode.optimized": "#6AB6FF"
-}
-```
+### Разделы
 
-Выбранный режим подсвечивается заливкой акцента режима (единственное крупное
-цветовое пятно в окне); акценты нигде больше не заливают поверхности.
+- **Dashboard** (`sections/dashboard.slint`): Performance и GPU Mode —
+  `SegmentedTrack` (выбранный сегмент залит акцентом режима); Display и
+  Keyboard — строки `DropdownRow` (ComboBox); Battery — одна строка
+  (slider + «100%» + health/power).
+- **Fans** (`sections/fans.slint`): `FanCurveEditor` + write-safety статус
+  (fan writes остаются hard-blocked).
+- **Hardware** (`sections/hardware.slint`): Hotkeys M1–M5, Aura effect/speed
+  (read-only), Panel Overdrive (`RequestToggleRow`), Boot sound (read-only),
+  Status LEDs / clamshell / ASPM / standby (draft-строки), Power/CPU
+  (iGPU memory, hibernate, P/E-cores). Все честные disabled-статусы сохранены.
+- **Settings** (`sections/settings.slint`): тема Dark/Light, autostart,
+  start minimized, remember position, close action, Diagnostics
+  (Refresh / Copy / Export; Copy — через toolkit clipboard из privacy-safe
+  summary), About (версия + профиль).
 
-### Структурные решения (отличия от G-Helper — сознательные)
+### Удалённые поверхности
 
-- Нативный titlebar ОС (Wayland CSD), не кастомная RForm-панель.
-- GPU Mode — один ряд из четырёх сегментов, а не 2 ряда с пустой колонкой.
-- Высота окна фиксированная: все секции видны всегда, неподдерживаемые
-  состояния показываются честными статусными строками, а не скрытием секций.
-- Quick Controls (Display/Keyboard) — секция Orbis; контролы disabled без
-  typed write evidence.
-- «Fans + Power» — неотключаемый сегмент-действие (открывает FansWindow),
-  никогда не отображает selected.
+Updates (нужен сервер распространения) и Automation-редактор (execution
+остаётся за safety-gate) убраны из UI. Rust-слой Automation shadow
+(`automation_backend.rs`) сохранён как observation-only ядро. Отдельные окна
+Preferences/Diagnostics/Fans/Extra/Updates/Automation удалены вместе с глеем.
 
-### Visual regression
+### Палитра — Catppuccin (норматив)
 
-Скриншот-проверки (`--features ui-review`, `--screenshot`, сценарии
-`--ui-state default/pending/disabled`) остаются механизмом верификации
-(§10); базовые сценарии актуальны, эталонные значения пересчитываются от
-нормативной геометрии этой секции, а не от G-Helper-замеров.
+Dark = Mocha, Light = Latte (https://catppuccin.com). Полный маппинг:
+
+| Токен | Mocha | Latte |
+|---|---|---|
+| window-background | #1E1E2E | #EFF1F5 |
+| titlebar-background | #181825 | #E6E9EF |
+| surface-default | #313244 | #CCD0DA |
+| surface-hover | #45475A | #BCC0CC |
+| surface-pressed | #181825 | #DCE0E8 |
+| surface-selected | #414356 | #C6CEE0 |
+| surface-disabled | #262637 | #E0E3EA |
+| border-default | #45475A | #9CA0B0 |
+| border-strong | #585B70 | #7C7F93 |
+| text-primary | #CDD6F4 | #4C4F69 |
+| text-secondary | #A6ADC8 | #5C5F77 |
+| text-disabled | #6C7086 | #9CA0B0 |
+| text-on-accent | #11111B | #EFF1F5 |
+| accent-default | #89B4FA | #1E66F5 |
+| warning | #F9E2AF | #DF8E1D |
+| error | #F38BA8 | #D20F39 |
+| success | #A6E3A1 | #40A02B |
+| silent / eco | #A6E3A1 | #40A02B |
+| balanced / standard | #89B4FA | #1E66F5 |
+| turbo | #F38BA8 | #D20F39 |
+| ultimate | #FAB387 | #FE640B |
+| optimized | #94E2D5 | #179299 |
+
+Контракт контраста: `check-ui-contract.py` проверяет WCAG AA для текстовых
+токенов (Latte text-secondary = subtext1 #5C5F77 именно поэтому).
+
+### Скриншоты
+
+`cargo run -p orbis-ui --example ui_snapshot -- <dashboard|fans|hardware|settings|dialog> [path] [dark|light]`
+и `orbis-control --features ui-review --screenshot <path> --ui-section <s>`
+(`--ui-state default|pending|disabled|error`). Базовые сценарии §10 актуальны.
 
 ## 1. Методология (историческая)
 

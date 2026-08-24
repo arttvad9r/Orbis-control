@@ -12,18 +12,18 @@
 - **GPU primitives** — independent power / physical MUX / access-policy reads.
 - **Telemetry** — read-only sysfs snapshot polling; coverage/freshness semantics still need #117.
 - **Fan reads** — profile/fan-specific Session1 reads plus active-curve reads; fan writes remain hard-blocked.
-- **Theme** — runtime + persistence.
+- **Theme** — runtime + persistence (Catppuccin Mocha/Latte).
 - **Autostart** — owned XDG desktop-entry read/write/read-back (#110 source-complete/closed).
 - **Start Minimized** — persisted and applied at launch.
 - **Remember Window Position** — supported on X11-style positioning sessions, explicitly unavailable on Wayland.
 - **Close/tray** — StatusNotifier host gating; HideToTray only with a live host; Quit terminates the Slint event loop (#121 closed).
-- **Diagnostics** — runtime initialization, capability-generation replacement, Refresh, privacy-bounded JSON Export and Copy Summary (#111 closed). Open Logs remains disabled.
+- **Diagnostics** — runtime initialization, capability-generation replacement, Refresh, privacy-bounded JSON Export and Copy Summary (#111 closed); surfaced as actions in Settings → Diagnostics. Open Logs remains disabled.
 - **CLI** — `orbisctl status` plus versioned `status --json`; read-only only.
 - **Display Quick Control** — authoritative read-only observation; no concrete mutation owner.
 - **Keyboard/Panel product controls** — typed Hardware1 status/request/read-back surfaces exist but current production backend status remains Unsupported.
 - **Aura** — observation/config-level typed surfaces exist; no promoted unattended hardware write.
 - **Boot sound** — strict read-only firmware-attribute provider.
-- **Updates** — installation-owner/blocker classification only; no fabricated feed/downloader/installer.
+- **Updates** — UI surface removed (real updates need a distribution server); typed providers retained, no UI consumer.
 
 ## ASUS FA707NV read-only baseline
 
