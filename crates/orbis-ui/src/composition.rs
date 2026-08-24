@@ -2641,4 +2641,171 @@ mod tests {
             CapabilityStatus::Supported
         );
     }
+
+    // --- #112: explicit refresh proves a real mutation-status D-Bus transition ---
+
+    /// Hardware1 stand-in serving only the three read-only mutation-status
+    /// methods over a private P2P connection. Wire values are the Hardware1
+    /// status contract (0 = Supported, 4 = Unknown), pinned by the
+    /// session-client wire-mapping tests.
+    struct StatusHardwareObject {
+        battery: Arc<std::sync::atomic::AtomicU8>,
+        performance: Arc<std::sync::atomic::AtomicU8>,
+        fan: Arc<std::sync::atomic::AtomicU8>,
+    }
+
+    #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
+    impl StatusHardwareObject {
+        async fn battery_mutation_status(&self) -> u8 {
+            self.battery.load(Ordering::SeqCst)
+        }
+
+        async fn performance_mutation_status(&self) -> u8 {
+            self.performance.load(Ordering::SeqCst)
+        }
+
+        async fn fan_mutation_status(&self) -> u8 {
+            self.fan.load(Ordering::SeqCst)
+        }
+    }
+
+    async fn connect_status_hardware(
+        object: StatusHardwareObject,
+    ) -> (zbus::Connection, zbus::Connection) {
+        use zbus::connection::Builder;
+
+        let (server_stream, client_stream) =
+            std::os::unix::net::UnixStream::pair().expect("socket pair");
+        let guid = zbus::Guid::generate();
+        // The Hardware1 object path contract (/io/github/orbiscontrol/Hardware)
+        // is pinned by orbis-hardwared's own tests; no system bus is involved.
+        let server_builder = Builder::unix_stream(server_stream)
+            .server(guid)
+            .expect("server builder")
+            .p2p()
+            .serve_at("/io/github/orbiscontrol/Hardware", object)
+            .expect("serve Hardware1");
+        let client_builder = Builder::unix_stream(client_stream).p2p();
+        tokio::try_join!(server_builder.build(), client_builder.build()).expect("p2p connect")
+    }
+
+    #[tokio::test]
+    async fn explicit_refresh_publishes_freshly_requeried_mutation_statuses() {
+        use std::sync::atomic::{AtomicU8, Ordering as AtomicOrdering};
+
+        const WIRE_SUPPORTED: u8 = 0;
+        const WIRE_UNKNOWN: u8 = 4;
+        // Fan wire contract has an extra BackendMissing variant, so its
+        // Unknown value is 5, not 4.
+        const WIRE_FAN_UNKNOWN: u8 = 5;
+
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let provider = Arc::new(MockProvider::new(state));
+        let initial = build_initial_snapshot_for_refresh(&provider).await;
+
+        let battery = Arc::new(AtomicU8::new(WIRE_UNKNOWN));
+        let performance = Arc::new(AtomicU8::new(WIRE_UNKNOWN));
+        let fan = Arc::new(AtomicU8::new(WIRE_FAN_UNKNOWN));
+        let (_server, client) = connect_status_hardware(StatusHardwareObject {
+            battery: Arc::clone(&battery),
+            performance: Arc::clone(&performance),
+            fan: Arc::clone(&fan),
+        })
+        .await;
+
+        // Cached startup evidence is stale; only a fresh re-query may update it.
+        let mut runtime = ApplicationRuntime::new_with_snapshot(
+            GpuServices::new(
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+            ),
+            AppService::new(provider.clone()),
+            AppService::new(provider.clone()),
+            AppService::new(provider.clone()),
+            AppService::new(provider.clone()),
+            initial,
+            CapabilityStatus::BackendMissing,
+            CapabilityStatus::BackendMissing,
+            CapabilityStatus::BackendMissing,
+            Some(client),
+        );
+
+        // Daemon reports Supported for Battery while cached evidence says
+        // BackendMissing. One canonical explicit refresh must publish the
+        // freshly re-queried Supported write evidence.
+        battery.store(WIRE_SUPPORTED, AtomicOrdering::SeqCst);
+        runtime.requery_mutation_statuses().await;
+        assert_eq!(
+            runtime.battery_mutation_status(),
+            CapabilityStatus::Supported,
+            "re-query must replace stale cached evidence"
+        );
+
+        let refreshed = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            runtime.fan_mutation_status(),
+            runtime.battery_mutation_status(),
+            runtime.performance_mutation_status(),
+            runtime.capabilities().generation() + 1,
+        )
+        .await
+        .expect("refresh must succeed");
+        runtime.replace_capabilities(refreshed);
+        assert_eq!(
+            runtime
+                .capabilities()
+                .capability(FeatureId::ChargeLimit)
+                .expect("ChargeLimit present")
+                .operations
+                .write
+                .status,
+            CapabilityStatus::Supported,
+            "explicit refresh must publish fresh BackendMissing→Supported evidence"
+        );
+
+        // Daemon disappears again: the next explicit refresh must demote the
+        // published write evidence instead of keeping the last-good Supported.
+        battery.store(WIRE_UNKNOWN, AtomicOrdering::SeqCst);
+        runtime.requery_mutation_statuses().await;
+        let demoted = refresh_capability_registry(
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            &*provider,
+            runtime.fan_mutation_status(),
+            runtime.battery_mutation_status(),
+            runtime.performance_mutation_status(),
+            runtime.capabilities().generation() + 1,
+        )
+        .await
+        .expect("refresh must succeed");
+        runtime.replace_capabilities(demoted);
+        assert_eq!(
+            runtime
+                .capabilities()
+                .capability(FeatureId::ChargeLimit)
+                .expect("ChargeLimit present")
+                .operations
+                .write
+                .status,
+            CapabilityStatus::Unknown,
+            "owner loss must be visible through explicit refresh"
+        );
+
+        // Independent domains stay on their own re-queried evidence.
+        assert_eq!(
+            runtime.fan_mutation_status(),
+            CapabilityStatus::Unknown,
+            "fan evidence comes from its own status query"
+        );
+    }
 }

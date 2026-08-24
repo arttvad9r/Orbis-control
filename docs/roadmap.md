@@ -50,7 +50,7 @@ write or product capability to `Supported`.
 3. **#107 Battery owner/interface liveness** — dynamic bounded non-mutating evidence across daemon restart/disappearance.
 4. **#117 telemetry coverage/freshness** — partially delivered (`dd5e2ae`): UI `telemetry_fresh` now means a recent useful observation (empty snapshot = absence evidence, last-good preserved); provider snapshot contracts pinned by tests. Remaining: field-local denied/malformed/unavailable evidence classes on the provider/protocol surface.
 
-#112 is source-complete: explicit and periodic capability refresh share the same canonical mutation-status requery path. It remains validation-only work until executable CI returns.
+#112 is source-complete and now carries executed evidence: explicit and periodic capability refresh share the same canonical mutation-status requery path, and a private-P2P integration test proves a real BackendMissing→Supported→Unknown transition through explicit refresh (2026-08-24). Hosted CI re-proof rides #106.
 
 ## Milestone 2 — Fan read/evidence correctness
 
