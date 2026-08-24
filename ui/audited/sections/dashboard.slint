@@ -1,0 +1,120 @@
+// Dashboard: quick daily controls only (spec §2.1).
+// Performance/GPU segmented switches, Display/Keyboard dropdown rows and the
+// one-line battery row. Truthful states are carried over verbatim from the
+// previous main window.
+import { UiState, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState } from "../model.slint";
+import { SegmentedTrack, Segment } from "../../components/segmented-control.slint";
+import { DropdownRow } from "../../components/dropdown-row.slint";
+import { ValueSlider } from "../../components/value-slider.slint";
+import { SectionTitle, ActionButton, LocalStatus } from "../common.slint";
+import { Palette } from "../../themes/dark.slint";
+
+export component DashboardSection inherits Rectangle {
+    in property <UiState> ui-state;
+    in property <bool> display-state-ready: false;
+    in property <bool> display-control-ready: false;
+    in property <int> display-mode: -1;
+    in property <string> display-status: "Unavailable";
+    callback display-mode-requested(int);
+    in property <bool> keyboard-state-ready: false;
+    in property <bool> keyboard-control-ready: false;
+    in property <int> keyboard-brightness: -1;
+    in property <string> keyboard-status: "Unavailable";
+    callback keyboard-brightness-requested(int);
+    callback perf-clicked(int);
+    callback gpu-clicked(int);
+    callback charge-changed(float);
+
+    function bit-set(mask: int, bit: int) -> bool {
+        let shifted = Math.floor(mask / bit);
+        return shifted - 2 * Math.floor(shifted / 2) == 1;
+    }
+
+    function perf-label() -> string {
+        return root.ui-state.perf-state == PerformanceHwState.Unavailable ? "Performance · Unavailable" : "Performance";
+    }
+
+    function gpu-label() -> string {
+        return root.ui-state.gpu-mode-state == GpuModeHwState.Unavailable ? "GPU Mode · Read only" : "GPU Mode";
+    }
+
+    function perf-detail() -> string { return "CPU " + root.ui-state.cpu-temp + " · Fan " + root.ui-state.cpu-fan-rpm; }
+    function gpu-detail() -> string { return "GPU " + root.ui-state.gpu-temp + " · Fan " + root.ui-state.gpu-fan-rpm; }
+    function display-row-status() -> string {
+        if (!root.display-state-ready) { return "Unavailable"; }
+        return root.display-status;
+    }
+    function keyboard-row-status() -> string {
+        if (!root.keyboard-state-ready) { return "Unavailable"; }
+        return root.keyboard-status;
+    }
+    function charge-detail() -> string {
+        if (root.ui-state.charge-limit-state == ChargeLimitState.Loading) { return "Loading"; }
+        if (root.ui-state.charge-limit-state != ChargeLimitState.Ready) { return "Unavailable"; }
+        return root.ui-state.charge-limit + "%";
+    }
+
+    VerticalLayout {
+        spacing: 10px;
+
+        VerticalLayout {
+            spacing: 4px;
+            SectionTitle { title: root.perf-label(); detail: root.perf-detail(); }
+            SegmentedTrack {
+                Segment { label: "Silent"; accent: Palette.silent; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0; segment-disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 1); activate => { root.perf-clicked(0); } }
+                Segment { label: "Balanced"; accent: Palette.balanced; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1; segment-disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 2); activate => { root.perf-clicked(1); } }
+                Segment { label: "Turbo"; accent: Palette.turbo; selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 2; segment-disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 4); activate => { root.perf-clicked(2); } }
+            }
+        }
+
+        VerticalLayout {
+            spacing: 4px;
+            SectionTitle { title: root.gpu-label(); detail: root.gpu-detail(); }
+            SegmentedTrack {
+                Segment { label: "Eco"; accent: Palette.eco; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0; pending: root.ui-state.gpu-queued == 0; segment-disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1); activate => { root.gpu-clicked(0); } }
+                Segment { label: "Standard"; accent: Palette.standard; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1; pending: root.ui-state.gpu-queued == 1; segment-disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2); activate => { root.gpu-clicked(1); } }
+                Segment { label: "Ultimate"; accent: Palette.ultimate; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2; pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2; segment-disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4); activate => { root.gpu-clicked(2); } }
+                Segment { label: "Optimized"; accent: Palette.optimized; selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3; segment-disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 8); activate => { root.gpu-clicked(3); } }
+            }
+            if (root.ui-state.gpu-section-error) : LocalStatus { text: "GPU mode change was not confirmed"; accent: Palette.error; }
+            if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : LocalStatus { text: "GPU mode queued · applied at next shutdown/reboot"; accent: Palette.warning; }
+        }
+
+        DropdownRow {
+            label: "Display";
+            options: ["Auto", "60 Hz", "120 Hz"];
+            current-index: root.display-mode < 0 ? 0 : root.display-mode;
+            enabled-row: root.display-control-ready;
+            status: root.display-row-status();
+            row-changed(i) => { root.display-mode-requested(i); }
+        }
+
+        DropdownRow {
+            label: "Keyboard";
+            options: ["Off", "1", "2", "3"];
+            current-index: root.keyboard-brightness < 0 ? 0 : root.keyboard-brightness;
+            enabled-row: root.keyboard-control-ready;
+            status: root.keyboard-row-status();
+            row-changed(i) => { root.keyboard-brightness-requested(i); }
+        }
+
+        VerticalLayout {
+            spacing: 4px;
+            SectionTitle { title: "Battery Charge Limit"; detail: root.charge-detail(); }
+            HorizontalLayout {
+                height: 30px;
+                spacing: 8px;
+                alignment: center;
+                if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : ValueSlider { horizontal-stretch: 1; min: 20; max: 100; step: 1; value: root.ui-state.charge-limit; disabled: !root.ui-state.charge-limit-writable; changed(v) => { root.charge-changed(v); } }
+                if (root.ui-state.charge-limit-state != ChargeLimitState.Ready) : Text { horizontal-stretch: 1; text: root.ui-state.charge-limit-state == ChargeLimitState.Loading ? "Reading battery threshold…" : "Battery threshold unavailable"; font-size: 10px; color: Palette.text-secondary; vertical-alignment: center; }
+                ActionButton { width: 58px; label: "100%"; disabled: root.ui-state.charge-limit-state != ChargeLimitState.Ready || !root.ui-state.charge-limit-writable; clicked => { root.charge-changed(100); } }
+            }
+            HorizontalLayout {
+                height: 16px;
+                Text { text: root.ui-state.battery-percent + " · " + root.ui-state.battery-health; font-size: 9px; color: Palette.text-secondary; vertical-alignment: center; overflow: elide; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text { text: root.ui-state.power-ac-mw; font-size: 9px; color: root.ui-state.telemetry-fresh ? Palette.text-secondary : Palette.text-disabled; vertical-alignment: center; horizontal-alignment: right; overflow: elide; }
+            }
+        }
+    }
+}
