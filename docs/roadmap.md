@@ -88,7 +88,7 @@ Completed source foundations include versioned desired-state storage, lifecycle 
 
 Next:
 
-- #113 — remove deprecated legacy config/path compatibility APIs after executable compatibility validation;
+- #113 closed (2026-08-24): deprecated legacy config/path compatibility symbols removed after confirming zero consumers and executing the full workspace `--locked` suite green;
 - wire research-foundation modules (presets, reconciliation, transaction, readiness) only through deliberate design steps that keep config loading hardware-inert;
 - reconciliation must read authoritative Observed state before any action;
 - Desired/Observed/Pending remain explicit;

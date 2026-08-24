@@ -69,25 +69,8 @@ pub use window_state::{
     window_state_file,
 };
 
-use std::path::PathBuf;
-
 /// Имя каталога конфигурации.
 pub const CONFIG_DIR_NAME: &str = "orbis-control";
 
 /// Текущая версия формата конфигурации.
 pub const CONFIG_VERSION: u32 = 1;
-
-/// Legacy config directory resolver used only by `store::AppConfig`.
-///
-/// Unlike the hardened stores above, this compatibility API still has legacy
-/// fallback semantics and must not be introduced into new production paths.
-pub fn config_dir() -> PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .map(|h| h.join(".config"))
-                .unwrap_or_else(|| PathBuf::from("."))
-        })
-        .join(CONFIG_DIR_NAME)
-}

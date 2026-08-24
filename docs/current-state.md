@@ -38,7 +38,7 @@ Production product path намеренно включает только док�
 | Remote branches | CLEANUP PENDING — #118 | Старые `agent/*` refs остаются. |
 | Application identity | DECISION OPEN — #124 | `io.github.orbiscontrol.*` permanence/ownership нужно решить до stable release. |
 | Core/domain | IMPLEMENTED | Typed capability/state/action/lifecycle models, `Accepted != Applied`, Desired/Observed/Pending foundations. |
-| Preferences/config | HARDENED / COMPAT CLEANUP OPEN — #113 | Checked XDG paths, inert defaults, atomic/durable stores; deprecated legacy compatibility symbols ещё существуют. |
+| Preferences/config | HARDENED / COMPAT CLEANUP CLOSED — #113 | Checked XDG paths, inert defaults, atomic/durable stores; deprecated legacy path symbols (`config_dir`, `config_file`, `state_dir`, `cache_dir`, `config_dir_with`) removed with zero external consumers confirmed; hardened stores/checked resolvers are the only remaining API. |
 | Autostart | IMPLEMENTED SOURCE — #110 closed | Owned XDG desktop entry read/write/read-back wired to Preferences. |
 | Window/tray lifecycle | IMPLEMENTED SOURCE — #121 closed | Start Minimized, X11-style position restore/save, Wayland fail-closed behavior, StatusNotifier tray gating and explicit Quit lifecycle. |
 | Diagnostics | IMPLEMENTED SOURCE — #111 closed | Runtime initialization, capability generation replacement, Refresh, privacy-bounded JSON export and Copy Summary wired; Open Logs intentionally disabled. |

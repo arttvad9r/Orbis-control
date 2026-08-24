@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::{CONFIG_DIR_NAME, config_dir};
+use crate::CONFIG_DIR_NAME;
 
 /// Имя файла конфигурации.
 pub const CONFIG_FILE: &str = "config.toml";
@@ -94,49 +94,6 @@ pub fn config_dir_with_checked(
     resolve_dir_checked_with("XDG_CONFIG_HOME", xdg_config_home, home, ".config")
 }
 
-/// Legacy resolver retained only for compatibility.
-fn resolve_dir_legacy(env_key: &str, fallback_subdir: &str) -> PathBuf {
-    std::env::var_os(env_key)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .map(|h| h.join(fallback_subdir))
-                .unwrap_or_else(|| PathBuf::from("."))
-        })
-        .join(CONFIG_DIR_NAME)
-}
-
-/// Полный путь к legacy-файлу конфигурации.
-#[deprecated(note = "legacy compatibility path; new production code must use hardened stores")]
-pub fn config_file() -> PathBuf {
-    config_dir().join(CONFIG_FILE)
-}
-
-/// Legacy state path with historical CWD fallback.
-///
-/// New production code must use [`state_dir_checked`].
-#[deprecated(note = "use state_dir_checked(); legacy function may fall back to CWD")]
-pub fn state_dir() -> PathBuf {
-    resolve_dir_legacy("XDG_STATE_HOME", ".local/state")
-}
-
-/// Legacy cache path with historical CWD fallback.
-///
-/// New production code must use [`cache_dir_checked`].
-#[deprecated(note = "use cache_dir_checked(); legacy function may fall back to CWD")]
-pub fn cache_dir() -> PathBuf {
-    resolve_dir_legacy("XDG_CACHE_HOME", ".cache")
-}
-
-/// Legacy pure config resolver retained for compatibility tests.
-///
-/// New code must use [`config_dir_with_checked`].
-#[deprecated(note = "use config_dir_with_checked(); legacy function may fall back to CWD")]
-pub fn config_dir_with(xdg: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
-    xdg.unwrap_or_else(|| home.unwrap_or_else(|| PathBuf::from(".")).join(".config"))
-        .join(CONFIG_DIR_NAME)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,14 +131,5 @@ mod tests {
             config_dir_with_checked(None, Some(PathBuf::from("relative-home"))),
             Err(PathResolutionError::InvalidHome(_))
         ));
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn legacy_config_file_joins_dir() {
-        let td = tempfile::tempdir().unwrap();
-        let cfg = td.path().join("cfg");
-        let dir = config_dir_with(Some(cfg), None);
-        assert_eq!(dir.join(CONFIG_FILE).file_name().unwrap(), CONFIG_FILE);
     }
 }
