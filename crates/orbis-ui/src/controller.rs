@@ -1311,6 +1311,7 @@ mod tests {
                 state: "Full".into(),
             }),
             gpu_power_state: orbis_core::gpu::GpuPowerState::Unknown,
+            field_gaps: Vec::new(),
             ts: std::time::SystemTime::UNIX_EPOCH,
         }
     }

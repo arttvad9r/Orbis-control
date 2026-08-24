@@ -678,6 +678,7 @@ fn telemetry_refresh_updates_ui_and_error_keeps_previous_state() {
         ac_online: Some(false),
         battery: None,
         gpu_power_state: orbis_core::gpu::GpuPowerState::Unknown,
+        field_gaps: Vec::new(),
         ts: std::time::SystemTime::UNIX_EPOCH,
     };
     apply_performance_event(&mut s, WorkerEvent::TelemetryRefresh(Ok(t)));

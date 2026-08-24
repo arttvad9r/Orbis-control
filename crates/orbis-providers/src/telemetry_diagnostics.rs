@@ -107,6 +107,7 @@ mod tests {
             ac_online: None,
             battery: None,
             gpu_power_state: GpuPowerState::Unknown,
+            field_gaps: Vec::new(),
             ts,
         }
     }
@@ -139,6 +140,7 @@ mod tests {
                 state: "Charging".into(),
             }),
             gpu_power_state: GpuPowerState::Active,
+            field_gaps: Vec::new(),
             ts,
         }
     }

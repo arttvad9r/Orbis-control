@@ -79,6 +79,41 @@ pub struct BatteryTelemetry {
     pub state: String,
 }
 
+/// Top-level telemetry groups whose selected source can fail field-locally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryField {
+    /// CPU temperature source (e.g. `k10temp`).
+    CpuTemp,
+    /// GPU temperature source (e.g. amdgpu edge temp).
+    GpuTemp,
+    /// GPU power draw source.
+    GpuPower,
+    /// Fan RPM sources.
+    Fans,
+    /// AC online state.
+    AcOnline,
+    /// Battery group.
+    Battery,
+}
+
+/// Why one telemetry group carries no value even though its source was
+/// discovered during collection (#117).
+///
+/// Only failed reads are recorded. A group absent because its source does not
+/// exist on this machine stays plain `None`/empty with no entry here, so a
+/// denied or malformed sensor stays distinguishable from structural absence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryFieldGap {
+    /// Reading the discovered source was denied by permissions.
+    Denied,
+    /// The source returned an unreadable/malformed/out-of-range value.
+    Malformed,
+    /// The source could not be read for another I/O reason (transient).
+    Unavailable,
+}
+
 /// Моментальный срез телеметрии.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Telemetry {
@@ -96,6 +131,12 @@ pub struct Telemetry {
     pub battery: Option<BatteryTelemetry>,
     /// Фактический power state dGPU.
     pub gpu_power_state: GpuPowerState,
+    /// Field-local evidence for discovered sources whose read failed.
+    ///
+    /// Empty when every discovered source was read successfully or missing;
+    /// never contains fabricated data and never affects [`Self::quality()`].
+    #[serde(default)]
+    pub field_gaps: Vec<(TelemetryField, TelemetryFieldGap)>,
     /// Отметка времени.
     pub ts: SystemTime,
 }
@@ -130,8 +171,17 @@ impl Telemetry {
             ac_online: None,
             battery: None,
             gpu_power_state: GpuPowerState::Unknown,
+            field_gaps: Vec::new(),
             ts: SystemTime::now(),
         }
+    }
+
+    /// Field-local gap recorded for one group in this snapshot, if any.
+    pub fn gap(&self, field: TelemetryField) -> Option<TelemetryFieldGap> {
+        self.field_gaps
+            .iter()
+            .find(|(candidate, _)| *candidate == field)
+            .map(|(_, gap)| *gap)
     }
 
     /// Classify the useful data present in this snapshot without considering
@@ -357,6 +407,7 @@ mod tests {
                 state: "Full".into(),
             }),
             gpu_power_state: GpuPowerState::Unknown,
+            field_gaps: Vec::new(),
             ts: SystemTime::UNIX_EPOCH,
         };
         let json = serde_json::to_string(&t).unwrap();
@@ -525,6 +576,7 @@ mod tests {
                 state: "Discharging".into(),
             }),
             gpu_power_state: GpuPowerState::Unknown,
+            field_gaps: Vec::new(),
             ts: SystemTime::UNIX_EPOCH,
         };
         let json = serde_json::to_string(&t).unwrap();
@@ -532,8 +584,27 @@ mod tests {
         assert_eq!(back, t);
         // Verify None fields are preserved, not collapsed.
         assert!(back.fans.is_empty());
-        assert_eq!(back.ac_online, None);
-        assert_eq!(back.power.gpu, None);
+    }
+
+    #[test]
+    fn field_gap_evidence_survives_roundtrip_with_snake_case_shape() {
+        let mut t = Telemetry::empty();
+        t.field_gaps = vec![
+            (TelemetryField::CpuTemp, TelemetryFieldGap::Denied),
+            (TelemetryField::Battery, TelemetryFieldGap::Malformed),
+            (TelemetryField::Fans, TelemetryFieldGap::Unavailable),
+        ];
+        let json = serde_json::to_string(&t).unwrap();
+        assert!(
+            json.contains("\"field_gaps\":[[\"cpu_temp\",\"denied\""),
+            "wire shape must be snake_case pairs: {json}"
+        );
+        let back: Telemetry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.field_gaps, t.field_gaps);
+        assert_eq!(
+            back.gap(TelemetryField::CpuTemp),
+            Some(TelemetryFieldGap::Denied)
+        );
     }
 
     #[test]

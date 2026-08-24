@@ -179,6 +179,7 @@ fn telemetry(cpu: i16, gpu: i16, fans: Vec<(FanId, Rpm)>, battery: bool) -> Tele
         gpu_power_state: GpuPowerState::Active,
         // Фиксированный timestamp: профили должны создаваться детерминированно
         // (для snapshot-тестов), поэтому НЕ используем SystemTime::now().
+        field_gaps: Vec::new(),
         ts: std::time::SystemTime::UNIX_EPOCH,
     }
 }

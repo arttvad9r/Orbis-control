@@ -9,6 +9,10 @@
 //! - каждый вызов `snapshot()` выполняет новый authoritative read (кэш
 //!   отсутствует);
 //! - отсутствующие необязательные файлы → `None` (не ломают snapshot);
+//! - неудачное чтение обнаруженного источника → `None` для этой группы плюс
+//!   запись в `Telemetry.field_gaps` (Denied/Malformed/Unavailable), чтобы
+//!   отказ/повреждение источника не был неотличим от структурного отсутствия
+//!   (#117); остальные группы не затрагиваются;
 //! - ошибки candidate metadata (`hwmon/name`, `power_supply/type`) пропускают
 //!   только этот discovery entry; ошибки после выбора источника не скрываются;
 //! - malformed/пустые значения выбранного источника → `ProviderError::Internal`;
@@ -27,7 +31,9 @@ use orbis_core::fan::FanId;
 use orbis_core::gpu::GpuPowerState;
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::{MilliWatt, Percent, Rpm, TemperatureC};
-use orbis_core::telemetry::{BatteryTelemetry, FanTelemetry, PowerTelemetry, Telemetry};
+use orbis_core::telemetry::{
+    BatteryTelemetry, FanTelemetry, PowerTelemetry, Telemetry, TelemetryField, TelemetryFieldGap,
+};
 
 use crate::error::ProviderError;
 use crate::traits::{Provider, ProviderHealth, TelemetryProvider};
@@ -101,21 +107,37 @@ impl TelemetryProvider for SysfsTelemetryProvider {
         let mut gpu_temp = None;
         let mut gpu_power = None;
         let mut fans = Vec::new();
+        let mut field_gaps = Vec::new();
 
         for dir in &hwmon_dirs {
             let Some(name) = read_discovery_string(&dir.join("name")) else {
                 continue;
             };
             match name.as_str() {
-                "k10temp" => {
-                    cpu_temp = read_temp_c(&dir.join("temp1_input")).ok().flatten();
-                }
+                "k10temp" => match read_temp_c(&dir.join("temp1_input")) {
+                    Ok(value) => cpu_temp = value,
+                    Err(error) => record_gap(&mut field_gaps, TelemetryField::CpuTemp, &error),
+                },
                 "amdgpu" => {
-                    gpu_temp = read_amdgpu_edge_temp(dir).ok().flatten();
-                    gpu_power = read_milli_watt(&dir.join("power1_input")).ok().flatten();
+                    match read_amdgpu_edge_temp(dir) {
+                        Ok(value) => gpu_temp = value,
+                        Err(error) => record_gap(&mut field_gaps, TelemetryField::GpuTemp, &error),
+                    }
+                    match read_milli_watt(&dir.join("power1_input")) {
+                        Ok(value) => gpu_power = value,
+                        Err(error) => record_gap(&mut field_gaps, TelemetryField::GpuPower, &error),
+                    }
                 }
                 "asus" => {
-                    fans = read_asus_fans(dir);
+                    let (read_fans, first_failure) = read_asus_fans(dir);
+                    fans = read_fans;
+                    // A fully failing fan set is recorded as one aggregate gap;
+                    // individual skipped fans stay optional-sensor behavior.
+                    if fans.is_empty() {
+                        if let Some(error) = first_failure {
+                            record_gap(&mut field_gaps, TelemetryField::Fans, &error);
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -133,16 +155,22 @@ impl TelemetryProvider for SysfsTelemetryProvider {
             match supply_type.as_str() {
                 "Battery" => {
                     if battery.is_none() {
-                        battery = read_battery(dir).ok().flatten();
+                        match read_battery(dir) {
+                            Ok(value) => battery = value,
+                            Err(error) => {
+                                record_gap(&mut field_gaps, TelemetryField::Battery, &error)
+                            }
+                        }
                     }
                 }
                 // External supplies use several kernel type names (Mains,
                 // USB*, Wireless, ...). Require an explicit non-Battery type
                 // plus the standard `online` attribute instead of selecting
                 // the first arbitrary power_supply that happens to have it.
-                _ if ac_online.is_none() && dir.join("online").exists() => {
-                    ac_online = read_online(dir).ok().flatten();
-                }
+                _ if ac_online.is_none() && dir.join("online").exists() => match read_online(dir) {
+                    Ok(value) => ac_online = value,
+                    Err(error) => record_gap(&mut field_gaps, TelemetryField::AcOnline, &error),
+                },
                 _ => {}
             }
         }
@@ -162,6 +190,7 @@ impl TelemetryProvider for SysfsTelemetryProvider {
             // Telemetry не смешивается с GpuPower/GpuMux/GpuAccess capability
             // state: capability живёт в отдельном GpuPowerProvider.
             gpu_power_state: GpuPowerState::Unknown,
+            field_gaps,
             ts: SystemTime::now(),
         })
     }
@@ -304,14 +333,40 @@ fn read_amdgpu_edge_temp(dir: &Path) -> Result<Option<TemperatureC>, ProviderErr
     read_temp_c(&dir.join("temp1_input"))
 }
 
+/// Read a discovered source failure into its typed field gap class (#117).
+///
+/// Permission failures stay `Denied`; other I/O failures are transient
+/// `Unavailable`; parse/empty/range failures are `Malformed`. The first
+/// recorded class per group wins.
+fn record_gap(
+    gaps: &mut Vec<(TelemetryField, TelemetryFieldGap)>,
+    field: TelemetryField,
+    error: &ProviderError,
+) {
+    let gap = match error {
+        ProviderError::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            TelemetryFieldGap::Denied
+        }
+        ProviderError::Io(_) => TelemetryFieldGap::Unavailable,
+        _ => TelemetryFieldGap::Malformed,
+    };
+    if !gaps.iter().any(|(candidate, _)| *candidate == field) {
+        gaps.push((field, gap));
+    }
+}
+
 /// Прочитать CPU/GPU (и другие) вентиляторы ASUS hwmon по labels.
 ///
 /// `FanTelemetry.percent` всегда `None` (нет доказанного источника max RPM).
 ///
 /// Каждый fan обрабатывается независимо: ошибка одного fan (malformed
-/// label/RPM) пропускает только этот entry, сохраняя остальные.
-fn read_asus_fans(dir: &Path) -> Vec<FanTelemetry> {
+/// label/RPM) пропускает только этот entry, сохраняя остальные. Первая
+/// обнаруженная ошибка чтения возвращается вызывающему как field-local
+/// evidence; полностью пустой результат с ошибкой означает, что ни один
+/// вентилятор не был прочитан.
+fn read_asus_fans(dir: &Path) -> (Vec<FanTelemetry>, Option<ProviderError>) {
     let mut fans = Vec::new();
+    let mut first_failure = None;
     for i in 1..=4 {
         // Skip fans with missing or malformed labels (read_string returns
         // None for NotFound, Err for malformed — both are skip-safe).
@@ -329,7 +384,16 @@ fn read_asus_fans(dir: &Path) -> Vec<FanTelemetry> {
             other => FanId::Other(other.to_string()),
         };
         // RPM read failure skips this fan without killing others.
-        let Some(rpm) = read_rpm(&dir.join(format!("fan{i}_input"))).ok().flatten() else {
+        let rpm = match read_rpm(&dir.join(format!("fan{i}_input"))) {
+            Ok(value) => value,
+            Err(error) => {
+                if first_failure.is_none() {
+                    first_failure = Some(error);
+                }
+                continue;
+            }
+        };
+        let Some(rpm) = rpm else {
             continue;
         };
         fans.push(FanTelemetry {
@@ -341,7 +405,7 @@ fn read_asus_fans(dir: &Path) -> Vec<FanTelemetry> {
             quality: orbis_core::telemetry::FanTelemetryQuality::Complete,
         });
     }
-    fans
+    (fans, first_failure)
 }
 
 /// Прочитать battery telemetry из power_supply директории.
@@ -489,11 +553,12 @@ mod tests {
         full_fixture(&root);
         let provider = SysfsTelemetryProvider::new(root.clone());
         let t = provider.snapshot().await.expect("snapshot");
-
         assert_eq!(t.cpu_temp, Some(TemperatureC::new(46).expect("c")));
         assert_eq!(t.gpu_temp, Some(TemperatureC::new(43).expect("c")));
         assert_eq!(t.power.gpu, Some(MilliWatt::new(13_073).expect("mw")));
         assert_eq!(t.ac_online, Some(true));
+        // Every discovered source read successfully: no gap evidence.
+        assert!(t.field_gaps.is_empty());
 
         assert_eq!(t.fans.len(), 2);
         let cpu = t
@@ -601,6 +666,33 @@ mod tests {
         assert!(t.fans.is_empty());
         assert_eq!(t.battery, None);
         assert_eq!(t.ac_online, None);
+        // Structural absence everywhere: no failed reads, no gap evidence.
+        assert!(t.field_gaps.is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn malformed_battery_capacity_kills_group_with_gap_evidence() {
+        // #117: a malformed required battery field previously made the whole
+        // battery look structurally absent; now the group stays None but the
+        // Malformed gap proves a battery source was discovered and failed.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
+        write_fixture(&root, "class/hwmon/hwmon0/temp1_input", "46375\n");
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "garbage\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot");
+        assert_eq!(t.battery, None);
+        assert_eq!(
+            t.gap(TelemetryField::Battery),
+            Some(TelemetryFieldGap::Malformed)
+        );
+        // Independent metrics stay intact and gap-free.
+        assert_eq!(t.cpu_temp, Some(TemperatureC::new(46).expect("c")));
+        assert_eq!(t.gap(TelemetryField::CpuTemp), None);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -634,6 +726,23 @@ mod tests {
         assert!(t.fans.is_empty());
         assert_eq!(t.battery, None);
         assert_eq!(t.ac_online, None);
+        // #117: every discovered group that failed records field-local
+        // evidence instead of silently collapsing into structural absence.
+        for field in [
+            TelemetryField::CpuTemp,
+            TelemetryField::GpuTemp,
+            TelemetryField::GpuPower,
+            TelemetryField::Fans,
+            TelemetryField::AcOnline,
+            TelemetryField::Battery,
+        ] {
+            assert_eq!(
+                t.gap(field),
+                Some(TelemetryFieldGap::Malformed),
+                "expected Malformed gap for {field:?}"
+            );
+        }
+        assert_eq!(t.field_gaps.len(), 6);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -656,11 +765,38 @@ mod tests {
         let provider = SysfsTelemetryProvider::new(root.clone());
         let t = provider.snapshot().await.expect("snapshot stays Ok");
         assert_eq!(t.cpu_temp, None);
-        // Independent fields survive.
+        // The denied read is field-local evidence, distinct from absence.
+        assert_eq!(
+            t.gap(TelemetryField::CpuTemp),
+            Some(TelemetryFieldGap::Denied)
+        );
+        // Independent fields survive without any gap evidence.
+        assert_eq!(t.gap(TelemetryField::GpuTemp), None);
+        assert_eq!(t.gap(TelemetryField::Battery), None);
+        assert_eq!(t.gap(TelemetryField::AcOnline), None);
         assert_eq!(t.gpu_temp, Some(TemperatureC::new(43).expect("c")));
         assert_eq!(
             t.battery.expect("battery").percent,
             Percent::new(100).expect("pct")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn unreadable_source_class_is_unavailable_for_other_io_errors() {
+        // A selected value file that cannot be read for a non-permission I/O
+        // reason (here: it is a directory) records Unavailable, not Denied.
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon0/name", "k10temp\n");
+        std::fs::create_dir_all(root.join("class/hwmon/hwmon0/temp1_input")).unwrap();
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        let t = provider.snapshot().await.expect("snapshot stays Ok");
+        assert_eq!(t.cpu_temp, None);
+        assert_eq!(
+            t.gap(TelemetryField::CpuTemp),
+            Some(TelemetryFieldGap::Unavailable)
         );
 
         let _ = std::fs::remove_dir_all(root);
@@ -728,6 +864,11 @@ mod tests {
             .await
             .expect("snapshot must succeed despite malformed fan RPM");
         assert!(t.fans.is_empty());
+        // All labeled fans failed to produce RPM: aggregate gap evidence.
+        assert_eq!(
+            t.gap(TelemetryField::Fans),
+            Some(TelemetryFieldGap::Malformed)
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -1131,6 +1272,9 @@ mod tests {
         assert_eq!(t.fans.len(), 1);
         assert_eq!(t.fans[0].fan, FanId::Cpu);
         assert_eq!(t.fans[0].rpm, Rpm::new(2600).expect("rpm"));
+        // Partial fan data exists, so the surviving observation carries the
+        // evidence; no aggregate gap is recorded.
+        assert!(t.field_gaps.is_empty());
 
         let _ = std::fs::remove_dir_all(root);
     }
