@@ -33,7 +33,7 @@ Production product path намеренно включает только док�
 |---|---|---|
 | Repository baseline | CLEANED / IMPLEMENTED | One-off validation artifact удалён; canonical workflow/document hierarchy сохранены; интеграция консолидирована в ветку `development` (PR #129 head `e8b611e` сохранён как исходная история). |
 | Rust/build contract | IMPLEMENTED | Workspace MSRV/toolchain contract — Rust 1.87. |
-| Executable CI | BLOCKED — #106 | Actions failure/no-run occurs before trustworthy repository steps; не интерпретируется как Cargo/Nix result. |
+| Executable CI | BLOCKED — #106 | Root cause identified 2026-08-24: GitHub billing rejects the job before `Set up job` («recent account payments have failed or your spending limit needs to be increased») on this private repo. Remediation requires the owner (raise Actions spending limit / fix payment, or make the repo public). Not a workflow/runner/repository-content failure. |
 | Main protection | DEFERRED — #114 | Required checks включать только после реально исполняемого CI. |
 | Remote branches | CLEANUP PENDING — #118 | Старые `agent/*` refs остаются. |
 | Application identity | DECISION OPEN — #124 | `io.github.orbiscontrol.*` permanence/ownership нужно решить до stable release. |
@@ -61,7 +61,7 @@ Production product path намеренно включает только док�
 | Automation | IMPLEMENTED SHADOW/EXECUTOR CONTRACT, EXECUTION BLOCKED | Worker owns policy/lifecycle/debounce/recovery/serialization; resume performs read-only provider/capability refresh and never restores desired hardware state. Performance executor compiled but promotion=false. Other executors disabled. |
 | Display Refresh | IMPLEMENTED CONTRACT / NO MUTATION OWNER | Typed target/request/read-back design exists; no concrete compositor configuration owner is enabled. |
 | Updates | FAIL-CLOSED | Installation owner detection + typed blockers exist; no invented release feed/downloader/installer. |
-| Release dependency graph | CLOSED IN SOURCE — #115 | GUI release graph no longer contains `orbis-test-support` (`cargo tree -e normal` proof on this revision): production startup uses `UiState::production_initial`; fixture bootstrap is dev-only + optional `ui-review` feature for screenshot builds. |
+| Release dependency graph | EXECUTED LOCALLY — #115 closed | GUI release graph contains no `orbis-test-support` (re-proven by `cargo tree -e normal --locked` on this revision): production startup uses `UiState::production_initial`; fixture bootstrap is dev-only + optional `ui-review` feature for screenshot builds (`cargo check -p orbis-ui --features ui-review` green). |
 | GUI root boundary | EXECUTED LOCALLY — #125 closed | Interactive launch rejects euid 0 before preferences/runtime/bus setup (`LaunchContext::validate`, rustix geteuid); screenshot/offscreen paths remain explicit exceptions; decision unit tests executed green on this revision. Hosted CI re-proof rides #106. |
 | Hardwared sandbox | STRUCTURALLY MINIMIZED / VALIDATION OPEN — #126 | Intended direct sysfs write surface is `platform_profile` only; executable package/VM proof awaits #106/tooling. |
 | ASUS FA707NV live read baseline | OBSERVED / READ-ONLY | `platform_profile`, asusd/asusctl profile, UPower, DRM/sysfs GPU, hwmon, thermal and power_supply reads were observed on FA707NV; Session1/Hardware1/hardwared and supergfxd were unavailable. This does not promote write support. |
