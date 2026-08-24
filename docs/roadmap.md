@@ -113,7 +113,7 @@ Completed source slices:
 
 Remaining:
 
-- #119 executable CLI/service-absent/integration validation;
+- #119 closed: executable local workspace validation plus an executable service-absent integration test recorded (`ebba8ea`); hosted CI re-proof rides #106;
 - #117 telemetry truth improvements should flow into Diagnostics/UI without fake freshness;
 - final packaged desktop/AppStream/tray/preferences acceptance on release revision.
 
