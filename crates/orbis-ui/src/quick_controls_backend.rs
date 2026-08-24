@@ -89,6 +89,16 @@ pub(crate) fn observe_automation_telemetry(telemetry: &orbis_core::telemetry::Te
     secondary_windows_backend::observe_automation_telemetry(telemetry);
 }
 
+/// Frameless title bar close button shares the native close-action policy.
+pub(crate) fn handle_close_request(app: &AppWindow) {
+    secondary_windows_backend::handle_close_request(app);
+}
+
+/// Settings section remember-position/close-action request handlers.
+pub(crate) fn wire_position_preferences_bridge(app: &AppWindow) {
+    secondary_windows_backend::wire_position_preferences_bridge(app);
+}
+
 pub(crate) fn wire_window(app: &AppWindow) {
     let context = CONTEXT.with(|slot| slot.borrow().clone());
     let runtime_ready = context.is_some();

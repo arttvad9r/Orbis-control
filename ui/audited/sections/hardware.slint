@@ -3,7 +3,6 @@
 // brightness quick control lives on the Dashboard now, so this section keeps
 // only the Aura effect/speed observation rows.
 import { ScrollView, ComboBox, SpinBox } from "std-widgets.slint";
-import { ToggleRow } from "../../components/visual-controls.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { ThemeBridge, SectionCard, SectionTitle, ActionButton, LocalStatus } from "../common.slint";
 import { Palette } from "../../themes/dark.slint";
@@ -106,8 +105,19 @@ export component HardwareSection inherits Rectangle {
                             ComboBox { horizontal-stretch: 1; enabled: false; model: ["Static", "Breathing", "Color Cycle", "Strobing"]; current-index <=> root.keyboard-effect; }
                             ComboBox { width: 122px; enabled: false; model: ["Slow", "Normal", "Fast"]; current-index <=> root.keyboard-speed; }
                         }
-                        ToggleRow { label: "Boot sound"; checked: root.boot-sound-state-ready && root.boot-sound; disabled: true; }
-                        ToggleRow { label: "Status LEDs"; checked <=> root.status-led; disabled: !root.backend-ready || root.applying; }
+                        RequestToggleRow {
+                            label: "Boot sound";
+                            description: root.boot-sound-state-ready ? "Firmware attribute · read only" : "State unavailable";
+                            checked: root.boot-sound-state-ready && root.boot-sound;
+                            disabled: true;
+                        }
+                        RequestToggleRow {
+                            label: "Status LEDs";
+                            description: root.backend-ready ? "Draft surface · Apply persists the draft" : "Waiting for advanced backend";
+                            checked: root.status-led;
+                            disabled: !root.backend-ready || root.applying;
+                            toggled(value) => { root.status-led = value; }
+                        }
                     }
                 }
 
@@ -122,9 +132,27 @@ export component HardwareSection inherits Rectangle {
                             disabled: !root.panel-overdrive-control-ready || root.applying;
                             toggled(value) => { root.panel-overdrive-requested(value); }
                         }
-                        ToggleRow { label: "Auto clamshell mode"; checked <=> root.auto-clamshell; disabled: !root.backend-ready || root.applying; }
-                        ToggleRow { label: "Disable PCIe ASPM when plugged in"; checked <=> root.disable-aspm; disabled: !root.backend-ready || root.applying; }
-                        ToggleRow { label: "Disable networking in Modern Standby"; checked <=> root.disable-standby-networking; disabled: !root.backend-ready || root.applying; }
+                        RequestToggleRow {
+                            label: "Auto clamshell mode";
+                            description: root.backend-ready ? "Draft surface · Apply persists the draft" : "Waiting for advanced backend";
+                            checked: root.auto-clamshell;
+                            disabled: !root.backend-ready || root.applying;
+                            toggled(value) => { root.auto-clamshell = value; }
+                        }
+                        RequestToggleRow {
+                            label: "Disable PCIe ASPM when plugged in";
+                            description: root.backend-ready ? "Draft surface · Apply persists the draft" : "Waiting for advanced backend";
+                            checked: root.disable-aspm;
+                            disabled: !root.backend-ready || root.applying;
+                            toggled(value) => { root.disable-aspm = value; }
+                        }
+                        RequestToggleRow {
+                            label: "Disable networking in Modern Standby";
+                            description: root.backend-ready ? "Draft surface · Apply persists the draft" : "Waiting for advanced backend";
+                            checked: root.disable-standby-networking;
+                            disabled: !root.backend-ready || root.applying;
+                            toggled(value) => { root.disable-standby-networking = value; }
+                        }
                     }
                 }
 

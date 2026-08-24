@@ -101,23 +101,29 @@ def run(root: Path) -> list[str]:
     require(diagnostics_model, "row.write_status", diagnostics_model_rel, errors)
     require(diagnostics_model, "row.read_status", diagnostics_model_rel, errors)
 
-    extra_ui_rel = "ui/audited/extra-window.slint"
+    extra_ui_rel = "ui/audited/sections/hardware.slint"
     extra_ui = read(root, extra_ui_rel, errors)
-    require(extra_ui, "keyboard-brightness-requested", extra_ui_rel, errors)
     require(extra_ui, "panel-overdrive-requested", extra_ui_rel, errors)
     require(extra_ui, "RequestToggleRow", extra_ui_rel, errors)
     require(extra_ui, "boot-sound-state-ready", extra_ui_rel, errors)
-    require(extra_ui, 'ToggleRow { label: "Boot sound";', extra_ui_rel, errors)
+    require(extra_ui, 'label: "Boot sound";', extra_ui_rel, errors)
     require(extra_ui, "disabled: true;", extra_ui_rel, errors)
     require(extra_ui, "enabled: false; model: [\"Static\"", extra_ui_rel, errors)
+
+    dashboard_ui_rel = "ui/audited/sections/dashboard.slint"
+    dashboard_ui = read(root, dashboard_ui_rel, errors)
+    require(dashboard_ui, "keyboard-brightness-requested", dashboard_ui_rel, errors)
 
     extra_rel = "crates/orbis-ui/src/extra_backend.rs"
     extra = read(root, extra_rel, errors)
     require(extra, "HardwareProductControlClient", extra_rel, errors)
-    require(extra, "set_keyboard_backlight", extra_rel, errors)
     require(extra, "set_panel_overdrive", extra_rel, errors)
-    require(extra, "keyboard_status", extra_rel, errors)
     require(extra, "panel_status", extra_rel, errors)
+
+    quick_rel = "crates/orbis-ui/src/quick_controls_backend.rs"
+    quick = read(root, quick_rel, errors)
+    require(quick, "set_keyboard_backlight", quick_rel, errors)
+    require(quick, "keyboard_status", quick_rel, errors)
     require(extra, "AsusBootSoundProvider", extra_rel, errors)
     require(extra, "set_boot_sound_state_ready", extra_rel, errors)
     forbid(extra, "set_aura_static_rgb", extra_rel, errors)
@@ -153,16 +159,10 @@ def run(root: Path) -> list[str]:
     forbid(promotion, "CapabilityStatus::Supported", promotion_rel, errors)
     forbid(promotion, "Command::new", promotion_rel, errors)
 
-    pref_ui_rel = "ui/audited/preferences-window.slint"
+    pref_ui_rel = "ui/audited/sections/settings.slint"
     pref_ui = read(root, pref_ui_rel, errors)
     require(pref_ui, "hide-to-tray-enabled", pref_ui_rel, errors)
-    require(pref_ui, "disabled: !root.close-action-enabled;", pref_ui_rel, errors)
-    require(
-        pref_ui,
-        "disabled: !root.close-action-enabled || !root.hide-to-tray-enabled;",
-        pref_ui_rel,
-        errors,
-    )
+    require(pref_ui, "enabled: root.close-action-enabled;", pref_ui_rel, errors)
 
     pref_rel = "crates/orbis-ui/src/preferences_backend.rs"
     pref = read(root, pref_rel, errors)
@@ -191,19 +191,6 @@ def run(root: Path) -> list[str]:
     forbid(action, "login1.call", action_rel, errors)
     forbid(action, "WorkerCommand::Set", action_rel, errors)
 
-    updates_rel = "crates/orbis-ui/src/updates_backend.rs"
-    updates = read(root, updates_rel, errors)
-    require(updates, "ReleaseSourceBlocker::CanonicalSourceMissing", updates_rel, errors)
-    require(updates, "enum InstallBlocker", updates_rel, errors)
-    require(updates, "fn can_check", updates_rel, errors)
-    require(updates, "fn can_install", updates_rel, errors)
-    require(updates, "source_ready: assessment.can_check()", updates_rel, errors)
-    require(updates, "check_enabled: assessment.can_check()", updates_rel, errors)
-    require(updates, "install_enabled: assessment.can_install()", updates_rel, errors)
-    require(updates, "detect_install_owner", updates_rel, errors)
-    forbid(updates, "Command::new", updates_rel, errors)
-    forbid(updates, "reqwest", updates_rel, errors)
-    forbid(updates, "std::fs::write", updates_rel, errors)
 
     display_rel = "crates/orbis-ui/src/display_refresh_service.rs"
     display = read(root, display_rel, errors)

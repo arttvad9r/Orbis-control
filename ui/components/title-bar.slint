@@ -38,17 +38,12 @@ export component TitleBar inherits Rectangle {
             property <bool> btn-hover: min-touch.has-hover;
             background: self.btn-hover ? Palette.surface-hover : transparent;
             border-radius: 6px;
-            Path {
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                width: 16px;
-                height: 16px;
-                viewbox-width: 16;
-                viewbox-height: 16;
-                commands: "M 3.5 8 H 12.5";
-                stroke: Palette.text-secondary;
-                stroke-width: 1.5px;
-                fill: transparent;
+            Text {
+                text: "–";
+                font-size: 13px;
+                color: Palette.text-secondary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
             min-touch := TouchArea {
                 clicked => { root.minimize-requested(); }
@@ -59,17 +54,12 @@ export component TitleBar inherits Rectangle {
             property <bool> btn-hover: close-touch.has-hover;
             background: self.btn-hover ? Palette.error : transparent;
             border-radius: 6px;
-            Path {
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                width: 16px;
-                height: 16px;
-                viewbox-width: 16;
-                viewbox-height: 16;
-                commands: "M 4 4 L 12 12 M 12 4 L 4 12";
-                stroke: parent.btn-hover ? #11111B : Palette.text-secondary;
-                stroke-width: 1.5px;
-                fill: transparent;
+            Text {
+                text: "\u{00D7}";
+                font-size: 15px;
+                color: close-touch.has-hover ? #11111B : Palette.text-secondary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
             close-touch := TouchArea {
                 clicked => { root.close-requested(); }

@@ -1698,16 +1698,6 @@ fn fan_curve_capabilities_gating_from_registry() {
 }
 
 #[test]
-fn main_window_height_no_longer_reserves_fan_editor_space() {
-    let s = base_state();
-    assert_eq!(window_height(&s), 441.0);
-
-    let mut error = s;
-    error.gpu_section_error = true;
-    assert_eq!(window_height(&error), 466.0);
-}
-
-#[test]
 fn missing_preferences_initialize_dark_before_first_render() {
     let td = tempfile::tempdir().expect("tempdir");
     let light =
@@ -2052,14 +2042,16 @@ fn production_initial_has_no_queued_target_or_reboot_claim() {
 
 #[test]
 fn main_window_renders_queued_target_and_reboot_state() {
-    let source = include_str!("../../../ui/audited/main-window.slint");
+    let source = include_str!("../../../ui/audited/sections/dashboard.slint");
     // Queued target renders as pending on the exact queued segment.
     assert!(source.contains("gpu-queued == 0"));
     assert!(source.contains("gpu-queued == 1"));
     assert!(source.contains("gpu-queued == 2"));
     // Reboot-required status line exists; Optimized never gains a queued binding.
     assert!(source.contains("shutdown/reboot"));
-    let optimized_line_start = source.find("label: \"Optimized\"").expect("Optimized segment");
+    let optimized_line_start = source
+        .find("label: \"Optimized\"")
+        .expect("Optimized segment");
     let optimized_line_end = source[optimized_line_start..]
         .find('\n')
         .map(|end| optimized_line_start + end)
@@ -2069,4 +2061,20 @@ fn main_window_renders_queued_target_and_reboot_state() {
         !optimized_line.contains("pending:"),
         "Optimized must never render a product-queue pending state"
     );
+}
+
+#[test]
+fn shell_hosts_four_sections_and_frameless_chrome() {
+    let shell = include_str!("../../../ui/audited/main-window.slint");
+    assert!(shell.contains("no-frame: true"));
+    assert!(shell.contains("border-radius: 10px"));
+    assert!(shell.contains("Section.Dashboard"));
+    assert!(shell.contains("Section.Fans"));
+    assert!(shell.contains("Section.Hardware"));
+    assert!(shell.contains("Section.Settings"));
+    assert!(shell.contains("titlebar-close-requested"));
+    assert!(shell.contains("titlebar-drag-started"));
+    assert!(!shell.contains("UpdatesWindow"));
+    assert!(!shell.contains("AutomationWindow"));
+    assert!(!shell.contains("fans-clicked"));
 }

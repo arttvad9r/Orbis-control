@@ -34,11 +34,12 @@ export component SettingsSection inherits Rectangle {
     // Diagnostics actions (same runtime paths as the former window).
     in-out property <bool> refresh-enabled: false;
     in property <bool> refresh-pending: false;
-    in property <bool> copy-enabled: false;
     in property <bool> export-enabled: false;
+    // Privacy-safe projection filled by the diagnostics runtime on refresh;
+    // the Copy button routes it through the toolkit clipboard.
+    in property <string> diagnostics-summary: "";
     in property <string> diagnostics-status: "Diagnostics unavailable · lifecycle wiring pending";
     callback refresh-requested;
-    callback copy-summary-requested;
     callback export-report-requested;
 
     in property <string> version: "0.0.0";
@@ -133,13 +134,23 @@ export component SettingsSection inherits Rectangle {
                     spacing: 6px;
                     alignment: center;
                     ActionButton { width: 96px; label: root.refresh-pending ? "Refreshing…" : "Refresh"; disabled: !root.refresh-enabled || root.refresh-pending; clicked => { root.refresh-requested(); } }
-                    ActionButton { width: 96px; label: "Copy"; disabled: !root.copy-enabled; clicked => { root.copy-summary-requested(); } }
+                    ActionButton {
+                        width: 96px;
+                        label: "Copy";
+                        disabled: root.diagnostics-summary == "";
+                        clicked => {
+                            copy-ti.select-all();
+                            copy-ti.copy();
+                            root.local-status = "Diagnostics copied to clipboard";
+                        }
+                    }
                     ActionButton { width: 96px; label: "Export"; disabled: !root.export-enabled; clicked => { root.export-report-requested(); } }
                     Rectangle { horizontal-stretch: 1; background: transparent; }
                 }
                 LocalStatus { text: root.diagnostics-status; accent: Palette.text-secondary; }
             }
         }
+
 
         SectionCard {
             VerticalLayout {
@@ -159,5 +170,16 @@ export component SettingsSection inherits Rectangle {
             text: root.local-status;
             accent: Palette.text-secondary;
         }
+    }
+
+    // Offscreen clipboard carrier: select-all + copy use the toolkit
+    // clipboard without any extra dependency. Direct child of the section
+    // root so no layout manages its position.
+    copy-ti := TextInput {
+        y: -1000px;
+        width: 1px;
+        height: 1px;
+        text: root.diagnostics-summary;
+        read-only: true;
     }
 }

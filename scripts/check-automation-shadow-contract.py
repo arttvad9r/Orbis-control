@@ -107,8 +107,8 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
     ),
     "crates/orbis-ui/src/automation_backend.rs": (
         "persisted_policy",
-        "set_runtime_ready(false)",
         "ReadyButExecutionDisabled",
+        "execution stays disconnected",
     ),
     "crates/orbis-ui/src/resume_observer.rs": (
         "org.freedesktop.login1.Manager",
@@ -330,10 +330,10 @@ def check_runtime_readiness(root: Path, errors: list[str]) -> None:
     if source is None:
         return
     code = strip_rust_non_code(source)
-    if "set_runtime_ready(true)" in code:
-        errors.append(f"{relative}: backend must not publish runtime-ready true yet")
-    if "set_runtime_ready(false)" not in code:
-        errors.append(f"{relative}: missing explicit runtime-ready=false publication")
+    # The runtime-ready surface does not exist anymore: no window property, no
+    # setter, no publication path. Any mention is a regression.
+    if "runtime_ready" in code or "runtime-ready" in code:
+        errors.append(f"{relative}: runtime-ready publication surface must stay absent")
 
 
 def check_public_execution_surfaces(root: Path, errors: list[str]) -> None:

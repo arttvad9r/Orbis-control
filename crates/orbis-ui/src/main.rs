@@ -34,21 +34,13 @@ use orbis_session_client::{
 use orbis_ui::composition::build_production_runtime;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker_with_product_gpu};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
+use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, LogicalSize, PhysicalSize, Rgb8Pixel, WindowSize};
 use tokio::sync::mpsc::UnboundedSender;
 
 slint::include_modules!();
 
 thread_local! {
-    // One lazily-created native fan editor window per UI thread. Keeping the
-    // handle here allows the window to be hidden/reshown without rebuilding it
-    // and lets worker events synchronize its UiState with AppWindow.
-    static FANS_WINDOW: RefCell<Option<FansWindow>> = const { RefCell::new(None) };
-    static EXTRA_WINDOW: RefCell<Option<ExtraWindow>> = const { RefCell::new(None) };
-    static AUTOMATION_WINDOW: RefCell<Option<AutomationWindow>> = const { RefCell::new(None) };
-    static PREFERENCES_WINDOW: RefCell<Option<PreferencesWindow>> = const { RefCell::new(None) };
-    static DIAGNOSTICS_WINDOW: RefCell<Option<DiagnosticsWindow>> = const { RefCell::new(None) };
-    static UPDATES_WINDOW: RefCell<Option<UpdatesWindow>> = const { RefCell::new(None) };
     static PREVIEW_DIALOG_WINDOW: RefCell<Option<PreviewDialogWindow>> = const { RefCell::new(None) };
     static THEME_LIGHT: Cell<bool> = const { Cell::new(false) };
 }
@@ -56,11 +48,13 @@ thread_local! {
 /// Разобранные аргументы командной строки.
 struct Args {
     ui_state: String,
+    ui_section: Option<String>,
     screenshot: Option<String>,
 }
 
 fn parse_args() -> Args {
     let mut ui_state = "default".to_string();
+    let mut ui_section = None;
     let mut screenshot = None;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -71,11 +65,17 @@ fn parse_args() -> Args {
                 }
             }
             "--screenshot" => screenshot = it.next(),
+            "--ui-section" => {
+                if let Some(v) = it.next() {
+                    ui_section = Some(v);
+                }
+            }
             other => eprintln!("orbis-control: игнорирую неизвестный аргумент '{other}'"),
         }
     }
     Args {
         ui_state,
+        ui_section,
         screenshot,
     }
 }
@@ -103,18 +103,6 @@ fn scenario_state(name: &str) -> anyhow::Result<controller::UiState> {
 #[cfg(not(any(test, feature = "ui-review")))]
 fn scenario_state(_name: &str) -> anyhow::Result<controller::UiState> {
     anyhow::bail!("--screenshot/--ui-state scenarios require a build with --features ui-review")
-}
-
-/// Высота главного окна. До добавления встроенного Fan Curve редактора
-/// AppWindow использовал 441px (466px с GPU error banner); возвращаем именно
-/// этот бюджет, потому что редактор теперь живёт в отдельном FansWindow.
-#[cfg(test)]
-fn window_height(state: &controller::UiState) -> f32 {
-    if state.gpu_section_error {
-        466.0
-    } else {
-        441.0
-    }
 }
 
 fn to_slint(state: &controller::UiState) -> UiState {
@@ -490,42 +478,6 @@ fn apply_theme_if_open<T>(window: Option<&T>, light: bool, apply: impl FnOnce(&T
 fn apply_theme_to_all(app: &AppWindow, light: bool) {
     set_current_theme_light(light);
     app.global::<ThemeState>().set_mode(theme_mode(light));
-    FANS_WINDOW.with(|slot| {
-        let slot = slot.borrow();
-        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
-            window.global::<ThemeState>().set_mode(mode);
-        });
-    });
-    EXTRA_WINDOW.with(|slot| {
-        let slot = slot.borrow();
-        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
-            window.global::<ThemeState>().set_mode(mode);
-        });
-    });
-    AUTOMATION_WINDOW.with(|slot| {
-        let slot = slot.borrow();
-        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
-            window.global::<ThemeState>().set_mode(mode);
-        });
-    });
-    PREFERENCES_WINDOW.with(|slot| {
-        let slot = slot.borrow();
-        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
-            window.global::<ThemeState>().set_mode(mode);
-        });
-    });
-    DIAGNOSTICS_WINDOW.with(|slot| {
-        let slot = slot.borrow();
-        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
-            window.global::<ThemeState>().set_mode(mode);
-        });
-    });
-    UPDATES_WINDOW.with(|slot| {
-        let slot = slot.borrow();
-        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
-            window.global::<ThemeState>().set_mode(mode);
-        });
-    });
     PREVIEW_DIALOG_WINDOW.with(|slot| {
         let slot = slot.borrow();
         apply_theme_if_open(slot.as_ref(), light, |window, mode| {
@@ -534,112 +486,8 @@ fn apply_theme_to_all(app: &AppWindow, light: bool) {
     });
 }
 
-/// Copy the authoritative state held by AppWindow into the secondary fan
-/// window if it has already been created.
-fn sync_fans_window(app: &AppWindow) {
-    let state = from_slint(&app.get_ui_state());
-    FANS_WINDOW.with(|slot| {
-        if let Some(window) = slot.borrow().as_ref() {
-            window.set_ui_state(to_slint(&state));
-        }
-    });
-}
-
-/// FansWindow is deliberately a thin UI surface. Its callbacks proxy to the
-/// already existing AppWindow callbacks, so all mutation guards, worker
-/// commands and authoritative read-back semantics remain in one place.
-fn wire_fans_window(window: &FansWindow, app: &AppWindow) {
-    {
-        let app_weak = app.as_weak();
-        window.on_fan_changed(move |i| {
-            if let Some(app) = app_weak.upgrade() {
-                app.invoke_fan_changed(i);
-                sync_fans_window(&app);
-            }
-        });
-    }
-    {
-        let app_weak = app.as_weak();
-        window.on_fan_profile_changed(move |i| {
-            if let Some(app) = app_weak.upgrade() {
-                app.invoke_fan_profile_changed(i);
-                sync_fans_window(&app);
-            }
-        });
-    }
-    {
-        let app_weak = app.as_weak();
-        window.on_fan_temp_point_changed(move |index, value| {
-            if let Some(app) = app_weak.upgrade() {
-                app.invoke_fan_temp_point_changed(index, value);
-                sync_fans_window(&app);
-            }
-        });
-    }
-    {
-        let app_weak = app.as_weak();
-        window.on_fan_pwm_point_changed(move |index, value| {
-            if let Some(app) = app_weak.upgrade() {
-                app.invoke_fan_pwm_point_changed(index, value);
-                sync_fans_window(&app);
-            }
-        });
-    }
-    {
-        let app_weak = app.as_weak();
-        window.on_fan_apply_clicked(move |reset_defaults| {
-            if let Some(app) = app_weak.upgrade() {
-                app.invoke_fan_apply_clicked(reset_defaults);
-                sync_fans_window(&app);
-            }
-        });
-    }
-}
-
-fn show_fans_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
-    FANS_WINDOW.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_none() {
-            let window = FansWindow::new()?;
-            window.set_ui_state(to_slint(&from_slint(&app.get_ui_state())));
-            wire_fans_window(&window, app);
-            *slot = Some(window);
-        }
-
-        let window = slot.as_ref().expect("FansWindow initialized");
-        window.set_ui_state(to_slint(&from_slint(&app.get_ui_state())));
-        window.global::<ThemeState>().set_mode(current_theme_mode());
-        window.show()
-    })
-}
-
-/// UI-boundary: преобразование UI-индекса карточки в доменный профиль.
-fn show_extra_window() -> Result<(), slint::PlatformError> {
-    EXTRA_WINDOW.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_none() {
-            *slot = Some(ExtraWindow::new()?);
-        }
-        let window = slot.as_ref().expect("ExtraWindow initialized");
-        window.global::<ThemeState>().set_mode(current_theme_mode());
-        window.show()
-    })
-}
-
-fn show_automation_window() -> Result<(), slint::PlatformError> {
-    AUTOMATION_WINDOW.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_none() {
-            *slot = Some(AutomationWindow::new()?);
-        }
-        let window = slot.as_ref().expect("AutomationWindow initialized");
-        window.global::<ThemeState>().set_mode(current_theme_mode());
-        window.show()
-    })
-}
-
 fn apply_autostart_state_to_window(
-    window: &PreferencesWindow,
+    window: &AppWindow,
     state: &preferences_backend::AutostartUiState,
 ) {
     window.set_startup(state.enabled);
@@ -648,7 +496,7 @@ fn apply_autostart_state_to_window(
 }
 
 fn apply_window_preferences_state_to_window(
-    window: &PreferencesWindow,
+    window: &AppWindow,
     state: &preferences_backend::WindowPreferencesUiState,
 ) {
     window.set_start_minimized(state.start_minimized);
@@ -657,10 +505,11 @@ fn apply_window_preferences_state_to_window(
     window.set_remember_position_enabled(state.remember_position_writable);
     window.set_close_action(state.close_action);
     window.set_close_action_enabled(state.close_action_writable);
-    window.set_local_status(state.status.into());
+    window.set_settings_local_status(state.status.into());
 }
 
-fn sync_preferences_window(window: &PreferencesWindow) {
+/// Apply the persisted preferences state onto the settings section surface.
+fn apply_preferences_state(window: &AppWindow) {
     match preferences_backend::read_autostart_state() {
         Ok(state) => apply_autostart_state_to_window(window, &state),
         Err(error) => {
@@ -681,119 +530,9 @@ fn sync_preferences_window(window: &PreferencesWindow) {
             window.set_remember_position_enabled(false);
             window.set_close_action(0);
             window.set_close_action_enabled(false);
-            window.set_local_status("Preferences backend unavailable".into());
+            window.set_settings_local_status("Preferences backend unavailable".into());
         }
     }
-}
-
-fn show_preferences_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
-    PREFERENCES_WINDOW.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_none() {
-            let window = PreferencesWindow::new()?;
-            window.global::<ThemeState>().set_mode(current_theme_mode());
-            let app_weak = app.as_weak();
-            window.on_theme_changed(move |light| {
-                if let Some(app) = app_weak.upgrade() {
-                    apply_theme_to_all(&app, light);
-                }
-
-                if let Err(error) = persist_theme(light) {
-                    tracing::warn!(
-                        error = %error,
-                        "theme preference save failed; runtime theme remains active"
-                    );
-                }
-            });
-
-            {
-                let weak = window.as_weak();
-                window.on_startup_changed(move |enabled| {
-                    let Some(window) = weak.upgrade() else {
-                        return;
-                    };
-                    window.set_startup_enabled(false);
-                    window.set_startup_status("Applying…".into());
-                    match preferences_backend::set_autostart(enabled) {
-                        Ok(state) => {
-                            apply_autostart_state_to_window(&window, &state);
-                            window.set_local_status(
-                                if state.enabled {
-                                    "Autostart enabled"
-                                } else {
-                                    "Autostart disabled"
-                                }
-                                .into(),
-                            );
-                        }
-                        Err(error) => {
-                            tracing::warn!(error = %error, "autostart change failed");
-                            sync_preferences_window(&window);
-                            window.set_local_status("Autostart change failed".into());
-                        }
-                    }
-                });
-            }
-
-            {
-                let weak = window.as_weak();
-                window.on_start_minimized_changed(move |enabled| {
-                    let Some(window) = weak.upgrade() else {
-                        return;
-                    };
-                    window.set_start_minimized_enabled(false);
-                    match preferences_backend::persist_start_minimized(enabled) {
-                        Ok(preferences) => {
-                            window.set_start_minimized(preferences.window.start_minimized);
-                            window.set_start_minimized_enabled(true);
-                            window.set_local_status("Saved · applies on next launch".into());
-                        }
-                        Err(error) => {
-                            tracing::warn!(error = %error, "start-minimized preference save failed");
-                            sync_preferences_window(&window);
-                            window.set_local_status("Could not save Start Minimized".into());
-                        }
-                    }
-                });
-            }
-
-            *slot = Some(window);
-        }
-        let window = slot.as_ref().expect("PreferencesWindow initialized");
-        window.global::<ThemeState>().set_mode(current_theme_mode());
-        sync_preferences_window(window);
-        window.show()
-    })
-}
-
-fn show_diagnostics_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
-    DIAGNOSTICS_WINDOW.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_none() {
-            let window = DiagnosticsWindow::new()?;
-            diagnostics_backend::wire_window(&window);
-            *slot = Some(window);
-        }
-        let window = slot.as_ref().expect("DiagnosticsWindow initialized");
-        window.set_version(app.get_ui_state().version.clone());
-        window.global::<ThemeState>().set_mode(current_theme_mode());
-        window.show()?;
-        diagnostics_backend::refresh(window);
-        Ok(())
-    })
-}
-
-fn show_updates_window(app: &AppWindow) -> Result<(), slint::PlatformError> {
-    UPDATES_WINDOW.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_none() {
-            *slot = Some(UpdatesWindow::new()?);
-        }
-        let window = slot.as_ref().expect("UpdatesWindow initialized");
-        window.set_version(app.get_ui_state().version.clone());
-        window.global::<ThemeState>().set_mode(current_theme_mode());
-        window.show()
-    })
 }
 
 fn show_preview_dialog(kind: i32) -> Result<(), slint::PlatformError> {
@@ -1364,7 +1103,6 @@ fn handle_worker_event(
     let mut s = from_slint(&app.get_ui_state());
     apply_performance_event(&mut s, event);
     app.set_ui_state(to_slint(&s));
-    sync_fans_window(app);
     if refresh_quick_controls {
         quick_controls_backend::refresh_if_due(app, Duration::from_secs(10));
     }
@@ -1461,108 +1199,6 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 None => {
                     tracing::warn!("charge-changed вне интерактивного режима (worker отсутствует)")
                 }
-            }
-        });
-    }
-    {
-        let app_weak = app.as_weak();
-        app.on_fans_clicked(move || {
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
-            if let Err(e) = show_fans_window(&app) {
-                tracing::warn!("не удалось открыть FansWindow: {e:?}");
-            }
-        });
-    }
-    app.on_extra_clicked(move || {
-        if let Err(e) = show_extra_window() {
-            tracing::warn!("не удалось открыть ExtraWindow: {e:?}");
-        }
-    });
-    app.on_automation_clicked(move || {
-        if let Err(e) = show_automation_window() {
-            tracing::warn!("не удалось открыть AutomationWindow: {e:?}");
-        }
-    });
-    {
-        let app_weak = app.as_weak();
-        app.on_preferences_clicked(move || {
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
-            if let Err(e) = show_preferences_window(&app) {
-                tracing::warn!("не удалось открыть PreferencesWindow: {e:?}");
-            }
-        });
-    }
-    {
-        let app_weak = app.as_weak();
-        app.on_diagnostics_clicked(move || {
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
-            if let Err(e) = show_diagnostics_window(&app) {
-                tracing::warn!("не удалось открыть DiagnosticsWindow: {e:?}");
-            }
-        });
-    }
-    {
-        let app_weak = app.as_weak();
-        app.on_updates_clicked(move || {
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
-            if let Err(e) = show_updates_window(&app) {
-                tracing::warn!("не удалось открыть UpdatesWindow: {e:?}");
-            }
-        });
-    }
-    app.on_preview_dialog_clicked(move |kind| {
-        if let Err(e) = show_preview_dialog(kind) {
-            tracing::warn!("не удалось открыть PreviewDialogWindow: {e:?}");
-        }
-    });
-    {
-        let app_weak = app.as_weak();
-        app.on_quit_clicked(move || {
-            FANS_WINDOW.with(|slot| {
-                if let Some(window) = slot.borrow().as_ref() {
-                    let _ = window.hide();
-                }
-            });
-            EXTRA_WINDOW.with(|slot| {
-                if let Some(window) = slot.borrow().as_ref() {
-                    let _ = window.hide();
-                }
-            });
-            AUTOMATION_WINDOW.with(|slot| {
-                if let Some(window) = slot.borrow().as_ref() {
-                    let _ = window.hide();
-                }
-            });
-            PREFERENCES_WINDOW.with(|slot| {
-                if let Some(window) = slot.borrow().as_ref() {
-                    let _ = window.hide();
-                }
-            });
-            DIAGNOSTICS_WINDOW.with(|slot| {
-                if let Some(window) = slot.borrow().as_ref() {
-                    let _ = window.hide();
-                }
-            });
-            UPDATES_WINDOW.with(|slot| {
-                if let Some(window) = slot.borrow().as_ref() {
-                    let _ = window.hide();
-                }
-            });
-            PREVIEW_DIALOG_WINDOW.with(|slot| {
-                if let Some(window) = slot.borrow().as_ref() {
-                    let _ = window.hide();
-                }
-            });
-            if let Some(app) = app_weak.upgrade() {
-                let _ = app.hide();
             }
         });
     }
@@ -1737,7 +1373,114 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             }
         });
     }
+
+    // Frameless title bar (spec §3): drag via the winit accessor, minimize via
+    // the window handle, close via the shared close-action decision path.
+    {
+        let app_weak = app.as_weak();
+        app.on_titlebar_minimize_requested(move || {
+            if let Some(app) = app_weak.upgrade() {
+                app.window().set_minimized(true);
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        app.on_titlebar_close_requested(move || {
+            if let Some(app) = app_weak.upgrade() {
+                quick_controls_backend::handle_close_request(&app);
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        app.on_titlebar_drag_started(move || {
+            if let Some(app) = app_weak.upgrade() {
+                let _ = app.window().with_winit_window(|winit_window| {
+                    let _ = winit_window.drag_window();
+                });
+            }
+        });
+    }
 }
+
+/// Wire the settings section: preferences persistence handlers plus the
+/// diagnostics actions (same runtime paths as the former windows, spec §2.4).
+fn wire_settings_section(app: &AppWindow) {
+    {
+        let app_weak = app.as_weak();
+        app.on_theme_changed(move |light| {
+            if let Some(app) = app_weak.upgrade() {
+                apply_theme_to_all(&app, light);
+            }
+            if let Err(error) = persist_theme(light) {
+                tracing::warn!(
+                    error = %error,
+                    "theme preference save failed; runtime theme remains active"
+                );
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        app.on_startup_changed(move |enabled| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            app.set_startup_enabled(false);
+            app.set_startup_status("Applying…".into());
+            match preferences_backend::set_autostart(enabled) {
+                Ok(state) => {
+                    apply_autostart_state_to_window(&app, &state);
+                    app.set_settings_local_status(
+                        if state.enabled {
+                            "Autostart enabled"
+                        } else {
+                            "Autostart disabled"
+                        }
+                        .into(),
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "autostart change failed");
+                    apply_preferences_state(&app);
+                    app.set_settings_local_status("Autostart change failed".into());
+                }
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        app.on_start_minimized_changed(move |enabled| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            app.set_start_minimized_enabled(false);
+            match preferences_backend::persist_start_minimized(enabled) {
+                Ok(preferences) => {
+                    app.set_start_minimized(preferences.window.start_minimized);
+                    app.set_start_minimized_enabled(true);
+                    app.set_settings_local_status("Saved · applies on next launch".into());
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "start-minimized preference save failed");
+                    apply_preferences_state(&app);
+                    app.set_settings_local_status("Could not save Start Minimized".into());
+                }
+            }
+        });
+    }
+
+    quick_controls_backend::wire_position_preferences_bridge(app);
+    diagnostics_backend::wire_window(app);
+    apply_preferences_state(app);
+    diagnostics_backend::refresh(app);
+}
+
+// ---------------------------------------------------------------------------
+// Детерминированный оффскрин-рендер (SoftwareRenderer)
 
 // ---------------------------------------------------------------------------
 // Детерминированный оффскрин-рендер (SoftwareRenderer)
@@ -1787,13 +1530,17 @@ impl Platform for SoftwarePlatform {
     }
 }
 
-fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<()> {
-    let height = 680u32;
+fn render_screenshot(
+    state: &controller::UiState,
+    path: &str,
+    ui_section: Option<&str>,
+) -> anyhow::Result<()> {
+    let height = 600u32;
     let renderer = Rc::new(slint::platform::software_renderer::SoftwareRenderer::new());
     let adapter = Rc::new(SoftwareWindowAdapter {
         renderer: renderer.clone(),
         window: OnceCell::new(),
-        size: Cell::new(PhysicalSize::new(500, height)),
+        size: Cell::new(PhysicalSize::new(760, height)),
     });
     {
         let dyn_adapter: Rc<dyn WindowAdapter> = adapter.clone();
@@ -1804,8 +1551,14 @@ fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<
     slint::platform::set_platform(Box::new(SoftwarePlatform { adapter })).expect("platform once");
 
     let app = build_app(state, None)?;
+    match ui_section {
+        Some("fans") => app.set_active_section(Section::Fans),
+        Some("hardware") => app.set_active_section(Section::Hardware),
+        Some("settings") => app.set_active_section(Section::Settings),
+        _ => app.set_active_section(Section::Dashboard),
+    }
     app.window()
-        .set_size(LogicalSize::new(500.0, height as f32));
+        .set_size(LogicalSize::new(760.0, height as f32));
     app.show()?;
 
     let size = app.window().size();
@@ -1847,7 +1600,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     if let Some(path) = args.screenshot {
-        return render_screenshot(&state, &path);
+        return render_screenshot(&state, &path, args.ui_section.as_deref());
     }
 
     init_tracing();
@@ -1888,7 +1641,8 @@ fn main() -> anyhow::Result<()> {
 
     let app = build_app(&state, Some(worker_tx.clone()))?;
     quick_controls_backend::force_refresh(&app);
-    app.window().set_size(LogicalSize::new(500.0, 680.0));
+    wire_settings_section(&app);
+    app.window().set_size(LogicalSize::new(760.0, 600.0));
     apply_start_minimized(startup_preferences.start_minimized, |minimized| {
         app.window().set_minimized(minimized);
     });
@@ -1937,12 +1691,6 @@ fn main() -> anyhow::Result<()> {
     app.show()?;
     slint::run_event_loop()?;
 
-    FANS_WINDOW.with(|slot| *slot.borrow_mut() = None);
-    EXTRA_WINDOW.with(|slot| *slot.borrow_mut() = None);
-    AUTOMATION_WINDOW.with(|slot| *slot.borrow_mut() = None);
-    PREFERENCES_WINDOW.with(|slot| *slot.borrow_mut() = None);
-    DIAGNOSTICS_WINDOW.with(|slot| *slot.borrow_mut() = None);
-    UPDATES_WINDOW.with(|slot| *slot.borrow_mut() = None);
     PREVIEW_DIALOG_WINDOW.with(|slot| *slot.borrow_mut() = None);
     diagnostics_backend::clear();
     quick_controls_backend::clear();

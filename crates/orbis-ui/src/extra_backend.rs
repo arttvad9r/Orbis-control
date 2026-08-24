@@ -6,16 +6,12 @@ use std::time::Duration;
 use orbis_core::aura::{AuraMode, AuraSpeed};
 use orbis_core::display::PanelOverdriveState;
 use orbis_core::firmware::BootSoundState;
-use orbis_core::keyboard_backlight::KeyboardBacklightState;
 use orbis_providers::error::ProviderError;
-use orbis_providers::traits::{AuraProvider, KeyboardBacklightProvider, PanelOverdriveProvider};
-use orbis_providers::{
-    AsusArmouryPanelOverdriveProvider, AsusAuraProvider, AsusBootSoundProvider,
-    AsusKeyboardBacklightProvider,
-};
+use orbis_providers::traits::{AuraProvider, PanelOverdriveProvider};
+use orbis_providers::{AsusArmouryPanelOverdriveProvider, AsusAuraProvider, AsusBootSoundProvider};
 use slint::ComponentHandle;
 
-use crate::ExtraWindow;
+use crate::AppWindow;
 use crate::quick_controls_backend::hardware_controls_backend::{
     HardwareProductControlClient, ProductWriteStatus,
 };
@@ -31,13 +27,6 @@ struct ExtraContext {
 
 thread_local! {
     static CONTEXT: RefCell<Option<ExtraContext>> = const { RefCell::new(None) };
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct KeyboardObserved {
-    ready: bool,
-    brightness: i32,
-    status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,11 +65,9 @@ pub(crate) fn clear() {
     CONTEXT.with(|slot| *slot.borrow_mut() = None);
 }
 
-fn reset_readiness(window: &ExtraWindow) {
+fn reset_readiness(window: &AppWindow) {
     window.set_backend_ready(false);
     window.set_applying(false);
-    window.set_keyboard_state_ready(false);
-    window.set_keyboard_control_ready(false);
     window.set_aura_state_ready(false);
     window.set_aura_control_ready(false);
     window.set_panel_overdrive_state_ready(false);
@@ -88,9 +75,8 @@ fn reset_readiness(window: &ExtraWindow) {
     window.set_boot_sound_state_ready(false);
 }
 
-pub(crate) fn wire_window(window: &ExtraWindow) {
+pub(crate) fn wire_window(window: &AppWindow) {
     reset_readiness(window);
-    window.set_keyboard_brightness(-1);
     window.set_keyboard_effect(-1);
     window.set_keyboard_speed(-1);
     window.set_boot_sound(false);
@@ -114,16 +100,6 @@ pub(crate) fn wire_window(window: &ExtraWindow) {
 
     {
         let weak = window.as_weak();
-        window.on_keyboard_brightness_requested(move |level| {
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            request_keyboard_brightness(&window, level);
-        });
-    }
-
-    {
-        let weak = window.as_weak();
         window.on_panel_overdrive_requested(move |enabled| {
             let Some(window) = weak.upgrade() else {
                 return;
@@ -139,72 +115,17 @@ pub(crate) fn wire_window(window: &ExtraWindow) {
     });
 }
 
-fn begin_mutation(window: &ExtraWindow) -> Option<ExtraContext> {
+fn begin_mutation(window: &AppWindow) -> Option<ExtraContext> {
     let context = CONTEXT.with(|slot| slot.borrow().clone())?;
     if context.mutating.swap(true, Ordering::AcqRel) {
         return None;
     }
     window.set_applying(true);
-    window.set_keyboard_control_ready(false);
     window.set_panel_overdrive_control_ready(false);
     Some(context)
 }
 
-fn request_keyboard_brightness(window: &ExtraWindow, level: i32) {
-    if !window.get_keyboard_control_ready() {
-        tracing::warn!(
-            requested_level = level,
-            "Extra keyboard request ignored: write evidence unavailable"
-        );
-        return;
-    }
-    let Ok(level) = u8::try_from(level) else {
-        tracing::warn!(
-            requested_level = level,
-            "Extra keyboard request ignored: invalid level"
-        );
-        return;
-    };
-    let Some(context) = begin_mutation(window) else {
-        return;
-    };
-
-    window.set_status("Applying keyboard brightness through Hardware1…".into());
-    let weak = window.as_weak();
-    let completion = context.mutating.clone();
-    context.runtime.spawn(async move {
-        let result = async {
-            let client = HardwareProductControlClient::connect_system().await?;
-            client.set_keyboard_backlight(level).await
-        }
-        .await;
-        completion.store(false, Ordering::Release);
-
-        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
-            window.set_applying(false);
-            match result {
-                Ok(observed) => {
-                    window.set_keyboard_brightness(i32::from(observed));
-                    window.set_status(
-                        format!("Keyboard level {observed} · authoritative read-back confirmed")
-                            .into(),
-                    );
-                }
-                Err(error) => {
-                    tracing::warn!(error = ?error, "Extra keyboard brightness mutation failed");
-                    window.set_status(
-                        format!("Keyboard write failed · {}", write_error_label(&error)).into(),
-                    );
-                }
-            }
-            refresh(&window);
-        }) {
-            tracing::warn!(error = ?error, "failed to publish Extra keyboard mutation result");
-        }
-    });
-}
-
-fn request_panel_overdrive(window: &ExtraWindow, enabled: bool) {
+fn request_panel_overdrive(window: &AppWindow, enabled: bool) {
     if !window.get_panel_overdrive_control_ready() {
         tracing::warn!(
             requested = enabled,
@@ -254,7 +175,7 @@ fn request_panel_overdrive(window: &ExtraWindow, enabled: bool) {
     });
 }
 
-pub(crate) fn refresh(window: &ExtraWindow) {
+pub(crate) fn refresh(window: &AppWindow) {
     let context = CONTEXT.with(|slot| slot.borrow().clone());
     let Some(context) = context else {
         reset_readiness(window);
@@ -278,24 +199,20 @@ pub(crate) fn refresh(window: &ExtraWindow) {
     let weak = window.as_weak();
     let completion = context.refreshing.clone();
     context.runtime.spawn(async move {
-        let keyboard_provider = AsusKeyboardBacklightProvider::default();
         let panel_provider = AsusArmouryPanelOverdriveProvider::default();
         let boot_sound_provider = AsusBootSoundProvider::default();
 
-        let (keyboard_result, aura_result, panel_result, boot_sound_result, write_statuses) =
-            tokio::join!(
-                bounded_keyboard_read(&keyboard_provider),
-                bounded_aura_read(),
-                bounded_panel_read(&panel_provider),
-                bounded_boot_sound_read(&boot_sound_provider),
-                bounded_write_statuses(),
-            );
+        let (aura_result, panel_result, boot_sound_result, write_statuses) = tokio::join!(
+            bounded_aura_read(),
+            bounded_panel_read(&panel_provider),
+            bounded_boot_sound_read(&boot_sound_provider),
+            bounded_write_statuses(),
+        );
 
-        let keyboard = keyboard_observed(keyboard_result);
         let aura = aura_observed(aura_result);
         let panel = panel_observed(panel_result);
         let boot_sound = boot_sound_observed(boot_sound_result);
-        let (keyboard_write, panel_write) = match write_statuses {
+        let (_keyboard_write, panel_write) = match write_statuses {
             Ok(statuses) => statuses,
             Err(error) => {
                 tracing::debug!(error = ?error, "Extra Hardware1 mutation-status read unavailable");
@@ -307,10 +224,6 @@ pub(crate) fn refresh(window: &ExtraWindow) {
         if let Err(error) = weak.upgrade_in_event_loop(move |window| {
             window.set_backend_ready(false);
             window.set_applying(false);
-
-            window.set_keyboard_state_ready(keyboard.ready);
-            window.set_keyboard_control_ready(keyboard.ready && keyboard_write.is_supported());
-            window.set_keyboard_brightness(keyboard.brightness);
 
             window.set_aura_state_ready(aura.ready);
             window.set_aura_control_ready(false);
@@ -324,22 +237,19 @@ pub(crate) fn refresh(window: &ExtraWindow) {
             window.set_boot_sound_state_ready(boot_sound.ready);
             window.set_boot_sound(boot_sound.enabled);
 
-            let any_ready = keyboard.ready || aura.ready || panel.ready || boot_sound.ready;
+            let any_ready = aura.ready || panel.ready || boot_sound.ready;
             window.set_status(
                 if any_ready {
                     format!(
-                        "Observed · {} · keyboard {} · {} · panel {} · {} · {}",
-                        keyboard.status,
-                        keyboard_write.short_label(),
+                        "Observed · {} · panel {} · {}",
                         aura.status,
                         panel_write.short_label(),
-                        panel.status,
                         boot_sound.status,
                     )
                 } else {
                     format!(
-                        "Advanced observations unavailable · {} · {} · {} · {}",
-                        keyboard.status, aura.status, panel.status, boot_sound.status
+                        "Advanced observations unavailable · {} · {}",
+                        aura.status, boot_sound.status
                     )
                 }
                 .into(),
@@ -348,14 +258,6 @@ pub(crate) fn refresh(window: &ExtraWindow) {
             tracing::warn!(error = ?error, "failed to publish Extra observed state to UI");
         }
     });
-}
-
-async fn bounded_keyboard_read(
-    provider: &AsusKeyboardBacklightProvider,
-) -> Result<KeyboardBacklightState, ProviderError> {
-    tokio::time::timeout(READ_TIMEOUT, provider.keyboard_backlight_state())
-        .await
-        .map_err(|_| ProviderError::Timeout("Extra keyboard read timed out".into()))?
 }
 
 async fn bounded_aura_read() -> Result<orbis_core::aura::AuraState, ProviderError> {
@@ -392,21 +294,6 @@ async fn bounded_write_statuses() -> Result<(ProductWriteStatus, ProductWriteSta
     let client = HardwareProductControlClient::connect_system().await?;
     let (keyboard, panel) = tokio::join!(client.keyboard_status(), client.panel_status());
     Ok((keyboard?, panel?))
-}
-
-fn keyboard_observed(result: Result<KeyboardBacklightState, ProviderError>) -> KeyboardObserved {
-    match result {
-        Ok(state) => KeyboardObserved {
-            ready: true,
-            brightness: i32::from(state.current.get()),
-            status: format!("keyboard {}/{}", state.current.get(), state.max.get()),
-        },
-        Err(error) => KeyboardObserved {
-            ready: false,
-            brightness: -1,
-            status: error_status("keyboard", &error),
-        },
-    }
 }
 
 fn aura_observed(result: Result<orbis_core::aura::AuraState, ProviderError>) -> AuraObserved {
@@ -521,7 +408,6 @@ mod tests {
     use orbis_core::aura::{
         AuraBrightness, AuraDirection, AuraEffect, AuraRgb, AuraState, AuraZone,
     };
-    use orbis_core::keyboard_backlight::KeyboardBrightnessLevel;
 
     #[test]
     fn aura_mapping_never_coerces_unsupported_modes() {
@@ -531,17 +417,6 @@ mod tests {
         assert_eq!(aura_effect_index(AuraMode::Flash), -1);
         assert_eq!(aura_effect_index(AuraMode::RainbowWave), -1);
         assert_eq!(aura_effect_index(AuraMode::Unknown(99)), -1);
-    }
-
-    #[test]
-    fn observed_keyboard_preserves_dynamic_hardware_max() {
-        let state = keyboard_observed(Ok(KeyboardBacklightState {
-            current: KeyboardBrightnessLevel::new(2),
-            max: KeyboardBrightnessLevel::new(4),
-        }));
-        assert!(state.ready);
-        assert_eq!(state.brightness, 2);
-        assert!(state.status.contains("2/4"));
     }
 
     #[test]

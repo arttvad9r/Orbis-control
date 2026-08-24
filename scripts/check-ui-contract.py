@@ -21,57 +21,35 @@ PRODUCTION_SURFACES = {
         "changed observed-mode",
     ],
     "ui/audited/main-window.slint": [
+        "no-frame: true",
         "display-mode-requested",
         "keyboard-brightness-requested",
-        "preferences-clicked",
-        "diagnostics-clicked",
-    ],
-    "ui/audited/preferences-window.slint": [
-        "ThemeBridge {",
-        "RequestToggleRow",
+        "titlebar-close-requested",
+        "titlebar-drag-started",
         "startup-changed",
         "start-minimized-changed",
         "remember-position-changed",
         "close-action-changed",
+        "diagnostics-refresh-requested",
+        "diagnostics-export-requested",
     ],
-    "ui/audited/automation-window.slint": [
+    "ui/audited/sections/settings.slint": [
+        "ThemeBridge {",
+        "diagnostics-summary",
+    ],
+    "ui/audited/sections/hardware.slint": [
         "ThemeBridge {",
         "RequestToggleRow",
-        "backend-ready",
-        "save-requested",
-        "reset-requested",
-    ],
-    "ui/audited/extra-window.slint": [
-        "ThemeBridge {",
         "backend-ready",
         "reload-requested",
         "apply-requested",
     ],
-    "ui/audited/diagnostics-window.slint": [
-        "refresh-requested",
-        "copy-summary-requested",
-        "open-logs-requested",
-        "export-report-requested",
-    ],
-    "ui/audited/updates-window.slint": [
-        "ThemeBridge {",
-        "backend-ready",
-        "check-requested",
-        "install-requested",
-        "channel-requested",
-    ],
-    "ui/audited/fans-window.slint": [
-        "ThemeBridge {",
+    "ui/audited/sections/fans.slint": [
         "mutation-safety-blocked",
-        "curve-enabled-known",
         "fan-apply-clicked",
     ],
     "ui/audited/preview-dialog-window.slint": [
-        "confirm-clicked",
         "dismiss-clicked",
-    ],
-    "ui/components/request-toggle-row.slint": [
-        "toggled(!root.checked)",
     ],
 }
 
@@ -114,12 +92,6 @@ THEME_TOKENS = {
 }
 
 SECONDARY_MIN_HEIGHT = {
-    "ui/audited/preferences-window.slint": 450,
-    "ui/audited/automation-window.slint": 530,
-    "ui/audited/extra-window.slint": 620,
-    "ui/audited/diagnostics-window.slint": 560,
-    "ui/audited/fans-window.slint": 540,
-    "ui/audited/updates-window.slint": 340,
     "ui/audited/preview-dialog-window.slint": 210,
 }
 
@@ -286,7 +258,7 @@ def check_main_geometry(text: str, errors: list[str]) -> None:
         fail(errors, "main window must declare fixed compact width/height")
         return
     w, h = geometry
-    if w > 500 or h > 600:
+    if w > 800 or h > 640:
         fail(errors, f"main window too large for compact contract: {w}x{h}")
     if w < 400 or h < 400:
         fail(errors, f"main window too small for planned production controls: {w}x{h}")
@@ -308,8 +280,8 @@ def check_secondary_geometry(root: Path, errors: list[str]) -> None:
 
 def check_authoritative_controls(root: Path, errors: list[str]) -> None:
     for rel in (
-        "ui/audited/preferences-window.slint",
-        "ui/audited/automation-window.slint",
+        "ui/audited/sections/hardware.slint",
+        "ui/audited/sections/settings.slint",
     ):
         text = read(root / rel, errors)
         if re.search(r"\bToggleRow\s*\{", text):

@@ -1,3 +1,8 @@
+//! Offscreen section snapshots for the single-window UI (ui-review companion).
+//!
+//! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme]`
+//! Sections: dashboard | fans | hardware | settings | dialog.
+
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
 
@@ -93,7 +98,7 @@ fn save(
 
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
-    let kind = args.next().unwrap_or_else(|| "extra".to_string());
+    let kind = args.next().unwrap_or_else(|| "dashboard".to_string());
     let path = args.next().unwrap_or_else(|| format!("{kind}.png"));
     let theme = args.next().unwrap_or_else(|| "dark".to_string());
     let light = match theme.as_str() {
@@ -102,131 +107,54 @@ fn main() -> anyhow::Result<()> {
         other => anyhow::bail!("unknown theme: {other}"),
     };
 
+    // The shell is fixed-size; the dialog keeps its own compact canvas.
     let (width, height) = match kind.as_str() {
-        "main" => (500, 680),
-        "fans" => (760, 590),
-        "extra" => (560, 760),
-        "automation" => (700, 600),
-        "preferences" => (580, 550),
-        "diagnostics" => (700, 610),
-        "updates" => (470, 350),
         "dialog" => (430, 220),
-        other => anyhow::bail!("unknown window: {other}"),
+        _ => (760, 600),
     };
 
     let renderer = setup(width, height);
 
     match kind.as_str() {
-        "main" => {
+        "dashboard" | "fans" | "hardware" | "settings" => {
             let component = AppWindow::new()?;
             component.global::<ThemeState>().set_mode(if light {
                 ThemeMode::Light
             } else {
                 ThemeMode::Dark
             });
-            component
-                .window()
-                .set_size(LogicalSize::new(width as f32, height as f32));
-            component.show()?;
-            save(&renderer, component.window(), &path)?;
-        }
-        "fans" => {
-            let component = FansWindow::new()?;
-            component.global::<ThemeState>().set_mode(if light {
-                ThemeMode::Light
-            } else {
-                ThemeMode::Dark
-            });
-            let mut state = component.get_ui_state();
-            state.fan_curve_state = FanCurveHwState::Ready;
-            state.fan_curve_writable = true;
-            state.fan_curve_dirty = true;
-            state.fan_selected = 0;
-            state.fan_profile_selected = 0;
-            state.fan_temp_0 = 30;
-            state.fan_temp_1 = 40;
-            state.fan_temp_2 = 50;
-            state.fan_temp_3 = 60;
-            state.fan_temp_4 = 70;
-            state.fan_temp_5 = 80;
-            state.fan_temp_6 = 90;
-            state.fan_temp_7 = 100;
-            state.fan_pwm_0 = 0;
-            state.fan_pwm_1 = 24;
-            state.fan_pwm_2 = 48;
-            state.fan_pwm_3 = 72;
-            state.fan_pwm_4 = 104;
-            state.fan_pwm_5 = 144;
-            state.fan_pwm_6 = 196;
-            state.fan_pwm_7 = 255;
-            component.set_ui_state(state);
-            component
-                .window()
-                .set_size(LogicalSize::new(width as f32, height as f32));
-            component.show()?;
-            save(&renderer, component.window(), &path)?;
-        }
-        "extra" => {
-            let component = ExtraWindow::new()?;
-            component.global::<ThemeState>().set_mode(if light {
-                ThemeMode::Light
-            } else {
-                ThemeMode::Dark
-            });
-            component
-                .window()
-                .set_size(LogicalSize::new(width as f32, height as f32));
-            component.show()?;
-            save(&renderer, component.window(), &path)?;
-        }
-        "automation" => {
-            let component = AutomationWindow::new()?;
-            component.global::<ThemeState>().set_mode(if light {
-                ThemeMode::Light
-            } else {
-                ThemeMode::Dark
-            });
-            component
-                .window()
-                .set_size(LogicalSize::new(width as f32, height as f32));
-            component.show()?;
-            save(&renderer, component.window(), &path)?;
-        }
-        "preferences" => {
-            let component = PreferencesWindow::new()?;
-            component.global::<ThemeState>().set_mode(if light {
-                ThemeMode::Light
-            } else {
-                ThemeMode::Dark
-            });
-            component
-                .window()
-                .set_size(LogicalSize::new(width as f32, height as f32));
-            component.show()?;
-            save(&renderer, component.window(), &path)?;
-        }
-        "diagnostics" => {
-            let component = DiagnosticsWindow::new()?;
-            component.global::<ThemeState>().set_mode(if light {
-                ThemeMode::Light
-            } else {
-                ThemeMode::Dark
-            });
-            component.set_version("0.1.0-audit".into());
-            component
-                .window()
-                .set_size(LogicalSize::new(width as f32, height as f32));
-            component.show()?;
-            save(&renderer, component.window(), &path)?;
-        }
-        "updates" => {
-            let component = UpdatesWindow::new()?;
-            component.global::<ThemeState>().set_mode(if light {
-                ThemeMode::Light
-            } else {
-                ThemeMode::Dark
-            });
-            component.set_version("0.1.0-audit".into());
+            if kind == "fans" {
+                let mut state = component.get_ui_state();
+                state.fan_curve_state = FanCurveHwState::Ready;
+                state.fan_curve_writable = true;
+                state.fan_curve_dirty = true;
+                state.fan_selected = 0;
+                state.fan_profile_selected = 0;
+                state.fan_temp_0 = 30;
+                state.fan_temp_1 = 40;
+                state.fan_temp_2 = 50;
+                state.fan_temp_3 = 60;
+                state.fan_temp_4 = 70;
+                state.fan_temp_5 = 80;
+                state.fan_temp_6 = 90;
+                state.fan_temp_7 = 100;
+                state.fan_pwm_0 = 0;
+                state.fan_pwm_1 = 24;
+                state.fan_pwm_2 = 48;
+                state.fan_pwm_3 = 72;
+                state.fan_pwm_4 = 104;
+                state.fan_pwm_5 = 144;
+                state.fan_pwm_6 = 196;
+                state.fan_pwm_7 = 255;
+                component.set_ui_state(state);
+            }
+            let section = match kind.as_str() {
+                "fans" => Section::Fans,
+                "hardware" => Section::Hardware,
+                "settings" => Section::Settings,
+                _ => Section::Dashboard,
+            };
+            component.set_active_section(section);
             component
                 .window()
                 .set_size(LogicalSize::new(width as f32, height as f32));
@@ -247,7 +175,7 @@ fn main() -> anyhow::Result<()> {
             component.show()?;
             save(&renderer, component.window(), &path)?;
         }
-        _ => unreachable!(),
+        other => anyhow::bail!("unknown section: {other}"),
     }
 
     Ok(())

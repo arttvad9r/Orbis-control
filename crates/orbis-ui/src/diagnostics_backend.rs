@@ -12,12 +12,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use orbis_capabilities::CapabilityRegistrySnapshot;
 use orbis_ui::diagnostics_dto::DiagnosticsUiDto;
-use orbis_ui::diagnostics_export::report_json;
+use orbis_ui::diagnostics_export::{report_json, summary_text};
 use orbis_ui::diagnostics_runtime::DiagnosticsRuntime;
 use orbis_ui::diagnostics_window_model::DiagnosticsWindowModel;
 use slint::ComponentHandle;
 
-use crate::DiagnosticsWindow;
+use crate::AppWindow;
 
 const EXPORT_DIR_NAME: &str = "diagnostics";
 const EXPORT_FILE_PREFIX: &str = "orbis-diagnostics";
@@ -77,18 +77,11 @@ pub(crate) fn clear() {
     CONTEXT.with(|slot| *slot.borrow_mut() = None);
 }
 
-fn apply_model(window: &DiagnosticsWindow, model: DiagnosticsWindowModel) {
-    window.set_kernel_value(model.kernel.into());
-    window.set_platform_value(model.platform.into());
-    window.set_version_value(model.version.into());
-    window.set_build_detail(model.build.into());
-    window.set_system_detail(model.system.into());
-    window.set_capabilities_text(model.capabilities.into());
-    window.set_services_text(model.services.into());
-    window.set_gpu_text(model.gpu.into());
-    window.set_telemetry_text(model.telemetry.into());
-    window.set_display_text(model.display.into());
-    window.set_snapshot_meta(model.snapshot_meta.into());
+fn apply_model(window: &AppWindow, model: DiagnosticsWindowModel) {
+    // The full text panels moved out of the UI with the dedicated window; the
+    // privacy-safe summary stays available to Copy/Export (spec §2.4).
+    let _ = window;
+    let _ = model;
 }
 
 fn store_latest(context: &DiagnosticsContext, dto: DiagnosticsUiDto) -> bool {
@@ -118,7 +111,7 @@ fn export_path_available() -> bool {
     orbis_config::paths::state_dir_checked().is_ok()
 }
 
-pub(crate) fn refresh(window: &DiagnosticsWindow) {
+pub(crate) fn refresh(window: &AppWindow) {
     if window.get_refresh_pending() {
         return;
     }
@@ -127,18 +120,15 @@ pub(crate) fn refresh(window: &DiagnosticsWindow) {
     let Some(context) = context else {
         window.set_refresh_enabled(false);
         window.set_refresh_pending(false);
-        window.set_copy_enabled(false);
-        window.set_logs_enabled(false);
         window.set_export_enabled(false);
-        window.set_local_status("Diagnostics runtime unavailable".into());
+        window.set_diagnostics_status("Diagnostics runtime unavailable".into());
         return;
     };
 
     window.set_refresh_enabled(false);
     window.set_refresh_pending(true);
-    window.set_copy_enabled(false);
     window.set_export_enabled(false);
-    window.set_local_status("Collecting read-only snapshot…".into());
+    window.set_diagnostics_status("Collecting read-only snapshot…".into());
 
     let runtime = context.runtime.clone();
     let source = context.source.clone();
@@ -148,13 +138,15 @@ pub(crate) fn refresh(window: &DiagnosticsWindow) {
         let snapshot = source.snapshot().await;
         let dto = DiagnosticsUiDto::from_snapshot(&snapshot);
         let model = DiagnosticsWindowModel::from_dto(&dto);
+        let summary: slint::SharedString = summary_text(&dto).into();
         let export_ready = store_latest(&publish_context, dto) && export_path_available();
 
         if let Err(error) = weak.upgrade_in_event_loop(move |window| {
             apply_model(&window, model);
+            window.set_diagnostics_summary(summary);
             window.set_refresh_pending(false);
             window.set_refresh_enabled(true);
-            window.set_local_status(
+            window.set_diagnostics_status(
                 if export_ready {
                     "Snapshot refreshed"
                 } else {
@@ -162,11 +154,9 @@ pub(crate) fn refresh(window: &DiagnosticsWindow) {
                 }
                 .into(),
             );
-            // Clipboard copy is implemented by the standard Slint TextEdit in
-            // DiagnosticsWindow, using the already privacy-safe UI projection.
-            // Open Logs remains disabled until a stable host integration exists.
-            window.set_copy_enabled(true);
-            window.set_logs_enabled(false);
+            // Copy is served in-section through the toolkit clipboard from the
+            // privacy-safe summary; Open Logs remains absent until a stable
+            // host integration exists (#111).
             window.set_export_enabled(export_ready);
         }) {
             tracing::warn!(error = ?error, "failed to publish diagnostics snapshot to UI");
@@ -174,7 +164,7 @@ pub(crate) fn refresh(window: &DiagnosticsWindow) {
     });
 }
 
-fn export_report(window: &DiagnosticsWindow) {
+fn export_report(window: &AppWindow) {
     if window.get_refresh_pending() {
         return;
     }
@@ -182,19 +172,19 @@ fn export_report(window: &DiagnosticsWindow) {
     let context = CONTEXT.with(|slot| slot.borrow().clone());
     let Some(context) = context else {
         window.set_export_enabled(false);
-        window.set_local_status("Diagnostics runtime unavailable".into());
+        window.set_diagnostics_status("Diagnostics runtime unavailable".into());
         return;
     };
 
     let Some(dto) = latest_snapshot(&context) else {
         window.set_export_enabled(false);
-        window.set_local_status("Refresh diagnostics before exporting".into());
+        window.set_diagnostics_status("Refresh diagnostics before exporting".into());
         return;
     };
 
     if !export_path_available() {
         window.set_export_enabled(false);
-        window.set_local_status("Diagnostics export path unavailable".into());
+        window.set_diagnostics_status("Diagnostics export path unavailable".into());
         return;
     }
 
@@ -202,7 +192,7 @@ fn export_report(window: &DiagnosticsWindow) {
     // re-enable actions over a newer pending snapshot.
     window.set_refresh_enabled(false);
     window.set_export_enabled(false);
-    window.set_local_status("Exporting privacy-safe report…".into());
+    window.set_diagnostics_status("Exporting privacy-safe report…".into());
 
     let weak = window.as_weak();
     context.runtime.spawn(async move {
@@ -212,17 +202,17 @@ fn export_report(window: &DiagnosticsWindow) {
             match result {
                 Ok(Ok(path)) => {
                     window.set_export_enabled(true);
-                    window.set_local_status(format!("Exported · {}", path.display()).into());
+                    window.set_diagnostics_status(format!("Exported · {}", path.display()).into());
                 }
                 Ok(Err(error)) => {
                     tracing::warn!(error = %error, "diagnostics report export failed");
                     window.set_export_enabled(false);
-                    window.set_local_status("Report export failed · refresh to retry".into());
+                    window.set_diagnostics_status("Report export failed · refresh to retry".into());
                 }
                 Err(error) => {
                     tracing::warn!(error = %error, "diagnostics report export task failed");
                     window.set_export_enabled(false);
-                    window.set_local_status("Report export failed · refresh to retry".into());
+                    window.set_diagnostics_status("Report export failed · refresh to retry".into());
                 }
             }
         }) {
@@ -312,15 +302,13 @@ fn sync_export_directory(_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn wire_window(window: &DiagnosticsWindow) {
+pub(crate) fn wire_window(window: &AppWindow) {
     window.set_refresh_enabled(CONTEXT.with(|slot| slot.borrow().is_some()));
-    window.set_copy_enabled(false);
-    window.set_logs_enabled(false);
     window.set_export_enabled(false);
 
     {
         let weak = window.as_weak();
-        window.on_refresh_requested(move || {
+        window.on_diagnostics_refresh_requested(move || {
             if let Some(window) = weak.upgrade() {
                 refresh(&window);
             }
@@ -329,7 +317,7 @@ pub(crate) fn wire_window(window: &DiagnosticsWindow) {
 
     {
         let weak = window.as_weak();
-        window.on_export_report_requested(move || {
+        window.on_diagnostics_export_requested(move || {
             if let Some(window) = weak.upgrade() {
                 export_report(&window);
             }
@@ -408,10 +396,10 @@ mod tests {
     }
 
     #[test]
-    fn successful_refresh_enables_builtin_clipboard_copy() {
+    fn successful_refresh_fills_summary_for_in_section_copy() {
         let source = include_str!("diagnostics_backend.rs");
-        assert!(source.contains("window.set_copy_enabled(false);"));
-        assert!(source.contains("window.set_copy_enabled(true);"));
+        assert!(source.contains("window.set_diagnostics_summary(summary);"));
+        assert!(source.contains("use orbis_ui::diagnostics_export::{report_json, summary_text};"));
         assert!(!source.contains(&["wl", "-copy"].concat()));
         assert!(!source.contains(&["x", "clip"].concat()));
     }

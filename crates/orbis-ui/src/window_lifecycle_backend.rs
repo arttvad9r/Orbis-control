@@ -114,45 +114,55 @@ pub(crate) fn wire_close_request(app: &AppWindow) {
         let Some(app) = weak.upgrade() else {
             return CloseRequestResponse::HideWindow;
         };
-        let _ = persist_position(&app);
-
-        let action = match load_preferences() {
-            Ok(load) if load.warning.is_none() => load.preferences.window.close_action,
-            Ok(load) => {
-                tracing::warn!(warning = ?load.warning, "close-action source preserved; using Quit");
-                CloseAction::Quit
-            }
-            Err(error) => {
-                tracing::warn!(error = %error, "close-action load failed; using Quit");
-                CloseAction::Quit
-            }
-        };
-
-        match action {
-            CloseAction::Quit => {
-                // `HideWindow` alone would keep the process/event loop alive.
-                // Explicitly terminate the Slint loop; HideWindow is returned
-                // only as the close-request disposition while shutdown begins.
-                if let Err(error) = slint::quit_event_loop() {
-                    tracing::warn!(error = ?error, "close-action Quit could not terminate Slint event loop");
-                    return CloseRequestResponse::KeepWindowShown;
-                }
-                CloseRequestResponse::HideWindow
-            }
-            CloseAction::HideToTray if super::tray_backend::is_ready() => {
-                tracing::debug!("main window closing to registered StatusNotifier tray");
-                CloseRequestResponse::HideWindow
-            }
-            CloseAction::HideToTray => {
-                tracing::warn!("HideToTray requested but no StatusNotifier host is registered; keeping window shown");
-                CloseRequestResponse::KeepWindowShown
-            }
-            CloseAction::Ask => {
-                tracing::warn!("CloseAction::Ask has no typed close-confirmation context; keeping window shown");
-                CloseRequestResponse::KeepWindowShown
-            }
-        }
+        handle_close_request(&app)
     });
+}
+
+/// Close-request disposition shared by the native path and the frameless
+/// title bar button (spec §3): persist position, then honor CloseAction.
+pub(crate) fn handle_close_request(app: &AppWindow) -> CloseRequestResponse {
+    let _ = persist_position(app);
+
+    let action = match load_preferences() {
+        Ok(load) if load.warning.is_none() => load.preferences.window.close_action,
+        Ok(load) => {
+            tracing::warn!(warning = ?load.warning, "close-action source preserved; using Quit");
+            CloseAction::Quit
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "close-action load failed; using Quit");
+            CloseAction::Quit
+        }
+    };
+
+    match action {
+        CloseAction::Quit => {
+            // `HideWindow` alone would keep the process/event loop alive.
+            // Explicitly terminate the Slint loop; HideWindow is returned
+            // only as the close-request disposition while shutdown begins.
+            if let Err(error) = slint::quit_event_loop() {
+                tracing::warn!(error = ?error, "close-action Quit could not terminate Slint event loop");
+                return CloseRequestResponse::KeepWindowShown;
+            }
+            CloseRequestResponse::HideWindow
+        }
+        CloseAction::HideToTray if super::tray_backend::is_ready() => {
+            tracing::debug!("main window closing to registered StatusNotifier tray");
+            CloseRequestResponse::HideWindow
+        }
+        CloseAction::HideToTray => {
+            tracing::warn!(
+                "HideToTray requested but no StatusNotifier host is registered; keeping window shown"
+            );
+            CloseRequestResponse::KeepWindowShown
+        }
+        CloseAction::Ask => {
+            tracing::warn!(
+                "CloseAction::Ask has no typed close-confirmation context; keeping window shown"
+            );
+            CloseRequestResponse::KeepWindowShown
+        }
+    }
 }
 
 pub(crate) fn wire_app_window(app: &AppWindow) {
