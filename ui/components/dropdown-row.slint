@@ -1,0 +1,42 @@
+// Label + ComboBox + trailing status: one compact 30px row (spec §2.1).
+import { ComboBox } from "std-widgets.slint";
+import { Palette } from "../themes/dark.slint";
+
+export component DropdownRow inherits Rectangle {
+    in property <string> label;
+    in property <[string]> options;
+    in-out property <int> current-index;
+    in property <bool> enabled-row: false;
+    in property <string> status: "";
+    callback row-changed(int);
+
+    height: 30px;
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: center;
+        Text {
+            width: 92px;
+            text: root.label;
+            font-size: 10px;
+            font-weight: 600;
+            color: root.enabled-row ? Palette.text-primary : Palette.text-disabled;
+            vertical-alignment: center;
+        }
+        ComboBox {
+            width: 132px;
+            enabled: root.enabled-row;
+            model: root.options;
+            current-index <=> root.current-index;
+            selected => { root.row-changed(self.current-index); }
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+        Text {
+            text: root.status;
+            font-size: 9px;
+            color: Palette.text-secondary;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            overflow: elide;
+        }
+    }
+}

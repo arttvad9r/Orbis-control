@@ -1,0 +1,79 @@
+// Frameless title bar: section label, drag surface, minimize/close (spec §3).
+// Icons are Path glyphs (spec §8 fallback): no raster assets, theme-colorable.
+import { Palette } from "../themes/dark.slint";
+
+export component TitleBar inherits Rectangle {
+    in property <string> section-title: "Dashboard";
+    callback minimize-requested;
+    callback close-requested;
+    callback drag-started;
+
+    height: 40px;
+    background: Palette.titlebar-background;
+
+    // Declared first: buttons below sit on top of this surface, so presses on
+    // them never reach the drag handler.
+    drag-touch := TouchArea {
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.drag-started();
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 8px;
+        alignment: center;
+        Text {
+            text: root.section-title;
+            font-size: 11px;
+            font-weight: 600;
+            color: Palette.text-secondary;
+            vertical-alignment: center;
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+        Rectangle {
+            width: 28px;
+            property <bool> btn-hover: min-touch.has-hover;
+            background: self.btn-hover ? Palette.surface-hover : transparent;
+            border-radius: 6px;
+            Path {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 16px;
+                height: 16px;
+                viewbox-width: 16;
+                viewbox-height: 16;
+                commands: "M 3.5 8 H 12.5";
+                stroke: Palette.text-secondary;
+                stroke-width: 1.5px;
+                fill: transparent;
+            }
+            min-touch := TouchArea {
+                clicked => { root.minimize-requested(); }
+            }
+        }
+        Rectangle {
+            width: 28px;
+            property <bool> btn-hover: close-touch.has-hover;
+            background: self.btn-hover ? Palette.error : transparent;
+            border-radius: 6px;
+            Path {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 16px;
+                height: 16px;
+                viewbox-width: 16;
+                viewbox-height: 16;
+                commands: "M 4 4 L 12 12 M 12 4 L 4 12";
+                stroke: parent.btn-hover ? #11111B : Palette.text-secondary;
+                stroke-width: 1.5px;
+                fill: transparent;
+            }
+            close-touch := TouchArea {
+                clicked => { root.close-requested(); }
+            }
+        }
+    }
+}
