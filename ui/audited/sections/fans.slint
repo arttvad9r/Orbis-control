@@ -1,0 +1,96 @@
+// Fans section: fan curve editor + write-safety status (spec §2.2).
+// Content carried over from the former fans-window; the separate UiState copy
+// is gone — the section binds the shell's ui-state directly.
+import { UiState } from "../model.slint";
+import { FanCurveEditor } from "../fan-curve-editor-v3.slint";
+import { ThemeBridge, ActionButton, LocalStatus } from "../common.slint";
+import { Palette } from "../../themes/dark.slint";
+
+export component FansSection inherits Rectangle {
+    in property <UiState> ui-state;
+
+    // Backend/policy presentation contract. Today production keeps mutation
+    // blocked; later backend wiring only needs to publish these facts.
+    in property <bool> mutation-safety-blocked: true;
+    in property <bool> factory-reset-available: false;
+    in property <string> policy-status: "Fan writes are safety-blocked";
+
+    property <bool> factory-reset-pending: false;
+
+    callback fan-changed(int);
+    callback fan-profile-changed(int);
+    callback fan-temp-point-changed(int, int);
+    callback fan-pwm-point-changed(int, int);
+    callback fan-apply-clicked(bool);
+
+    function status-text() -> string {
+        if (root.ui-state.fan-curve-error) { return "Fan curve operation failed"; }
+        if (root.mutation-safety-blocked) { return root.policy-status; }
+        if (root.factory-reset-pending) { return "Factory defaults selected · not applied yet"; }
+        if (!root.ui-state.fan-curve-writable) { return "Read only"; }
+        if (root.ui-state.fan-curve-dirty) { return "Custom curve modified · not applied yet"; }
+        if (root.ui-state.fan-curve-enabled-known) { return root.ui-state.fan-curve-enabled ? "Custom curve enabled" : "Stored custom curve is disabled"; }
+        return "Current stored curve · enabled state unknown";
+    }
+
+    function status-color() -> color {
+        if (root.ui-state.fan-curve-error) { return Palette.error; }
+        if (root.mutation-safety-blocked || root.factory-reset-pending || root.ui-state.fan-curve-dirty || !root.ui-state.fan-curve-enabled-known) { return Palette.warning; }
+        return root.ui-state.fan-curve-enabled ? Palette.success : Palette.text-secondary;
+    }
+
+    ThemeBridge { }
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 10px;
+
+        FanCurveEditor {
+            height: 430px;
+            state: root.ui-state.fan-curve-state;
+            writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked;
+            error-state: root.ui-state.fan-curve-error;
+            dirty: root.ui-state.fan-curve-dirty;
+            fan-selected: root.ui-state.fan-selected;
+            profile-selected: root.ui-state.fan-profile-selected;
+            temp-0: root.ui-state.fan-temp-0; temp-1: root.ui-state.fan-temp-1; temp-2: root.ui-state.fan-temp-2; temp-3: root.ui-state.fan-temp-3;
+            temp-4: root.ui-state.fan-temp-4; temp-5: root.ui-state.fan-temp-5; temp-6: root.ui-state.fan-temp-6; temp-7: root.ui-state.fan-temp-7;
+            pwm-0: root.ui-state.fan-pwm-0; pwm-1: root.ui-state.fan-pwm-1; pwm-2: root.ui-state.fan-pwm-2; pwm-3: root.ui-state.fan-pwm-3;
+            pwm-4: root.ui-state.fan-pwm-4; pwm-5: root.ui-state.fan-pwm-5; pwm-6: root.ui-state.fan-pwm-6; pwm-7: root.ui-state.fan-pwm-7;
+            fan-changed(i) => { root.factory-reset-pending = false; root.fan-changed(i); }
+            profile-changed(i) => { root.factory-reset-pending = false; root.fan-profile-changed(i); }
+            temp-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-temp-point-changed(i, v); }
+            pwm-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-pwm-point-changed(i, v); }
+        }
+
+        HorizontalLayout {
+            height: 32px;
+            spacing: 8px;
+            alignment: center;
+
+            LocalStatus {
+                horizontal-stretch: 1;
+                text: root.status-text();
+                accent: root.status-color();
+            }
+
+            ActionButton {
+                width: 116px;
+                label: "Factory Defaults";
+                disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error;
+                clicked => { root.factory-reset-pending = true; }
+            }
+            ActionButton {
+                width: 136px;
+                label: root.factory-reset-pending ? "Apply Defaults" : "Apply Curve";
+                accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
+                disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
+                clicked => {
+                    let reset = root.factory-reset-pending;
+                    root.fan-apply-clicked(reset);
+                    if (reset) { root.factory-reset-pending = false; }
+                }
+            }
+        }
+    }
+}
