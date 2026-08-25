@@ -120,7 +120,7 @@
         "io.github.orbiscontrol.hardware.set-fan-curve": "yes",
         "io.github.orbiscontrol.hardware.set-panel-overdrive": "yes",
         "io.github.orbiscontrol.hardware.set-keyboard-backlight": "yes",
-        "io.github.orbiscontrol.hardware.set-aura-static-rgb": "no",
+        "io.github.orbiscontrol.hardware.set-aura-static-rgb": "yes",
     }
     assert active_defaults == expected_active, (
         f"unexpected Hardware1 polkit defaults: {active_defaults!r}"

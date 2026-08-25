@@ -20,13 +20,12 @@ mod product_preflight;
 use std::error::Error;
 
 use async_trait::async_trait;
-use orbis_core::aura::AuraRgb;
 use orbis_hardwared::{
     AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION,
     GPU_POLKIT_ACTION, HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
     PRODUCT_GPU_POLKIT_ACTION, PolkitAuthorizer,
     asus_gpu_mode::{AsusGpuMutationBackend, AsusdGpuMutationClient},
-    aura::{AuraMutationStatus, AuraStaticRgbMutationBackend, AuraStaticRgbMutationReadback},
+    aura::{AsusdAuraStaticRgbMutationBackend, ZbusAsusdAuraClient},
     battery::{
         AsusdBatteryClient, AsusdBatteryMutationBackend, BatteryEffectiveReader,
         BatteryMutationBackend, BatteryMutationReadback, BatteryMutationStatus,
@@ -72,22 +71,6 @@ impl PanelOverdriveMutationBackend for DisabledPanelOverdriveMutationBackend {
 
     fn mutation_status(&self) -> PanelOverdriveMutationStatus {
         PanelOverdriveMutationStatus::Unsupported
-    }
-}
-
-struct DisabledAuraStaticRgbMutationBackend;
-
-#[async_trait]
-impl AuraStaticRgbMutationBackend for DisabledAuraStaticRgbMutationBackend {
-    async fn set_static_rgb(
-        &self,
-        _rgb: AuraRgb,
-    ) -> Result<AuraStaticRgbMutationReadback, ProviderError> {
-        Err(ProviderError::Unsupported(PRODUCT_MUTATION_DISABLED.into()))
-    }
-
-    fn mutation_status(&self) -> AuraMutationStatus {
-        AuraMutationStatus::Unsupported
     }
 }
 
@@ -267,7 +250,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )),
     )
     .with_aura_static_rgb(
-        Box::new(DisabledAuraStaticRgbMutationBackend),
+        Box::new(AsusdAuraStaticRgbMutationBackend::new(
+            ZbusAsusdAuraClient::new(connection.clone()),
+        )),
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             AURA_POLKIT_ACTION,
@@ -316,9 +301,6 @@ mod tests {
             panel.set_panel_overdrive(true).await,
             Err(ProviderError::Unsupported(_))
         ));
-
-        let aura = DisabledAuraStaticRgbMutationBackend;
-        assert_eq!(aura.mutation_status(), AuraMutationStatus::Unsupported);
     }
 
     #[tokio::test]
@@ -403,7 +385,7 @@ mod tests {
     #[test]
     fn product_disabled_status_wire_values_remain_total() {
         use orbis_hardwared::{
-            aura::aura_mutation_wire,
+            aura::{AuraMutationStatus, aura_mutation_wire},
             keyboard_backlight::{
                 KeyboardBacklightMutationStatus, keyboard_backlight_mutation_wire,
             },

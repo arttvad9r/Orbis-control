@@ -84,12 +84,12 @@
   <action id="io.github.orbiscontrol.hardware.set-aura-static-rgb">
     <description>Change the Orbis Control Aura Static RGB colour</description>
     <description xml:lang="ru">Изменить цвет Aura Static RGB Orbis Control</description>
-    <message>Aura Static RGB writes are disabled until backend owner liveness and release evidence are proven</message>
-    <message xml:lang="ru">Запись Aura Static RGB отключена до подтверждения доступности backend-владельца и release evidence</message>
+     <message>Set Aura Static RGB with config-level read-back</message>
+     <message xml:lang="ru">Изменить Aura Static RGB с подтверждением конфигурации</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
-      <allow_active>no</allow_active>
+      <allow_active>yes</allow_active>
     </defaults>
   </action>
 </policyconfig>
