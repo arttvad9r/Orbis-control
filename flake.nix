@@ -71,6 +71,7 @@
             export XDG_CACHE_HOME=$TMPDIR/cache
             export XDG_DATA_HOME=$TMPDIR/data
             export XDG_CONFIG_HOME=$TMPDIR/config
+            export ORBIS_HARDWARED_POLKIT_POLICY="${./packaging/nix/polkit/io.github.orbiscontrol.hardware.policy}"
             cargo fmt --all -- --check
             cargo clippy --locked --workspace --all-targets -- -D warnings
             cargo test --locked --workspace
