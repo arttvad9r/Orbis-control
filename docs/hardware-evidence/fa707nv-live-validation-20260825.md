@@ -130,31 +130,16 @@ result: PASS (profile applied, verified, and restored)
   `FanCurves` capability is published on this host right now (#109 contract
   observed live).
 - GPU power read stays honestly `Unavailable` (supergfxd not installed);
-  product-mode Armoury snapshot decodes Hybrid with nothing queued;
+  product-mode Armoury snapshot decodes Hybrid with queued Hybrid (same
+  current), `reboot_required=false`;
   physical MUX `Integrated`; access `Unblocked`.
-- Panel and Aura mutation statuses remain `Unsupported (1)` from the
-  production composition. Fan and keyboard are now production-wired and
-  live-validated above.
+- Aura mutation remains `Unsupported (1)` from the production composition.
+  Fan, Panel Overdrive and keyboard are production-wired and live-validated
+  above.
 
 ## What this evidence does NOT cover
 
-- Fan curve custom writes / factory reset (#104/#105): production remains
-  hard-blocked (`DisabledFanMutationBackend` + `allow_active=no`). The
-  feature-gated `fan-live-validate` dev harness reached the dormant typed
-  backend and passed controlled live validation without promoting production:
-
-  ```text
-  profile=Quiet; mutation_status=Supported
-  reset_curves_to_defaults=Applied; observed_curves=2
-  platform_profile: quiet -> quiet
-  same-value CPU write: 8 points; enabled=false preserved
-  independent read-back: CPU bytes equal; GPU untouched
-  RESULT: PASS (#104 enabled preservation + #105 reset containment, live)
-  ```
-
-  The harness performs no direct sysfs writes; the custom write uses freshly
-  read vendor-default bytes, so it does not change fan behavior. The issues
-  remain blocked by the independent production promotion policy before any
-  promotion.
-- Hosted CI execution is optional by owner policy; packaging acceptance beyond
-  this host and other hardware models remain separate evidence.
+- Raw supergfxd GPU mutation remains unavailable because the service is absent;
+  Aura remains disabled; Display Refresh/modeset remains read-only because no
+  concrete compositor mutation owner exists. Hosted CI is optional by owner
+  policy; other models remain outside this evidence.
