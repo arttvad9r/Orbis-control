@@ -250,7 +250,7 @@ Writes stay hard-blocked until #104/#105/#109/#116 and exact-build executable/li
 
 `SysfsTelemetryProvider` is read-only and dynamically discovers hwmon/power-supply sources. Partial metrics are allowed; unsupported derived values are not invented.
 
-Freshness must mean recent useful observation, not merely `Ok(Telemetry)`. Empty/partial/field-local failure evidence is implemented and pinned by #117's tests; hosted-CI re-proof remains externally blocked by #106.
+Freshness must mean recent useful observation, not merely `Ok(Telemetry)`. Empty/partial/field-local failure evidence is implemented and pinned by #117's tests.
 
 ## 12. Desired / Observed / Pending
 
@@ -326,4 +326,4 @@ The release-graph defect #115 is closed in source: the production GUI depends on
 
 Executable release claims require the exact candidate revision to pass Rust/Slint/Nix/package validation. Static contracts are useful fail-fast checks, not compilation evidence.
 
-Current blockers include #106, #125, remaining #123 work, #124 identity and #114 main protection after CI recovery. Fan/GPU/extended writes remain blocked by their separate evidence gates.
+Current blockers are independent fan/GPU/extended-write promotion gates and packaging/release acceptance. Hosted CI is optional by project policy; fan/GPU/extended writes remain blocked by their separate evidence gates.

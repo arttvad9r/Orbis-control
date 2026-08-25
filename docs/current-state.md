@@ -14,13 +14,13 @@ Privileged mutation architecture остаётся узкой: original caller �
 
 Production product path намеренно включает только доказанные writes. Performance и условно Battery — live mutation owners; raw GPU, Fan, Panel, Keyboard и Aura остаются product/policy blocked. Automation execution promotion=false, Display modeset не имеет concrete owner, Updates не имеет canonical signed feed/installer owner.
 
-Главный release blocker — #106: GitHub Actions не предоставляет trustworthy executable validation. Локальный Rust/Cargo toolchain (flake devShell) доступен: на ревизии `a752be6` (2026-08-24) `cargo fmt/check/test/clippy --workspace --all-targets --locked` выполнены успешно и `python3 scripts/verify-static` проходит (см. «Work still possible» ниже), а `nix flake check --no-build` подтверждает только evaluation. Поэтому изменения текущей ветки можно называть `IMPLEMENTED`/`TESTED` по source и локальному executable evidence точной ревизии, но это не `PACKAGED`, не `LIVE-VALIDATED` и не восстановление hosted CI.
+GitHub Actions is optional/manual for this single-owner project and is not a release gate. Canonical executable evidence is the local flake workflow: locked Cargo fmt/check/test/clippy, `python3 scripts/verify-static` and full `nix flake check --max-jobs 1 --cores 4`. These remain revision-scoped evidence; live hardware evidence remains separate.
 
 ## Repository status
 
 - Active integration branch: `development` (pushed to `origin/development`; consolidates the former `asus-hardware-validation-20260821` line).
 - Draft integration PR: #129 was closed on 2026-08-25 as superseded: its head `e8b611e` is a verified direct ancestor of `development` (`merge-base --is-ancestor`), so no unique work was lost. `development` remains the single integration line.
-- `main` — previous consolidated baseline; required checks не включены из-за #106/#114.
+- `main` — previous consolidated baseline; required hosted checks are intentionally not used by project policy.
 - Единственный canonical workflow — `.github/workflows/ci.yml`.
 - Удалён оставшийся одноразовый `.github/keyboard-backlight-probe-validation-trigger` artifact.
 - Canonical docs hierarchy определена в `docs/README.md`; historical plans/audits отделены через `history.md`.
@@ -33,8 +33,8 @@ Production product path намеренно включает только док�
 |---|---|---|
 | Repository baseline | CLEANED / IMPLEMENTED | One-off validation artifact удалён; canonical workflow/document hierarchy сохранены; интеграция консолидирована в ветку `development` (PR #129 head `e8b611e` сохранён как исходная история). |
 | Rust/build contract | IMPLEMENTED | Workspace MSRV/toolchain contract — Rust 1.87. |
-| Executable CI | BLOCKED — #106 | Root cause identified 2026-08-24: GitHub billing rejects the job before `Set up job` («recent account payments have failed or your spending limit needs to be increased») on this private repo. Remediation requires the owner (raise Actions spending limit / fix payment, or make the repo public). Not a workflow/runner/repository-content failure. |
-| Main protection | DEFERRED — #114 | Required checks включать только после реально исполняемого CI. |
+| Hosted CI | OPTIONAL / MANUAL — #106 closed by policy | GitHub Actions is retained as optional infrastructure only; it is not required for merges or release acceptance. |
+| Main protection | NOT REQUIRED BY POLICY — #114 closed | Single-owner project uses local canonical checks and explicit review; no hosted required-check dependency. |
 | Remote branches | CLEANUP COMPLETE — #118 | На remote остаются только `main` и `development`; obsolete refs удалены. |
 | Application identity | RESOLVED — #124 | ADR 0013 фиксирует постоянную canonical identity `io.github.orbiscontrol.Orbis`, независимую от GitHub hosting owner. |
 | Core/domain | IMPLEMENTED | Typed capability/state/action/lifecycle models, `Accepted != Applied`, Desired/Observed/Pending foundations. |
@@ -50,12 +50,12 @@ Production product path намеренно включает только док�
 | ASUS product GPU queue operation | IMPLEMENTED / REVISION-SCOPED TESTED / PACKAGED — PRODUCTION BLOCKED | Typed `Hardware1.SetProductGpuMode` exists end-to-end (provider outcome/mismatch classification → hardwared paired queue backend + P2P tests → session-client caller-preserving source → worker FIFO command/event → UI queued-target + reboot-required rendering). Polkit action `io.github.orbiscontrol.hardware.set-product-gpu-mode` ships `allow_active=no`; hardwared production composition keeps the backend unattached (`NotSupported`); UI controls stay disabled without `Supported` write evidence. No real host write was issued; controlled live validation requires explicit user confirmation. |
 | GPU product/raw mutation | BLOCKED | Product modes are policy, not raw backend enum. Production mutation remains disabled; ASUS GPU attributes are queued/deferred until shutdown and require reboot semantics. Raw `Hardware1.SetGpuMode` supergfxd semantics unchanged. |
 | Capability registry | IMPLEMENTED / RESILIENCE COVERED | Whole-swap immutable generations; explicit and periodic refresh share canonical mutation-status requery (#112 closed with an executed P2P integration test proving a real status transition through explicit refresh); backend loss/timeout and recovery publish capability-local availability transitions. UI/Diagnostics/support-policy source audit #120 is complete; Battery owner evidence is now dynamic (#107 owner liveness). |
-| Provider execution | EXECUTED LOCALLY — #123 closed | Canonical `bounded_provider_call`; public probes, CLI and main worker read refreshes use provider deadlines; telemetry owns provider identity/deadline (`provider_id`/`snapshot_timeout`); Hardware1 status requery bounded (`HARDWARE1_STATUS_DEADLINE`); mutation unknown outcome classified `Unconfirmed` without retry. Workspace checks executed green on this revision; hosted CI re-proof rides #106. |
-| CLI | IMPLEMENTED READ-ONLY / LOCALLY EXECUTED — #119 closed | `status` + versioned `status --json` (schema 3 includes battery threshold evidence); typed states; no mutation commands. Executable local validation + executable service-absent integration test (`ebba8ea`) recorded; hosted CI re-proof still rides #106. |
-| Telemetry | IMPLEMENTED / FIELD EVIDENCE COMPLETE — #117 closed | Partial metrics are supported. UI freshness honors snapshot quality: an `Ok` snapshot with no observed field is absence evidence (`telemetry_fresh=false`, last-good values preserved); provider contracts for empty root, all-sources-failing and permission-denied field-local degradation are pinned by tests. Field-local gap evidence is on the provider API (`Telemetry.field_gaps`: `Denied`/`Malformed`/`Unavailable` per discovered group; structural absence stays plain `None`; snake_case wire shape roundtrip-pinned) and is presented in Settings → Diagnostics (Copy/Export), Copy Summary text and JSON export (`gaps: none` when absent). Hosted-CI re-proof remains externally blocked by #106. |
-| UI shell | REDESIGNED / SOURCE-COMPLETE + LOCALLY EXECUTED — #128, sidebar redesign 2026-08-25 | Frameless preferred-1200×800 window (min 980×680): 230px sidebar with ten `Section` pages (Dashboard, Performance, Power, Cooling, Graphics, Backlight, Display, System, Settings, About), 44px title bar (drag via slint `unstable-winit-030` → winit `drag_window()`, minimize/maximize, close through the shared close-action tray/quit path). Calm light/dark token pair (off-white/white cards, one blue accent; WCAG AA pinned by `check-ui-contract.py`). Dashboard carries device header (privacy-safe DMI identity), performance modes, telemetry, read-only fan curve, charge limit and keyboard lighting; capability-honest pages hide unsupported controls. Updates and Automation editing surfaces remain removed (Automation shadow core stays observation-only); Diagnostics actions live in System. Software-renderer limitations documented: `Path`/rotation are not rendered — icons and the fan curve are Rectangle primitives; fluent light ComboBox/SpinBox render unreliably offscreen — primary flows use custom `ChoiceButton`/`NumberStepper`/`OptionStepper`. Executed on this revision: workspace check/test/clippy green, `verify-static` green (UI + backend contracts re-pinned to the new layout), section screenshots dark+light. Hosted-CI re-proof rides #106. |
+| Provider execution | EXECUTED LOCALLY — #123 closed | Canonical `bounded_provider_call`; public probes, CLI and main worker read refreshes use provider deadlines; telemetry owns provider identity/deadline (`provider_id`/`snapshot_timeout`); Hardware1 status requery bounded (`HARDWARE1_STATUS_DEADLINE`); mutation unknown outcome classified `Unconfirmed` without retry. Full local flake evidence is green. |
+| CLI | IMPLEMENTED READ-ONLY / LOCALLY EXECUTED — #119 closed | `status` + versioned `status --json` (schema 3 includes battery threshold evidence); typed states; no mutation commands. Executable local validation + service-absent integration test recorded. |
+| Telemetry | IMPLEMENTED / FIELD EVIDENCE COMPLETE — #117 closed | Partial metrics are supported. UI freshness honors snapshot quality: an `Ok` snapshot with no observed field is absence evidence (`telemetry_fresh=false`, last-good values preserved); provider contracts for empty root, all-sources-failing and permission-denied field-local degradation are pinned by tests. Field-local gap evidence is on the provider API and presented in Settings → Diagnostics, Copy Summary and JSON export. |
+| UI shell | REDESIGNED / SOURCE-COMPLETE + LOCALLY EXECUTED — #128, sidebar redesign 2026-08-25 | Frameless preferred-1200×800 window (min 980×680): 230px sidebar with ten `Section` pages (Dashboard, Performance, Power, Cooling, Graphics, Backlight, Display, System, Settings, About), 44px title bar (drag via slint `unstable-winit-030` → winit `drag_window()`, minimize/maximize, close through the shared close-action tray/quit path). Calm light/dark token pair (off-white/white cards, one blue accent; WCAG AA pinned by `check-ui-contract.py`). Dashboard carries device header, performance modes, telemetry, read-only fan curve, charge limit and keyboard lighting; capability-honest pages hide unsupported controls. Updates and Automation editing surfaces remain removed; Diagnostics actions live in System. Full local flake evidence is green. |
 | Fan reads | IMPLEMENTED / AGGREGATE TRUTH + STORED ENABLED CARRIED | Per-fan Session1 read exists; stored `FanCurveData.enabled` is carried through Session1/client/UI evidence (#116 source-complete) and rendered from `UiState` in the Fans section; aggregate FanCurves requires both CPU and GPU read contracts (#109 source-complete). |
-| Fan writes/reset | HARD-BLOCKED — write gate stays; #104/#105 source + controlled live success-path evidence complete | UI + polkit + production Hardware1 composition prevent the dormant unsafe path (`DisabledFanMutationBackend`, fan polkit `allow_active=no`). Source contracts remain fail-closed: `ApplyResult::Accepted` for reset, unknown-outcome after possible dispatch, worker serialization and no Orbis-side profile switching; error-path restoration remains source/P2P-test evidence. Current-revision feature-gated `fan-live-validate` passed on FA707NV: Quiet reset observed `quiet→quiet`; same-value CPU write preserved `enabled=false` and exact points; GPU stayed untouched. Do not promote production writes until #106/release gates are resolved. Evidence: [`hardware-evidence/fa707nv-live-validation-20260825.md`](hardware-evidence/fa707nv-live-validation-20260825.md). |
+| Fan writes/reset | HARD-BLOCKED — write gate stays; #104/#105 source + controlled live success-path evidence complete | UI + polkit + production Hardware1 composition prevent the dormant unsafe path (`DisabledFanMutationBackend`, fan polkit `allow_active=no`). Source contracts remain fail-closed: `ApplyResult::Accepted` for reset, unknown-outcome after possible dispatch, worker serialization and no Orbis-side profile switching; error-path restoration remains source/P2P-test evidence. Current-revision feature-gated `fan-live-validate` passed on FA707NV: Quiet reset observed `quiet→quiet`; same-value CPU write preserved `enabled=false` and exact points; GPU stayed untouched. Do not promote production writes until their independent safety/release gate is explicitly accepted. Evidence: [`hardware-evidence/fa707nv-live-validation-20260825.md`](hardware-evidence/fa707nv-live-validation-20260825.md). |
 | Panel write | HARD-BLOCKED | Typed API may exist; production backend status remains Unsupported/default-deny. |
 | Keyboard write | HARD-BLOCKED | Current production Hardware1 reports Unsupported; root sandbox does not expose keyboard write path. |
 | Aura write | HARD-BLOCKED | Static RGB typed writer is not promoted into product/unattended execution. |
@@ -90,7 +90,7 @@ Closure status (2026-08-24, #123 closed):
 2. Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`, timeout → `Unknown`);
 3. mutation timeout after possible dispatch is classified across interactive Performance/Battery, the Automation Performance executor and the (gated) Fan Factory Reset path as `CommandError::Unconfirmed`/recovery: never success, never retried, rollback not auto-triggered; the outcome is obtained only through a subsequent authoritative read-back that confirms or refutes the desired state. Successful factory reset returns `ApplyResult::Accepted` (not `Applied`) because an independent default-evidence source does not exist;
 4. `orbisctl validate` bus connects and status query are bounded (`VALIDATE_BUS_CONNECT_DEADLINE`/`VALIDATE_STATUS_DEADLINE`); the interactive confirmation and the confirmed mutation itself remain intentionally outside generic timeout (unknown-outcome contract);
-5. hosted CI execution remains blocked (#106); local workspace `fmt/check/test/clippy --locked` evidence for these paths was executed green on this revision line (see «Work still possible» above).
+5. hosted CI is optional by project policy; local workspace and full flake checks are the canonical executable evidence.
 
 ## Effective product-policy truth (#120 complete)
 
@@ -102,7 +102,7 @@ The current source contract is deliberately conservative:
 - support-matrix schema requires separate read/write evidence and the repository currently contains only `empty`/`unknown` examples, not optimistic model claims;
 - current deliberately disabled/unvalidated product writes remain effective `Unsupported` with a reason rather than a generic `DisabledByPolicy` status that could imply already-proven hardware support.
 
-These invariants are protected by the static backend completion contract. Executable validation still belongs to #106.
+These invariants are protected by the static backend completion contract and the local full flake check.
 
 ## Fan truth status (#109/#116)
 
@@ -141,7 +141,7 @@ original GUI/application caller
 
 Current product block remains defense-in-depth: UI gating + Hardware1 disabled backend + polkit/default sandbox where applicable.
 
-## Work still possible while GitHub Actions remain blocked (#106)
+## Local verification policy
 
 Local executable Rust checks are available in the flake devShell and were executed green on this revision (`a752be6`, 2026-08-24, NixOS flake devShell, rustc 1.97.1):
 
@@ -186,7 +186,7 @@ demote (mis-serving daemon raising `UnknownProperty` while ownership stays
 confirmed) → heal, all observed through `Hardware1.BatteryMutationStatus`
 without restarting hardwared.
 
-This is revision-scoped `TESTED` evidence only. It does not restore trustworthy hosted CI (#106), does not prove full packaging acceptance (`nix flake check` was not run as a whole on this revision), and does not create live hardware evidence for this branch.
+This is revision-scoped `TESTED` evidence. Hosted Actions are optional and do not replace full local flake or live hardware evidence.
 
 Safe source work may continue when it does not widen unvalidated hardware writes:
 
@@ -217,9 +217,7 @@ All of them are exported from crate public APIs but have **no runtime consumers*
 
 ## Active blockers / next work
 
-1. #106 executable CI/tooling recovery (owner billing decision; skipped for now).
-2. #104/#105 fan write hard-blockers: source + controlled live success-path evidence complete; production promotion remains blocked by #106/release gates.
-3. #114 required checks after #106.
+1. #104/#105 fan write hard-blockers: source + controlled live success-path evidence complete; production promotion remains independently gated.
 
 ## Historical live evidence retained
 

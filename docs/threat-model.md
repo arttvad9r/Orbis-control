@@ -131,7 +131,7 @@ Rules:
 Battery discovery source hardening for #108 is implemented in `main`: broken
 power-supply entries no longer silently become “not a battery”; if no valid
 candidate exists, remembered permission/I/O evidence wins over structural
-`Unsupported`. Executable validation is still blocked by #106.
+`Unsupported`. Executable validation uses the local full flake workflow; hosted Actions are optional by project policy.
 
 Explicit capability refresh still needs to re-query mutation evidence first (#112).
 
@@ -212,8 +212,8 @@ acceptance is recorded as VM + live module-unit evidence under #126.
 
 Current release blockers:
 
-- GitHub Actions fails before executing workflow steps / fresh pushes may receive no run (#106);
-- `main` must not be protected by a non-working required check; enable protection after CI recovery (#114);
+- hosted GitHub Actions is optional/manual by single-owner project policy (#106 closed);
+- `main` intentionally has no hosted required checks (#114 closed by policy);
 - obsolete remote agent refs were pruned (#118);
 - stable reverse-DNS application identity is fixed by ADR 0013 (#124).
 

@@ -110,9 +110,13 @@ Intended order:
 4. Nix/Rust/VM checks;
 5. final full flake check.
 
-#106 currently blocks trustworthy Actions execution: earlier jobs did not reach repository steps or fresh pushes produced no run. Until actual steps execute successfully, GitHub-hosted validation remains `BLOCKED`, not `PASS` or `FAIL` for the source itself.
+GitHub-hosted Actions are optional/manual by single-owner project policy. The
+canonical executable workflow is local and runs locked Cargo checks,
+`verify-static` and the full `nix flake check`.
 
-The local flake devShell does provide a Rust/Cargo toolchain. Locally executed `--locked` checks are valid revision-scoped evidence for the exact commit, but they do not restore hosted CI (#106), do not prove packaging/VM acceptance (`nix flake check --no-build` is evaluation-only), and never substitute live hardware validation.
+The local flake devShell provides the Rust/Cargo toolchain. Locally executed
+locked checks and full `nix flake check` are valid revision-scoped evidence for
+the exact commit; they never substitute live hardware validation.
 
 ## 8. Runtime and hardware evidence
 

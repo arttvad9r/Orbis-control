@@ -10,7 +10,7 @@
 - **Performance** — worker → application/provider mutation → authoritative read-back.
 - **Battery charge limit** — Session1 read + Hardware1/application mutation + fresh read-back.
 - **GPU primitives** — independent power / physical MUX / access-policy reads.
-- **Telemetry** — read-only sysfs snapshot polling; coverage/freshness semantics implemented and pinned by #117 (closed); hosted-CI re-proof remains blocked by #106.
+- **Telemetry** — read-only sysfs snapshot polling; coverage/freshness semantics implemented and pinned by #117 (closed).
 - **Fan reads** — profile/fan-specific Session1 reads plus active-curve reads; fan writes remain hard-blocked.
 - **Theme** — runtime + persistence (Catppuccin Mocha/Latte).
 - **Autostart** — owned XDG desktop-entry read/write/read-back (#110 source-complete/closed).
@@ -137,17 +137,20 @@ Status LEDs, clamshell/ASPM/standby-networking/iGPU-memory/CPU-core/hotkey conce
 ## Remaining high-value source blockers
 
 No closed source blocker remains in this list. Fan mutation promotion is still
-blocked by its independent #104/#105 safety/release gate; #106 remains the
-external hosted-CI blocker.
+blocked by its independent #104/#105 safety/release gate; hosted Actions are
+optional by project policy.
 
 ## Validation state
 
 `scripts/verify-static` provides standard-library source contracts for UI, Automation, Display, backend completion, provider-timeout and documentation-status invariants. It is a fail-fast safety net only.
 
-The local flake devShell provides a Rust/Cargo toolchain. On the current `development` revision, `cargo fmt/check/test/clippy --locked` were executed green and `python3 scripts/verify-static` passes after `317f22d`. This is revision-scoped source/test evidence only: it does not restore trustworthy hosted CI (#106), does not prove Slint/package/VM acceptance (`nix flake check --no-build` is evaluation-only), and creates no live hardware evidence for this branch.
+The local flake devShell provides a Rust/Cargo toolchain. On the current
+`development` revision, locked Cargo checks, `python3 scripts/verify-static`
+and the full `nix flake check` were executed green. This is revision-scoped
+evidence; live hardware evidence remains separately recorded.
 
 ## Unwired research foundations
 
 Policy/desired-state presets, reconciliation decisions, transaction phases, readiness helpers, software fan-policy computations and system-telemetry parsers are exported from crate APIs but have no runtime consumers. They remain FOUNDATION-only; no preset, policy or reconciliation path can dispatch hardware actions today.
 
-A Draft PR #129 CI run previously failed before repository steps (`steps=null`); the PR has since been closed as superseded by `development`, which is now the single integration line. #106 remains an external Actions execution blocker.
+A Draft PR #129 CI run previously failed before repository steps (`steps=null`); the PR has since been closed as superseded by `development`, which is now the single integration line. Hosted Actions are optional by project policy.

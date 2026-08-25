@@ -32,11 +32,11 @@ Completed in the active integration branch:
 
 Remaining:
 
-1. #106 — restore trustworthy executable GitHub Actions;
-2. #114 — after #106, protect `main` with the real required check names;
+1. resolved 2026-08-25: #106 closed by single-owner policy; GitHub Actions is optional/manual and local flake checks are canonical;
+2. resolved 2026-08-25: #114 closed as not required by project policy; `main` uses explicit review and local checks;
 3. resolved 2026-08-25: obsolete refs pruned (#118) — the superseded PR-head branch is deleted after verifying its tip is an ancestor of `development`; only `main`/`development` remain;
 4. resolved 2026-08-25: #124 identity decision recorded in ADR 0013; `io.github.orbiscontrol.Orbis` is permanent and hosting-independent;
-5. resolved 2026-08-25: integration lines reconciled — Draft PR #129 closed as superseded; `development` is the single integration line, and any merge into `main` still waits for executable validation (#106) and resolved safety blockers.
+5. resolved 2026-08-25: integration lines reconciled — Draft PR #129 closed as superseded; `development` is the single integration line, and any merge into `main` waits for local executable validation and resolved safety blockers.
 
 The ASUS baseline is observation evidence only. It does not promote any unvalidated
 write or product capability to `Supported`.
@@ -46,11 +46,11 @@ write or product capability to `Supported`.
 **Status: HIGHEST PRIORITY**
 
 1. **#125 GUI root boundary** — reject interactive euid 0 before preferences, runtime or D-Bus setup. Screenshot/offscreen behavior must remain explicit and testable.
-2. **#123 bounded execution — CLOSED (2026-08-24)**: telemetry owns provider identity/deadline, Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`), mutation unknown outcomes classify as `Unconfirmed` with no blind retries; all executed green locally (workspace `--locked` suite), hosted CI re-proof rides #106.
-3. **#107 Battery owner/interface liveness** — source-complete with executed fake-system evidence: dynamic bounded non-mutating owner probe plus, with an owner confirmed, a fresh uncached `ChargeControlEndThreshold` read; peer-reported structural absence (UnknownObject/Interface/Property, raw or typed-FDO) is proven drift → `TemporarilyUnavailable`, other failures stay `Unknown`. Executed: unit contracts + extended `battery-mutation-vm` status generations (supported → owner-loss demote → restore → live interface-drift demote with owner present → heal). Remaining: hosted-CI re-proof rides #106; optional live-device confirmation.
-4. **#117 telemetry coverage/freshness — CLOSED / SOURCE-COMPLETE (2026-08-24)**: UI `telemetry_fresh` means a recent useful observation (empty snapshot = absence evidence, last-good preserved); provider snapshot contracts pinned by tests; field-local denied/malformed/unavailable classes implemented as `Telemetry.field_gaps` with structural absence kept distinct; gap evidence presented in the Diagnostics window, Copy Summary and JSON export. Hosted-CI re-proof remains externally blocked by #106.
+2. **#123 bounded execution — CLOSED (2026-08-24)**: telemetry owns provider identity/deadline, Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`), mutation unknown outcomes classify as `Unconfirmed` with no blind retries; full local flake evidence is green.
+3. **#107 Battery owner/interface liveness — CLOSED (2026-08-25)**: dynamic bounded non-mutating owner probe, fresh uncached threshold read, interface-drift classification and live FA707NV confirmation are complete.
+4. **#117 telemetry coverage/freshness — CLOSED / SOURCE-COMPLETE (2026-08-24)**: UI `telemetry_fresh` means a recent useful observation; empty/partial/field-local evidence and Diagnostics gap export are implemented and pinned by tests.
 
-#112 is source-complete and now carries executed evidence: explicit and periodic capability refresh share the same canonical mutation-status requery path, and a private-P2P integration test proves a real BackendMissing→Supported→Unknown transition through explicit refresh (2026-08-24). Hosted CI re-proof rides #106.
+#112 is source-complete and carries executed evidence: explicit and periodic capability refresh share the same canonical mutation-status requery path, and a private-P2P integration test proves a real BackendMissing→Supported→Unknown transition through explicit refresh (2026-08-24).
 
 ## Milestone 2 — Fan read/evidence correctness
 
@@ -71,7 +71,7 @@ No fan write should be enabled to “test” these contracts.
 
 ## Milestone 3 — Release graph and production bootstrap
 
-**Status: SOURCE COMPLETE (#115); executable claim recorded locally at `a752be6` (2026-08-24); hosted CI re-proof still rides #106**
+**Status: SOURCE COMPLETE (#115); executable claim recorded by the local full flake workflow**
 
 - [x] #115 — production-native `UiState` startup with explicit Loading/Unknown/non-writable defaults and compile-time package version (`production_initial`);
 - [x] `orbis-test-support` moved out of the normal GUI release dependency graph (dev-dependency + optional `ui-review` feature only; proven by `cargo tree -e normal`);
@@ -109,7 +109,7 @@ Completed source slices:
 
 Remaining:
 
-- #119 closed: executable local workspace validation plus an executable service-absent integration test recorded (`ebba8ea`); hosted CI re-proof rides #106;
+- #119 closed: executable local workspace validation plus an executable service-absent integration test recorded (`ebba8ea`);
 - #117 telemetry truth improvements delivered: freshness honors snapshot quality and field-local gap evidence reaches Diagnostics/UI without fake freshness (2026-08-24);
 - final packaged desktop/AppStream/tray/preferences acceptance on release revision.
 
@@ -123,12 +123,12 @@ Panel, Keyboard and Aura typed code does not itself authorize product writes. Di
 
 ## Milestone 7 — Packaging / sandbox / release acceptance
 
-**Status: BLOCKED BY EXECUTABLE ENVIRONMENT**
+**Status: LOCAL EXECUTABLE EVIDENCE GREEN; RELEASE POLICY GATES REMAIN**
 
 - #126 standalone/full hardwared sandbox — resolved with package/VM/live evidence;
 - ADR 0013 permanent identity decision — resolved;
-- #106 executable CI;
-- #114 required checks after CI recovery;
+- hosted GitHub Actions optional/manual by single-owner policy;
+- `main` required checks intentionally not used;
 - final `cargo fmt/check/test/clippy --locked` — executed green locally;
 - final `nix flake check` — executed green locally;
 - packaged startup, D-Bus, polkit, desktop/AppStream and support-matrix acceptance;
@@ -147,7 +147,7 @@ A release candidate requires all of the following:
 - package/metadata acceptance complete;
 - current capability/UI/support evidence matches shipped policy;
 - application identity decision recorded in ADR 0013;
-- `main` protected by required executable checks (#114);
+- local canonical checks and explicit owner review;
 - live/device claims tied to exact revision and environment.
 
-Until #106/tooling is restored, continue only narrow source hardening, read/evidence work, repository cleanup, documentation and static contracts. Release remains **BLOCKED**.
+Release remains gated by packaging acceptance, independent hardware promotion gates and live/device evidence; hosted Actions recovery is not required by project policy.
