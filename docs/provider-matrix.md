@@ -36,7 +36,7 @@
 | Fan active curve | `asus_custom_fan_curve` sysfs read | none | read only |
 | Fan stored profile curve | asusd `FanCurveData(profile)` → Session1 | typed asusd owner through production Hardware1; exact read-back path | **LIVE-VALIDATED FA707NV**; aggregate read evidence is model/revision scoped |
 | Telemetry | dynamic read-only sysfs/hwmon/power_supply | none | read only; coverage/freshness semantics #117 |
-| Panel Overdrive | typed ASUS provider/probe | Hardware1 → typed asusd setter → local read-back | backend-ready; liveness evidence #107 |
+| Panel Overdrive | typed ASUS provider/probe | Hardware1 → typed asusd setter → kernel current-value read-back | **LIVE-VALIDATED FA707NV** |
 | MiniLED | typed read provider/probe | none | read only |
 | Screen Auto Brightness | typed read provider/probe | none | read only |
 | Keyboard backlight | typed read state/probe | Hardware1 → fixed brightness write → bounded fresh read-back | **LIVE-VALIDATED FA707NV** |

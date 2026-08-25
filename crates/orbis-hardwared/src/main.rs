@@ -9,8 +9,9 @@
 //! backend implementations present in this crate:
 //! - Performance is enabled through its validated Hardware1 path;
 //! - Battery is enabled only after non-activating asusd-owner + effective-threshold preflight;
-//! - GPU/Fan/Panel/Keyboard/Aura mutations are hard-disabled in composition;
-//! - Panel/Aura startup preflight is read-only evidence only and never promotes product policy;
+//! - raw GPU/Aura mutations remain hard-disabled in composition;
+//! - Panel/Aura startup preflight is read-only evidence; Panel selects its
+//!   typed backend only when the exact authoritative reader is discovered;
 //! - startup performs no hardware writes and does not activate asusd merely to probe writability;
 //! - reconnect/restart policy belongs to systemd.
 
@@ -213,7 +214,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tracing::info!(
         ?panel_preflight,
         ?aura_preflight,
-        "product mutation startup preflight complete; Panel/Aura writes remain release-disabled"
+        "product mutation startup preflight complete; Aura writes remain release-disabled"
     );
 
     let battery_backend = build_battery_backend(&connection).await;

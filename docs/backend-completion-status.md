@@ -20,7 +20,7 @@
 - **Diagnostics** — runtime initialization, capability-generation replacement, Refresh, privacy-bounded JSON Export and Copy Summary (#111 closed); surfaced as actions in Settings → Diagnostics. Open Logs remains disabled.
 - **CLI** — `orbisctl status` plus versioned `status --json`; read-only only.
 - **Display Quick Control** — authoritative read-only observation; no concrete mutation owner.
-- **Keyboard/Panel product controls** — keyboard typed backend is production-wired and FA707NV live-validated; Panel remains Unsupported/default-deny pending its independent owner/write evidence.
+- **Keyboard/Panel product controls** — keyboard and Panel Overdrive typed backends are production-wired and FA707NV live-validated; Aura remains Unsupported/default-deny.
 - **Aura** — observation/config-level typed surfaces exist; no promoted unattended hardware write.
 - **Boot sound** — strict read-only firmware-attribute provider.
 - **Updates** — UI surface removed (real updates need a distribution server); typed providers retained, no UI consumer.

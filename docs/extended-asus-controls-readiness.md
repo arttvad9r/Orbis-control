@@ -32,7 +32,7 @@ research and future validation without being a shipped writable feature.
 | Keyboard backlight read | typed read state/provider exists | `IMPLEMENTED SOURCE` | validate packaged/runtime evidence |
 | Keyboard backlight write | typed Hardware1/sysfs backend is production-wired; exact ASUS LED paths are sandboxed and FA707NV `3→0→3` live-validated | **LIVE-VALIDATED / FA707NV** | keep capability-specific probe/read-back; evidence is model/revision scoped |
 | Panel Overdrive read | typed read provider/probe exists | `IMPLEMENTED SOURCE` | validate runtime/device evidence |
-| Panel Overdrive write | typed Hardware1/backend code exists but production composes disabled backend | **HARD-BLOCKED** | prove real owner/interface/read-back and release evidence |
+| Panel Overdrive write | typed asusd backend is production-wired; kernel current-value read-back and FA707NV `1→0→1` live evidence complete | **LIVE-VALIDATED / FA707NV** | keep capability-specific owner/read-back; evidence is model/revision scoped |
 | MiniLED | typed read-only provider/probe exists | `READ ONLY` | expose only with runtime evidence; write needs separate proof |
 | Screen Auto Brightness | typed read-only provider/probe exists | `READ ONLY` | same: read first, mutation separately proven |
 

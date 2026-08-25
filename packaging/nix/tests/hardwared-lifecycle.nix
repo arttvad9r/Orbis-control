@@ -118,7 +118,7 @@
         "io.github.orbiscontrol.hardware.set-gpu-mode": "no",
         "io.github.orbiscontrol.hardware.set-product-gpu-mode": "yes",
         "io.github.orbiscontrol.hardware.set-fan-curve": "yes",
-        "io.github.orbiscontrol.hardware.set-panel-overdrive": "no",
+        "io.github.orbiscontrol.hardware.set-panel-overdrive": "yes",
         "io.github.orbiscontrol.hardware.set-keyboard-backlight": "yes",
         "io.github.orbiscontrol.hardware.set-aura-static-rgb": "no",
     }

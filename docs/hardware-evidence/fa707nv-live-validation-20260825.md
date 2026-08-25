@@ -71,6 +71,13 @@ fan/gpu/panel/keyboard ship `allow_active=no`; performance/charge-limit are
   `reboot_required=false`; no reboot/logout performed. Raw supergfxd mutation
   remains unavailable because `supergfxd` is absent on FA707NV.
 
+### Panel Overdrive
+
+- `PanelMutationStatus = Supported (0)` after production deployment.
+- Read-before-write kernel state was `1`.
+- `SetPanelOverdrive(false)` returned `y 0`; kernel read-back was `0`.
+- Restore `SetPanelOverdrive(true)` returned `y 1`; kernel read-back was `1`.
+
 ### Keyboard backlight
 
 - Current live unit: `orbis-hardwared` store package `w4acp9y0…`;
