@@ -244,7 +244,8 @@ Remaining evidence problems:
 - aggregate `FeatureId::FanCurves` is published only when **both** CPU and GPU read contracts are proven; a single-fan read failure (including `BackendMissing`/`PermissionDenied`) suppresses the aggregate — no CPU→GPU inference (#109 source-complete);
 - stored custom-curve `enabled` is now carried through typed Session1/client/UI observation (#116 source-complete).
 
-Writes stay hard-blocked until #104/#105/#109/#116 and exact-build executable/live validation are complete.
+Writes remain hard-blocked in production despite completed #104/#105/#109/#116
+evidence; any promotion requires a separate explicit product/policy decision.
 
 ## 11. Telemetry
 

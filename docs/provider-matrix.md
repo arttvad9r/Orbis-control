@@ -34,7 +34,7 @@
 | dGPU access policy | ASUS Armoury/kernel evidence → Session1 | product mutation disabled | blocked |
 | Product GPU mode | composed concept only | no accepted production mapping | BLOCKED |
 | Fan active curve | `asus_custom_fan_curve` sysfs read | none | read only |
-| Fan stored profile curve | asusd `FanCurveData(profile)` → Session1 | typed asusd owner through Hardware1 exists but is disabled | **BLOCKED** #104/#105/#109/#116 |
+| Fan stored profile curve | asusd `FanCurveData(profile)` → Session1 | typed asusd owner through Hardware1 exists but is disabled by production policy | **BLOCKED** independent fan-promotion gate; #104/#105/#109/#116 evidence complete |
 | Telemetry | dynamic read-only sysfs/hwmon/power_supply | none | read only; coverage/freshness semantics #117 |
 | Panel Overdrive | typed ASUS provider/probe | Hardware1 → typed asusd setter → local read-back | backend-ready; liveness evidence #107 |
 | MiniLED | typed read provider/probe | none | read only |

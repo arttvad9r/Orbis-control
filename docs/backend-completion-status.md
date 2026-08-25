@@ -137,7 +137,7 @@ Status LEDs, clamshell/ASPM/standby-networking/iGPU-memory/CPU-core/hotkey conce
 ## Remaining high-value source blockers
 
 No closed source blocker remains in this list. Fan mutation promotion is still
-blocked by its independent #104/#105 safety/release gate; hosted Actions are
+blocked by the independent production fan-promotion policy; hosted Actions are
 optional by project policy.
 
 ## Validation state

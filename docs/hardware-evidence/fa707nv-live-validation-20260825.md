@@ -112,6 +112,7 @@ result: PASS (profile applied, verified, and restored)
 
   The harness performs no direct sysfs writes; the custom write uses freshly
   read vendor-default bytes, so it does not change fan behavior. The issues
-  remain open for the external release/CI gate (#106) before any promotion.
-- Hosted CI execution (#106, skipped by owner decision); packaging acceptance
-  beyond this host; other hardware models.
+  remain blocked by the independent production promotion policy before any
+  promotion.
+- Hosted CI execution is optional by owner policy; packaging acceptance beyond
+  this host and other hardware models remain separate evidence.

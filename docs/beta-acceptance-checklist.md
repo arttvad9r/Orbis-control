@@ -34,7 +34,7 @@ Use [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 - [x] Privileged mutation is behind typed `Hardware1`, not a generic root proxy.
 - [x] `sessiond` remains a read/session boundary.
 - [x] Raw GPU/Fan/Panel/Keyboard/Aura writes are product/policy blocked in the current production composition.
-- [x] Fan writes are defense-in-depth blocked while known safety defects remain.
+- [x] Fan writes are defense-in-depth blocked by explicit production policy after source/live evidence.
 - [x] #125: interactive GUI rejects euid 0 before preferences/runtime/D-Bus setup; screenshot/offscreen paths remain exempt.
 - [x] #123: provider/status hang handling is complete, including mutation unknown-outcome recovery without blind retry; local workspace and full Nix checks are green.
 - [x] #126: packaged/VM/live inspection proves the intended minimal hardwared sandbox on the exact candidate; live module-unit evidence is recorded for FA707NV.

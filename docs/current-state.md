@@ -63,7 +63,7 @@ GitHub Actions is optional/manual for this single-owner project and is not a rel
 | Display Refresh | IMPLEMENTED CONTRACT / NO MUTATION OWNER | Typed target/request/read-back design exists; no concrete compositor configuration owner is enabled. |
 | Updates | FAIL-CLOSED | Installation owner detection + typed blockers exist; no invented release feed/downloader/installer. |
 | Release dependency graph | EXECUTED LOCALLY — #115 closed | GUI release graph contains no `orbis-test-support` (re-proven by `cargo tree -e normal --locked` on this revision): production startup uses `UiState::production_initial`; fixture bootstrap is dev-only + optional `ui-review` feature for screenshot builds (`cargo check -p orbis-ui --features ui-review` green). |
-| GUI root boundary | EXECUTED LOCALLY — #125 closed | Interactive launch rejects euid 0 before preferences/runtime/bus setup (`LaunchContext::validate`, rustix geteuid); screenshot/offscreen paths remain explicit exceptions; decision unit tests executed green on this revision. Hosted CI re-proof rides #106. |
+| GUI root boundary | EXECUTED LOCALLY — #125 closed | Interactive launch rejects euid 0 before preferences/runtime/bus setup (`LaunchContext::validate`, rustix geteuid); screenshot/offscreen paths remain explicit exceptions; decision unit tests executed green on this revision. |
 | Hardwared sandbox | STRUCTURALLY MINIMIZED / LIVE-VALIDATED — #126 closed | Intended direct sysfs write surface is `platform_profile` only. All three system-integration VM checks green (`hardwared-lifecycle`, `performance-mutation-vm`, `battery-mutation-vm` incl. #107 status generations); source-level parity contract (`scripts/check-hardwared-unit-parity.py`) pins the standalone unit to the identical sandbox. Live-host validation executed 2026-08-25 on FA707NV at `7db695c4` through the canonical NixOS module deployment: effective unit shows `ProtectSystem=strict`, `NoNewPrivileges=yes`, `ReadWritePaths` limited to `platform_profile`; the standalone script path is intentionally refused on this host (NixOS-owned unit) and stays covered by VM+parity evidence. |
 | ASUS FA707NV live read baseline | OBSERVED / READ-ONLY | `platform_profile`, asusd/asusctl profile, UPower, DRM/sysfs GPU, hwmon, thermal and power_supply reads were observed on FA707NV; Session1/Hardware1/hardwared and supergfxd were unavailable. This does not promote write support. |
 | ASUS FA707NV platform profile mutation | LIVE-VALIDATED (current revision) | Controlled Hardware1 apply/read-back/restore re-validated on-device at `7db695c4` (deployed store package `96xcnyn6…` via the NixOS module), including the canonical `orbisctl validate platform-profile --apply-test` PASS; see [`hardware-evidence/fa707nv-live-validation-20260825.md`](hardware-evidence/fa707nv-live-validation-20260825.md). Evidence is scoped to that revision; it does not extend to later changes or other capabilities. |
@@ -217,7 +217,7 @@ All of them are exported from crate public APIs but have **no runtime consumers*
 
 ## Active blockers / next work
 
-1. #104/#105 fan write hard-blockers: source + controlled live success-path evidence complete; production promotion remains independently gated.
+1. Fan production promotion gate: #104/#105 source + controlled live success-path evidence complete; production writes remain independently policy-gated.
 
 ## Historical live evidence retained
 
