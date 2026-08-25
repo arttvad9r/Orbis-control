@@ -65,6 +65,7 @@ pub trait AsusdFanCurveClient: Send + Sync {
 }
 
 /// Production typed client for the asusd FanCurves compatibility backend.
+#[derive(Clone)]
 pub struct ZbusAsusdFanCurveClient {
     connection: Connection,
 }

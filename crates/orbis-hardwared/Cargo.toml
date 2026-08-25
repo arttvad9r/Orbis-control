@@ -12,6 +12,14 @@ description = "Orbis Control: привилегированный hardware helper
 name = "orbis-hardwared"
 path = "src/main.rs"
 
+[[bin]]
+name = "fan-live-validate"
+path = "src/bin/fan-live-validate.rs"
+required-features = ["live-validation"]
+
+[features]
+live-validation = []
+
 [dependencies]
 serde = { workspace = true }
 orbis-core = { workspace = true }

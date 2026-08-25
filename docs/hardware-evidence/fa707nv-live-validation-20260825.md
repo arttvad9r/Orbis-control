@@ -96,9 +96,22 @@ result: PASS (profile applied, verified, and restored)
 
 ## What this evidence does NOT cover
 
-- Fan curve custom writes / factory reset (#104/#105): still hard-blocked in
-  production (`DisabledFanMutationBackend` + `allow_active=no`). Live
-  controlled validation requires a dedicated dev harness reaching the dormant
-  backend; not executed in this session yet.
+- Fan curve custom writes / factory reset (#104/#105): production remains
+  hard-blocked (`DisabledFanMutationBackend` + `allow_active=no`). The
+  feature-gated `fan-live-validate` dev harness reached the dormant typed
+  backend and passed controlled live validation without promoting production:
+
+  ```text
+  profile=Quiet; mutation_status=Supported
+  reset_curves_to_defaults=Applied; observed_curves=2
+  platform_profile: quiet -> quiet
+  same-value CPU write: 8 points; enabled=false preserved
+  independent read-back: CPU bytes equal; GPU untouched
+  RESULT: PASS (#104 enabled preservation + #105 reset containment, live)
+  ```
+
+  The harness performs no direct sysfs writes; the custom write uses freshly
+  read vendor-default bytes, so it does not change fan behavior. The issues
+  remain open for the external release/CI gate (#106) before any promotion.
 - Hosted CI execution (#106, skipped by owner decision); packaging acceptance
   beyond this host; other hardware models.
