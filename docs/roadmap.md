@@ -34,7 +34,7 @@ Remaining:
 
 1. #106 — restore trustworthy executable GitHub Actions;
 2. #114 — after #106, protect `main` with the real required check names;
-3. #118 — prune obsolete `agent/*` refs when delete-ref access exists;
+3. resolved 2026-08-25: obsolete refs pruned (#118) — the superseded PR-head branch is deleted after verifying its tip is an ancestor of `development`; only `main`/`development` remain;
 4. #124 — decide permanent `io.github.orbiscontrol.*` identity before stable release;
 5. resolved 2026-08-25: integration lines reconciled — Draft PR #129 closed as superseded; `development` is the single integration line, and any merge into `main` still waits for executable validation (#106) and resolved safety blockers.
 

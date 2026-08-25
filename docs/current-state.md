@@ -24,7 +24,7 @@ Production product path намеренно включает только док�
 - Единственный canonical workflow — `.github/workflows/ci.yml`.
 - Удалён оставшийся одноразовый `.github/keyboard-backlight-probe-validation-trigger` artifact.
 - Canonical docs hierarchy определена в `docs/README.md`; historical plans/audits отделены через `history.md`.
-- Remote `agent/*` refs ещё требуют cleanup #118; текущий connector не предоставляет delete-ref operation.
+- Obsolete remote refs are fully pruned (#118): the merged PR-head branch `chatgpt/ui-refresh-ghelper-20260820` (`e8b611e`, verified ancestor of `development`) was deleted on 2026-08-25; no `agent/*` or probe refs remain. Only `main` and `development` exist.
 - Read-only ASUS FA707NV evidence is recorded in [`hardware-evidence/asus-fa707nv-baseline.md`](hardware-evidence/asus-fa707nv-baseline.md).
 
 ## Current areas
@@ -221,8 +221,7 @@ All of them are exported from crate public APIs but have **no runtime consumers*
 3. #117 telemetry evidence closure (source-complete; hosted-CI re-proof rides #106).
 4. #126 package/VM sandbox validation (live `deploy-dev-hardwared.sh` run pending).
 5. #124 application identity decision.
-6. #118 old remote branch cleanup when delete-ref access exists.
-7. #114 required checks after #106.
+6. #114 required checks after #106.
 
 ## Historical live evidence retained
 
