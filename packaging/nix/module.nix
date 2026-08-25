@@ -69,13 +69,14 @@ in
         AmbientCapabilities = [ ];
         CapabilityBoundingSet = "";
 
-        # `/sys` remains read-only. Performance platform_profile is the only
-        # direct-sysfs mutation currently enabled by product policy. Keyboard
-        # brightness remains read-only until its write path is release-validated
-        # and intentionally re-enabled together with policy/capability evidence.
+        # `/sys` remains read-only except for the two exact, capability-owned
+        # mutation paths promoted for FA707NV: platform profile and ASUS
+        # keyboard backlight. No parent directory is writable.
         ReadOnlyPaths = [ "/sys" ];
         ReadWritePaths = [
           "-/sys/firmware/acpi/platform_profile"
+          "-/sys/class/leds/asus::kbd_backlight/brightness"
+          "-/sys/class/leds/asus::kbd_backlight/max_brightness"
         ];
       };
     };

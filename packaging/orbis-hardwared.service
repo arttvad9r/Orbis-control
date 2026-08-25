@@ -9,9 +9,8 @@
 # X-RestartIfChanged=false: при обновлении unit'а systemd НЕ перезапускает
 # service (deploy script делает explicit restart).
 #
-# Direct sysfs write scope intentionally matches the full NixOS module:
-# only Performance platform_profile is writable. Keyboard brightness and other
-# unvalidated product writes remain sandbox/policy-blocked.
+# Direct sysfs write scope intentionally matches the full NixOS module: only
+# Performance platform_profile and the exact ASUS keyboard LED paths are writable.
 
 [Unit]
 Description=Orbis Control hardware helper (standalone dev deployment)
@@ -39,6 +38,8 @@ MemoryDenyWriteExecute=true
 AmbientCapabilities=
 CapabilityBoundingSet=
 
-# /sys stays read-only except the one exact optional production write path.
+# /sys stays read-only except the two exact promoted write paths.
 ReadOnlyPaths=/sys
 ReadWritePaths=-/sys/firmware/acpi/platform_profile
+ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/brightness
+ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/max_brightness

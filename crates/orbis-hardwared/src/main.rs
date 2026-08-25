@@ -34,10 +34,7 @@ use orbis_hardwared::{
         FanCurveDefaultsReadback, FanCurveMutationOperation, FanCurveMutationReadback,
         FanCurvePoints, FanMutationStatus,
     },
-    keyboard_backlight::{
-        KeyboardBacklightMutationBackend, KeyboardBacklightMutationReadback,
-        KeyboardBacklightMutationStatus,
-    },
+    keyboard_backlight::{SysfsKeyboardBacklightIo, SysfsKeyboardBacklightMutationBackend},
     panel::{
         PanelOverdriveMutationBackend, PanelOverdriveMutationReadback, PanelOverdriveMutationStatus,
     },
@@ -101,22 +98,6 @@ impl PanelOverdriveMutationBackend for DisabledPanelOverdriveMutationBackend {
 
     fn mutation_status(&self) -> PanelOverdriveMutationStatus {
         PanelOverdriveMutationStatus::Unsupported
-    }
-}
-
-struct DisabledKeyboardBacklightMutationBackend;
-
-#[async_trait]
-impl KeyboardBacklightMutationBackend for DisabledKeyboardBacklightMutationBackend {
-    async fn set_brightness(
-        &self,
-        _level: u8,
-    ) -> Result<KeyboardBacklightMutationReadback, ProviderError> {
-        Err(ProviderError::Unsupported(PRODUCT_MUTATION_DISABLED.into()))
-    }
-
-    fn mutation_status(&self) -> KeyboardBacklightMutationStatus {
-        KeyboardBacklightMutationStatus::Unsupported
     }
 }
 
@@ -290,7 +271,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )),
     )
     .with_keyboard_backlight(
-        Box::new(DisabledKeyboardBacklightMutationBackend),
+        Box::new(SysfsKeyboardBacklightMutationBackend::new(
+            SysfsKeyboardBacklightIo::default(),
+        )),
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             KEYBOARD_BACKLIGHT_POLKIT_ACTION,
@@ -343,16 +326,6 @@ mod tests {
         );
         assert!(matches!(
             panel.set_panel_overdrive(true).await,
-            Err(ProviderError::Unsupported(_))
-        ));
-
-        let keyboard = DisabledKeyboardBacklightMutationBackend;
-        assert_eq!(
-            keyboard.mutation_status(),
-            KeyboardBacklightMutationStatus::Unsupported
-        );
-        assert!(matches!(
-            keyboard.set_brightness(1).await,
             Err(ProviderError::Unsupported(_))
         ));
 
@@ -442,7 +415,10 @@ mod tests {
     #[test]
     fn product_disabled_status_wire_values_remain_total() {
         use orbis_hardwared::{
-            aura::aura_mutation_wire, keyboard_backlight::keyboard_backlight_mutation_wire,
+            aura::aura_mutation_wire,
+            keyboard_backlight::{
+                KeyboardBacklightMutationStatus, keyboard_backlight_mutation_wire,
+            },
             panel::panel_mutation_wire,
         };
 

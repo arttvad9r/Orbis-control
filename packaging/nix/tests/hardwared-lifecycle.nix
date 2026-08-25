@@ -83,7 +83,7 @@
       "RestrictAddressFamilies": "AF_UNIX",
       "MemoryDenyWriteExecute": "yes",
       "ReadOnlyPaths": "/sys",
-      "ReadWritePaths": "-/sys/firmware/acpi/platform_profile",
+      "ReadWritePaths": "-/sys/firmware/acpi/platform_profile -/sys/class/leds/asus::kbd_backlight/brightness -/sys/class/leds/asus::kbd_backlight/max_brightness",
       "CapabilityBoundingSet": "",
     }
     for key, expected in props.items():
@@ -97,9 +97,11 @@
     read_write_paths = machine.succeed(
         "systemctl show -p ReadWritePaths --value orbis-hardwared.service"
     ).strip().split()
-    assert read_write_paths == ["-/sys/firmware/acpi/platform_profile"], read_write_paths
-    assert "-/sys/class/leds/asus::kbd_backlight/brightness" not in read_write_paths
-    assert "-/sys/class/leds/asus::kbd_backlight/max_brightness" not in read_write_paths
+    assert read_write_paths == [
+        "-/sys/firmware/acpi/platform_profile",
+        "-/sys/class/leds/asus::kbd_backlight/brightness",
+        "-/sys/class/leds/asus::kbd_backlight/max_brightness",
+    ], read_write_paths
     assert "-/sys/class/leds" not in read_write_paths
 
     policy_text = machine.succeed(
@@ -117,7 +119,7 @@
         "io.github.orbiscontrol.hardware.set-product-gpu-mode": "no",
         "io.github.orbiscontrol.hardware.set-fan-curve": "no",
         "io.github.orbiscontrol.hardware.set-panel-overdrive": "no",
-        "io.github.orbiscontrol.hardware.set-keyboard-backlight": "no",
+        "io.github.orbiscontrol.hardware.set-keyboard-backlight": "yes",
         "io.github.orbiscontrol.hardware.set-aura-static-rgb": "no",
     }
     assert active_defaults == expected_active, (

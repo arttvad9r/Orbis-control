@@ -73,12 +73,12 @@
   <action id="io.github.orbiscontrol.hardware.set-keyboard-backlight">
     <description>Change the Orbis Control keyboard backlight brightness</description>
     <description xml:lang="ru">Изменить яркость подсветки клавиатуры Orbis Control</description>
-    <message>Keyboard backlight writes are disabled until the hardware path is release-validated</message>
-    <message xml:lang="ru">Запись подсветки клавиатуры отключена до release-валидации hardware path</message>
+      <message>Change the ASUS keyboard backlight level</message>
+      <message xml:lang="ru">Изменить уровень подсветки клавиатуры ASUS</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
-      <allow_active>no</allow_active>
+      <allow_active>yes</allow_active>
     </defaults>
   </action>
   <action id="io.github.orbiscontrol.hardware.set-aura-static-rgb">
