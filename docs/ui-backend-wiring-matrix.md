@@ -104,7 +104,7 @@ This table describes backend facts independently of whether a current UI control
 | MiniLED | `AsusArmouryMiniLedModeProvider` | Provider + probe exist; read-only; not current runtime/UI | None | Confirmed absent → `UNSUPPORTED_ON_FA707NV` |
 | Screen Auto Brightness | `AsusArmouryScreenAutoBrightnessProvider` | Provider + probe exist; read-only; not current runtime/UI | None | Confirmed absent → `UNSUPPORTED_ON_FA707NV` |
 | Wayland display outputs | `WaylandDisplayOutputProvider<WaylandCompositorOutputSource>` | Provider + probe exist; no modeset API; not current runtime/UI | None | Read-only candidate; does not make 60/120 controls writable |
-| Keyboard backlight brightness | `AsusKeyboardBacklightProvider`; hardwared LED-class writer | Provider + Hardware1 exist; not current runtime/UI | `SetKeyboardBacklight`, polkit `...set-keyboard-backlight`, `Applied` | Confirmed present |
+| Keyboard backlight brightness | `AsusKeyboardBacklightProvider`; hardwared LED-class writer | Production Hardware1 + exact NixOS sandbox/polkit; UI derives writability from Supported | `SetKeyboardBacklight`, polkit `...set-keyboard-backlight`, `Applied` | FA707NV live-validated |
 | Aura state | `AsusAuraProvider` over `xyz.ljones.Aura` | Read provider exists; not current runtime/UI | None for generic Aura mode | TUF Aura confirmed present |
 | Aura Static RGB | hardwared `AsusdAuraStaticRgbMutationBackend` | Hardware1 exists; not current runtime/UI | `SetAuraStaticRgb`, polkit `...set-aura-static-rgb`, **`Accepted`** | Confirmed present; hardware RGB read-back is impossible |
 | Power limits | Domain `PowerLimitProvider` / `PowerLimitValue` exists; no safe production implementation found in audited composition | Not in current `ProductionRuntime` | None | Attributes exist but metadata empty; unsafe to expose |
@@ -211,7 +211,7 @@ The fan statuses below intentionally reflect the latest production composition d
 | Binding action selectors: M1, M2, M3, M4, M5, Fn+F4, Fn+C, Fn+V, Fn+NmEnt | 9 | Hotkey/action bindings | Core `HotkeyProvider` trait exists, no production binding service/runtime found | `PREVIEW_ONLY` |
 | Binding parameter fields for same 9 keys | 9 | Optional action/command argument | Local strings only | `PREVIEW_ONLY` |
 | Bindings Reset / Help | 2 | UI-local editor actions | Reset mutates local properties; Help sets local status | `PREVIEW_ONLY` |
-| Backlight Brightness | 1 | `KeyboardBacklightState` / hardware level | Read provider + Hardware1 mutation are implemented; max is read from kernel, not hardcoded | `BACKEND_READY_NOT_WIRED` |
+| Backlight Brightness | 1 | `KeyboardBacklightState` / hardware level | Read provider + Hardware1 mutation are production-wired; max is read from kernel and live read-back is proven on FA707NV | `WIRED_READ_WRITE_FA707NV` |
 | Keyboard/Logo/Lightbar/Lid × Awake/Boot/Sleep/Battery state chips | 16 | Aura/device power-state policy | Current Aura provider covers effect/brightness state, not these 16 power-state semantics | `SEMANTICS_NOT_PROVEN` |
 | XG Mobile | 1 | External GPU/device policy | No proven current product mapping | `SEMANTICS_NOT_PROVEN` |
 | Animation speed | 1 | Aura effect speed mutation | Aura read includes speed, but no generic effect mutation backend | `BACKEND_MISSING` |

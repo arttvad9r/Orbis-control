@@ -20,7 +20,7 @@
 - **Diagnostics** — runtime initialization, capability-generation replacement, Refresh, privacy-bounded JSON Export and Copy Summary (#111 closed); surfaced as actions in Settings → Diagnostics. Open Logs remains disabled.
 - **CLI** — `orbisctl status` plus versioned `status --json`; read-only only.
 - **Display Quick Control** — authoritative read-only observation; no concrete mutation owner.
-- **Keyboard/Panel product controls** — typed Hardware1 status/request/read-back surfaces exist but current production backend status remains Unsupported.
+- **Keyboard/Panel product controls** — keyboard typed backend is production-wired and FA707NV live-validated; Panel remains Unsupported/default-deny pending its independent owner/write evidence.
 - **Aura** — observation/config-level typed surfaces exist; no promoted unattended hardware write.
 - **Boot sound** — strict read-only firmware-attribute provider.
 - **Updates** — UI surface removed (real updates need a distribution server); typed providers retained, no UI consumer.
@@ -106,7 +106,7 @@ Remaining:
 
 ## Product/release-gated writers
 
-Typed writer code does not equal product support. Current production Hardware1 deliberately reports disabled/Unsupported for raw GPU, Fan, Panel, Keyboard and Aura writes. This remains defense-in-depth with UI gating and packaged policy/sandbox restrictions.
+Typed writer code does not equal product support. Current production Hardware1 deliberately reports disabled/Unsupported for raw GPU, Fan, Panel and Aura; keyboard is the exception on FA707NV with exact sandbox/polkit/read-back evidence. This remains defense-in-depth with UI gating and packaged policy/sandbox restrictions.
 
 Promotion requires all relevant evidence:
 

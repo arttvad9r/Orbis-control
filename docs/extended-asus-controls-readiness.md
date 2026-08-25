@@ -30,7 +30,7 @@ research and future validation without being a shipped writable feature.
 | Generic Aura effects | typed read/provider work exists | `PARTIAL / READ-ORIENTED` | expand one proven mode/effect at a time |
 | Aura Static RGB write | typed Hardware1/backend code exists; result semantics are config-level `Accepted` | **HARD-BLOCKED** | prove owner/interface/lifecycle + packaged/live evidence, then deliberate re-enable |
 | Keyboard backlight read | typed read state/provider exists | `IMPLEMENTED SOURCE` | validate packaged/runtime evidence |
-| Keyboard backlight write | typed Hardware1/sysfs backend exists but production composes disabled backend; sysfs path is read-only in service sandbox | **HARD-BLOCKED** | controlled release/live validation before any re-enable |
+| Keyboard backlight write | typed Hardware1/sysfs backend is production-wired; exact ASUS LED paths are sandboxed and FA707NV `3→0→3` live-validated | **LIVE-VALIDATED / FA707NV** | keep capability-specific probe/read-back; evidence is model/revision scoped |
 | Panel Overdrive read | typed read provider/probe exists | `IMPLEMENTED SOURCE` | validate runtime/device evidence |
 | Panel Overdrive write | typed Hardware1/backend code exists but production composes disabled backend | **HARD-BLOCKED** | prove real owner/interface/read-back and release evidence |
 | MiniLED | typed read-only provider/probe exists | `READ ONLY` | expose only with runtime evidence; write needs separate proof |

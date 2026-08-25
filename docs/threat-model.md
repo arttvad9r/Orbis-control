@@ -95,7 +95,7 @@ live-validated production mutation slices:
 | Raw GPU mode | **blocked** |
 | Fan curve/default reset | **blocked** |
 | Panel Overdrive | **blocked** |
-| Keyboard backlight | **blocked** |
+| Keyboard backlight | **FA707NV live-validated** |
 | Aura Static RGB | **blocked** |
 
 The code-level presence of a typed backend is not permission to enable its
@@ -110,7 +110,7 @@ publishing backend `Supported` as effective writability.
 - fan CPU/GPU evidence must not be cross-inferred (#109);
 - fan `enabled` state must survive Session1/UI transport (#116);
 - Battery/Panel/Aura write-owner liveness still needs stronger non-mutating proof (#107); Panel/Aura stay blocked while this is unresolved;
-- Keyboard write remains blocked until release/live validation is explicitly recorded;
+- Keyboard write is restricted to the exact ASUS LED paths and remains model/revision-scoped to FA707NV evidence;
 - product GPU mutation remains blocked until product policy/confirmation semantics are proven.
 
 ## 4. External service and kernel evidence

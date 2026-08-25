@@ -49,6 +49,18 @@ fan/gpu/panel/keyboard ship `allow_active=no`; performance/charge-limit are
 
 ## Controlled mutations (current revision, all restored)
 
+### Keyboard backlight
+
+- Current live unit: `orbis-hardwared` store package `w4acp9y0…`;
+  `KeyboardBacklightMutationStatus = Supported (0)`.
+- Read-before-write: brightness `3`, max `3`.
+- `SetKeyboardBacklight(0)` returned `y 0`; sysfs read-back was `0`.
+- `SetKeyboardBacklight(3)` returned `y 3`; sysfs read-back was `3`.
+- The kernel LED write is asynchronous on this host. The backend performs one
+  write and a bounded read-only settle/read-back window; it never retries the
+  mutation. A prior pre-fix live attempt exposed this behavior as a mismatch
+  and was corrected before the passing run.
+
 ### Performance profile
 
 1. Manual round-trip via Hardware1:

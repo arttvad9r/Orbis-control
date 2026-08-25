@@ -39,7 +39,7 @@
 | Panel Overdrive | typed ASUS provider/probe | Hardware1 → typed asusd setter → local read-back | backend-ready; liveness evidence #107 |
 | MiniLED | typed read provider/probe | none | read only |
 | Screen Auto Brightness | typed read provider/probe | none | read only |
-| Keyboard backlight | typed read state/probe | Hardware1 → fixed brightness write → fresh read-back | backend-ready |
+| Keyboard backlight | typed read state/probe | Hardware1 → fixed brightness write → bounded fresh read-back | **LIVE-VALIDATED FA707NV** |
 | Aura Static RGB | typed Aura read/config state | Hardware1 → asusd Static config; honest `Accepted` semantics | PARTIAL; liveness evidence #107 |
 | Wayland outputs | read-only compositor output provider | none | read only |
 | Diagnostics service presence | D-Bus `NameHasOwner`/activatable checks without activation | none | read only |
