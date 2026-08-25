@@ -35,7 +35,7 @@ Remaining:
 1. #106 — restore trustworthy executable GitHub Actions;
 2. #114 — after #106, protect `main` with the real required check names;
 3. resolved 2026-08-25: obsolete refs pruned (#118) — the superseded PR-head branch is deleted after verifying its tip is an ancestor of `development`; only `main`/`development` remain;
-4. #124 — decide permanent `io.github.orbiscontrol.*` identity before stable release;
+4. resolved 2026-08-25: #124 identity decision recorded in ADR 0013; `io.github.orbiscontrol.Orbis` is permanent and hosting-independent;
 5. resolved 2026-08-25: integration lines reconciled — Draft PR #129 closed as superseded; `development` is the single integration line, and any merge into `main` still waits for executable validation (#106) and resolved safety blockers.
 
 The ASUS baseline is observation evidence only. It does not promote any unvalidated
@@ -48,7 +48,7 @@ write or product capability to `Supported`.
 1. **#125 GUI root boundary** — reject interactive euid 0 before preferences, runtime or D-Bus setup. Screenshot/offscreen behavior must remain explicit and testable.
 2. **#123 bounded execution — CLOSED (2026-08-24)**: telemetry owns provider identity/deadline, Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`), mutation unknown outcomes classify as `Unconfirmed` with no blind retries; all executed green locally (workspace `--locked` suite), hosted CI re-proof rides #106.
 3. **#107 Battery owner/interface liveness** — source-complete with executed fake-system evidence: dynamic bounded non-mutating owner probe plus, with an owner confirmed, a fresh uncached `ChargeControlEndThreshold` read; peer-reported structural absence (UnknownObject/Interface/Property, raw or typed-FDO) is proven drift → `TemporarilyUnavailable`, other failures stay `Unknown`. Executed: unit contracts + extended `battery-mutation-vm` status generations (supported → owner-loss demote → restore → live interface-drift demote with owner present → heal). Remaining: hosted-CI re-proof rides #106; optional live-device confirmation.
-4. **#117 telemetry coverage/freshness — SOURCE-COMPLETE (2026-08-24)**: UI `telemetry_fresh` means a recent useful observation (empty snapshot = absence evidence, last-good preserved); provider snapshot contracts pinned by tests; field-local denied/malformed/unavailable classes implemented as `Telemetry.field_gaps` with structural absence kept distinct; gap evidence presented in the Diagnostics window, Copy Summary and JSON export. Hosted-CI re-proof rides #106.
+4. **#117 telemetry coverage/freshness — CLOSED / SOURCE-COMPLETE (2026-08-24)**: UI `telemetry_fresh` means a recent useful observation (empty snapshot = absence evidence, last-good preserved); provider snapshot contracts pinned by tests; field-local denied/malformed/unavailable classes implemented as `Telemetry.field_gaps` with structural absence kept distinct; gap evidence presented in the Diagnostics window, Copy Summary and JSON export. Hosted-CI re-proof remains externally blocked by #106.
 
 #112 is source-complete and now carries executed evidence: explicit and periodic capability refresh share the same canonical mutation-status requery path, and a private-P2P integration test proves a real BackendMissing→Supported→Unknown transition through explicit refresh (2026-08-24). Hosted CI re-proof rides #106.
 
@@ -125,13 +125,12 @@ Panel, Keyboard and Aura typed code does not itself authorize product writes. Di
 
 **Status: BLOCKED BY EXECUTABLE ENVIRONMENT**
 
-- #108 source fix needs real test/clippy execution;
-- #126 standalone/full hardwared sandbox needs package/VM validation;
-- #124 identity decision;
+- #126 standalone/full hardwared sandbox — resolved with package/VM/live evidence;
+- ADR 0013 permanent identity decision — resolved;
 - #106 executable CI;
 - #114 required checks after CI recovery;
-- final `cargo fmt/check/test/clippy --locked`;
-- final `nix flake check`;
+- final `cargo fmt/check/test/clippy --locked` — executed green locally;
+- final `nix flake check` — executed green locally;
 - packaged startup, D-Bus, polkit, desktop/AppStream and support-matrix acceptance;
 - dated live evidence for device-specific claims.
 
@@ -147,7 +146,7 @@ A release candidate requires all of the following:
 - `nix flake check` executed green;
 - package/metadata acceptance complete;
 - current capability/UI/support evidence matches shipped policy;
-- application identity decision recorded (#124);
+- application identity decision recorded in ADR 0013;
 - `main` protected by required executable checks (#114);
 - live/device claims tied to exact revision and environment.
 

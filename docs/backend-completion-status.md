@@ -10,7 +10,7 @@
 - **Performance** — worker → application/provider mutation → authoritative read-back.
 - **Battery charge limit** — Session1 read + Hardware1/application mutation + fresh read-back.
 - **GPU primitives** — independent power / physical MUX / access-policy reads.
-- **Telemetry** — read-only sysfs snapshot polling; coverage/freshness semantics still need #117.
+- **Telemetry** — read-only sysfs snapshot polling; coverage/freshness semantics implemented and pinned by #117 (closed); hosted-CI re-proof remains blocked by #106.
 - **Fan reads** — profile/fan-specific Session1 reads plus active-curve reads; fan writes remain hard-blocked.
 - **Theme** — runtime + persistence (Catppuccin Mocha/Latte).
 - **Autostart** — owned XDG desktop-entry read/write/read-back (#110 source-complete/closed).
@@ -136,12 +136,9 @@ Status LEDs, clamshell/ASPM/standby-networking/iGPU-memory/CPU-core/hotkey conce
 
 ## Remaining high-value source blockers
 
-- #125 — early interactive GUI euid-0 rejection;
-- #123 — remaining timeout/unknown-outcome contract;
-- #107 — dynamic Battery mutation owner/interface liveness;
-- #117 — telemetry useful/partial/empty evidence;
-- #109/#116 — fan read evidence;
-- #115 — production-native UiState and removal of normal `orbis-test-support` GUI dependency.
+No closed source blocker remains in this list. Fan mutation promotion is still
+blocked by its independent #104/#105 safety/release gate; #106 remains the
+external hosted-CI blocker.
 
 ## Validation state
 

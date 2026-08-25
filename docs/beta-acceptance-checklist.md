@@ -36,8 +36,8 @@ Use [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 - [x] Raw GPU/Fan/Panel/Keyboard/Aura writes are product/policy blocked in the current production composition.
 - [x] Fan writes are defense-in-depth blocked while known safety defects remain.
 - [x] #125: interactive GUI rejects euid 0 before preferences/runtime/D-Bus setup; screenshot/offscreen paths remain exempt.
-- [ ] #123: provider/status hang handling is complete, including mutation unknown-outcome recovery without blind retry.
-- [ ] #126: packaged/VM inspection proves the intended minimal hardwared sandbox on the exact candidate.
+- [x] #123: provider/status hang handling is complete, including mutation unknown-outcome recovery without blind retry; local workspace and full Nix checks are green.
+- [x] #126: packaged/VM/live inspection proves the intended minimal hardwared sandbox on the exact candidate; live module-unit evidence is recorded for FA707NV.
 
 ## Capability truth
 
@@ -45,8 +45,8 @@ Use [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 - [x] Explicit and periodic capability refresh use one canonical mutation-status requery path (#112 source-complete).
 - [x] Public probes use bounded read-only adapters.
 - [x] #120: UI/Diagnostics consume operation-level/equivalent typed write evidence; support-matrix schema separates read/write; product-disabled unvalidated writers remain conservative `Unsupported` with reasons.
-- [ ] #107: Battery write owner/interface liveness is dynamically re-proven across restart/disappearance.
-- [ ] #117: telemetry distinguishes useful fresh data from empty/partial/field-local failure states.
+- [x] #107: Battery write owner/interface liveness is dynamically re-proven across restart/disappearance; live owner-present evidence is recorded.
+- [x] #117: telemetry distinguishes useful fresh data from empty/partial/field-local failure states.
 
 ## Battery / Performance / GPU reads
 
@@ -107,7 +107,7 @@ Use [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 - [ ] A concrete typed compositor owner exists and is validated before Display modeset is enabled.
 - [x] Updates does not invent a release feed/downloader/installer.
 - [ ] A canonical signed source and installation-owner contract exists before application self-update is enabled.
-- [ ] #124 application identity is explicitly accepted or migrated before stable release.
+- [x] #124 application identity is explicitly accepted before stable release; ADR 0013 fixes `io.github.orbiscontrol.Orbis` as permanent and hosting-independent.
 
 ## Final beta decision
 

@@ -250,7 +250,7 @@ Writes stay hard-blocked until #104/#105/#109/#116 and exact-build executable/li
 
 `SysfsTelemetryProvider` is read-only and dynamically discovers hwmon/power-supply sources. Partial metrics are allowed; unsupported derived values are not invented.
 
-Freshness must mean recent useful observation, not merely `Ok(Telemetry)`. Empty/partial/field-local failure evidence remains #117.
+Freshness must mean recent useful observation, not merely `Ok(Telemetry)`. Empty/partial/field-local failure evidence is implemented and pinned by #117's tests; hosted-CI re-proof remains externally blocked by #106.
 
 ## 12. Desired / Observed / Pending
 

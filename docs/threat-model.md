@@ -208,14 +208,14 @@ telemetry or capability refresh.
 Full NixOS and standalone hardwared deployment use the same product policy and
 minimal direct sysfs write intent. Standalone deployment refuses to overwrite a
 NixOS-owned symlink unit and validates the effective write-path list; runtime
-acceptance remains open under #126.
+acceptance is recorded as VM + live module-unit evidence under #126.
 
 Current release blockers:
 
 - GitHub Actions fails before executing workflow steps / fresh pushes may receive no run (#106);
 - `main` must not be protected by a non-working required check; enable protection after CI recovery (#114);
-- obsolete remote agent refs require branch-delete access (#118);
-- stable reverse-DNS application identity still needs an explicit release decision (#124).
+- obsolete remote agent refs were pruned (#118);
+- stable reverse-DNS application identity is fixed by ADR 0013 (#124).
 
 ## 11. Security acceptance rules
 

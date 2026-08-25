@@ -132,10 +132,10 @@ FansWindow mutation controls are disabled. Reads remain available.
 metrics without inventing unsupported totals/percentages. Partial observations
 are allowed.
 
-Current evidence refinement #117 must distinguish a useful recent observation
-from an empty/partial successful call. One optional sensor failure must not poison
-all telemetry, but denial/malformed absence also must not silently become proof
-of fresh useful data.
+Evidence refinement #117 is implemented: useful recent observation is distinct
+from an empty/partial successful call. One optional sensor failure does not
+poison all telemetry, while denial/malformed absence does not become proof of
+fresh useful data; field-local gap classes remain available for diagnostics.
 
 ## Extended ASUS controls
 
