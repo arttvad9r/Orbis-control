@@ -1,6 +1,6 @@
 # DisplayRefresh backend design
 
-Status: typed evidence, request, authoritative applied-state, provider-owner and application orchestration contracts exist; no production compositor mutation implementation exists.
+Status: typed evidence, request, authoritative applied-state, provider-owner and application orchestration contracts exist; no production compositor mutation implementation exists. FA707NV live probe (2026-08-25) found the KScreen/KWayland runtime owner unavailable: `plasma-kscreen.service` is active and `kscreen-doctor` observes `eDP-2`, but the D-Bus loader returns an empty backend and logs `Could not find slot BackendLoaderAdaptor::requestBackend`.
 
 ## Invariant
 
@@ -152,4 +152,4 @@ Display Quick Control write must remain disabled until all of the following are 
 11. Quick Controls set `display-control-ready=true` only from that evidence;
 12. Rust/Slint executable validation passes.
 
-Until then the current UI behavior is correct: observed refresh is shown, but mutation controls remain disabled.
+Until then the current UI behavior is correct: observed refresh is shown, but mutation controls remain disabled. Installing `supergfxd` does not address this compositor/session owner boundary.
