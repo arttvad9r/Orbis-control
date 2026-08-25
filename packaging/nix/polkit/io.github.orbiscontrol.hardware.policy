@@ -51,12 +51,12 @@
   <action id="io.github.orbiscontrol.hardware.set-fan-curve">
     <description>Change the Orbis Control fan curve</description>
     <description xml:lang="ru">Изменить кривую вентилятора Orbis Control</description>
-    <message>Fan curve writes are temporarily disabled pending safe enabled-state preservation</message>
-    <message xml:lang="ru">Запись кривых вентилятора временно отключена до безопасного сохранения enabled-state</message>
+     <message>Change the ASUS fan curve with authoritative read-back</message>
+     <message xml:lang="ru">Изменить кривую вентилятора ASUS с подтверждением read-back</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
-      <allow_active>no</allow_active>
+      <allow_active>yes</allow_active>
     </defaults>
   </action>
   <action id="io.github.orbiscontrol.hardware.set-panel-overdrive">

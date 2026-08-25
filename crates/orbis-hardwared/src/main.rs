@@ -19,7 +19,7 @@ mod product_preflight;
 use std::error::Error;
 
 use async_trait::async_trait;
-use orbis_core::{aura::AuraRgb, fan::FanId, profile::AsusdFanProfile};
+use orbis_core::aura::AuraRgb;
 use orbis_hardwared::{
     AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION,
     GPU_POLKIT_ACTION, HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
@@ -30,10 +30,7 @@ use orbis_hardwared::{
         BatteryMutationBackend, BatteryMutationReadback, BatteryMutationStatus,
         ZbusAsusdBatteryClient, discover_effective_reader,
     },
-    fans::{
-        FanCurveDefaultsReadback, FanCurveMutationOperation, FanCurveMutationReadback,
-        FanCurvePoints, FanMutationStatus,
-    },
+    fans::{AsusdFanCurveMutationBackend, ZbusAsusdFanCurveClient},
     keyboard_backlight::{SysfsKeyboardBacklightIo, SysfsKeyboardBacklightMutationBackend},
     panel::{
         PanelOverdriveMutationBackend, PanelOverdriveMutationReadback, PanelOverdriveMutationStatus,
@@ -44,8 +41,6 @@ use orbis_providers::{error::ProviderError, supergfxd::SupergfxdMode};
 
 const PRODUCT_MUTATION_DISABLED: &str =
     "mutation is disabled until the Orbis product contract and release evidence are proven";
-const FAN_MUTATION_DISABLED: &str = "fan mutation is disabled until enabled-state preservation and factory-reset restoration are fixed";
-
 struct DisabledGpuMutationBackend;
 
 #[async_trait]
@@ -57,31 +52,6 @@ impl SupergfxdMutationOperation for DisabledGpuMutationBackend {
         Err(ProviderError::Unsupported(
             "GPU mutation is disabled until Orbis product-level GPU semantics are proven".into(),
         ))
-    }
-}
-
-struct DisabledFanMutationBackend;
-
-#[async_trait]
-impl FanCurveMutationOperation for DisabledFanMutationBackend {
-    async fn set_fan_curve(
-        &self,
-        _profile: AsusdFanProfile,
-        _fan: &FanId,
-        _curve: &FanCurvePoints,
-    ) -> Result<FanCurveMutationReadback, ProviderError> {
-        Err(ProviderError::Unsupported(FAN_MUTATION_DISABLED.into()))
-    }
-
-    async fn mutation_status(&self) -> FanMutationStatus {
-        FanMutationStatus::Unsupported
-    }
-
-    async fn reset_curves_to_defaults(
-        &self,
-        _profile: AsusdFanProfile,
-    ) -> Result<FanCurveDefaultsReadback, ProviderError> {
-        Err(ProviderError::Unsupported(FAN_MUTATION_DISABLED.into()))
     }
 }
 
@@ -257,7 +227,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             connection.clone(),
             GPU_POLKIT_ACTION,
         )),
-        Box::new(DisabledFanMutationBackend),
+        Box::new(AsusdFanCurveMutationBackend::new(
+            ZbusAsusdFanCurveClient::new(connection.clone()),
+        )),
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             FAN_POLKIT_ACTION,
@@ -311,14 +283,6 @@ mod tests {
 
     #[tokio::test]
     async fn unvalidated_product_mutations_are_hard_disabled() {
-        let fan = DisabledFanMutationBackend;
-        assert_eq!(fan.mutation_status().await, FanMutationStatus::Unsupported);
-        assert!(matches!(
-            fan.reset_curves_to_defaults(AsusdFanProfile::Balanced)
-                .await,
-            Err(ProviderError::Unsupported(_))
-        ));
-
         let panel = DisabledPanelOverdriveMutationBackend;
         assert_eq!(
             panel.mutation_status(),
