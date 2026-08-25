@@ -90,12 +90,14 @@ export component AppWindow inherits Window {
     callback fan-temp-point-changed(int, int);
     callback fan-pwm-point-changed(int, int);
     callback fan-apply-clicked(bool);
+    callback aura-static-rgb-requested(int, int, int);
 
     // Hardware observation surface (backlight/display/system pages).
     in property <bool> backend-ready: false;
     in property <bool> applying: false;
     in property <string> status: "Advanced controls backend unavailable";
     in property <bool> aura-state-ready: false;
+    in property <bool> aura-control-ready: false;
     in property <bool> panel-overdrive-state-ready: false;
     in property <bool> panel-overdrive-control-ready: false;
     in property <bool> boot-sound-state-ready: false;
@@ -300,8 +302,10 @@ export component AppWindow inherits Window {
                         keyboard-brightness <=> root.keyboard-brightness;
                         keyboard-brightness-requested(i) => { root.keyboard-brightness-requested(i); }
                         aura-state-ready <=> root.aura-state-ready;
+                        aura-control-ready <=> root.aura-control-ready;
                         keyboard-effect <=> root.keyboard-effect;
                         keyboard-speed <=> root.keyboard-speed;
+                        aura-static-rgb-requested(a, b, c) => { root.aura-static-rgb-requested(a, b, c); }
                     }
                     if (root.active-section == Section.Display) : DisplaySection {
                         display-state-ready <=> root.display-state-ready;

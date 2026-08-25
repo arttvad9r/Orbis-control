@@ -12,8 +12,10 @@ export component BacklightSection inherits Rectangle {
     in property <int> keyboard-brightness: -1;
     callback keyboard-brightness-requested(int);
     in property <bool> aura-state-ready: false;
+    in property <bool> aura-control-ready: false;
     in-out property <int> keyboard-effect: -1;
     in-out property <int> keyboard-speed: -1;
+    callback aura-static-rgb-requested(int, int, int);
 
     function keyboard-status() -> string {
         if (!root.keyboard-state-ready) { return "Состояние подсветки недоступно"; }
@@ -112,20 +114,35 @@ export component BacklightSection inherits Rectangle {
 
                     SectionTitle {
                         title: "Aura";
-                        detail: root.aura-state-ready ? "наблюдается" : "недоступно";
-                        detail-color: root.aura-state-ready ? Palette.text-secondary : Palette.text-disabled;
+                        detail: root.aura-state-ready ? (root.aura-control-ready ? "config read-back" : "наблюдается") : "недоступно";
+                        detail-color: root.aura-control-ready ? Palette.success : root.aura-state-ready ? Palette.text-secondary : Palette.text-disabled;
                     }
 
-                    // Aura observation is read-only: the privileged writer is
-                    // Static RGB only until a typed effect contract exists.
                     InfoRow { label: "Эффект"; value: root.aura-effect-label(); }
                     InfoRow { label: "Скорость"; value: root.aura-speed-label(); }
 
                     Text {
-                        text: "Запись статических цветов Aura остаётся отдельным продуктом и не включена.";
+                        text: root.aura-control-ready ? "Static RGB · config-level read-back" : "Static RGB недоступен";
                         font-size: 11.5px;
                         color: Palette.text-secondary;
                         overflow: elide;
+                    }
+
+                    if (root.aura-control-ready) : HorizontalLayout {
+                        height: 34px;
+                        spacing: 8px;
+                        Rectangle {
+                            width: 34px; height: 34px; border-radius: 17px; background: #ff3030;
+                            TouchArea { clicked => { root.aura-static-rgb-requested(255, 48, 48); } }
+                        }
+                        Rectangle {
+                            width: 34px; height: 34px; border-radius: 17px; background: #00d8ff;
+                            TouchArea { clicked => { root.aura-static-rgb-requested(0, 216, 255); } }
+                        }
+                        Rectangle {
+                            width: 34px; height: 34px; border-radius: 17px; background: #ffffff;
+                            TouchArea { clicked => { root.aura-static-rgb-requested(255, 255, 255); } }
+                        }
                     }
                 }
             }

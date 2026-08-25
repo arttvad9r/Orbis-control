@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use hardware_controls_backend::{HardwareProductControlClient, ProductWriteStatus};
+use orbis_core::aura::AuraRgb;
 use orbis_core::display_output::DisplayOutputSnapshot;
 use orbis_core::keyboard_backlight::KeyboardBacklightState;
 use orbis_providers::error::ProviderError;
@@ -128,6 +129,7 @@ pub(crate) fn wire_window(app: &AppWindow) {
     app.set_keyboard_state_ready(false);
     app.set_keyboard_control_ready(false);
     app.set_keyboard_brightness(-1);
+    app.set_aura_control_ready(false);
 
     app.on_display_mode_requested(|mode| {
         tracing::warn!(
@@ -192,6 +194,50 @@ pub(crate) fn wire_window(app: &AppWindow) {
                     refresh(&app, None);
                 }) {
                     tracing::warn!(error = ?error, "failed to publish keyboard mutation result");
+                }
+            });
+        });
+    }
+
+    {
+        let weak = app.as_weak();
+        let request_context = context.clone();
+        app.on_aura_static_rgb_requested(move |r, g, b| {
+            let Some(context) = request_context.clone() else {
+                return;
+            };
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            if !app.get_aura_control_ready() {
+                tracing::warn!("Aura request ignored: write evidence unavailable");
+                return;
+            }
+            let rgb = AuraRgb {
+                r: r as u8,
+                g: g as u8,
+                b: b as u8,
+            };
+            app.set_aura_control_ready(false);
+            let result_weak = app.as_weak();
+            context.runtime.spawn(async move {
+                let result = async {
+                    let client = HardwareProductControlClient::connect_system().await?;
+                    client.set_aura_static_rgb(rgb).await
+                }
+                .await;
+                if let Err(error) = result_weak.upgrade_in_event_loop(move |app| {
+                    app.set_status(match result {
+                        Ok(observed) => format!(
+                            "Aura Static RGB accepted · config read-back {:?}",
+                            observed.observed
+                        )
+                        .into(),
+                        Err(error) => format!("Aura write failed · {error}").into(),
+                    });
+                    force_refresh(&app);
+                }) {
+                    tracing::warn!(error = ?error, "failed to publish Aura mutation result");
                 }
             });
         });
@@ -294,14 +340,16 @@ fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
     let weak = app.as_weak();
     let completion = context.refreshing.clone();
     context.runtime.spawn(async move {
-        let (display_result, keyboard_result, keyboard_write_result) = tokio::join!(
+        let (display_result, keyboard_result, keyboard_write_result, aura_write_result) = tokio::join!(
             read_display_state(),
             read_keyboard_state(),
             read_keyboard_write_status(),
+            read_aura_write_status(),
         );
 
         let display = display_state(display_result);
         let keyboard = keyboard_state(keyboard_result, keyboard_write_result);
+        let aura_write = aura_write_result.unwrap_or(ProductWriteStatus::Unknown);
         completion.store(false, Ordering::Release);
 
         if let Err(error) = weak.upgrade_in_event_loop(move |app| {
@@ -313,6 +361,7 @@ fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
             app.set_keyboard_state_ready(keyboard.state_ready);
             app.set_keyboard_control_ready(keyboard.control_ready);
             app.set_keyboard_brightness(keyboard.brightness);
+            app.set_aura_control_ready(aura_write.is_supported());
         }) {
             tracing::warn!(error = ?error, "failed to publish quick-control state to UI");
         }
@@ -336,6 +385,11 @@ async fn read_keyboard_state() -> Result<KeyboardBacklightState, ProviderError> 
 async fn read_keyboard_write_status() -> Result<ProductWriteStatus, ProviderError> {
     let client = HardwareProductControlClient::connect_system().await?;
     client.keyboard_status().await
+}
+
+async fn read_aura_write_status() -> Result<ProductWriteStatus, ProviderError> {
+    let client = HardwareProductControlClient::connect_system().await?;
+    client.aura_status().await
 }
 
 fn display_state(result: Result<DisplayOutputSnapshot, ProviderError>) -> DisplayUiState {
