@@ -1,7 +1,7 @@
 # Current State
 
 > Роль: **CURRENT STATUS**.
-> Обновлено: **2026-08-24**.
+> Обновлено: **2026-08-25**.
 > Source snapshot: development branch (consolidates `asus-hardware-validation-20260821` / PR #129 head `e8b611e`).
 >
 > `main` остаётся последней консолидированной baseline до отдельной интеграции этой ветки. Claims используют [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md): `IMPLEMENTED / TESTED / PACKAGED / LIVE-VALIDATED / BLOCKED / UNKNOWN`.
@@ -43,7 +43,7 @@ Production product path намеренно включает только док�
 | Window/tray lifecycle | IMPLEMENTED SOURCE — #121 closed | Start Minimized, X11-style position restore/save, Wayland fail-closed behavior, StatusNotifier tray gating and explicit Quit lifecycle. |
 | Diagnostics | IMPLEMENTED SOURCE — #111 closed | Runtime initialization, capability generation replacement, Refresh, privacy-bounded JSON export and Copy Summary wired; Open Logs intentionally disabled. |
 | Battery read | IMPLEMENTED / ASUS+SYSFS CONSENSUS | Current charge/status come from UPower; configured/effective charge-limit state is accepted when ASUS/asusd and kernel sysfs agree. UPower threshold is diagnostic only. |
-| Battery mutation | HISTORICAL LIVE-VALIDATED / SOURCE-COMPLETE — #107 | Controlled Hardware1 path. Dynamic asusd evidence is implemented (#107): `Hardware1.BatteryMutationStatus` re-checks owner liveness per query (non-activating `NameHasOwner`) and, with an owner confirmed, performs one fresh uncached `Properties.Get` of `ChargeControlEndThreshold`; peer-reported UnknownObject/UnknownInterface/UnknownProperty (raw or typed-FDO shape) is proven interface drift → `TemporarilyUnavailable`, other failures stay inconclusive (`Unknown`). Startup preflight keeps the strict non-activating guarantee; only the racy refresh window may address the well-known name. Fake-system `battery-mutation-vm` executes supported → owner-loss → restore → live interface-drift (mis-serving daemon raising `UnknownProperty` with the owner present) → heal status generations locally on this revision; real-asusd/live-device confirmation remains future work. |
+| Battery mutation | HISTORICAL + CURRENT LIVE-VALIDATED / CLOSED — #107 | Controlled Hardware1 path with dynamic asusd owner-liveness requery (`NameHasOwner` non-activating, fresh uncached `Properties.Get`, interface-drift → `TemporarilyUnavailable`). Proven live on 2026-08-25: real-asusd owner present → `Supported` per query (stale revision showed boot-race `TemporarilyUnavailable`), plus a full charge-limit round-trip with Confirmed consensus; see [`hardware-evidence/fa707nv-live-validation-20260825.md`](hardware-evidence/fa707nv-live-validation-20260825.md). Fake-system `battery-mutation-vm` executes supported → owner-loss → restore → interface-drift → heal generations locally. |
 | Performance read/write | HISTORICAL LIVE-VALIDATED / CURRENT SOURCE IMPLEMENTED | Session1 read + Hardware1/polkit write + read-back. |
 | GPU primitives | HISTORICAL LIVE-VALIDATED READS | Power, physical MUX and access policy remain separate read concepts. |
 | GPU product mode read | IMPLEMENTED SOURCE / ASUSD ARMOURY | Read-only `dgpu_disable + gpu_mux_mode` decoder reports Hybrid/Integrated/Ultimate; Optimized is not inferred. Current host reports Hybrid (fresh read-only Armoury snapshot 2026-08-24: `CurrentValue` pair `(0,1)`, both `QueuedGpuValue=-1`). |
@@ -64,9 +64,10 @@ Production product path намеренно включает только док�
 | Updates | FAIL-CLOSED | Installation owner detection + typed blockers exist; no invented release feed/downloader/installer. |
 | Release dependency graph | EXECUTED LOCALLY — #115 closed | GUI release graph contains no `orbis-test-support` (re-proven by `cargo tree -e normal --locked` on this revision): production startup uses `UiState::production_initial`; fixture bootstrap is dev-only + optional `ui-review` feature for screenshot builds (`cargo check -p orbis-ui --features ui-review` green). |
 | GUI root boundary | EXECUTED LOCALLY — #125 closed | Interactive launch rejects euid 0 before preferences/runtime/bus setup (`LaunchContext::validate`, rustix geteuid); screenshot/offscreen paths remain explicit exceptions; decision unit tests executed green on this revision. Hosted CI re-proof rides #106. |
-| Hardwared sandbox | STRUCTURALLY MINIMIZED / VM-VALIDATED — #126 residual live-host | Intended direct sysfs write surface is `platform_profile` only. Executed on the contract-probe revision: all three system-integration VM checks green (`hardwared-lifecycle`, `performance-mutation-vm`, `battery-mutation-vm` incl. #107 status generations); a source-level parity contract (`scripts/check-hardwared-unit-parity.py` in `verify-static`, drift-catching verified) pins the standalone unit to the identical module sandbox/write surface. Remaining before close: one live `deploy-dev-hardwared.sh` run against a real/dev host (owner-side, needs sudo). |
+| Hardwared sandbox | STRUCTURALLY MINIMIZED / LIVE-VALIDATED — #126 closed | Intended direct sysfs write surface is `platform_profile` only. All three system-integration VM checks green (`hardwared-lifecycle`, `performance-mutation-vm`, `battery-mutation-vm` incl. #107 status generations); source-level parity contract (`scripts/check-hardwared-unit-parity.py`) pins the standalone unit to the identical sandbox. Live-host validation executed 2026-08-25 on FA707NV at `7db695c4` through the canonical NixOS module deployment: effective unit shows `ProtectSystem=strict`, `NoNewPrivileges=yes`, `ReadWritePaths` limited to `platform_profile`; the standalone script path is intentionally refused on this host (NixOS-owned unit) and stays covered by VM+parity evidence. |
 | ASUS FA707NV live read baseline | OBSERVED / READ-ONLY | `platform_profile`, asusd/asusctl profile, UPower, DRM/sysfs GPU, hwmon, thermal and power_supply reads were observed on FA707NV; Session1/Hardware1/hardwared and supergfxd were unavailable. This does not promote write support. |
-| ASUS FA707NV platform profile mutation | LIVE-VALIDATED (revision-scoped) | Controlled Hardware1 apply/read-back/restore was validated on-device; see [`hardware-evidence/fa707nv-platform-profile-validation.md`](hardware-evidence/fa707nv-platform-profile-validation.md). Evidence is scoped to that revision and environment; it does not extend to later changes or other capabilities. |
+| ASUS FA707NV platform profile mutation | LIVE-VALIDATED (current revision) | Controlled Hardware1 apply/read-back/restore re-validated on-device at `7db695c4` (deployed store package `96xcnyn6…` via the NixOS module), including the canonical `orbisctl validate platform-profile --apply-test` PASS; see [`hardware-evidence/fa707nv-live-validation-20260825.md`](hardware-evidence/fa707nv-live-validation-20260825.md). Evidence is scoped to that revision; it does not extend to later changes or other capabilities. |
+| ASUS FA707NV battery mutation | LIVE-VALIDATED (current revision) | `SetChargeLimit` 100→80→100 through production Hardware1/polkit with kernel read-back and Confirmed AsusBackend+Sysfs consensus at both ends; dynamic `BatteryMutationStatus=Supported` observed against the real asusd owner (#107). Same evidence doc as above. |
 | Research foundations (policy/preset/reconciliation/fan-policy/transaction/readiness/system-telemetry) | FOUNDATION | Merged modules are exported from `orbis-core`/`orbis-config`/`orbis-providers` public APIs but have no runtime consumers: worker, UI, sessiond and hardwared do not call them. Loading config remains hardware-inert. See "Research-foundation status" below. |
 
 ## Bounded execution status (#123)
@@ -216,12 +217,11 @@ All of them are exported from crate public APIs but have **no runtime consumers*
 
 ## Active blockers / next work
 
-1. #106 executable CI/tooling recovery.
-2. #104/#105 fan write hard-blockers: source contracts in place, no promotion until closure conditions are met (#104/#105).
+1. #106 executable CI/tooling recovery (owner billing decision; skipped for now).
+2. #104/#105 fan write hard-blockers: source contracts in place; controlled live validation of the dormant backend pending (dev harness).
 3. #117 telemetry evidence closure (source-complete; hosted-CI re-proof rides #106).
-4. #126 package/VM sandbox validation (live `deploy-dev-hardwared.sh` run pending).
-5. #124 application identity decision.
-6. #114 required checks after #106.
+4. #124 application identity decision.
+5. #114 required checks after #106.
 
 ## Historical live evidence retained
 
