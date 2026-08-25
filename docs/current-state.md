@@ -19,7 +19,7 @@ Production product path намеренно включает только док�
 ## Repository status
 
 - Active integration branch: `development` (pushed to `origin/development`; consolidates the former `asus-hardware-validation-20260821` line).
-- Integration PR #129 was closed on 2026-08-25 as superseded: its head `e8b611e` is a verified direct ancestor of `development` (`merge-base --is-ancestor`), so no unique work was lost. `development` remains the single integration line.
+- Draft integration PR: #129 was closed on 2026-08-25 as superseded: its head `e8b611e` is a verified direct ancestor of `development` (`merge-base --is-ancestor`), so no unique work was lost. `development` remains the single integration line.
 - `main` — previous consolidated baseline; required checks не включены из-за #106/#114.
 - Единственный canonical workflow — `.github/workflows/ci.yml`.
 - Удалён оставшийся одноразовый `.github/keyboard-backlight-probe-validation-trigger` artifact.
