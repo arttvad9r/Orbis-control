@@ -265,7 +265,11 @@ async fn read_brightness_until_match(
                 "asus kbd_backlight read-back mismatch: expected={expected}, got={observed}"
             )));
         }
-        tokio::time::sleep(READBACK_POLL_INTERVAL).await;
+        // Hardware1 methods are also dispatched by zbus' executor thread,
+        // which is not guaranteed to have a Tokio reactor. The interval is
+        // tightly bounded and only delays a read-back poll; it never retries
+        // the already-dispatched mutation.
+        std::thread::sleep(READBACK_POLL_INTERVAL);
         observed = io.read_brightness().await?;
     }
     Ok(observed)
