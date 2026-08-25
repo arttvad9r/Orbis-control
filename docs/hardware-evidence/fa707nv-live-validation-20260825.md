@@ -49,6 +49,28 @@ fan/gpu/panel/keyboard ship `allow_active=no`; performance/charge-limit are
 
 ## Controlled mutations (current revision, all restored)
 
+### Production fan backend
+
+- `FanMutationStatus = Supported (0)` after current production deployment.
+- `ResetFanCurvesToDefaults(Quiet=2)` through Hardware1 returned `u 2`;
+  subsequent Session1 CPU/GPU reads returned valid eight-point curves with
+  `enabled=false` and no malformed sentinel.
+- Production `SetFanCurve(Quiet=2, CPU=0)` using the freshly read exact curve
+  returned `u 2`; the backend preserved `enabled` and performed authoritative
+  CPU read-back. GPU remained a separate untouched curve.
+
+### ASUS product GPU queue
+
+- Production `SetProductGpuMode(Hybrid=0)` no-op returned
+  `uuuub 0 0 4294967295 0 false`; current pair remained `(dgpu_disable=0,
+  gpu_mux_mode=1)` with no queued change.
+- Controlled staged `Integrated=1` returned `uuuub 1 0 1 1 true`, proving the
+  paired queue and reboot-required semantics; it was immediately restored via
+  `Hybrid=0`, returning `uuuub 0 0 0 1 false`.
+- Final live state: current Hybrid, queued Hybrid (same current),
+  `reboot_required=false`; no reboot/logout performed. Raw supergfxd mutation
+  remains unavailable because `supergfxd` is absent on FA707NV.
+
 ### Keyboard backlight
 
 - Current live unit: `orbis-hardwared` store package `w4acp9y0…`;
@@ -103,8 +125,9 @@ result: PASS (profile applied, verified, and restored)
 - GPU power read stays honestly `Unavailable` (supergfxd not installed);
   product-mode Armoury snapshot decodes Hybrid with nothing queued;
   physical MUX `Integrated`; access `Unblocked`.
-- Fan/Panel/Keyboard/Aura mutation statuses remain `Unsupported (1)` from the
-  production composition.
+- Panel and Aura mutation statuses remain `Unsupported (1)` from the
+  production composition. Fan and keyboard are now production-wired and
+  live-validated above.
 
 ## What this evidence does NOT cover
 

@@ -94,7 +94,7 @@ Backend publishes:
 - `keyboard-state-ready: bool`
 - `keyboard-brightness: int` — фактический raw hardware level
 - `keyboard-status: string` — включает observed `current/max`
-- `keyboard-control-ready: false` в текущем production composition
+- `keyboard-control-ready` выводится из operation-level `Supported` evidence
 
 Read path использует существующий `AsusKeyboardBacklightProvider`, который
 читает `/sys/class/leds/asus::kbd_backlight/{brightness,max_brightness}`. Max
@@ -102,13 +102,11 @@ level определяется hardware и не hardcode-ится как `3`; е
 сообщает, например, `4`, UI сохраняет это в status и не подделывает выбранный
 preset.
 
-В `orbis-hardwared` уже существует typed keyboard mutation implementation с
-validation, отдельным polkit action и fresh read-back. Однако production daemon
-намеренно компонует `DisabledKeyboardBacklightMutationBackend`, который
-сообщает `Unsupported`; packaged policy также не разрешает считать этот write
-production-ready. Поэтому `keyboard-brightness-requested(int)` зарегистрирован,
-но handler только отклоняет request, а `keyboard-control-ready` остаётся
-`false`.
+В `orbis-hardwared` существует typed keyboard mutation implementation с
+validation, отдельным polkit action и fresh read-back. Текущая FA707NV
+production-композиция использует этот backend, точные sandbox paths и
+capability-specific polkit. `keyboard-brightness-requested(int)` проходит только
+при `Supported`; live `3→0→3` read-back подтверждён.
 
 Initial/periodic read lifecycle и 2-секундный timeout совпадают с Display.
 

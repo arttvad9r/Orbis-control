@@ -12,7 +12,11 @@
 
 Privileged mutation architecture остаётся узкой: original caller → typed `Hardware1` → capability-specific polkit → bounded backend/read-back. `sessiond` — user-session/read boundary и не является privileged deputy.
 
-Production product path включает только доказанные writes. Performance, Battery и FA707NV keyboard backlight — live mutation owners; raw GPU, Fan, Panel и Aura остаются product/policy blocked. Automation execution promotion=false, Display modeset не имеет concrete owner, Updates не имеет canonical signed feed/installer owner.
+Production product path включает только доказанные writes. Performance, Battery,
+FA707NV keyboard backlight, ASUS fan curves and ASUS product GPU queue are live
+mutation owners; raw supergfxd GPU, Panel and Aura remain product/policy
+blocked. Automation execution promotion=false, Display modeset не имеет
+concrete owner, Updates не имеет canonical signed feed/installer owner.
 
 GitHub Actions is optional/manual for this single-owner project and is not a release gate. Canonical executable evidence is the local flake workflow: locked Cargo fmt/check/test/clippy, `python3 scripts/verify-static` and full `nix flake check --max-jobs 1 --cores 4`. These remain revision-scoped evidence; live hardware evidence remains separate.
 
@@ -47,15 +51,15 @@ GitHub Actions is optional/manual for this single-owner project and is not a rel
 | Performance read/write | HISTORICAL LIVE-VALIDATED / CURRENT SOURCE IMPLEMENTED | Session1 read + Hardware1/polkit write + read-back. |
 | GPU primitives | HISTORICAL LIVE-VALIDATED READS | Power, physical MUX and access policy remain separate read concepts. |
 | GPU product mode read | IMPLEMENTED SOURCE / ASUSD ARMOURY | Read-only `dgpu_disable + gpu_mux_mode` decoder reports Hybrid/Integrated/Ultimate; Optimized is not inferred. Current host reports Hybrid (fresh read-only Armoury snapshot 2026-08-24: `CurrentValue` pair `(0,1)`, both `QueuedGpuValue=-1`). |
-| ASUS product GPU queue operation | IMPLEMENTED / REVISION-SCOPED TESTED / PACKAGED — PRODUCTION BLOCKED | Typed `Hardware1.SetProductGpuMode` exists end-to-end (provider outcome/mismatch classification → hardwared paired queue backend + P2P tests → session-client caller-preserving source → worker FIFO command/event → UI queued-target + reboot-required rendering). Polkit action `io.github.orbiscontrol.hardware.set-product-gpu-mode` ships `allow_active=no`; hardwared production composition keeps the backend unattached (`NotSupported`); UI controls stay disabled without `Supported` write evidence. No real host write was issued; controlled live validation requires explicit user confirmation. |
-| GPU product/raw mutation | BLOCKED | Product modes are policy, not raw backend enum. Production mutation remains disabled; ASUS GPU attributes are queued/deferred until shutdown and require reboot semantics. Raw `Hardware1.SetGpuMode` supergfxd semantics unchanged. |
+| ASUS product GPU queue operation | LIVE-VALIDATED FA707NV / PRODUCTION WIRED | Typed `Hardware1.SetProductGpuMode` paired queue backend is production-wired with active-session polkit. Live Hybrid no-op and Integrated→Hybrid staged restore passed on FA707NV; current/queued pairs and `reboot_required=false` read back authoritatively. No automatic reboot is performed; raw supergfxd path remains disabled because the service is absent. |
+| GPU raw mutation | BLOCKED | Raw `Hardware1.SetGpuMode` remains disabled because supergfxd is absent. ASUS product GPU queue is separately live-validated and production-wired. |
 | Capability registry | IMPLEMENTED / RESILIENCE COVERED | Whole-swap immutable generations; explicit and periodic refresh share canonical mutation-status requery (#112 closed with an executed P2P integration test proving a real status transition through explicit refresh); backend loss/timeout and recovery publish capability-local availability transitions. UI/Diagnostics/support-policy source audit #120 is complete; Battery owner evidence is now dynamic (#107 owner liveness). |
 | Provider execution | EXECUTED LOCALLY — #123 closed | Canonical `bounded_provider_call`; public probes, CLI and main worker read refreshes use provider deadlines; telemetry owns provider identity/deadline (`provider_id`/`snapshot_timeout`); Hardware1 status requery bounded (`HARDWARE1_STATUS_DEADLINE`); mutation unknown outcome classified `Unconfirmed` without retry. Full local flake evidence is green. |
 | CLI | IMPLEMENTED READ-ONLY / LOCALLY EXECUTED — #119 closed | `status` + versioned `status --json` (schema 3 includes battery threshold evidence); typed states; no mutation commands. Executable local validation + service-absent integration test recorded. |
 | Telemetry | IMPLEMENTED / FIELD EVIDENCE COMPLETE — #117 closed | Partial metrics are supported. UI freshness honors snapshot quality: an `Ok` snapshot with no observed field is absence evidence (`telemetry_fresh=false`, last-good values preserved); provider contracts for empty root, all-sources-failing and permission-denied field-local degradation are pinned by tests. Field-local gap evidence is on the provider API and presented in Settings → Diagnostics, Copy Summary and JSON export. |
 | UI shell | REDESIGNED / SOURCE-COMPLETE + LOCALLY EXECUTED — #128, sidebar redesign 2026-08-25 | Frameless preferred-1200×800 window (min 980×680): 230px sidebar with ten `Section` pages (Dashboard, Performance, Power, Cooling, Graphics, Backlight, Display, System, Settings, About), 44px title bar (drag via slint `unstable-winit-030` → winit `drag_window()`, minimize/maximize, close through the shared close-action tray/quit path). Calm light/dark token pair (off-white/white cards, one blue accent; WCAG AA pinned by `check-ui-contract.py`). Dashboard carries device header, performance modes, telemetry, read-only fan curve, charge limit and keyboard lighting; capability-honest pages hide unsupported controls. Updates and Automation editing surfaces remain removed; Diagnostics actions live in System. Full local flake evidence is green. |
 | Fan reads | IMPLEMENTED / AGGREGATE TRUTH + STORED ENABLED CARRIED | Per-fan Session1 read exists; stored `FanCurveData.enabled` is carried through Session1/client/UI evidence (#116 source-complete) and rendered from `UiState` in the Fans section; aggregate FanCurves requires both CPU and GPU read contracts (#109 source-complete). |
-| Fan writes/reset | HARD-BLOCKED — write gate stays; #104/#105 source + controlled live success-path evidence complete | UI + polkit + production Hardware1 composition prevent the dormant unsafe path (`DisabledFanMutationBackend`, fan polkit `allow_active=no`). Source contracts remain fail-closed: `ApplyResult::Accepted` for reset, unknown-outcome after possible dispatch, worker serialization and no Orbis-side profile switching; error-path restoration remains source/P2P-test evidence. Current-revision feature-gated `fan-live-validate` passed on FA707NV: Quiet reset observed `quiet→quiet`; same-value CPU write preserved `enabled=false` and exact points; GPU stayed untouched. Do not promote production writes until their independent safety/release gate is explicitly accepted. Evidence: [`hardware-evidence/fa707nv-live-validation-20260825.md`](hardware-evidence/fa707nv-live-validation-20260825.md). |
+| Fan writes/reset | LIVE-VALIDATED FA707NV / PRODUCTION WIRED | Typed asusd backend is production-wired with active-session fan polkit. Hardware1 Quiet reset returned Applied with fresh CPU/GPU curves; production same-value CPU write returned Applied and preserved exact points/enabled, GPU untouched. Unknown-outcome and profile-containment contracts remain fail-closed. Evidence: [`hardware-evidence/fa707nv-live-validation-20260825.md`](hardware-evidence/fa707nv-live-validation-20260825.md). |
 | Panel write | HARD-BLOCKED | Typed API may exist; production backend status remains Unsupported/default-deny. |
 | Keyboard write | LIVE-VALIDATED — current revision | FA707NV `/sys/class/leds/asus::kbd_backlight` promoted through typed Hardware1/polkit with exact sandbox paths; `3→0→3` returned Applied and authoritative read-back matched; bounded settle handles the device's asynchronous write. |
 | Aura write | HARD-BLOCKED | Static RGB typed writer is not promoted into product/unattended execution. |
@@ -98,7 +102,7 @@ The current source contract is deliberately conservative:
 
 - Performance/Battery/Fan UI writability derives from `operations.write.status`;
 - Diagnostics carries and renders read/write statuses independently;
-- Panel/Keyboard request paths require explicit `ProductWriteStatus::Supported`;
+- Panel request paths require explicit `ProductWriteStatus::Supported`; keyboard is now live-wired on FA707NV and still uses operation-level status;
 - support-matrix schema requires separate read/write evidence and the repository currently contains only `empty`/`unknown` examples, not optimistic model claims;
 - current deliberately disabled/unvalidated product writes remain effective `Unsupported` with a reason rather than a generic `DisabledByPolicy` status that could imply already-proven hardware support.
 
@@ -197,7 +201,7 @@ Safe source work may continue when it does not widen unvalidated hardware writes
 - fail-closed runtime hardening whose source semantics are locally reviewable;
 - preparation of tests that will execute later.
 
-Do not promote fan/GPU/Panel/Keyboard/Aura writes, unattended Automation, Display modeset or self-update on static or local-test evidence alone.
+Do not promote raw GPU/Panel/Aura writes, unattended Automation, Display modeset or self-update on static or local-test evidence alone; fan, keyboard and ASUS product-GPU promotion now have FA707NV live evidence.
 
 ## Research-foundation status (FOUNDATION, unwired)
 
