@@ -28,7 +28,7 @@ research and future validation without being a shipped writable feature.
 | AniMe Matrix | capability/domain vocabulary exists; no proven production provider | `PRODUCTION BLOCKED` | read-only provider/evidence first |
 | Slash Lighting | capability vocabulary exists; no dedicated production provider | `PRODUCTION BLOCKED` | typed read model + probe after ABI research |
 | Generic Aura effects | typed read/provider work exists | `PARTIAL / READ-ORIENTED` | expand one proven mode/effect at a time |
-| Aura Static RGB write | typed Hardware1/backend code exists; result semantics are config-level `Accepted` | **HARD-BLOCKED** | prove owner/interface/lifecycle + packaged/live evidence, then deliberate re-enable |
+| Aura Static RGB write | typed Hardware1 backend is production-wired; config-level `Accepted` and exact `LedModeData` read-back live-validated on FA707NV | **LIVE-VALIDATED / CONFIG-ACCEPTED** | hardware LED state remains unconfirmed because kernel RGB ABI is write-only |
 | Keyboard backlight read | typed read state/provider exists | `IMPLEMENTED SOURCE` | validate packaged/runtime evidence |
 | Keyboard backlight write | typed Hardware1/sysfs backend is production-wired; exact ASUS LED paths are sandboxed and FA707NV `3→0→3` live-validated | **LIVE-VALIDATED / FA707NV** | keep capability-specific probe/read-back; evidence is model/revision scoped |
 | Panel Overdrive read | typed read provider/probe exists | `IMPLEMENTED SOURCE` | validate runtime/device evidence |

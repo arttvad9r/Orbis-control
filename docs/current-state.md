@@ -14,8 +14,9 @@ Privileged mutation architecture остаётся узкой: original caller �
 
 Production product path включает только доказанные writes. Performance, Battery,
 FA707NV keyboard backlight, ASUS fan curves and ASUS product GPU queue are live
-mutation owners; raw supergfxd GPU, Panel and Aura remain product/policy
-blocked. Automation execution promotion=false, Display modeset не имеет
+mutation owners; raw supergfxd GPU remains blocked, while Panel Overdrive and
+Aura Static RGB use their typed production owners. Automation execution
+promotion=false, Display modeset не имеет
 concrete owner, Updates не имеет canonical signed feed/installer owner.
 
 GitHub Actions is optional/manual for this single-owner project and is not a release gate. Canonical executable evidence is the local flake workflow: locked Cargo fmt/check/test/clippy, `python3 scripts/verify-static` and full `nix flake check --max-jobs 1 --cores 4`. These remain revision-scoped evidence; live hardware evidence remains separate.
@@ -62,7 +63,7 @@ GitHub Actions is optional/manual for this single-owner project and is not a rel
 | Fan writes/reset | LIVE-VALIDATED FA707NV / PRODUCTION WIRED | Typed asusd backend is production-wired with active-session fan polkit. Hardware1 Quiet reset returned Applied with fresh CPU/GPU curves; production same-value CPU write returned Applied and preserved exact points/enabled, GPU untouched. Unknown-outcome and profile-containment contracts remain fail-closed. Evidence: [`hardware-evidence/fa707nv-live-validation-20260825.md`](hardware-evidence/fa707nv-live-validation-20260825.md). |
 | Panel Overdrive write | LIVE-VALIDATED FA707NV / PRODUCTION WIRED | Typed asusd setter + kernel current-value read-back; active-session polkit; live `1→0→1` returned Applied and restored `1`. |
 | Keyboard write | LIVE-VALIDATED — current revision | FA707NV `/sys/class/leds/asus::kbd_backlight` promoted through typed Hardware1/polkit with exact sandbox paths; `3→0→3` returned Applied and authoritative read-back matched; bounded settle handles the device's asynchronous write. |
-| Aura write | HARD-BLOCKED | Static RGB typed writer is not promoted into product/unattended execution. |
+| Aura Static RGB write | LIVE-VALIDATED FA707NV / CONFIG-ACCEPTED | Typed asusd backend is production-wired with active-session polkit; same RGB config round-trip returned `Accepted` with exact `LedModeData` read-back. Hardware LED state remains unconfirmed because the kernel attribute is write-only. |
 | Automation | IMPLEMENTED SHADOW/EXECUTOR CONTRACT, EXECUTION BLOCKED | Worker owns policy/lifecycle/debounce/recovery/serialization; resume performs read-only provider/capability refresh and never restores desired hardware state. Performance executor compiled but promotion=false. Other executors disabled. |
 | Display Refresh | IMPLEMENTED CONTRACT / NO MUTATION OWNER | Typed target/request/read-back design exists; no concrete compositor configuration owner is enabled. |
 | Updates | FAIL-CLOSED | Installation owner detection + typed blockers exist; no invented release feed/downloader/installer. |

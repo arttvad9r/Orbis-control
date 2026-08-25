@@ -40,7 +40,7 @@
 | MiniLED | typed read provider/probe | none | read only |
 | Screen Auto Brightness | typed read provider/probe | none | read only |
 | Keyboard backlight | typed read state/probe | Hardware1 → fixed brightness write → bounded fresh read-back | **LIVE-VALIDATED FA707NV** |
-| Aura Static RGB | typed Aura read/config state | Hardware1 → asusd Static config; honest `Accepted` semantics | PARTIAL; liveness evidence #107 |
+| Aura Static RGB | typed Aura read/config state | Hardware1 → asusd Static config; honest `Accepted` semantics | **LIVE-VALIDATED FA707NV / CONFIG-ACCEPTED** |
 | Wayland outputs | read-only compositor output provider | none | read only |
 | Diagnostics service presence | D-Bus `NameHasOwner`/activatable checks without activation | none | read only |
 

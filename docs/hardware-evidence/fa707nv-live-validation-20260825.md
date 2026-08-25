@@ -78,6 +78,16 @@ fan/gpu/panel/keyboard ship `allow_active=no`; performance/charge-limit are
 - `SetPanelOverdrive(false)` returned `y 0`; kernel read-back was `0`.
 - Restore `SetPanelOverdrive(true)` returned `y 1`; kernel read-back was `1`.
 
+### Aura Static RGB
+
+- `AuraMutationStatus = Supported (0)` after production deployment.
+- Read-before-write `LedModeData` was Static/TUF with primary RGB
+  `(0,250,255)` and preserved secondary colour, speed and direction.
+- Same-RGB `SetAuraStaticRgb(0,250,255)` returned exact requested/observed
+  values with result `Accepted (0)`; fresh `LedModeData` matched exactly.
+- This is config-level evidence only: kernel `kbd_rgb_mode` is write-only, so
+  hardware LED state is not claimed as `Applied`.
+
 ### Keyboard backlight
 
 - Current live unit: `orbis-hardwared` store package `w4acp9y0…`;
@@ -133,13 +143,12 @@ result: PASS (profile applied, verified, and restored)
   product-mode Armoury snapshot decodes Hybrid with queued Hybrid (same
   current), `reboot_required=false`;
   physical MUX `Integrated`; access `Unblocked`.
-- Aura mutation remains `Unsupported (1)` from the production composition.
-  Fan, Panel Overdrive and keyboard are production-wired and live-validated
-  above.
+- Fan, Panel Overdrive, keyboard and Aura are production-wired and
+  live-validated above.
 
 ## What this evidence does NOT cover
 
 - Raw supergfxd GPU mutation remains unavailable because the service is absent;
-  Aura remains disabled; Display Refresh/modeset remains read-only because no
-  concrete compositor mutation owner exists. Hosted CI is optional by owner
-  policy; other models remain outside this evidence.
+  Display Refresh/modeset remains read-only because no concrete compositor
+  mutation owner exists. Hosted CI is optional by owner policy; other models
+  remain outside this evidence.

@@ -96,7 +96,7 @@ live-validated production mutation slices:
 | Fan curve/default reset | **blocked** |
 | Panel Overdrive | **blocked** |
 | Keyboard backlight | **FA707NV live-validated** |
-| Aura Static RGB | **blocked** |
+| Aura Static RGB | **FA707NV config-accepted** |
 
 The code-level presence of a typed backend is not permission to enable its
 product write path. #120 tracks the remaining requirement that capability and

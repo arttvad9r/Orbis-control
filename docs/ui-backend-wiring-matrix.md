@@ -105,8 +105,8 @@ This table describes backend facts independently of whether a current UI control
 | Screen Auto Brightness | `AsusArmouryScreenAutoBrightnessProvider` | Provider + probe exist; read-only; not current runtime/UI | None | Confirmed absent → `UNSUPPORTED_ON_FA707NV` |
 | Wayland display outputs | `WaylandDisplayOutputProvider<WaylandCompositorOutputSource>` | Provider + probe exist; no modeset API; not current runtime/UI | None | Read-only candidate; does not make 60/120 controls writable |
 | Keyboard backlight brightness | `AsusKeyboardBacklightProvider`; hardwared LED-class writer | Production Hardware1 + exact NixOS sandbox/polkit; UI derives writability from Supported | `SetKeyboardBacklight`, polkit `...set-keyboard-backlight`, `Applied` | FA707NV live-validated |
-| Aura state | `AsusAuraProvider` over `xyz.ljones.Aura` | Read provider exists; not current runtime/UI | None for generic Aura mode | TUF Aura confirmed present |
-| Aura Static RGB | hardwared `AsusdAuraStaticRgbMutationBackend` | Hardware1 exists; not current runtime/UI | `SetAuraStaticRgb`, polkit `...set-aura-static-rgb`, **`Accepted`** | Confirmed present; hardware RGB read-back is impossible |
+| Aura state | `AsusAuraProvider` over `xyz.ljones.Aura` | Read provider + production Hardware1 | None for generic Aura mode | TUF Aura confirmed present |
+| Aura Static RGB | hardwared `AsusdAuraStaticRgbMutationBackend` | Production Hardware1 + active-session polkit | `SetAuraStaticRgb`, `Accepted` config read-back | FA707NV live-validated; hardware RGB read-back impossible |
 | Power limits | Domain `PowerLimitProvider` / `PowerLimitValue` exists; no safe production implementation found in audited composition | Not in current `ProductionRuntime` | None | Attributes exist but metadata empty; unsafe to expose |
 | Automation | Core/config models exist; no production desired-state/reconciliation executor in current runtime | UI local only | No approved background privileged execution path | Security/lifecycle semantics not proven |
 | Updates | `FirmwareUpdateProvider` trait exists, no production implementation found | UI shell only | None | `BACKEND_MISSING` |
@@ -146,7 +146,7 @@ Key source locations:
 | Gamut | 1 | Display gamut | Local ComboBox | No matching production provider | `BACKEND_MISSING` |
 | Slash/AniMe: effect, mode, interval, disable-on-battery, disable-on-lid | 5 | Slash/AniMe | Local properties only | No applicable device on FA707NV | `UNSUPPORTED_ON_FA707NV` |
 | Keyboard mode | 1 | General Aura effect mode | Local ComboBox | Aura **read** exists; generic mode mutation is not implemented | `BACKEND_MISSING` |
-| Keyboard Color | 1 | Aura Static RGB | Local color cycle today; exact Static RGB Hardware1 backend exists | `SetAuraStaticRgb`; `Accepted`, not `Applied` | `BACKEND_READY_NOT_WIRED` |
+| Keyboard Color | 1 | Aura Static RGB | Production Static RGB Hardware1 backend; exact config read-back | `SetAuraStaticRgb`; `Accepted`, not `Applied` | `WIRED_CONFIG_ACCEPTED_FA707NV` |
 | FN-Lock | 1 | Keyboard policy/hotkey | Local toggle | No matching production backend | `BACKEND_MISSING` |
 | Extra | 1 | UI navigation | Opens `ExtraWindow` | No hardware operation by launcher | `PREVIEW_ONLY` |
 | Battery limit slider + `100%` | 2 | `ChargeLimit` | `charge-changed` → worker `SetChargeLimit` → `AppService` → composed Session1/Hardware1 provider | Hardware1 `SetChargeLimit`; `...set-charge-limit`; asusd configured + kernel effective read-back, then Session1 `ChargeLimit`; `Applied` | `WIRED_READ_WRITE` |
