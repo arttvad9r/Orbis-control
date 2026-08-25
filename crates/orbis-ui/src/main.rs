@@ -784,6 +784,7 @@ fn apply_product_gpu_result(
             state.gpu_reboot_required = reply.reboot_required;
             match reply.outcome {
                 OUTCOME_ALREADY_ACTIVE | OUTCOME_REBOOT_REQUIRED => {
+                    state.gpu_mode_writable = true;
                     state.gpu_section_error = false;
                     tracing::debug!(
                         "product gpu: queued state confirmed: requested={}, current={}, queued={}, reboot_required={}",
@@ -794,6 +795,7 @@ fn apply_product_gpu_result(
                     );
                 }
                 OUTCOME_INCONSISTENT => {
+                    state.gpu_mode_writable = false;
                     state.gpu_section_error = true;
                     tracing::warn!("product gpu: read-back inconsistent: {reply:?}");
                 }
@@ -807,6 +809,7 @@ fn apply_product_gpu_result(
             }
         }
         Err(e) => {
+            state.gpu_mode_writable = false;
             state.gpu_section_error = true;
             tracing::warn!("product gpu: команда не выполнена: {e:?}");
         }
