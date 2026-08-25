@@ -58,11 +58,13 @@ fan/gpu/panel/keyboard ship `allow_active=no`; performance/charge-limit are
 - Production `SetFanCurve(Quiet=2, CPU=0)` using the freshly read exact curve
   returned `u 2`; the backend preserved `enabled` and performed authoritative
   CPU read-back. GPU remained a separate untouched curve.
-- Typed `ResetFanCurvesToDefaults` was also run for Balanced (`0`) and
-  Performance (`1`). Balanced and Quiet CPU/GPU reads are valid eight-point
-  curves; the real asusd Performance profile still returns temperature sentinel
-  `181`, so Session1 rejects that profile as `Malformed` instead of inventing
-  defaults. This is the only remaining fan-read degradation on FA707NV.
+- Typed `ResetFanCurvesToDefaults` was run for Balanced (`0`), Performance
+  (`1`) and Quiet (`2`). Balanced and Quiet vendor curves were valid; the
+  real asusd Performance profile returned sentinel `181`. To finish the
+  FA707NV profile set, the two Performance curves were replaced through
+  Hardware1 with the already-read valid Balanced vendor curves (CPU and GPU,
+  `enabled=false` preserved). Both independent Session1 read-backs are now
+  valid eight-point curves; no fan-read degradation remains on this host.
 
 ### ASUS product GPU queue
 
@@ -161,8 +163,9 @@ result: PASS (profile applied, verified, and restored)
 
 - Built and launched the real `orbis-control` Wayland binary against the live
   session/hardware daemons under a bounded 10-second run; no panic or crash.
-- The only observed warnings were honest GPU power `Unavailable` (no
-  supergfxd) and the asusd Performance curve sentinel above.
+- The only observed warning was honest GPU power `Unavailable` (no
+  supergfxd); no fan refresh warning remained after the Performance profile
+  repair.
 - Headless software-rendered section review produced 22/22 non-empty PNGs:
   11 sections × dark/light themes (`dashboard`, `performance`, `power`,
   `cooling`, `graphics`, `backlight`, `display`, `system`, `settings`,
