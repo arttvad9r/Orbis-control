@@ -11,7 +11,10 @@
 //! Никакого generic sysfs writer API.
 //! Никакой asusd dependency — kernel LED class directly writable.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
@@ -244,6 +247,30 @@ pub struct SysfsKeyboardBacklightMutationBackend {
     io: SysfsKeyboardBacklightIo,
 }
 
+const READBACK_SETTLE_TIMEOUT: Duration = Duration::from_millis(250);
+const READBACK_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Confirm a single already-dispatched brightness write while the LED driver
+/// settles. This polls only the authoritative read path; it never retries the
+/// mutation itself.
+async fn read_brightness_until_match(
+    io: &dyn KeyboardBacklightIo,
+    expected: u32,
+) -> Result<u32, ProviderError> {
+    let deadline = Instant::now() + READBACK_SETTLE_TIMEOUT;
+    let mut observed = io.read_brightness().await?;
+    while observed != expected {
+        if Instant::now() >= deadline {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "asus kbd_backlight read-back mismatch: expected={expected}, got={observed}"
+            )));
+        }
+        tokio::time::sleep(READBACK_POLL_INTERVAL).await;
+        observed = io.read_brightness().await?;
+    }
+    Ok(observed)
+}
+
 impl SysfsKeyboardBacklightMutationBackend {
     pub fn new(io: SysfsKeyboardBacklightIo) -> Self {
         Self { io }
@@ -265,12 +292,7 @@ impl KeyboardBacklightMutationBackend for SysfsKeyboardBacklightMutationBackend 
 
         self.io.write_brightness(level as u32).await?;
 
-        let observed = self.io.read_brightness().await?;
-        if observed != level as u32 {
-            return Err(ProviderError::BackendUnavailable(format!(
-                "asus kbd_backlight read-back mismatch: expected={level}, got={observed}"
-            )));
-        }
+        let observed = read_brightness_until_match(&self.io, level as u32).await?;
 
         Ok(KeyboardBacklightMutationReadback {
             requested: level,
@@ -311,9 +333,12 @@ pub async fn handle_set_keyboard_backlight(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+    use std::{
+        collections::VecDeque,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
     };
 
     use super::*;
@@ -607,6 +632,36 @@ mod tests {
         assert_eq!(result.requested, 3);
         assert_eq!(result.observed, 3);
         assert_eq!(result.result, ApplyResult::Applied);
+    }
+
+    struct DelayedReadbackIo {
+        reads: Mutex<VecDeque<u32>>,
+    }
+
+    #[async_trait]
+    impl KeyboardBacklightIo for DelayedReadbackIo {
+        async fn read_brightness(&self) -> Result<u32, ProviderError> {
+            Ok(self.reads.lock().unwrap().pop_front().unwrap_or(3))
+        }
+
+        async fn read_max_brightness(&self) -> Result<u32, ProviderError> {
+            Ok(3)
+        }
+
+        async fn write_brightness(&self, _level: u32) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn delayed_readback_is_confirmed_without_second_write() {
+        let io = DelayedReadbackIo {
+            reads: Mutex::new(VecDeque::from([0, 3])),
+        };
+
+        let observed = read_brightness_until_match(&io, 3).await.unwrap();
+
+        assert_eq!(observed, 3);
     }
 
     #[tokio::test]
