@@ -62,12 +62,12 @@
   <action id="io.github.orbiscontrol.hardware.set-panel-overdrive">
     <description>Change the Orbis Control panel overdrive state</description>
     <description xml:lang="ru">Изменить состояние panel overdrive Orbis Control</description>
-    <message>Panel overdrive writes are disabled until backend owner liveness and release evidence are proven</message>
-    <message xml:lang="ru">Запись panel overdrive отключена до подтверждения доступности backend-владельца и release evidence</message>
+     <message>Change ASUS panel overdrive with authoritative read-back</message>
+     <message xml:lang="ru">Изменить ASUS panel overdrive с подтверждением read-back</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
-      <allow_active>no</allow_active>
+      <allow_active>yes</allow_active>
     </defaults>
   </action>
   <action id="io.github.orbiscontrol.hardware.set-keyboard-backlight">

@@ -34,7 +34,9 @@ use orbis_hardwared::{
     fans::{AsusdFanCurveMutationBackend, ZbusAsusdFanCurveClient},
     keyboard_backlight::{SysfsKeyboardBacklightIo, SysfsKeyboardBacklightMutationBackend},
     panel::{
-        PanelOverdriveMutationBackend, PanelOverdriveMutationReadback, PanelOverdriveMutationStatus,
+        AsusdPanelOverdriveMutationBackend, PanelOverdriveMutationBackend,
+        PanelOverdriveMutationReadback, PanelOverdriveMutationStatus,
+        ZbusAsusdPanelOverdriveClient, discover_panel_overdrive_reader,
     },
     supergfxd::{MutationObservation, SupergfxdMutationOperation},
 };
@@ -215,6 +217,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let battery_backend = build_battery_backend(&connection).await;
+    let panel_backend: Box<dyn PanelOverdriveMutationBackend> =
+        match discover_panel_overdrive_reader() {
+            Ok(reader) => Box::new(AsusdPanelOverdriveMutationBackend::new(
+                ZbusAsusdPanelOverdriveClient::new(connection.clone()),
+                reader,
+            )),
+            Err(error) => {
+                tracing::warn!(?error, "panel overdrive mutation backend unavailable");
+                Box::new(DisabledPanelOverdriveMutationBackend)
+            }
+        };
 
     let service = HardwareService::with_battery_gpu_and_fan_backends(
         Box::new(PolkitAuthorizer::new(connection.clone())),
@@ -237,7 +250,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )),
     )
     .with_panel(
-        Box::new(DisabledPanelOverdriveMutationBackend),
+        panel_backend,
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             PANEL_POLKIT_ACTION,
