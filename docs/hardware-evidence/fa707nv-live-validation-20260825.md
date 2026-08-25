@@ -58,6 +58,11 @@ fan/gpu/panel/keyboard ship `allow_active=no`; performance/charge-limit are
 - Production `SetFanCurve(Quiet=2, CPU=0)` using the freshly read exact curve
   returned `u 2`; the backend preserved `enabled` and performed authoritative
   CPU read-back. GPU remained a separate untouched curve.
+- Typed `ResetFanCurvesToDefaults` was also run for Balanced (`0`) and
+  Performance (`1`). Balanced and Quiet CPU/GPU reads are valid eight-point
+  curves; the real asusd Performance profile still returns temperature sentinel
+  `181`, so Session1 rejects that profile as `Malformed` instead of inventing
+  defaults. This is the only remaining fan-read degradation on FA707NV.
 
 ### ASUS product GPU queue
 
@@ -136,9 +141,8 @@ result: PASS (profile applied, verified, and restored)
   against the real daemon: stored asusd CPU curve contains temperature
   sentinel `153` → strict range decode rejects it
   («asusd FanCurves: температура вне диапазона '153' для CPU»). This is local
-  `Malformed`-class evidence, not fake defaults; consequently no aggregate
-  `FanCurves` capability is published on this host right now (#109 contract
-  observed live).
+  `Malformed`-class evidence, not fake defaults; the Performance profile stays
+  unavailable while Balanced/Quiet remain valid (#109 contract observed live).
 - GPU power read stays honestly `Unavailable` (supergfxd not installed);
   product-mode Armoury snapshot decodes Hybrid with queued Hybrid (same
   current), `reboot_required=false`;
@@ -152,3 +156,14 @@ result: PASS (profile applied, verified, and restored)
   Display Refresh/modeset remains read-only because no concrete compositor
   mutation owner exists. Hosted CI is optional by owner policy; other models
   remain outside this evidence.
+
+## UI smoke evidence
+
+- Built and launched the real `orbis-control` Wayland binary against the live
+  session/hardware daemons under a bounded 10-second run; no panic or crash.
+- The only observed warnings were honest GPU power `Unavailable` (no
+  supergfxd) and the asusd Performance curve sentinel above.
+- Headless software-rendered section review produced 22/22 non-empty PNGs:
+  11 sections × dark/light themes (`dashboard`, `performance`, `power`,
+  `cooling`, `graphics`, `backlight`, `display`, `system`, `settings`,
+  `about`, `dialog`).
