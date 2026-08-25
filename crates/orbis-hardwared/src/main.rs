@@ -23,7 +23,8 @@ use orbis_core::aura::AuraRgb;
 use orbis_hardwared::{
     AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION,
     GPU_POLKIT_ACTION, HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
-    PolkitAuthorizer,
+    PRODUCT_GPU_POLKIT_ACTION, PolkitAuthorizer,
+    asus_gpu_mode::{AsusGpuMutationBackend, AsusdGpuMutationClient},
     aura::{AuraMutationStatus, AuraStaticRgbMutationBackend, AuraStaticRgbMutationReadback},
     battery::{
         AsusdBatteryClient, AsusdBatteryMutationBackend, BatteryEffectiveReader,
@@ -256,6 +257,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             AURA_POLKIT_ACTION,
+        )),
+    )
+    .with_product_gpu_backend(
+        Box::new(AsusGpuMutationBackend::new(AsusdGpuMutationClient::new(
+            connection.clone(),
+        ))),
+        Box::new(PolkitAuthorizer::with_action(
+            connection.clone(),
+            PRODUCT_GPU_POLKIT_ACTION,
         )),
     );
 
