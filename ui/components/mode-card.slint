@@ -1,130 +1,95 @@
-// G-Helper-style mode tile: 94×60, flat buttonMain surface, icon glyph over
-// label, selected = accent border (spec docs/ui-reference.md §4/§7).
+// ModeCard — large segmented-card selector (reference design):
+// icon left, title + short description right. Selected = accent border +
+// soft accent tint + accent icon; no glow, no filled accent blocks.
+import { Icon } from "icon.slint";
 import { Palette } from "../themes/dark.slint";
 
 export component ModeCard inherits Rectangle {
     in property <string> title;
+    in property <string> description: "";
     in property <color> accent: Palette.accent-default;
     in property <bool> selected: false;
     in property <bool> disabled: false;
     in property <bool> pending: false;
-    in property <string> pending-note: "Reboot required";
-    // 0 silent/moon, 1 balanced/scales, 2 turbo/charge, 3 fans, 4 generic
+    in property <string> pending-note: "Требуется перезагрузка";
     in property <int> icon-kind: 4;
     in property <bool> icon-visible: true;
     callback clicked;
 
-    width: 94px;
-    min-height: 60px;
-    border-radius: 5.5px;
+    horizontal-stretch: 1;
+    min-height: 64px;
+    border-radius: 10px;
     border-width: root.selected || root.pending ? 1.5px : 1px;
-    border-color: root.selected || root.pending ? root.accent : Palette.border-default;
+    border-color: root.selected || root.pending ? root.accent
+        : touch.has-hover && !root.disabled ? Palette.border-strong
+        : Palette.border-default;
 
     property <bool> hover: touch.has-hover;
     property <bool> down: touch.pressed;
-
-    background: root.disabled ? Palette.surface-disabled
+    // Shared with the icon as an arc mask (gauge glyph).
+    property <color> card-bg: root.disabled ? Palette.surface-disabled
         : root.down ? Palette.surface-pressed
-        : root.selected || root.pending ? Palette.surface-selected
+        : root.selected || root.pending ? Palette.accent-soft
         : root.hover ? Palette.surface-hover
         : Palette.surface-default;
 
-    VerticalLayout {
-        padding-top: 7px;
-        padding-bottom: 6px;
-        spacing: 3px;
+    background: root.card-bg;
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 12px;
+        spacing: 11px;
         alignment: center;
 
-        // 20x20 glyph area (Rectangle primitives: software renderer has no
-        // Path). Wrapped in a centering row: VerticalLayout left-aligns
-        // fixed-width children otherwise.
-        if (root.icon-visible) : HorizontalLayout {
-            alignment: center;
-            height: 20px;
-            Rectangle {
-            width: 20px;
-            height: 20px;
-            property <color> tint: root.disabled ? Palette.text-disabled
-                : root.selected || root.pending ? root.accent
-                : Palette.text-secondary;
+        if (root.icon-visible) : Rectangle {
+            width: 22px;
             background: transparent;
-
-            if (root.icon-kind == 0): Rectangle { // moon
-                width: 12px; height: 12px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                border-radius: self.height / 2;
-                border-width: 1.4px;
-                border-color: parent.tint;
-            }
-            if (root.icon-kind == 1): Rectangle { // balance bar
-                width: 14px; height: 1.6px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                background: parent.tint;
-            }
-            if (root.icon-kind == 1): Rectangle { // balance post
-                width: 1.6px; height: 10px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                background: parent.tint;
-            }
-            if (root.icon-kind == 2): Rectangle { // charge core
-                width: 9px; height: 9px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                border-radius: 2px;
-                background: parent.tint;
-            }
-            if (root.icon-kind == 2): Rectangle { // charge ring
-                width: 15px; height: 15px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                border-radius: 3px;
-                border-width: 1.4px;
-                border-color: parent.tint;
-            }
-            if (root.icon-kind == 3): Rectangle { // fan ring
-                width: 13px; height: 13px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                border-radius: self.height / 2;
-                border-width: 1.4px;
-                border-color: parent.tint;
-            }
-            if (root.icon-kind == 3): Rectangle { // fan hub
-                width: 4px; height: 4px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                border-radius: self.height / 2;
-                background: parent.tint;
-            }
-            if (root.icon-kind == 4): Rectangle { // generic dot
-                width: 6px; height: 6px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                border-radius: self.height / 2;
-                background: parent.tint;
-            }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 22px;
+                    height: 22px;
+                    property <color> tint: root.disabled ? Palette.text-disabled
+                        : root.selected || root.pending ? root.accent
+                        : Palette.text-secondary;
+                    background: transparent;
+                    // 22px glyph: the shared 18px icon scaled by a wrapper is
+                    // not supported by the software renderer, so mode glyphs
+                    // reuse the Icon at native size inside a centering box.
+                    Icon {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        kind: root.icon-kind;
+                        tint: parent.tint;
+                        mask: root.card-bg;
+                    }
+                }
             }
         }
 
-        Text {
-            text: root.title;
-            font-size: 12px;
-            font-weight: root.selected ? 650 : 500;
-            color: root.disabled ? Palette.text-disabled
-                : root.selected ? Palette.text-primary
-                : Palette.text-secondary;
-            horizontal-alignment: center;
-            overflow: elide;
-        }
-        if (root.pending && !root.disabled) : Text {
-            text: root.pending-note;
-            font-size: 8px;
-            color: root.accent;
-            horizontal-alignment: center;
-            overflow: elide;
+        VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.title;
+                font-size: 13.5px;
+                font-weight: 600;
+                color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+                overflow: elide;
+            }
+            if (root.description != "") : Text {
+                text: root.description;
+                font-size: 11.5px;
+                color: root.disabled ? Palette.text-disabled : Palette.text-secondary;
+                overflow: elide;
+            }
+            if (root.pending && !root.disabled) : Text {
+                text: root.pending-note;
+                font-size: 10px;
+                color: root.accent;
+                overflow: elide;
+            }
         }
     }
 

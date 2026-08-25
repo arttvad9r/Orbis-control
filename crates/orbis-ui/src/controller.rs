@@ -281,6 +281,8 @@ pub struct UiState {
     pub gpu_fan_rpm: String,
     /// Battery percent, % ("—" = неизвестно).
     pub battery_percent: String,
+    /// Numeric battery percent for the header indicator (-1 = unknown).
+    pub battery_percent_value: i32,
     /// Battery health (capacity), % от design ("—" = неизвестно).
     pub battery_health: String,
     /// Число циклов заряда ("—" = неизвестно).
@@ -407,6 +409,7 @@ impl UiState {
             cpu_fan_rpm: "—".into(),
             gpu_fan_rpm: "—".into(),
             battery_percent: "—".into(),
+            battery_percent_value: -1,
             battery_health: "—".into(),
             battery_cycles: "—".into(),
             battery_status: String::new(),
@@ -547,6 +550,7 @@ impl UiState {
             cpu_fan_rpm,
             gpu_fan_rpm,
             battery_percent: format_percent(battery_percent),
+            battery_percent_value: battery_percent.map(|p| i32::from(p.get())).unwrap_or(-1),
             battery_health: format_percent(battery_health),
             battery_cycles: battery_cycles
                 .map(|c| c.to_string())
@@ -648,6 +652,7 @@ impl UiState {
         self.cpu_fan_rpm = "—".into();
         self.gpu_fan_rpm = "—".into();
         self.battery_percent = "—".into();
+        self.battery_percent_value = -1;
         self.battery_health = "—".into();
         self.battery_cycles = "—".into();
         self.battery_status.clear();
@@ -702,6 +707,12 @@ impl UiState {
         self.gpu_fan_rpm = format_rpm(gpu_fan_rpm);
 
         self.battery_percent = format_percent(telemetry.battery.as_ref().map(|b| b.percent));
+        self.battery_percent_value = telemetry
+            .battery
+            .as_ref()
+            .map(|b| b.percent)
+            .map(|p| i32::from(p.get()))
+            .unwrap_or(-1);
         self.battery_health = format_percent(telemetry.battery.as_ref().and_then(|b| b.capacity));
         self.battery_cycles = telemetry
             .battery

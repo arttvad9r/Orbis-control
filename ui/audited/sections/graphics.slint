@@ -1,0 +1,147 @@
+// Graphics page — GPU product mode (queued/reboot semantics preserved) and
+// read-only dGPU hardware status (power state, physical MUX, access policy).
+import { ScrollView } from "std-widgets.slint";
+import { UiState, GpuHwState, GpuModeHwState } from "../model.slint";
+import { PageHeader, SectionCard, SectionTitle, InfoRow } from "../common.slint";
+import { ModeCard } from "../../components/mode-card.slint";
+import { Palette } from "../../themes/dark.slint";
+
+export component GraphicsSection inherits Rectangle {
+    in property <UiState> ui-state;
+    callback gpu-clicked(int);
+
+    function bit-set(mask: int, bit: int) -> bool {
+        let shifted = Math.floor(mask / bit);
+        return shifted - 2 * Math.floor(shifted / 2) == 1;
+    }
+
+    function mode-reason() -> string {
+        if (root.ui-state.gpu-mode-state == GpuModeHwState.Ready) {
+            return root.ui-state.gpu-mode-writable ? "" : "Только чтение";
+        }
+        if (root.ui-state.gpu-mode-state == GpuModeHwState.Loading) { return "Чтение…"; }
+        return "Управление недоступно";
+    }
+
+    function power-label() -> string {
+        if (root.ui-state.gpu-power-state == GpuHwState.Loading) { return "—"; }
+        if (root.ui-state.gpu-power-state == GpuHwState.Unavailable) { return "Недоступно"; }
+        if (root.ui-state.gpu-power-value == 0) { return "Активна"; }
+        if (root.ui-state.gpu-power-value == 1) { return "Приостановлена"; }
+        if (root.ui-state.gpu-power-value == 2) { return "Неизвестно"; }
+        return "Выключена";
+    }
+
+    function mux-label() -> string {
+        if (root.ui-state.gpu-mux-state == GpuHwState.Loading) { return "—"; }
+        if (root.ui-state.gpu-mux-state == GpuHwState.Unavailable) { return "Недоступно"; }
+        if (root.ui-state.gpu-mux-value == 0) { return "Гибрид (iGPU)"; }
+        if (root.ui-state.gpu-mux-value == 1) { return "Дискретный"; }
+        return "Неизвестно";
+    }
+
+    function access-label() -> string {
+        if (root.ui-state.gpu-access-state == GpuHwState.Loading) { return "—"; }
+        if (root.ui-state.gpu-access-state == GpuHwState.Unavailable) { return "Недоступно"; }
+        if (root.ui-state.gpu-access-value == 0) { return "Не заблокирована"; }
+        if (root.ui-state.gpu-access-value == 1) { return "Заблокирована"; }
+        if (root.ui-state.gpu-access-value == 2) { return "Ожидает"; }
+        return "Неизвестно";
+    }
+
+    ScrollView {
+        VerticalLayout {
+            width: root.width - 56px;
+            x: 28px;
+            spacing: 16px;
+            padding-top: 8px;
+            padding-bottom: 20px;
+
+            PageHeader {
+                title: "Графика";
+                description: "Режимы гибридной графики и состояние dGPU.";
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    SectionTitle {
+                        title: "Режим GPU";
+                        detail: root.mode-reason();
+                    }
+
+                    HorizontalLayout {
+                        height: 76px;
+                        spacing: 12px;
+                        ModeCard {
+                            title: "Eco";
+                            description: "Только iGPU";
+                            icon-kind: 4;
+                            accent: Palette.eco;
+                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0;
+                            pending: root.ui-state.gpu-queued == 0;
+                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1);
+                            clicked => { root.gpu-clicked(0); }
+                        }
+                        ModeCard {
+                            title: "Standard";
+                            description: "Гибридный режим";
+                            icon-kind: 4;
+                            accent: Palette.standard;
+                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1;
+                            pending: root.ui-state.gpu-queued == 1;
+                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2);
+                            clicked => { root.gpu-clicked(1); }
+                        }
+                        ModeCard {
+                            title: "Ultimate";
+                            description: "Только dGPU (MUX)";
+                            icon-kind: 4;
+                            accent: Palette.ultimate;
+                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2;
+                            pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2;
+                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4);
+                            clicked => { root.gpu-clicked(2); }
+                        }
+                        if (root.bit-set(root.ui-state.available-gpu-mask, 8)) : ModeCard {
+                            title: "Optimized";
+                            description: "Автоматическое переключение";
+                            icon-kind: 4;
+                            accent: Palette.optimized;
+                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3;
+                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable;
+                            clicked => { root.gpu-clicked(3); }
+                        }
+                    }
+
+                    if (root.ui-state.gpu-section-error) : Text {
+                        text: "Изменение режима GPU не было подтверждено";
+                        font-size: 12px;
+                        color: Palette.error;
+                    }
+                    if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : Text {
+                        text: "Режим поставлен в очередь · применится при следующем выключении/перезагрузке";
+                        font-size: 12px;
+                        color: Palette.warning;
+                    }
+                }
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 4px;
+
+                    SectionTitle { title: "Состояние оборудования"; }
+
+                    InfoRow { label: "Питание dGPU"; value: root.power-label(); }
+                    InfoRow { label: "Физический MUX"; value: root.mux-label(); }
+                    InfoRow { label: "Доступ к dGPU"; value: root.access-label(); }
+                }
+            }
+            Rectangle { vertical-stretch: 100; background: transparent; }
+        }
+    }
+}

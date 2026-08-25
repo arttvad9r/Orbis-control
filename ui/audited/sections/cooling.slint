@@ -1,0 +1,112 @@
+// Cooling page — fan curves (write path stays safety-gated), current RPM and
+// the honest mutation-safety status.
+import { ScrollView } from "std-widgets.slint";
+import { UiState } from "../model.slint";
+import { PageHeader, SectionCard, LocalStatus, ActionButton } from "../common.slint";
+import { FanCurveEditor } from "../fan-curve-editor-v3.slint";
+import { Palette } from "../../themes/dark.slint";
+
+export component CoolingSection inherits Rectangle {
+    in property <UiState> ui-state;
+
+    // Backend/policy presentation contract. Today production keeps mutation
+    // blocked; later backend wiring only needs to publish these facts.
+    in property <bool> mutation-safety-blocked: true;
+    in property <bool> factory-reset-available: false;
+    in property <string> policy-status: "Запись кривых вентиляторов заблокирована по безопасности";
+
+    property <bool> factory-reset-pending: false;
+
+    callback fan-changed(int);
+    callback fan-profile-changed(int);
+    callback fan-temp-point-changed(int, int);
+    callback fan-pwm-point-changed(int, int);
+    callback fan-apply-clicked(bool);
+
+    function status-text() -> string {
+        if (root.ui-state.fan-curve-error) { return "Операция с кривой завершилась ошибкой"; }
+        if (root.mutation-safety-blocked) { return root.policy-status; }
+        if (root.factory-reset-pending) { return "Заводские значения выбраны · ещё не применены"; }
+        if (!root.ui-state.fan-curve-writable) { return "Только чтение"; }
+        if (root.ui-state.fan-curve-dirty) { return "Кривая изменена · ещё не применена"; }
+        if (root.ui-state.fan-curve-enabled-known) {
+            return root.ui-state.fan-curve-enabled
+                ? "Своя кривая включена"
+                : "Сохранённая своя кривая отключена";
+        }
+        return "Текущая сохранённая кривая · состояние включённости неизвестно";
+    }
+
+    function status-color() -> color {
+        if (root.ui-state.fan-curve-error) { return Palette.error; }
+        if (root.mutation-safety-blocked || root.factory-reset-pending || root.ui-state.fan-curve-dirty || !root.ui-state.fan-curve-enabled-known) { return Palette.warning; }
+        return root.ui-state.fan-curve-enabled ? Palette.success : Palette.text-secondary;
+    }
+
+    ScrollView {
+        VerticalLayout {
+            width: root.width - 56px;
+            x: 28px;
+            spacing: 16px;
+            padding-top: 8px;
+            padding-bottom: 20px;
+
+            PageHeader {
+                title: "Охлаждение";
+                description: "Кривые вентиляторов по профилям BIOS и текущие обороты.";
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    FanCurveEditor {
+                        state: root.ui-state.fan-curve-state;
+                        writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked;
+                        error-state: root.ui-state.fan-curve-error;
+                        dirty: root.ui-state.fan-curve-dirty;
+                        fan-selected: root.ui-state.fan-selected;
+                        profile-selected: root.ui-state.fan-profile-selected;
+                        temp-0: root.ui-state.fan-temp-0; temp-1: root.ui-state.fan-temp-1; temp-2: root.ui-state.fan-temp-2; temp-3: root.ui-state.fan-temp-3;
+                        temp-4: root.ui-state.fan-temp-4; temp-5: root.ui-state.fan-temp-5; temp-6: root.ui-state.fan-temp-6; temp-7: root.ui-state.fan-temp-7;
+                        pwm-0: root.ui-state.fan-pwm-0; pwm-1: root.ui-state.fan-pwm-1; pwm-2: root.ui-state.fan-pwm-2; pwm-3: root.ui-state.fan-pwm-3;
+                        pwm-4: root.ui-state.fan-pwm-4; pwm-5: root.ui-state.fan-pwm-5; pwm-6: root.ui-state.fan-pwm-6; pwm-7: root.ui-state.fan-pwm-7;
+                        fan-changed(i) => { root.factory-reset-pending = false; root.fan-changed(i); }
+                        profile-changed(i) => { root.factory-reset-pending = false; root.fan-profile-changed(i); }
+                        temp-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-temp-point-changed(i, v); }
+                        pwm-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-pwm-point-changed(i, v); }
+                    }
+
+                    HorizontalLayout {
+                        height: 32px;
+                        spacing: 10px;
+
+                        LocalStatus {
+                            horizontal-stretch: 1;
+                            text: root.status-text();
+                            accent: root.status-color();
+                        }
+
+                        ActionButton {
+                            label: "Заводские значения";
+                            disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error;
+                            clicked => { root.factory-reset-pending = true; }
+                        }
+                        ActionButton {
+                            label: root.factory-reset-pending ? "Применить заводские" : "Применить кривую";
+                            accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
+                            disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
+                            clicked => {
+                                let reset = root.factory-reset-pending;
+                                root.fan-apply-clicked(reset);
+                                if (reset) { root.factory-reset-pending = false; }
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle { vertical-stretch: 100; background: transparent; }
+        }
+    }
+}

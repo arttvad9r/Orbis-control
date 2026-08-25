@@ -1,0 +1,43 @@
+// Sidebar navigation item: 44px row, 18px line icon + 13px label.
+// Selected = soft accent fill with accent icon/text (reference design);
+// hover = quiet neutral fill. No gradients, no glow.
+import { Icon } from "icon.slint";
+import { Palette } from "../themes/dark.slint";
+
+export component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <int> icon-kind: 0;
+    in property <bool> selected: false;
+    callback clicked;
+
+    height: 44px;
+    border-radius: 8px;
+    background: root.selected ? Palette.accent-soft
+        : touch.has-hover ? Palette.surface-hover
+        : transparent;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 11px;
+        alignment: center;
+
+        Icon {
+            kind: root.icon-kind;
+            tint: root.selected ? Palette.accent-default : Palette.text-secondary;
+        }
+        Text {
+            text: root.label;
+            font-size: 13px;
+            font-weight: root.selected ? 600 : 500;
+            color: root.selected ? Palette.accent-default : Palette.text-primary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}

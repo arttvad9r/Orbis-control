@@ -2042,13 +2042,13 @@ fn production_initial_has_no_queued_target_or_reboot_claim() {
 
 #[test]
 fn main_window_renders_queued_target_and_reboot_state() {
-    let source = include_str!("../../../ui/audited/sections/performance.slint");
+    let source = include_str!("../../../ui/audited/sections/graphics.slint");
     // Queued target renders as pending on the exact queued segment.
     assert!(source.contains("gpu-queued == 0"));
     assert!(source.contains("gpu-queued == 1"));
     assert!(source.contains("gpu-queued == 2"));
     // Reboot-required status line exists; Optimized never gains a queued binding.
-    assert!(source.contains("shutdown/reboot"));
+    assert!(source.contains("gpu-reboot-required"));
     let optimized_line_start = source.find("title: \"Optimized\"").expect("Optimized tile");
     let optimized_line_end = source[optimized_line_start..]
         .find('\n')
@@ -2065,10 +2065,17 @@ fn main_window_renders_queued_target_and_reboot_state() {
 fn shell_hosts_four_sections_and_frameless_chrome() {
     let shell = include_str!("../../../ui/audited/main-window.slint");
     assert!(shell.contains("no-frame: true"));
-    assert!(shell.contains("width: 425px"));
+    assert!(shell.contains("preferred-width: 1200px"));
+    assert!(shell.contains("Section.Dashboard"));
     assert!(shell.contains("Section.Performance"));
-    assert!(shell.contains("Section.Fans"));
-    assert!(shell.contains("Section.Extra"));
+    assert!(shell.contains("Section.Power"));
+    assert!(shell.contains("Section.Cooling"));
+    assert!(shell.contains("Section.Graphics"));
+    assert!(shell.contains("Section.Backlight"));
+    assert!(shell.contains("Section.Display"));
+    assert!(shell.contains("Section.System"));
+    assert!(shell.contains("Section.Settings"));
+    assert!(shell.contains("Section.About"));
     assert!(shell.contains("titlebar-close-requested"));
     assert!(shell.contains("titlebar-drag-started"));
     assert!(!shell.contains("UpdatesWindow"));

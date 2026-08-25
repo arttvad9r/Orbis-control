@@ -1,14 +1,47 @@
-// Frameless title bar: section label, drag surface, minimize/close (spec §3).
-// Icons are Path glyphs (spec §8 fallback): no raster assets, theme-colorable.
+// Frameless title bar: app identity above the sidebar, drag surface,
+// minimize/maximize/close on the right (reference design).
+// Window glyphs are text primitives; drag goes through the winit accessor.
 import { Palette } from "../themes/dark.slint";
 
+component WindowButton inherits Rectangle {
+    in property <string> glyph;
+    in property <bool> rect-glyph: false;
+    in property <bool> danger: false;
+    callback clicked;
+
+    width: 44px;
+    background: btn-touch.has-hover
+        ? (root.danger ? Palette.error : Palette.surface-hover)
+        : transparent;
+    Text {
+        text: root.glyph;
+        font-size: 13px;
+        color: btn-touch.has-hover && root.danger ? Palette.text-on-accent : Palette.text-secondary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    if (root.rect-glyph) : Rectangle {
+        width: 9px;
+        height: 9px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 2px;
+        border-width: 1.3px;
+        border-color: btn-touch.has-hover && root.danger ? Palette.text-on-accent : Palette.text-secondary;
+        background: transparent;
+    }
+    btn-touch := TouchArea { clicked => { root.clicked(); } }
+}
+
 export component TitleBar inherits Rectangle {
-    in property <string> section-title: "Dashboard";
+    in property <string> app-title: "Orbis Control";
+    in property <bool> maximized: false;
     callback minimize-requested;
+    callback maximize-requested;
     callback close-requested;
     callback drag-started;
 
-    height: 34px;
+    height: 44px;
     background: Palette.titlebar-background;
 
     // Declared first: buttons below sit on top of this surface, so presses on
@@ -22,47 +55,43 @@ export component TitleBar inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 8px;
-        Text {
-            text: root.section-title;
-            font-size: 11px;
-            font-weight: 600;
-            color: Palette.text-secondary;
-            vertical-alignment: center;
+        // App identity aligned with the sidebar column.
+        Rectangle {
+            width: 230px;
+            background: transparent;
+            HorizontalLayout {
+                padding-left: 16px;
+                spacing: 9px;
+                alignment: center;
+                Rectangle {
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 5px;
+                    background: Palette.accent-default;
+                    Rectangle {
+                        width: 6px;
+                        height: 6px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 1.5px;
+                        background: Palette.text-on-accent;
+                    }
+                }
+                Text {
+                    text: root.app-title;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: Palette.text-primary;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
         }
+
         Rectangle { horizontal-stretch: 1; background: transparent; }
-        Rectangle {
-            width: 28px;
-            property <bool> btn-hover: min-touch.has-hover;
-            background: self.btn-hover ? Palette.surface-hover : transparent;
-            border-radius: 6px;
-            Text {
-                text: "–";
-                font-size: 13px;
-                color: Palette.text-secondary;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-            min-touch := TouchArea {
-                clicked => { root.minimize-requested(); }
-            }
-        }
-        Rectangle {
-            width: 28px;
-            property <bool> btn-hover: close-touch.has-hover;
-            background: self.btn-hover ? Palette.error : transparent;
-            border-radius: 6px;
-            Text {
-                text: "\u{00D7}";
-                font-size: 15px;
-                color: close-touch.has-hover ? #11111B : Palette.text-secondary;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-            close-touch := TouchArea {
-                clicked => { root.close-requested(); }
-            }
-        }
+
+        WindowButton { glyph: "–"; clicked => { root.minimize-requested(); } }
+        WindowButton { rect-glyph: true; clicked => { root.maximize-requested(); } }
+        WindowButton { glyph: "\u{00D7}"; danger: true; clicked => { root.close-requested(); } }
     }
 }

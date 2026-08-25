@@ -170,6 +170,7 @@ fn to_slint(state: &controller::UiState) -> UiState {
         cpu_fan_rpm: state.cpu_fan_rpm.clone().into(),
         gpu_fan_rpm: state.gpu_fan_rpm.clone().into(),
         battery_percent: state.battery_percent.clone().into(),
+        battery_percent_value: state.battery_percent_value,
         power_ac_mw: state.power_ac.clone().into(),
         battery_health: state.battery_health.clone().into(),
         battery_cycles: state.battery_cycles.clone().into(),
@@ -270,6 +271,7 @@ fn from_slint(state: &UiState) -> controller::UiState {
         cpu_fan_rpm: state.cpu_fan_rpm.to_string(),
         gpu_fan_rpm: state.gpu_fan_rpm.to_string(),
         battery_percent: state.battery_percent.to_string(),
+        battery_percent_value: state.battery_percent_value,
         power_ac: state.power_ac_mw.to_string(),
         version: state.version.to_string(),
         mock_profile: state.mock_profile.to_string(),
@@ -334,9 +336,25 @@ fn build_app(
     let app = AppWindow::new()?;
     app.global::<ThemeState>().set_mode(current_theme_mode());
     app.set_ui_state(to_slint(state));
+    apply_device_identity(&app);
     wire_callbacks(&app, worker_tx);
     quick_controls_backend::wire_window(&app);
     Ok(app)
+}
+
+/// Privacy-safe DMI identity for the device header and the System page.
+///
+/// Reuses the production read-only `HardwareIdentityProvider` allowlist
+/// (vendor/product/board/BIOS only; no serial/UUID). Missing fields stay
+/// empty and the UI renders honest placeholders.
+fn apply_device_identity(app: &AppWindow) {
+    let identity = orbis_providers::HardwareIdentityProvider::new().snapshot();
+    if let Some(identity) = identity.identity {
+        app.set_device_name(identity.product.into());
+        app.set_device_board(identity.board.into());
+        app.set_bios_version(identity.bios_version.into());
+        app.set_bios_date(identity.bios_date.into());
+    }
 }
 
 fn theme_mode(light: bool) -> ThemeMode {
@@ -1386,6 +1404,17 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
     }
     {
         let app_weak = app.as_weak();
+        app.on_titlebar_maximize_requested(move || {
+            if let Some(app) = app_weak.upgrade() {
+                let window = app.window();
+                let next = !window.is_maximized();
+                window.set_maximized(next);
+                app.set_maximized(next);
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
         app.on_titlebar_close_requested(move || {
             if let Some(app) = app_weak.upgrade() {
                 quick_controls_backend::handle_close_request(&app);
@@ -1535,12 +1564,12 @@ fn render_screenshot(
     path: &str,
     ui_section: Option<&str>,
 ) -> anyhow::Result<()> {
-    let height = 620u32;
+    let (width, height) = (1200u32, 800u32);
     let renderer = Rc::new(slint::platform::software_renderer::SoftwareRenderer::new());
     let adapter = Rc::new(SoftwareWindowAdapter {
         renderer: renderer.clone(),
         window: OnceCell::new(),
-        size: Cell::new(PhysicalSize::new(425, height)),
+        size: Cell::new(PhysicalSize::new(width, height)),
     });
     {
         let dyn_adapter: Rc<dyn WindowAdapter> = adapter.clone();
@@ -1552,12 +1581,19 @@ fn render_screenshot(
 
     let app = build_app(state, None)?;
     match ui_section {
-        Some("fans") => app.set_active_section(Section::Fans),
-        Some("extra") => app.set_active_section(Section::Extra),
-        _ => app.set_active_section(Section::Performance),
+        Some("performance") => app.set_active_section(Section::Performance),
+        Some("power") => app.set_active_section(Section::Power),
+        Some("fans") | Some("cooling") => app.set_active_section(Section::Cooling),
+        Some("graphics") => app.set_active_section(Section::Graphics),
+        Some("backlight") => app.set_active_section(Section::Backlight),
+        Some("display") => app.set_active_section(Section::Display),
+        Some("extra") | Some("system") => app.set_active_section(Section::System),
+        Some("settings") => app.set_active_section(Section::Settings),
+        Some("about") => app.set_active_section(Section::About),
+        _ => app.set_active_section(Section::Dashboard),
     }
     app.window()
-        .set_size(LogicalSize::new(425.0, height as f32));
+        .set_size(LogicalSize::new(width as f32, height as f32));
     app.show()?;
 
     let size = app.window().size();

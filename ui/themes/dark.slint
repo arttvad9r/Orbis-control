@@ -1,6 +1,7 @@
 // Orbis Control — runtime semantic theme tokens.
 // The filename remains stable because all UI surfaces import Palette from here.
-// Dark: G-Helper palette (formBack/buttonMain/buttonSecond/foreMain) — pixel-perfect clone baseline
+// Dark counterpart of the calm light palette: near-black chrome, elevated
+// cards, thin borders, one restrained blue accent.
 
 import { LightPalette } from "light.slint";
 
@@ -11,35 +12,36 @@ export global ThemeState {
 }
 
 export global Palette {
-    // Base surfaces (Catppuccin Mocha: base/mantle/surface0-2).
-    in property <color> window-background: ThemeState.mode == ThemeMode.Light ? LightPalette.window-background : #1C1C1C;
-    in property <color> titlebar-background: ThemeState.mode == ThemeMode.Light ? LightPalette.titlebar-background : #232323;
-    in property <color> surface-default: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-default : #2E2E2E;
-    in property <color> surface-hover: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-hover : #383838;
-    in property <color> surface-pressed: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-pressed : #242424;
-    in property <color> surface-selected: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-selected : #3A3A3A;
-    in property <color> surface-disabled: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-disabled : #2A2A2A;
-    in property <color> border-default: ThemeState.mode == ThemeMode.Light ? LightPalette.border-default : #383838;
-    in property <color> border-strong: ThemeState.mode == ThemeMode.Light ? LightPalette.border-strong : #4A4A4A;
+    // Base surfaces.
+    in property <color> window-background: ThemeState.mode == ThemeMode.Light ? LightPalette.window-background : #17181C;
+    in property <color> titlebar-background: ThemeState.mode == ThemeMode.Light ? LightPalette.titlebar-background : #1B1C21;
+    in property <color> surface-default: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-default : #232529;
+    in property <color> surface-hover: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-hover : #2A2D33;
+    in property <color> surface-pressed: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-pressed : #1E2024;
+    in property <color> surface-selected: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-selected : #1A2840;
+    in property <color> surface-disabled: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-disabled : #202226;
+    in property <color> accent-soft: ThemeState.mode == ThemeMode.Light ? LightPalette.accent-soft : #1A2840;
+    in property <color> border-default: ThemeState.mode == ThemeMode.Light ? LightPalette.border-default : #33363D;
+    in property <color> border-strong: ThemeState.mode == ThemeMode.Light ? LightPalette.border-strong : #464A53;
 
     // Text.
-    in property <color> text-primary: ThemeState.mode == ThemeMode.Light ? LightPalette.text-primary : #F0F0F0;
-    in property <color> text-secondary: ThemeState.mode == ThemeMode.Light ? LightPalette.text-secondary : #B8B8B8;
-    in property <color> text-disabled: ThemeState.mode == ThemeMode.Light ? LightPalette.text-disabled : #7A7A7A;
-    in property <color> text-on-accent: ThemeState.mode == ThemeMode.Light ? LightPalette.text-on-accent : #1C1C1C;
+    in property <color> text-primary: ThemeState.mode == ThemeMode.Light ? LightPalette.text-primary : #F1F2F4;
+    in property <color> text-secondary: ThemeState.mode == ThemeMode.Light ? LightPalette.text-secondary : #9BA1AC;
+    in property <color> text-disabled: ThemeState.mode == ThemeMode.Light ? LightPalette.text-disabled : #6A6F79;
+    in property <color> text-on-accent: ThemeState.mode == ThemeMode.Light ? LightPalette.text-on-accent : #FFFFFF;
 
     // General semantic accents.
-    in property <color> accent-default: ThemeState.mode == ThemeMode.Light ? LightPalette.accent-default : #2DA8F2;
-    in property <color> warning: ThemeState.mode == ThemeMode.Light ? LightPalette.warning : #E5A94F;
+    in property <color> accent-default: ThemeState.mode == ThemeMode.Light ? LightPalette.accent-default : #4D8DFF;
+    in property <color> warning: ThemeState.mode == ThemeMode.Light ? LightPalette.warning : #E0A24E;
     in property <color> error: ThemeState.mode == ThemeMode.Light ? LightPalette.error : #E35D6A;
-    in property <color> success: ThemeState.mode == ThemeMode.Light ? LightPalette.success : #4BC39A;
+    in property <color> success: ThemeState.mode == ThemeMode.Light ? LightPalette.success : #46BD93;
 
     // Mode accents. They are used as borders/markers, not large filled areas.
-    in property <color> silent: ThemeState.mode == ThemeMode.Light ? LightPalette.silent : #49C6A5;
-    in property <color> balanced: ThemeState.mode == ThemeMode.Light ? LightPalette.balanced : #2DA8F2;
-    in property <color> turbo: ThemeState.mode == ThemeMode.Light ? LightPalette.turbo : #EF6376;
-    in property <color> eco: ThemeState.mode == ThemeMode.Light ? LightPalette.eco : #67C66A;
-    in property <color> standard: ThemeState.mode == ThemeMode.Light ? LightPalette.standard : #2DA8F2;
-    in property <color> ultimate: ThemeState.mode == ThemeMode.Light ? LightPalette.ultimate : #E6A04B;
-    in property <color> optimized: ThemeState.mode == ThemeMode.Light ? LightPalette.optimized : #2DA8F2;
+    in property <color> silent: ThemeState.mode == ThemeMode.Light ? LightPalette.silent : #46BD93;
+    in property <color> balanced: ThemeState.mode == ThemeMode.Light ? LightPalette.balanced : #4D8DFF;
+    in property <color> turbo: ThemeState.mode == ThemeMode.Light ? LightPalette.turbo : #E35D6A;
+    in property <color> eco: ThemeState.mode == ThemeMode.Light ? LightPalette.eco : #46BD93;
+    in property <color> standard: ThemeState.mode == ThemeMode.Light ? LightPalette.standard : #4D8DFF;
+    in property <color> ultimate: ThemeState.mode == ThemeMode.Light ? LightPalette.ultimate : #E0A24E;
+    in property <color> optimized: ThemeState.mode == ThemeMode.Light ? LightPalette.optimized : #38BDF8;
 }

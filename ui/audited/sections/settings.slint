@@ -1,0 +1,152 @@
+// Settings page — appearance, session behavior and window preferences.
+// All toggles are request-only: the authoritative value is published by the
+// preferences backends after persistence.
+import { ScrollView } from "std-widgets.slint";
+import { PageHeader, SectionCard, SectionTitle, LocalStatus, ActionButton, ChoiceButton } from "../common.slint";
+import { RequestToggleRow } from "../../components/request-toggle-row.slint";
+import { Palette, ThemeState, ThemeMode } from "../../themes/dark.slint";
+
+export component SettingsSection inherits Rectangle {
+    callback theme-changed(bool);
+    callback startup-changed(bool);
+    in-out property <bool> startup: false;
+    in-out property <bool> startup-enabled: false;
+    in property <string> startup-status: "Unavailable";
+    callback start-minimized-changed(bool);
+    in property <bool> start-minimized: false;
+    in property <bool> start-minimized-enabled: false;
+    callback remember-position-changed(bool);
+    in property <bool> remember-position: false;
+    in property <bool> remember-position-enabled: false;
+    callback close-action-changed(int);
+    in property <int> close-action: 0;
+    in property <bool> close-action-enabled: false;
+    in property <bool> hide-to-tray-enabled: false;
+    in property <string> settings-local-status: "";
+    callback quit-requested;
+
+    ScrollView {
+        VerticalLayout {
+            width: root.width - 56px;
+            x: 28px;
+            spacing: 16px;
+            padding-top: 8px;
+            padding-bottom: 20px;
+
+            PageHeader {
+                title: "Настройки";
+                description: "Внешний вид и поведение приложения.";
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+
+                    SectionTitle { title: "Внешний вид"; }
+
+                    HorizontalLayout {
+                        height: 36px;
+                        spacing: 8px;
+                        Text {
+                            width: 150px;
+                            text: "Тема";
+                            font-size: 13px;
+                            font-weight: 500;
+                            color: Palette.text-primary;
+                            vertical-alignment: center;
+                        }
+                        ChoiceButton {
+                            label: "Тёмная";
+                            selected: ThemeState.mode == ThemeMode.Dark;
+                            clicked => {
+                                ThemeState.mode = ThemeMode.Dark;
+                                root.theme-changed(false);
+                            }
+                        }
+                        ChoiceButton {
+                            label: "Светлая";
+                            selected: ThemeState.mode == ThemeMode.Light;
+                            clicked => {
+                                ThemeState.mode = ThemeMode.Light;
+                                root.theme-changed(true);
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+                }
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 8px;
+
+                    SectionTitle { title: "Поведение"; }
+
+                    RequestToggleRow {
+                        label: "Запускать при входе в систему";
+                        description: root.startup-enabled ? "Запускать Orbis вместе с пользовательской сессией" : "Ожидание autostart-backend";
+                        checked: root.startup;
+                        disabled: !root.startup-enabled;
+                        toggled(value) => { root.startup-changed(value); }
+                    }
+                    RequestToggleRow {
+                        label: "Запускать свёрнутым";
+                        description: root.start-minimized-enabled ? "Открывать окно без захвата фокуса" : "Ожидание lifecycle-backend";
+                        checked: root.start-minimized;
+                        disabled: !root.start-minimized-enabled;
+                        toggled(value) => { root.start-minimized-changed(value); }
+                    }
+                    RequestToggleRow {
+                        label: "Помнить положение окна";
+                        description: root.remember-position-enabled ? "Восстанавливать только если оконная система это поддерживает" : "Недоступно в текущем окружении";
+                        checked: root.remember-position;
+                        disabled: !root.remember-position-enabled;
+                        toggled(value) => { root.remember-position-changed(value); }
+                    }
+                    HorizontalLayout {
+                        height: 36px;
+                        spacing: 10px;
+                        Text {
+                            width: 150px;
+                            text: "Кнопка закрытия";
+                            font-size: 13px;
+                            font-weight: 500;
+                            color: root.close-action-enabled ? Palette.text-primary : Palette.text-disabled;
+                            vertical-alignment: center;
+                        }
+                        ChoiceButton {
+                            label: "Выход";
+                            selected: root.close-action == 0;
+                            disabled: !root.close-action-enabled;
+                            clicked => { root.close-action-changed(0); }
+                        }
+                        ChoiceButton {
+                            label: "Скрыть в трей";
+                            selected: root.close-action == 1;
+                            disabled: !root.close-action-enabled || !root.hide-to-tray-enabled;
+                            clicked => { root.close-action-changed(1); }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+
+                    LocalStatus {
+                        text: root.startup-status != "" && root.startup-status != "Unavailable"
+                            ? root.startup-status
+                            : root.settings-local-status;
+                        accent: Palette.text-secondary;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                height: 32px;
+                spacing: 8px;
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                ActionButton { label: "Выход"; clicked => { root.quit-requested(); } }
+            }
+            Rectangle { vertical-stretch: 100; background: transparent; }
+        }
+    }
+}

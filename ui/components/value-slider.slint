@@ -6,12 +6,12 @@ import { Palette } from "../themes/dark.slint";
 export component ValueSlider inherits Rectangle {
     in property <int> min: 40;
     in property <int> max: 100;
-    in property <int> step: 5;
+    in property <int> step: 1;
     in property <int> value: 80;
     in property <bool> disabled: false;
     callback changed(float);
 
-    height: 30px;
+    height: 32px;
     background: transparent;
 
     property <bool> gesture-active: false;
@@ -26,46 +26,47 @@ export component ValueSlider inherits Rectangle {
     }
 
     HorizontalLayout {
-        spacing: 7px;
+        spacing: 10px;
         alignment: center;
 
         Text {
             text: root.min + "";
-            font-size: 9px;
+            font-size: 11.5px;
             color: Palette.text-disabled;
             vertical-alignment: center;
         }
 
         Rectangle {
             horizontal-stretch: 1;
-            min-width: 120px;
-            height: 4px;
-            border-radius: 2px;
+            min-width: 140px;
+            height: 6px;
+            y: (parent.height - 6px) / 2;
+            border-radius: 3px;
             background: root.disabled ? Palette.surface-disabled : Palette.border-default;
 
             Rectangle {
                 x: 0px;
                 width: parent.width * root.frac;
                 height: 100%;
-                border-radius: 2px;
+                border-radius: 3px;
                 background: root.disabled ? Palette.text-disabled : Palette.accent-default;
             }
 
             Rectangle {
-                width: 14px;
-                height: 14px;
-                border-radius: 7px;
-                background: root.disabled ? Palette.text-disabled : Palette.text-primary;
-                border-width: touch.has-hover && !root.disabled ? 1.5px : 1px;
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                background: root.disabled ? Palette.surface-disabled : Palette.surface-default;
+                border-width: 1.5px;
                 border-color: root.disabled ? Palette.text-disabled : Palette.accent-default;
-                x: root.frac * (parent.width - 14px);
-                y: (parent.height - 14px) / 2;
+                x: root.frac * (parent.width - 16px);
+                y: (parent.height - 16px) / 2;
             }
 
             touch := TouchArea {
                 width: parent.width;
-                height: 24px;
-                y: (parent.height - 24px) / 2;
+                height: 28px;
+                y: (parent.height - 28px) / 2;
                 enabled: !root.disabled;
                 pointer-event(ev) => {
                     if (ev.kind == PointerEventKind.down) {
@@ -93,17 +94,17 @@ export component ValueSlider inherits Rectangle {
 
         Text {
             text: root.max + "";
-            font-size: 9px;
+            font-size: 11.5px;
             color: Palette.text-disabled;
             vertical-alignment: center;
         }
 
         Text {
-            text: round(root.internal-value) + "%";
-            font-size: 11px;
-            font-weight: 650;
+            text: round(root.internal-value) + " %";
+            font-size: 12.5px;
+            font-weight: 600;
             color: root.disabled ? Palette.text-disabled : Palette.text-primary;
-            min-width: 38px;
+            min-width: 44px;
             horizontal-alignment: right;
             vertical-alignment: center;
         }

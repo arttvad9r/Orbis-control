@@ -17,34 +17,34 @@ export component PreviewDialogWindow inherits Window {
     callback confirm-clicked;
 
     VerticalLayout {
-        padding: 12px; spacing: 9px;
+        padding: 16px; spacing: 12px;
         WindowHeader {
-            title: root.kind == 0 ? "Reboot required"
-                : root.kind == 1 ? "Logout required"
-                : root.kind == 2 ? "Action failed"
-                : "Confirm action";
-            subtitle: root.kind == 2 ? "The observed state was not replaced" : "System action required";
+            title: root.kind == 0 ? "Требуется перезагрузка"
+                : root.kind == 1 ? "Требуется выход из сессии"
+                : root.kind == 2 ? "Действие не удалось"
+                : "Подтвердите действие";
+            subtitle: root.kind == 2 ? "Наблюдаемое состояние не было изменено" : "Требуется системное действие";
         }
         SectionCard {
             vertical-stretch: 1;
             Text {
-                x: 12px; y: 12px; width: parent.width - 24px; height: parent.height - 24px;
-                text: root.kind == 0 ? "The requested GPU mode requires a reboot before it becomes effective."
-                    : root.kind == 1 ? "The requested transition requires logging out before the desktop session can switch safely."
-                    : root.kind == 2 ? "The backend did not confirm the requested operation. The previously observed state is preserved."
-                    : "Review the requested operation before continuing.";
-                font-size: 10px;
+                x: 14px; y: 12px; width: parent.width - 28px; height: parent.height - 24px;
+                text: root.kind == 0 ? "Запрошенный режим GPU применится после перезагрузки."
+                    : root.kind == 1 ? "Переключение требует выхода из сессии, чтобы рабочий стол переключился безопасно."
+                    : root.kind == 2 ? "Backend не подтвердил операцию. Прежнее наблюдаемое состояние сохранено."
+                    : "Проверьте запрошенную операцию перед продолжением.";
+                font-size: 12.5px;
                 color: root.kind == 2 ? Palette.error : Palette.text-primary;
                 wrap: word-wrap;
             }
         }
         HorizontalLayout {
-            height: 30px; spacing: 6px;
+            height: 32px; spacing: 8px;
             Rectangle { horizontal-stretch: 1; background: transparent; }
-            if (root.kind != 2) : ActionButton { width: 88px; label: "Cancel"; clicked => { root.dismiss-clicked(); } }
+            if (root.kind != 2) : ActionButton { label: "Отмена"; clicked => { root.dismiss-clicked(); } }
             ActionButton {
-                width: 112px;
-                label: root.kind == 0 ? "Reboot Later" : root.kind == 1 ? "Logout Later" : root.kind == 2 ? "Close" : root.action-label;
+                min-width: 120px;
+                label: root.kind == 0 ? "Перезагрузить позже" : root.kind == 1 ? "Выйти позже" : root.kind == 2 ? "Закрыть" : root.action-label;
                 accent: root.kind != 2;
                 disabled: root.kind == 3 && !root.action-enabled;
                 clicked => {

@@ -25,27 +25,45 @@ PRODUCTION_SURFACES = {
         "titlebar-close-requested",
         "titlebar-drag-started",
     ],
-    "ui/audited/sections/performance.slint": [
-        "display-mode-requested",
-        "startup-changed",
-    ],
-    "ui/audited/sections/extra.slint": [
-        "ThemeBridge {",
+    "ui/audited/sections/dashboard.slint": [
+        "perf-clicked",
+        "charge-changed",
         "keyboard-brightness-requested",
-        "RequestToggleRow",
+    ],
+    "ui/audited/sections/performance.slint": [
+        "perf-clicked",
+    ],
+    "ui/audited/sections/power.slint": [
+        "charge-changed",
+    ],
+    "ui/audited/sections/cooling.slint": [
+        "mutation-safety-blocked",
+        "fan-apply-clicked",
+    ],
+    "ui/audited/sections/graphics.slint": [
+        "gpu-clicked",
+    ],
+    "ui/audited/sections/backlight.slint": [
+        "keyboard-brightness-requested",
+    ],
+    "ui/audited/sections/display.slint": [
+        "display-mode-requested",
+        "panel-overdrive-requested",
+    ],
+    "ui/audited/sections/system.slint": [
         "backend-ready",
         "reload-requested",
         "apply-requested",
         "diagnostics-summary",
-        "start-minimized-changed",
-        "remember-position-changed",
-        "close-action-changed",
         "diagnostics-refresh-requested",
         "diagnostics-export-requested",
     ],
-    "ui/audited/sections/fans.slint": [
-        "mutation-safety-blocked",
-        "fan-apply-clicked",
+    "ui/audited/sections/settings.slint": [
+        "theme-changed",
+        "startup-changed",
+        "start-minimized-changed",
+        "remember-position-changed",
+        "close-action-changed",
     ],
     "ui/audited/preview-dialog-window.slint": [
         "dismiss-clicked",
@@ -71,6 +89,7 @@ THEME_TOKENS = {
     "surface-pressed",
     "surface-selected",
     "surface-disabled",
+    "accent-soft",
     "border-default",
     "border-strong",
     "text-primary",
@@ -254,13 +273,13 @@ def declared_geometry(text: str) -> tuple[int, int] | None:
 def check_main_geometry(text: str, errors: list[str]) -> None:
     geometry = declared_geometry(text)
     if geometry is None:
-        fail(errors, "main window must declare fixed compact width/height")
+        fail(errors, "main window must declare fixed preferred width/height")
         return
     w, h = geometry
-    if w > 800 or h > 640:
-        fail(errors, f"main window too large for compact contract: {w}x{h}")
-    if w < 400 or h < 400:
-        fail(errors, f"main window too small for planned production controls: {w}x{h}")
+    if w > 1400 or h > 900:
+        fail(errors, f"main window too large for desktop-utility contract: {w}x{h}")
+    if w < 1000 or h < 640:
+        fail(errors, f"main window too small for sidebar + card layout: {w}x{h}")
 
 
 def check_secondary_geometry(root: Path, errors: list[str]) -> None:
@@ -279,7 +298,9 @@ def check_secondary_geometry(root: Path, errors: list[str]) -> None:
 
 def check_authoritative_controls(root: Path, errors: list[str]) -> None:
     for rel in (
-        "ui/audited/sections/extra.slint",
+        "ui/audited/sections/system.slint",
+        "ui/audited/sections/display.slint",
+        "ui/audited/sections/settings.slint",
     ):
         text = read(root / rel, errors)
         if re.search(r"\bToggleRow\s*\{", text):

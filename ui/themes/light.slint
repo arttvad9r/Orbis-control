@@ -1,38 +1,40 @@
 // Orbis Control — light-theme semantic tokens.
-// Light mode mirrors the same visual hierarchy as dark mode instead of being a
-// white inversion: quiet window chrome, clear cards and one restrained accent.
-// Light: Catppuccin Latte — https://catppuccin.com
+// Calm system-utility palette: off-white chrome, white cards, thin borders,
+// one restrained blue accent (reference design 2026-08-25).
 
 export global LightPalette {
-    // surfaces (Catppuccin Latte: base/mantle/surface0-2)
-    in property <color> window-background: #EFF1F5;
-    in property <color> titlebar-background: #E6E9EF;
-    in property <color> surface-default: #CCD0DA;
-    in property <color> surface-hover: #BCC0CC;
-    in property <color> surface-pressed: #DCE0E8;
-    in property <color> surface-selected: #C6CEE0;
-    in property <color> surface-disabled: #E0E3EA;
-    in property <color> border-default: #9CA0B0;
-    in property <color> border-strong: #7C7F93;
+    // surfaces
+    in property <color> window-background: #F7F8FA;
+    in property <color> titlebar-background: #FAFAFB;
+    in property <color> surface-default: #FFFFFF;
+    in property <color> surface-hover: #F3F4F7;
+    in property <color> surface-pressed: #ECEDF1;
+    in property <color> surface-selected: #EAF2FF;
+    in property <color> surface-disabled: #F2F3F5;
+    in property <color> accent-soft: #EAF2FF;
+
+    // borders
+    in property <color> border-default: #E6E8EC;
+    in property <color> border-strong: #CFD3DA;
 
     // text
-    in property <color> text-primary: #4C4F69;
-    in property <color> text-secondary: #5C5F77;
-    in property <color> text-disabled: #9CA0B0;
-    in property <color> text-on-accent: #EFF1F5;
+    in property <color> text-primary: #171717;
+    in property <color> text-secondary: #6B7280;
+    in property <color> text-disabled: #9CA3AF;
+    in property <color> text-on-accent: #FFFFFF;
 
     // semantic accents
-    in property <color> accent-default: #1E66F5;
-    in property <color> warning: #DF8E1D;
-    in property <color> error: #D20F39;
-    in property <color> success: #40A02B;
+    in property <color> accent-default: #2563EB;
+    in property <color> warning: #D97706;
+    in property <color> error: #DC2626;
+    in property <color> success: #16A34A;
 
-    // mode accents
-    in property <color> silent: #40A02B;
-    in property <color> balanced: #1E66F5;
-    in property <color> turbo: #D20F39;
-    in property <color> eco: #40A02B;
-    in property <color> standard: #1E66F5;
-    in property <color> ultimate: #FE640B;
-    in property <color> optimized: #179299;
+    // mode accents (markers only, never large fills)
+    in property <color> silent: #16A34A;
+    in property <color> balanced: #2563EB;
+    in property <color> turbo: #DC2626;
+    in property <color> eco: #16A34A;
+    in property <color> standard: #2563EB;
+    in property <color> ultimate: #D97706;
+    in property <color> optimized: #0284C7;
 }

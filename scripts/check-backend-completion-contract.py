@@ -101,14 +101,22 @@ def run(root: Path) -> list[str]:
     require(diagnostics_model, "row.write_status", diagnostics_model_rel, errors)
     require(diagnostics_model, "row.read_status", diagnostics_model_rel, errors)
 
-    extra_ui_rel = "ui/audited/sections/extra.slint"
-    extra_ui = read(root, extra_ui_rel, errors)
-    require(extra_ui, "panel-overdrive-requested", extra_ui_rel, errors)
-    require(extra_ui, "RequestToggleRow", extra_ui_rel, errors)
-    require(extra_ui, "boot-sound-state-ready", extra_ui_rel, errors)
-    require(extra_ui, 'label: "Boot sound";', extra_ui_rel, errors)
-    require(extra_ui, "disabled: true;", extra_ui_rel, errors)
-    require(extra_ui, "enabled: false; model: [\"Static\"", extra_ui_rel, errors)
+    display_ui_rel = "ui/audited/sections/display.slint"
+    display_ui = read(root, display_ui_rel, errors)
+    require(display_ui, "panel-overdrive-requested", display_ui_rel, errors)
+    require(display_ui, "RequestToggleRow", display_ui_rel, errors)
+
+    system_ui_rel = "ui/audited/sections/system.slint"
+    system_ui = read(root, system_ui_rel, errors)
+    require(system_ui, "boot-sound-state-ready", system_ui_rel, errors)
+    require(system_ui, 'label: "Звук при включении";', system_ui_rel, errors)
+    require(system_ui, "disabled: true;", system_ui_rel, errors)
+
+    backlight_ui_rel = "ui/audited/sections/backlight.slint"
+    backlight_ui = read(root, backlight_ui_rel, errors)
+    # Aura effect/speed stay read-only observations (no writable control).
+    require(backlight_ui, 'InfoRow { label: "Эффект";', backlight_ui_rel, errors)
+    require(backlight_ui, 'InfoRow { label: "Скорость";', backlight_ui_rel, errors)
 
     extra_rel = "crates/orbis-ui/src/extra_backend.rs"
     extra = read(root, extra_rel, errors)
@@ -155,10 +163,15 @@ def run(root: Path) -> list[str]:
     forbid(promotion, "CapabilityStatus::Supported", promotion_rel, errors)
     forbid(promotion, "Command::new", promotion_rel, errors)
 
-    pref_ui_rel = "ui/audited/sections/extra.slint"
+    pref_ui_rel = "ui/audited/sections/settings.slint"
     pref_ui = read(root, pref_ui_rel, errors)
     require(pref_ui, "hide-to-tray-enabled", pref_ui_rel, errors)
-    require(pref_ui, "enabled: root.close-action-enabled;", pref_ui_rel, errors)
+    require(
+        pref_ui,
+        "disabled: !root.close-action-enabled || !root.hide-to-tray-enabled;",
+        pref_ui_rel,
+        errors,
+    )
 
     pref_rel = "crates/orbis-ui/src/preferences_backend.rs"
     pref = read(root, pref_rel, errors)

@@ -5,7 +5,7 @@ export enum GpuHwState { Loading, Ready, Unavailable }
 export enum PerformanceHwState { Loading, Ready, Unavailable }
 export enum GpuModeHwState { Loading, Ready, Unavailable }
 export enum FanCurveHwState { Loading, Ready, Unavailable }
-export enum Section { Performance, Fans, Extra }
+export enum Section { Dashboard, Performance, Power, Cooling, Graphics, Backlight, Display, System, Settings, About }
 
 export struct UiState {
     capability-generation: int,
@@ -39,6 +39,8 @@ export struct UiState {
     cpu-fan-rpm: string,
     gpu-fan-rpm: string,
     battery-percent: string,
+    /// Numeric battery charge percent for the header indicator (-1 = unknown).
+    battery-percent-value: int,
     power-ac-mw: string,
     battery-health: string,
     battery-cycles: string,

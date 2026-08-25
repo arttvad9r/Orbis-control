@@ -1,0 +1,135 @@
+// Backlight page — keyboard brightness levels and observed Aura state.
+// Writes stay request-only and gated by Hardware1 write evidence; when the
+// privileged writer is not supported the UI says so instead of pretending.
+import { ScrollView } from "std-widgets.slint";
+import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow } from "../common.slint";
+import { Icon } from "../../components/icon.slint";
+import { Palette } from "../../themes/dark.slint";
+
+export component BacklightSection inherits Rectangle {
+    in property <bool> keyboard-state-ready: false;
+    in property <bool> keyboard-control-ready: false;
+    in property <int> keyboard-brightness: -1;
+    callback keyboard-brightness-requested(int);
+    in property <bool> aura-state-ready: false;
+    in-out property <int> keyboard-effect: -1;
+    in-out property <int> keyboard-speed: -1;
+
+    function keyboard-status() -> string {
+        if (!root.keyboard-state-ready) { return "Состояние подсветки недоступно"; }
+        if (root.keyboard-control-ready) { return "Запись подтверждается чтением после применения"; }
+        return "Запись отключена · уровень только для чтения";
+    }
+
+    function aura-effect-label() -> string {
+        if (!root.aura-state-ready) { return "—"; }
+        if (root.keyboard-effect == 0) { return "Static"; }
+        if (root.keyboard-effect == 1) { return "Breathing"; }
+        if (root.keyboard-effect == 2) { return "Color Cycle"; }
+        return "—";
+    }
+
+    function aura-speed-label() -> string {
+        if (!root.aura-state-ready) { return "—"; }
+        if (root.keyboard-speed == 0) { return "Slow"; }
+        if (root.keyboard-speed == 1) { return "Normal"; }
+        if (root.keyboard-speed == 2) { return "Fast"; }
+        return "—";
+    }
+
+    ScrollView {
+        VerticalLayout {
+            width: root.width - 56px;
+            x: 28px;
+            spacing: 16px;
+            padding-top: 8px;
+            padding-bottom: 20px;
+
+            PageHeader {
+                title: "Подсветка";
+                description: "Яркость клавиатуры и наблюдаемые эффекты Aura.";
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    SectionTitle {
+                        title: "Подсветка клавиатуры";
+                        detail: root.keyboard-state-ready ? "" : "недоступно";
+                        detail-color: Palette.text-disabled;
+                    }
+
+                    if (root.keyboard-state-ready) : HorizontalLayout {
+                        height: 40px;
+                        spacing: 8px;
+                        for level in 4: Rectangle {
+                            min-width: 96px;
+                            horizontal-stretch: 1;
+                            border-radius: 8px;
+                            border-width: root.keyboard-brightness == level && root.keyboard-control-ready ? 1.5px : 1px;
+                            border-color: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default
+                                : kb-touch.has-hover && root.keyboard-control-ready ? Palette.border-strong
+                                : Palette.border-default;
+                            background: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-soft
+                                : kb-touch.pressed && root.keyboard-control-ready ? Palette.surface-pressed
+                                : kb-touch.has-hover && root.keyboard-control-ready ? Palette.surface-hover
+                                : Palette.surface-default;
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 7px;
+                                Icon {
+                                    kind: 5;
+                                    tint: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default : Palette.text-disabled;
+                                }
+                                Text {
+                                    text: level == 0 ? "Выкл" : "Уровень " + level;
+                                    font-size: 12.5px;
+                                    font-weight: 500;
+                                    color: root.keyboard-control-ready ? Palette.text-primary : Palette.text-disabled;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            kb-touch := TouchArea {
+                                enabled: root.keyboard-control-ready;
+                                clicked => { root.keyboard-brightness-requested(level); }
+                            }
+                        }
+                    }
+
+                    LocalStatus {
+                        text: root.keyboard-status();
+                        accent: root.keyboard-control-ready ? Palette.success : Palette.text-secondary;
+                    }
+                }
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    SectionTitle {
+                        title: "Aura";
+                        detail: root.aura-state-ready ? "наблюдается" : "недоступно";
+                        detail-color: root.aura-state-ready ? Palette.text-secondary : Palette.text-disabled;
+                    }
+
+                    // Aura observation is read-only: the privileged writer is
+                    // Static RGB only until a typed effect contract exists.
+                    InfoRow { label: "Эффект"; value: root.aura-effect-label(); }
+                    InfoRow { label: "Скорость"; value: root.aura-speed-label(); }
+
+                    Text {
+                        text: "Запись статических цветов Aura остаётся отдельным продуктом и не включена.";
+                        font-size: 11.5px;
+                        color: Palette.text-secondary;
+                        overflow: elide;
+                    }
+                }
+            }
+            Rectangle { vertical-stretch: 100; background: transparent; }
+        }
+    }
+}

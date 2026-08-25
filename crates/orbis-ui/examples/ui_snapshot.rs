@@ -1,7 +1,8 @@
 //! Offscreen section snapshots for the single-window UI (ui-review companion).
 //!
 //! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme]`
-//! Sections: dashboard | fans | hardware | settings | dialog.
+//! Sections: dashboard | performance | power | cooling | graphics | backlight
+//! | display | system | settings | about | dialog.
 
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
@@ -53,6 +54,59 @@ impl Platform for SoftwarePlatform {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
         Ok(self.adapter.clone())
     }
+}
+
+/// Realistic review state for section screenshots (dev-only; never shipped).
+fn demo_state(component: &AppWindow) {
+    let mut state = component.get_ui_state();
+    state.perf_state = PerformanceHwState::Ready;
+    state.perf_writable = true;
+    state.perf_selected = 1;
+    state.available_perf_mask = 0b0111;
+    state.gpu_mode_state = GpuModeHwState::Ready;
+    state.gpu_mode_writable = false;
+    state.gpu_selected = 1;
+    state.available_gpu_mask = 0b0111;
+    state.charge_limit_state = ChargeLimitState::Ready;
+    state.charge_limit_writable = true;
+    state.charge_limit = 80;
+    state.cpu_temp = "56°C".into();
+    state.gpu_temp = "51°C".into();
+    state.cpu_fan_rpm = "2300 rpm".into();
+    state.gpu_fan_rpm = "2100 rpm".into();
+    state.battery_percent = "78%".into();
+    state.battery_percent_value = 78;
+    state.battery_health = "89%".into();
+    state.battery_cycles = "142".into();
+    state.battery_status = "Charging".into();
+    state.ac_online = "On AC".into();
+    state.power_ac_mw = "23 W".into();
+    state.gpu_power = "8 W".into();
+    state.telemetry_fresh = true;
+    state.fan_curve_state = FanCurveHwState::Ready;
+    state.fan_curve_writable = true;
+    state.fan_curve_dirty = false;
+    state.fan_curve_enabled_known = true;
+    state.fan_curve_enabled = false;
+    state.fan_selected = 0;
+    state.fan_profile_selected = 0;
+    state.fan_temp_0 = 30;
+    state.fan_temp_1 = 40;
+    state.fan_temp_2 = 50;
+    state.fan_temp_3 = 60;
+    state.fan_temp_4 = 70;
+    state.fan_temp_5 = 80;
+    state.fan_temp_6 = 90;
+    state.fan_temp_7 = 100;
+    state.fan_pwm_0 = 0;
+    state.fan_pwm_1 = 24;
+    state.fan_pwm_2 = 48;
+    state.fan_pwm_3 = 72;
+    state.fan_pwm_4 = 104;
+    state.fan_pwm_5 = 144;
+    state.fan_pwm_6 = 196;
+    state.fan_pwm_7 = 255;
+    component.set_ui_state(state);
 }
 
 fn setup(width: u32, height: u32) -> Rc<slint::platform::software_renderer::SoftwareRenderer> {
@@ -110,48 +164,36 @@ fn main() -> anyhow::Result<()> {
     // The shell is fixed-size; the dialog keeps its own compact canvas.
     let (width, height) = match kind.as_str() {
         "dialog" => (430, 220),
-        _ => (425, 620),
+        _ => (1200, 800),
     };
 
     let renderer = setup(width, height);
 
     match kind.as_str() {
-        "performance" | "fans" | "extra" => {
+        "dashboard" | "performance" | "power" | "fans" | "cooling" | "graphics" | "backlight"
+        | "display" | "extra" | "system" | "settings" | "about" => {
             let component = AppWindow::new()?;
             component.global::<ThemeState>().set_mode(if light {
                 ThemeMode::Light
             } else {
                 ThemeMode::Dark
             });
-            if kind == "fans" {
-                let mut state = component.get_ui_state();
-                state.fan_curve_state = FanCurveHwState::Ready;
-                state.fan_curve_writable = true;
-                state.fan_curve_dirty = true;
-                state.fan_selected = 0;
-                state.fan_profile_selected = 0;
-                state.fan_temp_0 = 30;
-                state.fan_temp_1 = 40;
-                state.fan_temp_2 = 50;
-                state.fan_temp_3 = 60;
-                state.fan_temp_4 = 70;
-                state.fan_temp_5 = 80;
-                state.fan_temp_6 = 90;
-                state.fan_temp_7 = 100;
-                state.fan_pwm_0 = 0;
-                state.fan_pwm_1 = 24;
-                state.fan_pwm_2 = 48;
-                state.fan_pwm_3 = 72;
-                state.fan_pwm_4 = 104;
-                state.fan_pwm_5 = 144;
-                state.fan_pwm_6 = 196;
-                state.fan_pwm_7 = 255;
-                component.set_ui_state(state);
-            }
+            demo_state(&component);
+            // Keyboard backlight observation is ready in the review scenario.
+            component.set_keyboard_state_ready(true);
+            component.set_keyboard_control_ready(false);
+            component.set_keyboard_brightness(2);
             let section = match kind.as_str() {
-                "fans" => Section::Fans,
-                "extra" => Section::Extra,
-                _ => Section::Performance,
+                "performance" => Section::Performance,
+                "power" => Section::Power,
+                "fans" | "cooling" => Section::Cooling,
+                "graphics" => Section::Graphics,
+                "backlight" => Section::Backlight,
+                "display" => Section::Display,
+                "extra" | "system" => Section::System,
+                "settings" => Section::Settings,
+                "about" => Section::About,
+                _ => Section::Dashboard,
             };
             component.set_active_section(section);
             component

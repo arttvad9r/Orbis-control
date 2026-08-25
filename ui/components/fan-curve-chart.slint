@@ -1,0 +1,220 @@
+// FanCurveChart — temperature → fan speed curve (reference design).
+//
+// The software renderer does not rasterize `Path`, so the curve is drawn as a
+// piecewise-linear area silhouette: a fixed number of vertical columns whose
+// heights interpolate the eight authoritative curve points, plus the points
+// themselves as draggable dots when `editable` is set. This renders
+// deterministically in screenshots and in the production software fallback.
+//
+// Y axis labels are percent (0–100 %) or raw PWM (0–255).
+
+import { FanCurveHwState } from "../audited/model.slint";
+import { Palette } from "../themes/dark.slint";
+
+// Draggable curve point. Drag is a local preview; committed() fires once on
+// pointer release so the backend never sees per-pixel mutation traffic.
+component GraphPoint inherits Rectangle {
+    in property <int> index;
+    in property <int> pwm;
+    in property <bool> editable: false;
+    in property <color> accent: Palette.accent-default;
+    callback committed(int, int);
+
+    property <bool> active: false;
+    property <int> preview: root.pwm;
+    property <int> shown: root.active ? root.preview : root.pwm;
+
+    width: 16px;
+    background: transparent;
+
+    Rectangle {
+        y: (1 - Math.min(Math.max(root.shown / 255, 0), 1)) * (parent.height - 14px) - 2px;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        border-width: 2px;
+        border-color: Palette.surface-default;
+        background: root.accent;
+    }
+
+    if (drag.has-hover || root.active) : Rectangle {
+        y: Math.max((1 - Math.min(Math.max(root.shown / 255, 0), 1)) * (parent.height - 14px) - 22px, 0px);
+        width: 42px;
+        height: 18px;
+        x: (parent.width - self.width) / 2;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Palette.border-default;
+        background: Palette.surface-default;
+        Text {
+            text: root.shown + "";
+            font-size: 10px;
+            font-weight: 600;
+            color: Palette.text-primary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    drag := TouchArea {
+        width: 24px;
+        x: (parent.width - self.width) / 2;
+        enabled: root.editable;
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down) {
+                root.active = true;
+                root.preview = Math.min(Math.max(Math.round((1 - self.mouse-y / self.height) * 255), 0), 255);
+            } else if (ev.kind == PointerEventKind.move && self.pressed) {
+                root.preview = Math.min(Math.max(Math.round((1 - self.mouse-y / self.height) * 255), 0), 255);
+            } else if (ev.kind == PointerEventKind.up && root.active) {
+                let value = Math.min(Math.max(Math.round((1 - self.mouse-y / self.height) * 255), 0), 255);
+                root.active = false;
+                root.preview = root.pwm;
+                root.committed(root.index, value);
+            } else if (ev.kind == PointerEventKind.cancel) {
+                root.active = false;
+                root.preview = root.pwm;
+            }
+        }
+    }
+}
+
+export component FanCurveChart inherits Rectangle {
+    in property <FanCurveHwState> state: FanCurveHwState.Loading;
+    in property <bool> editable: false;
+    in property <bool> percent-labels: true;
+    in property <color> accent: Palette.accent-default;
+    in property <int> axis-min: 30;
+    in property <int> axis-max: 110;
+    in property <int> temp-0; in property <int> temp-1; in property <int> temp-2; in property <int> temp-3;
+    in property <int> temp-4; in property <int> temp-5; in property <int> temp-6; in property <int> temp-7;
+    in property <int> pwm-0; in property <int> pwm-1; in property <int> pwm-2; in property <int> pwm-3;
+    in property <int> pwm-4; in property <int> pwm-5; in property <int> pwm-6; in property <int> pwm-7;
+    callback pwm-changed(int, int);
+
+    property <bool> has-curve: root.state == FanCurveHwState.Ready;
+    property <int> columns: 44;
+    property <length> label-w: 30px;
+    property <int> axis-span: root.axis-max - root.axis-min;
+
+    pure function lerp(t: float, t0: float, p0: float, t1: float, p1: float) -> float {
+        if (t1 - t0 == 0) { return p1; }
+        return p0 + (p1 - p0) * (t - t0) / (t1 - t0);
+    }
+
+    pure function pwm-at-temp(t: float) -> float {
+        if (t <= root.temp-0) { return root.pwm-0; }
+        if (t >= root.temp-7) { return root.pwm-7; }
+        if (t <= root.temp-1) { return root.lerp(t, root.temp-0, root.pwm-0, root.temp-1, root.pwm-1); }
+        if (t <= root.temp-2) { return root.lerp(t, root.temp-1, root.pwm-1, root.temp-2, root.pwm-2); }
+        if (t <= root.temp-3) { return root.lerp(t, root.temp-2, root.pwm-2, root.temp-3, root.pwm-3); }
+        if (t <= root.temp-4) { return root.lerp(t, root.temp-3, root.pwm-3, root.temp-4, root.pwm-4); }
+        if (t <= root.temp-5) { return root.lerp(t, root.temp-4, root.pwm-4, root.temp-5, root.pwm-5); }
+        if (t <= root.temp-6) { return root.lerp(t, root.temp-5, root.pwm-5, root.temp-6, root.pwm-6); }
+        return root.lerp(t, root.temp-6, root.pwm-6, root.temp-7, root.pwm-7);
+    }
+
+    pure function temp-at-fraction(f: float) -> float {
+        return root.axis-min + f * (root.axis-max - root.axis-min);
+    }
+
+    pure function point-x(temp: int) -> length {
+        let frac = Math.min(Math.max((temp - root.axis-min) / (root.axis-max - root.axis-min), 0), 1);
+        return plot.x + frac * plot.width;
+    }
+
+    HorizontalLayout {
+        spacing: 6px;
+
+        // Y axis labels.
+        VerticalLayout {
+            width: root.label-w;
+            padding-top: 2px;
+            padding-bottom: 18px;
+            alignment: space-between;
+            Text { text: root.percent-labels ? "100 %": "255"; font-size: 9.5px; color: Palette.text-disabled; horizontal-alignment: right; }
+            Text { text: root.percent-labels ? "75 %": "191"; font-size: 9.5px; color: Palette.text-disabled; horizontal-alignment: right; }
+            Text { text: root.percent-labels ? "50 %": "128"; font-size: 9.5px; color: Palette.text-disabled; horizontal-alignment: right; }
+            Text { text: root.percent-labels ? "25 %": "64"; font-size: 9.5px; color: Palette.text-disabled; horizontal-alignment: right; }
+            Text { text: root.percent-labels ? "0 %": "0"; font-size: 9.5px; color: Palette.text-disabled; horizontal-alignment: right; }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+
+            plot := Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height - 18px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Palette.border-default;
+                background: Palette.window-background;
+                clip: true;
+
+                Rectangle { x: 0px; y: parent.height * 0.25; width: parent.width; height: 1px; background: Palette.border-default; }
+                Rectangle { x: 0px; y: parent.height * 0.50; width: parent.width; height: 1px; background: Palette.border-default; }
+                Rectangle { x: 0px; y: parent.height * 0.75; width: parent.width; height: 1px; background: Palette.border-default; }
+
+                // Curve silhouette: piecewise-linear area under the 8 points.
+                if (root.has-curve) : Rectangle {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    background: transparent;
+                    clip: true;
+                    for i in 44: Rectangle {
+                        property <float> f: (i + 0.5) / 44;
+                        property <float> frac: Math.min(Math.max(root.pwm-at-temp(root.temp-at-fraction(self.f)) / 255, 0), 1);
+                        x: i * (parent.width / 44);
+                        width: parent.width / 44 + 1px;
+                        y: parent.height * (1 - self.frac);
+                        height: parent.height * self.frac;
+                        background: root.accent.transparentize(0.72);
+                    }
+                }
+
+                // Curve points (draggable when editable).
+                if (root.has-curve) : GraphPoint { height: plot.height; index: 0; pwm: root.pwm-0; editable: root.editable; accent: root.accent; x: root.point-x(root.temp-0) - 8px; committed(i, v) => { root.pwm-changed(i, v); } }
+                if (root.has-curve) : GraphPoint { height: plot.height; index: 1; pwm: root.pwm-1; editable: root.editable; accent: root.accent; x: root.point-x(root.temp-1) - 8px; committed(i, v) => { root.pwm-changed(i, v); } }
+                if (root.has-curve) : GraphPoint { height: plot.height; index: 2; pwm: root.pwm-2; editable: root.editable; accent: root.accent; x: root.point-x(root.temp-2) - 8px; committed(i, v) => { root.pwm-changed(i, v); } }
+                if (root.has-curve) : GraphPoint { height: plot.height; index: 3; pwm: root.pwm-3; editable: root.editable; accent: root.accent; x: root.point-x(root.temp-3) - 8px; committed(i, v) => { root.pwm-changed(i, v); } }
+                if (root.has-curve) : GraphPoint { height: plot.height; index: 4; pwm: root.pwm-4; editable: root.editable; accent: root.accent; x: root.point-x(root.temp-4) - 8px; committed(i, v) => { root.pwm-changed(i, v); } }
+                if (root.has-curve) : GraphPoint { height: plot.height; index: 5; pwm: root.pwm-5; editable: root.editable; accent: root.accent; x: root.point-x(root.temp-5) - 8px; committed(i, v) => { root.pwm-changed(i, v); } }
+                if (root.has-curve) : GraphPoint { height: plot.height; index: 6; pwm: root.pwm-6; editable: root.editable; accent: root.accent; x: root.point-x(root.temp-6) - 8px; committed(i, v) => { root.pwm-changed(i, v); } }
+                if (root.has-curve) : GraphPoint { height: plot.height; index: 7; pwm: root.pwm-7; editable: root.editable; accent: root.accent; x: root.point-x(root.temp-7) - 8px; committed(i, v) => { root.pwm-changed(i, v); } }
+
+                if (!root.has-curve) : Text {
+                    x: 12px;
+                    y: (parent.height - 36px) / 2;
+                    width: parent.width - 24px;
+                    height: 36px;
+                    text: root.state == FanCurveHwState.Loading
+                        ? "Чтение кривой…"
+                        : "Кривая вентиляторов недоступна";
+                    font-size: 12px;
+                    color: root.state == FanCurveHwState.Unavailable ? Palette.error : Palette.text-secondary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            // X axis labels.
+            HorizontalLayout {
+                y: plot.height + 3px;
+                height: 14px;
+                Text { width: 40px; text: root.axis-min + " °C"; font-size: 9.5px; color: Palette.text-disabled; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text { text: root.axis-min + root.axis-span / 4 + " °C"; font-size: 9.5px; color: Palette.text-disabled; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text { text: root.axis-min + root.axis-span / 2 + " °C"; font-size: 9.5px; color: Palette.text-disabled; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text { text: root.axis-min + root.axis-span * 3 / 4 + " °C"; font-size: 9.5px; color: Palette.text-disabled; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text { width: 40px; text: root.axis-max + " °C"; font-size: 9.5px; color: Palette.text-disabled; horizontal-alignment: right; }
+            }
+        }
+    }
+}

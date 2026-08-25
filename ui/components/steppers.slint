@@ -1,0 +1,126 @@
+// Steppers — renderer-independent numeric and option controls.
+//
+// These replace fluent ComboBox/SpinBox on primary flows: the software
+// renderer (screenshots) draws fluent light-scheme popups unreliably, and the
+// custom steppers keep one visual language across both renderers.
+
+import { Palette } from "../themes/dark.slint";
+
+component StepGlyphButton inherits Rectangle {
+    in property <string> glyph;
+    in property <bool> disabled: false;
+    callback clicked;
+
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: Palette.border-default;
+    background: root.disabled ? Palette.surface-disabled
+        : touch.pressed ? Palette.surface-pressed
+        : touch.has-hover ? Palette.surface-hover
+        : Palette.window-background;
+    Text {
+        text: root.glyph;
+        font-size: 12px;
+        color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Numeric stepper: [−] value [+] with clamping. `value` is in-out so pages
+// can bind it two-way to their draft/authoritative fields.
+export component NumberStepper inherits Rectangle {
+    in-out property <int> value: 0;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> step: 1;
+    in property <bool> disabled: false;
+
+    width: 132px;
+    height: 34px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Palette.border-default;
+    background: Palette.surface-default;
+
+    function clamp(v: int) -> int {
+        return Math.min(Math.max(v, root.minimum), root.maximum);
+    }
+
+    StepGlyphButton {
+        glyph: "−";
+        x: 4px;
+        y: (parent.height - self.height) / 2;
+        disabled: root.disabled || root.value <= root.minimum;
+        clicked => { root.value = root.clamp(root.value - root.step); }
+    }
+    Text {
+        x: 34px;
+        width: parent.width - 68px;
+        height: parent.height;
+        text: root.value + "";
+        font-size: 13px;
+        font-weight: 500;
+        color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    StepGlyphButton {
+        glyph: "+";
+        x: parent.width - 30px;
+        y: (parent.height - self.height) / 2;
+        disabled: root.disabled || root.value >= root.maximum;
+        clicked => { root.value = root.clamp(root.value + root.step); }
+    }
+}
+
+// Option stepper: [‹] label [›]. The owner owns the index and derives the
+// label; next/previous wrap within the option count.
+export component OptionStepper inherits Rectangle {
+    in property <string> label;
+    in property <bool> disabled: false;
+    in property <bool> can-previous: true;
+    in property <bool> can-next: true;
+    callback previous;
+    callback next;
+
+    width: 168px;
+    height: 34px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Palette.border-default;
+    background: Palette.surface-default;
+
+    StepGlyphButton {
+        glyph: "‹";
+        x: 4px;
+        y: (parent.height - self.height) / 2;
+        disabled: root.disabled || !root.can-previous;
+        clicked => { root.previous(); }
+    }
+    Text {
+        x: 34px;
+        width: parent.width - 68px;
+        height: parent.height;
+        text: root.label;
+        font-size: 12.5px;
+        font-weight: 500;
+        color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    StepGlyphButton {
+        glyph: "›";
+        x: parent.width - 30px;
+        y: (parent.height - self.height) / 2;
+        disabled: root.disabled || !root.can-next;
+        clicked => { root.next(); }
+    }
+}
