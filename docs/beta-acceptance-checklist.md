@@ -20,8 +20,8 @@ Use [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 - [x] One canonical general-purpose workflow remains: `.github/workflows/ci.yml`.
 - [x] Obsolete one-off validation trigger artifacts are removed from `.github`.
 - [x] Canonical documentation hierarchy exists and historical plans are separated.
-- [x] Draft PR #129 exists as the explicit integration checkpoint; it remains Draft while release blockers are open.
-- [ ] #106: GitHub Actions actually executes repository steps and produces trustworthy green results. A fresh #129 run still failed pre-step with `steps=null`.
+- [x] Draft PR #129 existed as the explicit integration checkpoint; closed 2026-08-25 as superseded — `development` is now the single integration line.
+- [ ] #106: GitHub Actions actually executes repository steps and produces trustworthy green results. Earlier runs failed pre-step (`steps=null`); root cause identified as Actions billing (2026-08-24).
 - [ ] Exact candidate passes `cargo fmt --all -- --check`.
 - [ ] Exact candidate passes `cargo check --workspace --all-targets --locked`.
 - [ ] Exact candidate passes `cargo test --workspace --locked`.
@@ -113,7 +113,7 @@ Use [`release-evidence-taxonomy.md`](release-evidence-taxonomy.md).
 
 A beta is acceptable only when:
 
-1. Draft PR #129 (or its validated successor) is merged into `main`;
+1. The validated integration line (`development`; formerly Draft PR #129) is merged into `main`;
 2. #106 is resolved and the exact candidate has executable green Rust/Nix checks;
 3. #125 and the remaining safety-critical #123 contract are complete;
 4. no known unsafe or policy-unproven write is enabled;

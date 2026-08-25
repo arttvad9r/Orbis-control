@@ -153,4 +153,4 @@ The local flake devShell provides a Rust/Cargo toolchain. On the current `develo
 
 Policy/desired-state presets, reconciliation decisions, transaction phases, readiness helpers, software fan-policy computations and system-telemetry parsers are exported from crate APIs but have no runtime consumers. They remain FOUNDATION-only; no preset, policy or reconciliation path can dispatch hardware actions today.
 
-A fresh Draft PR #129 CI run previously failed before repository steps (`steps=null`), so #106 remains an external Actions execution blocker; live PR status requires GitHub verification.
+A Draft PR #129 CI run previously failed before repository steps (`steps=null`); the PR has since been closed as superseded by `development`, which is now the single integration line. #106 remains an external Actions execution blocker.

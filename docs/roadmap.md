@@ -27,7 +27,7 @@ Completed in the active integration branch:
 - current UI/backend status normalized into `current-state.md` and `backend-completion-status.md`;
 - source-complete Autostart (#110), Diagnostics (#111) and Window/Tray lifecycle (#121) issues closed;
 - effective product write-truth consumer/support-matrix audit and policy decision completed (#120 closed);
-- Draft PR #129 created as the explicit integration checkpoint for the active branch.
+- Draft PR #129 was created as the explicit integration checkpoint; closed 2026-08-25 as superseded — its head `e8b611e` is a verified direct ancestor of `development`.
 - Read-only ASUS FA707NV baseline evidence captured on `asus-hardware-validation-20260821` at `67f9913`; no hardware mutation performed.
 
 Remaining:
@@ -36,7 +36,7 @@ Remaining:
 2. #114 — after #106, protect `main` with the real required check names;
 3. #118 — prune obsolete `agent/*` refs when delete-ref access exists;
 4. #124 — decide permanent `io.github.orbiscontrol.*` identity before stable release;
-5. reconcile integration lines: `development` (active) vs Draft PR #129 (head `e8b611e`); any merge decision waits for executable validation and resolved safety blockers.
+5. resolved 2026-08-25: integration lines reconciled — Draft PR #129 closed as superseded; `development` is the single integration line, and any merge into `main` still waits for executable validation (#106) and resolved safety blockers.
 
 The ASUS baseline is observation evidence only. It does not promote any unvalidated
 write or product capability to `Supported`.
