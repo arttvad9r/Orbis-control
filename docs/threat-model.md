@@ -145,7 +145,7 @@ Diagnostics must not activate stopped privileged services solely to collect more
 
 Fixtures, mock providers and fake device state are useful for development but must never masquerade as production device evidence.
 
-Normal automated tests should use private P2P D-Bus, fake sysfs/filesystems, fixtures and NixOS VMs rather than mutating the developer's real laptop.
+Normal automated tests should use private P2P D-Bus, fake sysfs/filesystems, fixtures and disposable non-hardware integration environments rather than mutating the developer's real laptop. No test or release gate requires Nix/NixOS.
 
 Live hardware tests must be deliberate and opt-in.
 
@@ -157,9 +157,9 @@ Provider calls that may hang should be bounded and report typed timeout/unavaila
 
 ## 12. Packaging and deployment
 
-Declarative package/module source is authoritative for installed service files, D-Bus policy and polkit policy.
+Repository-owned distro-neutral service files, D-Bus policy and polkit actions are the authoritative integration assets. Arch/local installers copy them into the host locations appropriate to their ownership model; installed copies are not edited as source.
 
-Development helpers must not silently overwrite package-manager/Nix-owned service configuration or compete for a production D-Bus name without making that ownership explicit.
+Development helpers must not silently overwrite a package-manager-owned installation or compete for a production D-Bus name without making that ownership explicit.
 
 A packaged daemon being present does not prove it is running or usable; capability discovery handles service absence honestly.
 
