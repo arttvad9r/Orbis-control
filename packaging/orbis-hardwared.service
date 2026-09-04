@@ -1,20 +1,11 @@
-# orbis-hardwared.service — standalone dev deployment unit.
+# orbis-hardwared.service — standalone system service for local Arch/Linux installs.
 #
-# Устанавливается deploy-dev-hardwared.sh как regular file в
-# /etc/systemd/system/. Full services.orbis-control также умеет создавать
-# NixOS-managed hardwared unit, поэтому deploy script отказывается перезаписывать
-# symlink и ожидает policy-only module для standalone lifecycle.
-#
-# X-StopOnRemoval=false: при удалении unit'а systemd НЕ останавливает service.
-# X-RestartIfChanged=false: при обновлении unit'а systemd НЕ перезапускает
-# service (deploy script делает explicit restart).
-#
-# Direct sysfs write scope intentionally matches the full NixOS module: only
-# Performance platform_profile and the exact ASUS keyboard LED paths are writable.
+# Installed by packaging/deploy-dev-hardwared.sh as a regular file in
+# /etc/systemd/system/. Privileged mutation stays behind the typed Hardware1
+# D-Bus API and per-capability polkit actions.
 
 [Unit]
-Description=Orbis Control hardware helper (standalone dev deployment)
-X-StopOnRemoval=false
+Description=Orbis Control hardware helper
 After=dbus.service
 Requires=dbus.service
 
@@ -24,7 +15,6 @@ BusName=io.github.orbiscontrol.Hardware
 ExecStart=/usr/local/bin/orbis-hardwared
 Restart=on-failure
 RestartSec=2s
-X-RestartIfChanged=false
 
 # Sandbox (threat-model §3.3)
 NoNewPrivileges=true
@@ -38,8 +28,11 @@ MemoryDenyWriteExecute=true
 AmbientCapabilities=
 CapabilityBoundingSet=
 
-# /sys stays read-only except the two exact promoted write paths.
+# /sys stays read-only except the exact capability-owned write paths.
 ReadOnlyPaths=/sys
 ReadWritePaths=-/sys/firmware/acpi/platform_profile
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/brightness
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/max_brightness
+
+[Install]
+WantedBy=multi-user.target
