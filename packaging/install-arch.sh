@@ -15,7 +15,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 BIN_DIR="/usr/local/bin"
 SYSTEM_UNIT_DIR="/etc/systemd/system"
-USER_UNIT_DIR="/usr/local/lib/systemd/user"
+USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 DBUS_DIR="/etc/dbus-1/system.d"
 POLKIT_DIR="/usr/share/polkit-1/actions"
 APPLICATIONS_DIR="/usr/local/share/applications"
@@ -43,11 +43,11 @@ echo "→ Installing binaries and integration assets…"
 sudo install -d -m 0755 \
   "$BIN_DIR" \
   "$SYSTEM_UNIT_DIR" \
-  "$USER_UNIT_DIR" \
   "$DBUS_DIR" \
   "$POLKIT_DIR" \
   "$APPLICATIONS_DIR" \
   "$METAINFO_DIR"
+install -d -m 0755 "$USER_UNIT_DIR"
 
 sudo install -m 0755 target/release/orbis-control "$BIN_DIR/orbis-control"
 sudo install -m 0755 target/release/orbisctl "$BIN_DIR/orbisctl"
@@ -57,7 +57,7 @@ sudo install -m 0755 target/release/orbis-hardwared "$BIN_DIR/orbis-hardwared"
 sudo install -m 0644 \
   packaging/orbis-hardwared.service \
   "$SYSTEM_UNIT_DIR/orbis-hardwared.service"
-sudo install -m 0644 \
+install -m 0644 \
   data/systemd/user/orbis-sessiond.service \
   "$USER_UNIT_DIR/orbis-sessiond.service"
 sudo install -m 0644 \
@@ -77,7 +77,7 @@ sudo install -m 0644 \
 sudo systemctl daemon-reload
 sudo systemctl enable --now orbis-hardwared.service
 
-# Session daemon: install/enable in the invoking user's systemd manager.
+# Session daemon: per-user unit owned by the invoking user.
 systemctl --user daemon-reload
 systemctl --user enable --now orbis-sessiond.service
 
@@ -87,7 +87,8 @@ printf '  %s\n' \
   "$BIN_DIR/orbis-control" \
   "$BIN_DIR/orbisctl" \
   "$BIN_DIR/orbis-sessiond" \
-  "$BIN_DIR/orbis-hardwared"
+  "$BIN_DIR/orbis-hardwared" \
+  "$USER_UNIT_DIR/orbis-sessiond.service"
 
 echo ""
 echo "=== Service state ==="
