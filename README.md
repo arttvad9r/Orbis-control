@@ -2,7 +2,7 @@
 
 Orbis Control is a Rust + Slint Linux application for monitoring and controlling supported ASUS ROG/TUF/Zephyrus laptop features. It is Wayland-first, keeps unsupported hardware honest, and routes privileged mutations through a narrow typed `Hardware1` service instead of running the GUI as root.
 
-`main` is the canonical development branch.
+`main` is the canonical development branch. The primary development environment is Arch Linux; the repository has no Nix/NixOS build dependency.
 
 ## What already exists
 
@@ -16,20 +16,31 @@ The current codebase includes production paths for the core application shell an
 - keyboard backlight and selected ASUS extra controls;
 - preferences, autostart, tray/window lifecycle and diagnostics;
 - read-only CLI status output;
-- Nix package/module, D-Bus and polkit integration;
-- fake-system/private-P2P/VM integration tests for privileged boundaries.
+- systemd, D-Bus and polkit integration;
+- fake-system/private-P2P integration tests for privileged boundaries.
 
 The project still contains unfinished or deliberately disabled product surfaces. The active completion queue is [`TODO.md`](TODO.md). A feature is considered finished only when the user-visible flow is connected end to end or the unused shell has been removed.
 
-## Development
+## Arch Linux development setup
 
-Rust workspace: edition 2024, MSRV 1.87.
+Rust workspace: edition 2024, MSRV/toolchain 1.87.
 
-Recommended environment:
+Install the native build/runtime dependencies:
 
 ```bash
-nix develop
+sudo pacman -S --needed \
+  base-devel rustup pkgconf \
+  fontconfig freetype2 libglvnd \
+  libx11 libxcursor libxrandr libxi \
+  libxkbcommon libxkbcommon-x11 \
+  wayland wayland-protocols \
+  dbus openssl systemd polkit upower \
+  glib2 cairo pango gdk-pixbuf2
+
+rustup toolchain install 1.87 --profile minimal --component rustfmt clippy
 ```
+
+The repository's `rust-toolchain.toml` selects Rust 1.87 automatically inside the checkout.
 
 Run the GUI during development:
 
@@ -37,11 +48,24 @@ Run the GUI during development:
 cargo run -p orbis-ui --bin orbis-control
 ```
 
-Or build/run through the flake:
+Build the release workspace:
 
 ```bash
-nix build .#orbis-control
-nix run .
+cargo build --workspace --release --locked
+```
+
+Install the current checkout as a local Arch system integration build:
+
+```bash
+bash packaging/install-arch.sh
+```
+
+This installs the four production binaries under `/usr/local/bin`, the system/user systemd units, D-Bus policy, polkit actions and desktop/AppStream metadata. It is a local developer installer, not a pacman-owned release package.
+
+To update only the privileged helper during development:
+
+```bash
+bash packaging/deploy-dev-hardwared.sh
 ```
 
 ## Verification
@@ -52,12 +76,12 @@ Use real build/test checks rather than documentation/source-marker contracts:
 scripts/verify crate orbis-ui   # targeted crate while iterating
 scripts/verify quick            # fmt + workspace check
 scripts/verify task             # fmt + check + tests + clippy
-scripts/verify full             # task checks + Nix/package/integration checks
+scripts/verify full             # task checks + release build + packaging asset validation
 ```
 
 Do not run the full suite after every small edit. Implement a coherent batch, run targeted checks, fix failures, and use broader verification at the end of the vertical slice.
 
-CI runs the flake checks on pushes to `main` and pull requests.
+CI uses the pinned Rust toolchain and normal Linux system packages; it does not use Nix.
 
 ## Architecture
 
