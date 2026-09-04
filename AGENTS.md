@@ -58,7 +58,7 @@ For current behavior, use this order:
 
 1. production source code;
 2. executable tests and build configuration;
-3. current GitHub issues when they describe still-relevant product work;
+3. current GitHub issues or `TODO.md` when they describe still-relevant product work;
 4. `README.md` and stable architecture/ADR documentation for intentional public invariants;
 5. other documents only as background.
 
@@ -90,27 +90,19 @@ During active development:
 - fix failures immediately and continue;
 - avoid repeatedly running the entire workspace for tiny edits;
 - do not add tests that merely restate implementation details or inflate coverage without protecting behavior;
-- do not add source-contract scripts when an ordinary Rust/Slint test can verify the behavior;
+- do not add source-marker contract scripts when an ordinary Rust/Slint/integration test can verify behavior;
 - run broad workspace verification once a coherent slice is complete or before release-oriented work.
 
-Typical targeted Rust checks:
+Use the repository runner when convenient:
 
 ```bash
-cargo fmt --all -- --check
-cargo check -p <affected-crate> --all-targets --locked
-cargo test -p <affected-crate> --locked
+scripts/verify crate <affected-crate>  # targeted crate
+scripts/verify quick                   # fmt + workspace check
+scripts/verify task                    # fmt + check + tests + clippy
+scripts/verify full                    # task checks + full Nix flake checks
 ```
 
-For cross-crate/runtime changes, finish the implementation first, then use:
-
-```bash
-cargo fmt --all -- --check
-cargo check --workspace --all-targets --locked
-cargo test --workspace --locked
-cargo clippy --workspace --all-targets --locked -- -D warnings
-```
-
-Use `python3 scripts/verify-static` when it is relevant, but do not let static/document-contract checks dominate the development loop. Use `nix flake check --max-jobs 1 --cores 4` for release/package/system-service changes when Nix is available.
+Direct Cargo commands are also fine. Do not repeatedly run `scripts/verify full` while still making small edits.
 
 Do not weaken existing safety-critical tests or lints merely to get green output. Fix the underlying problem.
 
