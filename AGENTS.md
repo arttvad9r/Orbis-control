@@ -20,6 +20,22 @@ A normal work cycle is:
 
 Do not end a session merely because one intermediate task passed. End at a meaningful product checkpoint or a real blocker.
 
+## Canonical completion plan
+
+For general project-completion work, [`FINISH_PLAN.md`](FINISH_PLAN.md) is the **single canonical execution queue**.
+
+When the user says `continue`, `finish`, `make it work`, or gives an equivalent broad instruction:
+
+1. read `FINISH_PLAN.md` before choosing work;
+2. start at the earliest unchecked phase that can be advanced in the current environment;
+3. verify items that may already be complete in current source, mark them complete, and continue rather than stopping with a status report;
+4. work through coherent vertical slices until reaching a meaningful checkpoint or a real blocker;
+5. update plan checkboxes only after the stated behavior has actually been verified.
+
+Do not create a parallel roadmap, remediation plan, status matrix, or alternative backlog for the same completion goal. `TODO.md` is only a pointer to `FINISH_PLAN.md`.
+
+A specific user request always overrides queue order for that requested task. After completing the explicit task, return to the canonical finish plan when the user's broader goal is still to finish the project.
+
 ## When to stop
 
 Stop and ask the user only when progress genuinely requires information or authority that cannot be inferred safely, for example:
@@ -68,9 +84,10 @@ For current behavior, use this order:
 
 1. production source code;
 2. executable tests and build configuration;
-3. current GitHub issues or `TODO.md` when they describe still-relevant product work;
-4. `README.md` and stable architecture/ADR documentation for intentional public invariants;
-5. other documents only as background.
+3. `FINISH_PLAN.md` for the ordered completion queue;
+4. current GitHub issues when they describe still-relevant defects or acceptance criteria;
+5. `README.md` and stable architecture/ADR documentation for intentional public invariants;
+6. other documents only as background.
 
 Do **not** spend a development session reconciling documents with one another unless the user specifically asks for documentation work.
 
