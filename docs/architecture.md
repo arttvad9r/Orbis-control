@@ -185,11 +185,9 @@ Persistent data should use checked XDG locations, deterministic schemas where ne
 
 ## 12. Packaging and service ownership
 
-Declarative package/module source owns installed binaries, desktop/AppStream metadata, D-Bus policy, polkit policy and system/user service definitions.
+Repository-owned distro-neutral assets are the source of truth for D-Bus policy, polkit actions, desktop/AppStream metadata and system/user service semantics. Arch packaging or local installation copies those assets into the appropriate host locations; generated or installed system files are not the source of truth.
 
-Do not edit generated system files as the source of truth.
-
-Development helpers and production service ownership must not compete for the same D-Bus name or privileged resource simultaneously.
+Development helpers and package-manager-owned installations must not silently overwrite one another or compete for the same D-Bus name or privileged resource. A local installer must make its ownership and install prefix explicit.
 
 A package containing a daemon does not by itself prove the daemon is enabled/running; runtime capability discovery must handle service absence honestly.
 
@@ -203,9 +201,9 @@ Use, as appropriate:
 - mock providers and fixtures;
 - private P2P D-Bus tests;
 - fake sysfs/filesystem state;
-- NixOS VM integration tests.
+- disposable Linux integration environments for service/packaging behavior when needed.
 
-These can prove software behavior, protocol wiring, service policy and packaging integration. They do not prove physical device behavior.
+These can prove software behavior, protocol wiring, service policy and packaging integration. They do not prove physical device behavior and must not require Nix/NixOS.
 
 Live hardware validation is device/revision specific and should be recorded separately when it is actually performed. Lack of live hardware does not block implementing and testing the software path with honest capability gating.
 
