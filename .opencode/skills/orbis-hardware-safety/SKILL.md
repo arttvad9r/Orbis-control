@@ -1,37 +1,37 @@
 ---
 name: orbis-hardware-safety
-description: Принципы безопасной работы с hardware-кодом в Orbis Control: read-before-write, capability detection, никаких опасных предположений о sysfs. Используй при любой hardware-связанной задаче.
+description: Safety rules for Orbis hardware semantics. Use when changing providers, privileged mutations, capability evidence, sysfs/asusd/supergfxd behavior, or hardware-facing UI state.
 ---
 
-# orbis-hardware-safety
+# Orbis hardware safety
 
-## Базовые принципы
+These rules protect real hardware. They must not turn ordinary software development into a stop condition.
 
-- **Read-before-write**: перед любым изменением hardware-состояния убедись, что
-  текущее состояние прочитано и понятно. Никогда не пиши вслепую.
-- **Capability detection**: возможности пробуются, а не предполагаются.
-  `orbis-capabilities` — источник истины; не дублируй проверки в UI/domain.
-- **sysfs paths не гарантированы**: пути, вендорные значения и формат могут
-  меняться между моделями/прошивками. Валидируй, а не хардкодь.
-- **Ranges проверяются**: любой ввод, уходящий в hardware (температурные
-  лимиты, fan curves, яркость), валидируется на границе; не полагайся на
-  неявные допущения о диапазоне.
-- **Permission errors ≠ unsupported**: если операция отклонена по правам,
-  возвращай честную ошибку (`Unsupported`/`PermissionDenied`), не симулируй успех.
+## Invariants
 
-## Запрещено в тестах
+- Read support and write support are independent.
+- Probe capabilities at runtime; never infer support from a laptop model name alone.
+- Validate values and ranges at the hardware boundary.
+- Permission failures, missing backends, temporary failures and unsupported hardware remain distinct outcomes.
+- Privileged mutation stays behind typed `Hardware1` operations and capability-specific authorization.
+- Never add arbitrary privileged path, shell-command or generic D-Bus proxy execution.
+- Unknown mutation outcome after possible dispatch must not be blindly retried.
+- `Accepted` is not the same as authoritative `Applied` hardware state.
 
-- Hardware writes в unit-тестах. D-Bus integration-тесты — через приватный P2P
-  транспорт, не на реальной системной шине.
-- Не запускать реальные UPower/asusd/supergfxd/внешний D-Bus демон/Docker/VM
-  без прямого указания в задаче.
-- Не использовать `sudo`; не вызывать `systemctl`/`busctl` без задачи.
+## Development versus live execution
 
-## При изменении провайдеров
+You may freely implement, refactor, compile and test hardware-facing software using mocks, fixtures, private P2P D-Bus transports, fake sysfs, or existing VM tests.
 
-- `orbis-providers` содержит trait'ы и mock. Новые системные провайдеры (sysfs/
-  asusd) — только после этапа, на котором они реально нужны (ADR 0002).
-- Отделяй domain/application от конкретного backend; hardware-код не должен
-  протекать в UI слой.
-- Если семантика аппаратной операции неизвестна — остановись и запроси
-  `expert` с компактной выжимкой фактов и одним вопросом; не выдумывай поведение.
+Do not execute real hardware writes, `sudo`, real privileged mutation calls, or uncontrolled system-bus experiments unless the user's task explicitly authorizes that real-hardware operation.
+
+Lack of physical hardware blocks only a **live-validation claim**. It does not block completing the production code path, UI wiring, error handling, mocks, tests, packaging integration, or fail-closed capability gating.
+
+## When semantics are uncertain
+
+First inspect the existing provider/backend, kernel or upstream API documentation, existing tests, and available read-only evidence. Choose the safest implementation consistent with those facts and keep unsupported paths fail-closed.
+
+Ask the user only when the missing fact changes the product semantics materially and cannot be resolved from source, documentation, read-only probing, or a safe default. Do not stop merely because a hardware path has not yet been live-validated.
+
+## Testing
+
+Prefer behavior tests over source-marker assertions. Tests must not touch real hardware by default. Use the narrowest existing integration fixture that observes the actual boundary being changed.
