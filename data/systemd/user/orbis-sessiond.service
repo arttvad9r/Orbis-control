@@ -1,0 +1,14 @@
+[Unit]
+Description=Orbis Control session daemon
+PartOf=graphical-session.target
+After=graphical-session-pre.target
+
+[Service]
+Type=dbus
+BusName=io.github.orbiscontrol.Session
+ExecStart=/usr/bin/orbis-sessiond
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=graphical-session.target
