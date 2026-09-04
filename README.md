@@ -1,143 +1,107 @@
 # Orbis Control
 
-Orbis Control — Linux-first приложение на Rust + Slint для управления и наблюдения за возможностями ASUS ROG/TUF/Zephyrus. Проект Wayland-first; X11 используется как compatibility path там, где это имеет смысл. Privileged hardware mutations проходят только через узкий typed `Hardware1` boundary с per-capability polkit.
+Orbis Control is a Rust + Slint Linux application for monitoring and controlling supported ASUS ROG/TUF/Zephyrus laptop features. It is Wayland-first, keeps unsupported hardware honest, and routes privileged mutations through a narrow typed `Hardware1` service instead of running the GUI as root.
 
-## Статус проекта
+`main` is the canonical development branch.
 
-Версия workspace: `0.1.0`. Активная интеграционная ветка — `development`; она консолидирует прежнюю линию `asus-hardware-validation-20260821` (head PR #129, `e8b611e`) и содержит более новый UI/backend/runtime слой, чем текущий `main`. `main` остаётся последней консолидированной release-базой до отдельной интеграции.
+## What already exists
 
-Текущие source-level production slices в активной ветке:
+The current codebase includes production paths for the core application shell and a substantial part of the daily-control feature set, including:
 
-- Battery Charge Limit: Session1 read + controlled Hardware1 mutation + authoritative read-back;
-- Performance: Session1/kernel read + Hardware1 mutation + authoritative read-back;
-- независимые GPU Power / physical MUX / access-policy reads;
-- read-only sysfs telemetry;
-- profile-specific fan reads через Session1/asusd и active-curve reads через sysfs;
-- immutable capability registry с отдельным read/write evidence;
-- bounded provider execution для public capability probes, `orbisctl` и основных worker-owned authoritative reads;
-- XDG preferences, autostart, window state, tray/close lifecycle;
-- privacy-bounded Diagnostics refresh/export/copy;
-- read-only `orbisctl status` и versioned `orbisctl status --json`;
-- Slint UI с отдельными quick/advanced surfaces и fail-closed disabled controls;
-- NixOS package/module, desktop/AppStream metadata и support-matrix tooling.
+- system telemetry and capability discovery;
+- Performance profile read/write with read-back;
+- Battery charge-limit read/write with read-back;
+- fan state/curve support and ASUS fan mutation paths where capability evidence permits them;
+- ASUS product GPU mode read/queued mutation flow;
+- keyboard backlight and selected ASUS extra controls;
+- preferences, autostart, tray/window lifecycle and diagnostics;
+- read-only CLI status output;
+- Nix package/module, D-Bus and polkit integration;
+- fake-system/private-P2P/VM integration tests for privileged boundaries.
 
-Некоторые функции намеренно отключены. Product GPU mode, fan writes/reset, Panel/Keyboard/Aura product writes, unattended Automation execution, Display modeset и self-update не включаются только потому, что существует похожий backend/API. Для них требуется отдельное concept-specific evidence и explicit promotion.
+The project still contains unfinished or deliberately disabled product surfaces. The active completion queue is [`TODO.md`](TODO.md). A feature is considered finished only when the user-visible flow is connected end to end or the unused shell has been removed.
 
-## Release gate
+## Development
 
-Release сейчас **BLOCKED**. Основной внешний blocker — #106: GitHub Actions не выполняет trustworthy repository jobs. Локальный Rust/Cargo toolchain (flake devShell) доступен: на текущей ревизии `cargo fmt/check/test/clippy --locked` выполнялись успешно, а `python3 scripts/verify-static` проходит после `317f22d`. Это source/test-level evidence для точной ревизии; оно не является runtime/package/hardware verification и не отменяет #106.
+Rust workspace: edition 2024, MSRV 1.87.
 
-До release обязательны:
+Recommended environment:
 
-- executable `cargo fmt/check/test/clippy --locked` на точной revision;
-- executable `nix flake check` и package acceptance;
-- GUI euid-0 guard (#125);
-- завершение timeout/unknown-outcome hardening (#123);
-- отсутствие известных unsafe writes в enabled product path;
-- revision-scoped hardware evidence для заявляемых hardware features;
-- решение application identity #124;
-- после восстановления CI — required checks / protection для `main` (#114).
+```bash
+nix develop
+```
 
-Точный статус: [`docs/current-state.md`](docs/current-state.md). План: [`docs/roadmap.md`](docs/roadmap.md).
+Run the GUI during development:
 
-## Архитектура
+```bash
+cargo run -p orbis-ui --bin orbis-control
+```
+
+Or build/run through the flake:
+
+```bash
+nix build .#orbis-control
+nix run .
+```
+
+## Verification
+
+Use real build/test checks rather than documentation/source-marker contracts:
+
+```bash
+scripts/verify crate orbis-ui   # targeted crate while iterating
+scripts/verify quick            # fmt + workspace check
+scripts/verify task             # fmt + check + tests + clippy
+scripts/verify full             # task checks + Nix/package/integration checks
+```
+
+Do not run the full suite after every small edit. Implement a coherent batch, run targeted checks, fix failures, and use broader verification at the end of the vertical slice.
+
+CI runs the flake checks on pushes to `main` and pull requests.
+
+## Architecture
 
 Read path:
 
 ```text
-UPower / kernel / supergfxd / asusd / read-only sysfs / Wayland observation
-→ orbis-sessiond / typed providers
+UPower / kernel / asusd / supergfxd / read-only sysfs / compositor observation
+→ providers / orbis-sessiond
 → Session1 / application runtime
-→ worker → GUI / read-only CLI / diagnostics
+→ worker
+→ GUI / CLI / diagnostics
 ```
 
 Privileged mutation path:
 
 ```text
-original GUI/application caller
-→ Hardware1 system bus
+original application caller
+→ typed Hardware1 system-bus API
 → capability-specific polkit
-→ narrow typed backend
-→ authoritative read-back / explicit Pending / fail-closed error
+→ narrow backend
+→ authoritative read-back / explicit pending / honest error
 ```
 
-Ключевые invariants:
+Important invariants:
 
-- GUI — обычный user-session process; прямой root запуск должен быть отклонён (#125);
-- `sessiond` не является privileged mutation deputy;
-- generic root/sysfs/shell proxy отсутствует;
-- read/write evidence независимы;
-- `Unsupported`, `BackendMissing`, `TemporarilyUnavailable`, `PermissionDenied` и `Unknown` не взаимозаменяемы;
-- `Accepted != Applied`;
-- model/DMI name — hint, а не доказательство support;
-- capability refresh публикуется whole-swap generation;
-- mutation timeout после возможного dispatch не должен автоматически считаться обычным failure/retry;
-- live hardware claims всегда revision-scoped.
+- the GUI is an unprivileged user-session application;
+- `orbis-sessiond` is not a privileged mutation deputy;
+- no generic root/sysfs/shell proxy;
+- runtime evidence determines capability support, not the laptop model name alone;
+- read and write support are independent;
+- requested, observed and pending state stay distinct;
+- `Accepted` is not automatically `Applied`;
+- an unknown mutation outcome is never blindly retried.
 
-Подробнее: [`docs/architecture.md`](docs/architecture.md).
+Stable architecture details live in [`docs/architecture.md`](docs/architecture.md) and accepted ADRs under [`docs/adr/`](docs/adr/). Hardware evidence under `docs/hardware-evidence/` is revision/device-specific reference material, not a development gate.
 
-## Workspace
+## Repository workflow for AI agents
 
-- `orbis-core` — domain types и invariants;
-- `orbis-config` — XDG preferences/state/desired-state foundations;
-- `orbis-capabilities` — capability evidence и immutable registry snapshots;
-- `orbis-providers` — typed platform/provider implementations;
-- `orbis-application` — application services, command/read-back composition, diagnostics collector;
-- `orbis-session-protocol` / `orbis-session-client` / `orbis-sessiond` — user-session read path;
-- `orbis-hardwared` — narrow privileged Hardware1 service;
-- `orbis-ui` — Slint UI, production composition и current worker runtime;
-- `orbis-cli` — read-only CLI;
-- `orbis-test-support` — fixtures/screenshots/tests; removal from the default GUI release dependency graph remains #115.
+[`AGENTS.md`](AGENTS.md) is intentionally product-first: agents are expected to complete coherent vertical work, continue across necessary crates, and stop only at a real blocker. Documentation maintenance and source-marker test generation are not default development work.
 
-Production worker в активной ветке — `crates/orbis-ui/src/worker_runtime.rs`; legacy large worker files не должны использоваться как source of truth для новых runtime fixes.
+When asked simply to continue or finish the project, start from [`TODO.md`](TODO.md), verify the actual source/runtime state, complete the highest-priority actionable slice, and continue to the next related item instead of stopping after a micro-fix.
 
-## Development / verification
-
-Rust toolchain contract: **1.87**.
-
-```bash
-nix develop
-scripts/verify-static
-scripts/verify quick
-scripts/verify task
-scripts/verify full
-```
-
-Intended Rust gates:
-
-```bash
-cargo fmt --all -- --check
-cargo check --workspace --all-targets --locked
-cargo test --workspace --locked
-cargo clippy --workspace --all-targets --locked -- -D warnings
-git diff --check
-```
-
-`scripts/verify-static` — только source-level safety net для среды без toolchain. Он не заменяет компиляцию.
-
-Дополнительные ограничения evidence:
-
-- `nix flake check --no-build` подтверждает только evaluation flake, а не VM/build/package acceptance;
-- локальные Cargo-результаты действительны для точной ревизии и не восстанавливают hosted CI (#106);
-- новые изменения ветки `development` не имеют полноценного live hardware evidence.
-
-## Документация
-
-Начните с [`docs/README.md`](docs/README.md). Canonical hierarchy:
-
-- [`docs/current-state.md`](docs/current-state.md) — current source status;
-- [`docs/architecture.md`](docs/architecture.md) — архитектурный контракт;
-- [`docs/verification.md`](docs/verification.md) — evidence policy;
-- [`docs/release-evidence-taxonomy.md`](docs/release-evidence-taxonomy.md) — уровни claims;
-- [`docs/roadmap.md`](docs/roadmap.md) — активный backlog/order;
-- [`docs/backend-completion-status.md`](docs/backend-completion-status.md) — UI/backend connection summary;
-- [`docs/beta-acceptance-checklist.md`](docs/beta-acceptance-checklist.md) — текущие beta gates;
-- [`docs/history.md`](docs/history.md) — historical/superseded records.
-
-Не храните в project docs chat/session transcripts, secrets, private runtime dumps и одноразовые validation trigger artifacts.
-
-## Лицензия
+## License
 
 GPL-3.0-or-later.
 
-Orbis Control — независимый проект, не связанный с ASUSTeK Computer Inc.
+Orbis Control is an independent project and is not affiliated with ASUSTeK Computer Inc.
