@@ -8,7 +8,7 @@ This is the concise backlog for finishing the application. It is intentionally p
 
 - [ ] On every substantial development session, first establish the current build/runtime state and fix blocking compile/startup failures before adding more architecture.
 - [ ] `scripts/verify task` passes on the working revision.
-- [ ] The normal GUI starts as an unprivileged user from the documented development environment without fixture-only setup.
+- [ ] The normal GUI starts as an unprivileged user from the documented Arch Linux development environment without fixture-only setup.
 - [ ] Remove or fix dead production modules, placeholder wiring and stale feature gates encountered on the path to a runnable application.
 
 ## P1 — finish the daily-control experience
@@ -22,7 +22,7 @@ Audit every visible section as a real user flow, not as individual backend funct
 - [ ] Graphics exposes the supported ASUS product GPU flow coherently, including pending/reboot semantics where required.
 - [ ] Keyboard/backlight and supported ASUS extras are either fully wired or removed from the interactive UI until they are real.
 - [ ] Every user action produces confirmed state, pending state, or a useful error; no optimistic fake success.
-- [ ] Preferences, autostart, tray/close behavior and diagnostics work in the packaged application, not only tests.
+- [ ] Preferences, autostart, tray/close behavior and diagnostics work in the installed application, not only tests.
 
 ## P2 — resolve unfinished feature shells
 
@@ -43,8 +43,9 @@ For each item below choose one of two valid outcomes: **finish it as a real prod
 ## P4 — package and release
 
 - [ ] `scripts/verify full` passes on the release candidate.
-- [ ] Nix package/module installs the GUI, user/session pieces, `orbis-hardwared`, D-Bus policy and polkit policy correctly.
-- [ ] Perform a packaged smoke test: launch, tray/lifecycle, diagnostics, read-only state and safe supported controls.
+- [ ] Produce a pacman/PKGBUILD-quality Arch package that installs the GUI, CLI, `orbis-sessiond`, `orbis-hardwared`, system/user systemd units, D-Bus policy, polkit policy and desktop/AppStream metadata correctly.
+- [ ] Ensure the release package and local `packaging/install-arch.sh` path agree on runtime ownership and installed assets.
+- [ ] Perform an installed smoke test: launch, tray/lifecycle, diagnostics, read-only state and safe supported controls.
 - [ ] Check desktop/AppStream metadata and application identity.
 - [ ] Confirm no known unsafe write is enabled by default.
 - [ ] Record live hardware validation only for features actually exercised on the named device; lack of another device does not block shipping software with honest capability detection.
