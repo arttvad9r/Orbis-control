@@ -1,37 +1,31 @@
 ---
 name: orbis-slint-ui
-description: Реальные UI paths и конвенции Slint в Orbis Control, включая theme/token, проверку рендера. Используй при работе с UI в этом репозитории.
+description: Current Slint UI paths and implementation rules for Orbis Control. Use for substantial UI work.
 ---
 
-# orbis-slint-ui
+# Orbis Slint UI
 
-## UI source
+## Current source layout
 
-- Slint UI файлы: `ui/` — `app-window.slint`, `themes/dark.slint`,
-  `components/{section-header,value-slider,mode-card}.slint`.
-- Rust glue: `crates/orbis-ui/src/` — `main.rs`, `worker.rs`, `controller.rs`, `lib.rs`.
-- Slint version: `slint = { version = "1", features = [..., "backend-winit-wayland",
-  "backend-winit-x11", "renderer-winit-software", "software-renderer-systemfonts",
-  "image-default-formats"] }`; сборка через `slint-build` в `crates/orbis-ui/build.rs`.
+- Slint entrypoint: `ui/app-entry.slint`.
+- Main shell and sections: `ui/audited/main-window.slint` and `ui/audited/sections/`.
+- Shared components: `ui/components/`.
+- Themes: `ui/themes/dark.slint` and `ui/themes/light.slint`.
+- Rust UI/runtime: `crates/orbis-ui/src/`.
+- Active worker runtime: `crates/orbis-ui/src/worker_runtime.rs`.
 
-## Известные UI-конвенции
+Do not resurrect removed legacy window/component files just because an old document mentions them.
 
-- `docs/ui-reference.md` — источник UI-спецификации (размеры окон, структура
-  главного окна, компоненты). `docs/ui-measurements.json` — машиночитаемые замеры.
-- Тема: тёмная (`ui/themes/dark.slint`); токены — через ре-используемые
-  компоненты, без хардкода цветов в местах использования.
+## Implementation rules
 
-## Проверка / рендер
+- UI is a presentation layer; privileged hardware/system I/O stays in application/provider/service boundaries.
+- Wire a control all the way to production runtime behavior or leave it honestly disabled/absent. Do not create fake-success UI.
+- Keep state ownership in Rust/domain/runtime where it belongs; use Slint for presentation and interaction.
+- Reuse existing components/tokens when they fit, but refactor or replace them when they obstruct a coherent design.
+- Avoid preserving obsolete layouts only because screenshots or old measurements exist.
 
-- Headless-рендер: flake devShell настраивает `QT_XKB_CONFIG_ROOT` и
-  `XDG_DATA_DIRS` для Slint software rendering; возможен screenshot-тест
-  (`target/ui-review`).
-- После изменения `.slint`: убедись, что `cargo check`/`cargo build` проходит
-  (slint-build пересобирает), и при возможности — скриншот/визуальная проверка.
+## Verification
 
-## Правила callbacks/state
+After a meaningful UI batch, run an affected-crate check/test. Before completing a substantial UI slice, run at least `scripts/verify crate orbis-ui` or broader task verification.
 
-- Следуй существующей структуре `worker.rs`/`controller.rs`: UI не выполняет
-  hardware I/O напрямую; данные приходят через провайдеры/сервисы.
-- Callbacks из `.slint` обрабатываются в контроллере/воркере; не дублируй
-  логику в разметке.
+When visual output materially changed and a screenshot/offscreen path is available, inspect the rendered result. A text-marker script is not a substitute for compiling or rendering the UI.
