@@ -1,243 +1,187 @@
 # Threat Model — Orbis Control
 
-> Роль: **CURRENT SECURITY DESIGN**. Реализованные mitigations и открытые
-> security work items должны описываться отдельно. Фактическая готовность
-> функций — в [`current-state.md`](current-state.md).
->
-> Обновлено: 2026-08-19.
+This document defines durable security assumptions and trust boundaries. It is not a feature-status ledger or release checklist.
 
 ## 1. Trust boundaries
 
 ```text
 TL0  user session / orbis-ui / orbisctl
-  │ session D-Bus reads
+  │ typed user/session reads
   ▼
 TL1  orbis-sessiond (unprivileged user daemon)
-  │ read-only system D-Bus / kernel reads
+  │ read-only service/kernel access
   ▼
-TL2  UPower / asusd / supergfxd / kernel ABI
+TL2  UPower / asusd / supergfxd / kernel and compositor APIs
 
 Separate privileged mutation boundary:
 
 TL0 original application caller
-  │ system D-Bus Hardware1
+  │ typed system D-Bus Hardware1 request
   ▼
 TL4 orbis-hardwared (root, sandboxed)
-  │ per-capability polkit + bounded backend
+  │ capability-specific authorization + bounded backend
   ▼
-mutation owner / fixed kernel ABI
+mutation owner / fixed platform ABI
 ```
 
-Critical rule: `orbis-sessiond` is never a privileged mutation deputy. Hardware1
-must authorize the original system-bus sender, not a second session-daemon hop.
+Critical rule: `orbis-sessiond` must never become a privileged mutation deputy. When a privileged operation requires caller authorization, `Hardware1` authorizes the original system-bus sender rather than trusting caller-provided identity data or a second daemon hop.
 
 ## 2. Assets
 
 | Asset | Main risk |
 |---|---|
-| Hardware settings | unsafe/incorrect writes, thermal/stability impact |
-| GPU/display lifecycle | loss of display/session, reboot/logout requirements |
-| User preferences / desired state | unintended automatic application |
-| Capability evidence | false writable/supported state |
+| Hardware settings | unsafe/incorrect writes, thermal or stability impact |
+| GPU/display lifecycle | loss of display/session, unexpected reboot/logout requirements |
+| User preferences and Desired state | unintended automatic application |
+| Capability evidence | falsely reporting unsupported hardware as writable/supported |
 | Diagnostics/export | privacy leakage |
-| D-Bus/system services | spoofed/malformed/stale backend data |
-| Root helper | privilege escalation / generic write primitive |
+| D-Bus/system service input | malformed, spoofed or stale state |
+| Root helper | privilege escalation or generic privileged-write primitive |
 
-## 3. Current attack surfaces and mitigations
+## 3. Privileged service requirements
 
-### 3.1 `orbis-ui`
+`orbis-hardwared` may expose only narrow semantic operations required by the product.
 
-Implemented:
+Forbidden privileged designs include:
 
-- hardware work routes through typed application/service boundaries, not generic privileged sysfs operations;
-- backend-derived controls use explicit state/evidence instead of fake defaults;
-- incomplete product controls are disabled/preview-only;
-- fan and extended ASUS writes are fail-closed in current UI/policy.
+- caller-supplied arbitrary filesystem/sysfs paths;
+- arbitrary shell commands or executables;
+- generic D-Bus forwarding;
+- caller-supplied UID/PID/session/executable metadata used as an authorization trust anchor;
+- broad write access added merely because a backend is easier to implement that way.
 
-Open:
+Each privileged capability should have:
 
-- interactive GUI launch rejects euid 0 before preferences, runtime, or bus setup (#125). Screenshot/offscreen rendering remains explicitly exempt for test workflows;
-- mock/test-support remains in the default release graph (#115);
-- Run on Startup and Diagnostics lifecycle glue remain incomplete (#110/#111).
+1. a precise user-visible meaning;
+2. validated typed input;
+3. capability-specific authorization;
+4. the minimum backend access required for that operation;
+5. explicit result semantics;
+6. denial/unavailable/malformed/partial-failure tests;
+7. controlled live validation when physical device behavior is part of the claim.
 
-### 3.2 `orbis-sessiond`
+Systemd/polkit packaging should preserve least privilege: no unnecessary Linux capabilities, no broad filesystem write surface, no inactive/remote default authorization unless the product requirement explicitly justifies it.
 
-Implemented:
+## 4. Confused-deputy prevention
 
-- unprivileged user daemon;
-- read/getter boundary for privileged concepts;
-- no Hardware1 mutation delegation;
-- Battery/UPower discovery is lazy and capability-local;
-- malformed/new protocol values become typed failure rather than fake state;
-- historical unimplemented `mockDevice` / `readOnlyEmpty` Nix options were removed instead of being silently ignored (#122 resolved).
-
-### 3.3 `orbis-hardwared`
-
-Implemented boundary:
-
-- root system service, narrow typed Hardware1 API;
-- no caller-supplied filesystem paths, shell commands or arbitrary D-Bus forwarding;
-- strict wire/input validation before mutation;
-- per-capability polkit actions use the original Hardware1 sender's `system-bus-name`;
-- `allow_any=no` and `allow_inactive=no` for all packaged mutation actions;
-- `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `PrivateDevices`, `ProtectControlGroups`, `MemoryDenyWriteExecute`, `RestrictAddressFamilies=AF_UNIX`, empty `CapabilityBoundingSet`;
-- `/sys` read-only except the single exact currently enabled direct-write path `/sys/firmware/acpi/platform_profile`;
-- Performance performs bounded typed write + authoritative read-back;
-- Battery uses typed asusd ownership plus configured/effective confirmation and does not require broad sysfs write access.
-
-Current packaged polkit defaults intentionally allow only the two historical
-live-validated production mutation slices:
-
-| Mutation | Default active-user policy |
-|---|---|
-| Performance profile | allowed |
-| Battery charge limit | allowed |
-| Raw GPU mode | **blocked** |
-| Fan curve/default reset | **blocked** |
-| Panel Overdrive | **blocked** |
-| Keyboard backlight | **FA707NV live-validated** |
-| Aura Static RGB | **FA707NV config-accepted** |
-
-The code-level presence of a typed backend is not permission to enable its
-product write path. #120 tracks the remaining requirement that capability and
-diagnostics evidence must represent these product/policy blocks rather than
-publishing backend `Supported` as effective writability.
-
-### 3.4 Known privileged-write blockers
-
-- fan custom write must preserve upstream `CurveData.enabled` (#104);
-- fan Factory Defaults must restore the previous performance profile on all failure paths (#105);
-- fan CPU/GPU evidence must not be cross-inferred (#109);
-- fan `enabled` state must survive Session1/UI transport (#116);
-- Battery/Panel/Aura write-owner liveness still needs stronger non-mutating proof (#107); Panel/Aura stay blocked while this is unresolved;
-- Keyboard write is restricted to the exact ASUS LED paths and remains model/revision-scoped to FA707NV evidence;
-- product GPU mutation remains blocked until product policy/confirmation semantics are proven.
-
-## 4. External service and kernel evidence
-
-Backend data is protocol input even when the service/kernel is trusted as part
-of the host TCB. Orbis must handle service restart, version drift, malformed
-values, permission changes and competing ownership without inventing support.
-
-Rules:
-
-- typed adapters and strict decode;
-- authoritative reads avoid implicit cache where correctness requires freshness;
-- capability-local errors;
-- read and write evidence remain separate;
-- confirmed mutations require read-back when possible;
-- model name is not runtime support evidence.
-
-Battery discovery source hardening for #108 is implemented in `main`: broken
-power-supply entries no longer silently become “not a battery”; if no valid
-candidate exists, remembered permission/I/O evidence wins over structural
-`Unsupported`. Executable validation uses the local full flake workflow; hosted Actions are optional by project policy.
-
-Explicit capability refresh still needs to re-query mutation evidence first (#112).
-
-## 5. Confused-deputy model
-
-Forbidden production flow:
+Forbidden mutation flow:
 
 ```text
 GUI → Session1/sessiond → Hardware1
 ```
 
-Required flow:
+Required model:
 
 ```text
 original application caller
 → Hardware1
-→ polkit(system-bus-name)
+→ authorization based on the original bus caller
 → bounded mutation
 ```
 
-Caller-provided UID/PID/session metadata, executable paths and user-unit names
-are not authorization trust anchors.
+An unprivileged user-session service may aggregate reads, but it must not accidentally lend its identity/authority to another process for privileged mutation.
 
-## 6. Capability/evidence spoofing
+## 5. Capability/evidence integrity
 
-A false `Supported`/`Applied` claim is a security/product risk because users or
-future automation may act on incorrect state.
+A false `Supported`, writable or `Applied` claim is a security and product-trust failure.
 
 Rules:
 
-- file/object presence alone is not effective write support;
-- validation success alone is not effective write support;
-- backend `Supported` plus product/policy blocked is **not writable** (#120);
-- UI must consume operation-specific write evidence, not only overall capability status;
+- model name alone is not runtime support evidence;
+- object/file presence alone is not sufficient write evidence;
+- validation success alone is not proof that a real mutation owner is usable;
+- read evidence and write evidence remain separate;
+- backend capability and product/policy permission remain separate;
+- persisted Desired state is not Observed state;
 - `Accepted` is not `Applied`;
-- persisted Desired is not Observed;
-- empty/partial telemetry is not automatically proof of useful fresh data (#117);
-- stored fan points are not proof the custom curve is enabled/active (#116).
+- empty/partial telemetry is not proof of fresh useful state;
+- unsupported or uncertain mutation paths fail closed.
 
-## 7. Persistence and automation
+## 6. Mutation outcome integrity
 
-Production preferences/window/desired-state stores are separated by concern.
-Loading configuration never performs hardware mutation by itself.
+Never display requested state as authoritative physical state merely because a write call returned.
 
-Legacy compatibility hardening under #113 is largely implemented:
+When possible, confirm the result through an authoritative read-back. When a transition inherently requires reboot/logout/later observation, expose an explicit pending state.
 
-- defaults are hardware-inert (`automation=false`, no implicit AC/Battery policy, no implicit charge limit);
-- legacy writes use exclusive same-directory temp files, fsync + atomic rename + parent fsync and private new-file permissions;
-- checked config/state/cache resolvers reject missing/relative HOME/XDG;
-- Orbis' own legacy loader uses the checked resolver and cannot fall back to CWD;
-- historical CWD-fallback helpers remain deprecated pending compatibility removal.
+A transport timeout after a mutation may have been dispatched is an **unknown outcome**. Do not blindly retry such operations; doing so can duplicate a non-idempotent hardware action.
 
-Reconciliation remains intentionally unimplemented and requires its own policy,
-evidence and executable tests.
+## 7. External service and kernel input
 
-## 8. Diagnostics/privacy
+Even trusted host services/kernel interfaces are protocol inputs from Orbis' perspective. They may restart, change version, disappear, deny permission, return malformed values or conflict with another owner.
 
-Diagnostics remains allowlist-based and read-only. Do not export by default:
-serials, machine UUIDs, asset tags, arbitrary environment, arbitrary files,
-journals, credentials/secrets or full home paths.
+Mitigations:
 
-Diagnostics does not activate stopped services. Current Diagnostics window stays
-fail-closed until lifecycle/refresh glue is complete (#111).
+- typed adapters and strict decode;
+- bounded provider operations where hangs are plausible;
+- capability-local failure instead of global fake fallback;
+- authoritative reads where freshness matters;
+- explicit unknown/unavailable states;
+- no inference of one hardware concept from a different one unless the platform contract actually guarantees it.
 
-## 9. Runtime availability and hangs
+## 8. Persistence and automation
 
-The worker is deliberately ordered, but provider timeout declarations are not
-yet generically enforced (#123). A stuck backend must eventually become typed
-Timeout/Unavailable and must not indefinitely block unrelated commands,
-telemetry or capability refresh.
+Loading preferences/configuration is hardware-inert. Persisted intent must not mutate hardware simply because the application starts.
 
-## 10. Packaging/system boundary
+Separate concerns such as UI preferences, window state and hardware Desired state so one persistence mechanism cannot silently become an "apply everything" mechanism.
 
-Full NixOS and standalone hardwared deployment use the same product policy and
-minimal direct sysfs write intent. Standalone deployment refuses to overwrite a
-NixOS-owned symlink unit and validates the effective write-path list; runtime
-acceptance is recorded as VM + live module-unit evidence under #126.
+Any automation/reconciliation feature must pass through the same capability, authorization, mutation-result and unknown-outcome rules as a direct user action. Automation must not create an alternate privileged path.
 
-Current release blockers:
+## 9. Diagnostics and privacy
 
-- hosted GitHub Actions is optional/manual by single-owner project policy (#106 closed);
-- `main` intentionally has no hosted required checks (#114 closed by policy);
-- obsolete remote agent refs were pruned (#118);
-- stable reverse-DNS application identity is fixed by ADR 0013 (#124).
+Diagnostics should be allowlist-based and read-only.
 
-## 11. Security acceptance rules
+Do not export by default:
 
-Before enabling a privileged capability:
+- device serial numbers or machine UUIDs;
+- asset tags;
+- arbitrary environment variables;
+- arbitrary files or journals;
+- credentials or secrets;
+- full home-directory paths when a redacted representation is sufficient.
 
-1. define the exact user-visible concept;
-2. prove the real write owner and non-mutating support evidence;
-3. define a bounded typed API and validate untrusted input;
-4. preserve original caller authorization;
-5. define confirmation/read-back or explicit Accepted/Pending semantics;
-6. test denial, unavailable, malformed and partial-failure cases;
-7. validate product policy and systemd sandbox on the exact package revision;
-8. perform controlled live hardware validation when real device semantics are part of the claim.
+Diagnostics must not activate stopped privileged services solely to collect more data.
 
-Known-unsafe or insufficiently evidenced functionality stays disabled rather
-than enabled merely because partial backend code exists.
+## 10. Mock/test isolation
 
-## 12. Assumptions
+Fixtures, mock providers and fake device state are useful for development but must never masquerade as production device evidence.
 
-- attacker does not already control root or the system bus;
-- kernel and installed system services are host TCB, but their data/API may be unavailable, malformed or version-incompatible from Orbis' perspective;
-- attacker may run arbitrary same-user processes and call user-accessible D-Bus APIs;
-- package/repository integrity and host NixOS/polkit configuration are trusted at installation time.
+Normal automated tests should use private P2P D-Bus, fake sysfs/filesystems, fixtures and NixOS VMs rather than mutating the developer's real laptop.
 
-Changes to these assumptions require a new security review/ADR.
+Live hardware tests must be deliberate and opt-in.
+
+## 11. Runtime availability
+
+A stuck or missing backend must not indefinitely block unrelated application work when the operations are independent.
+
+Provider calls that may hang should be bounded and report typed timeout/unavailable state. Retry policy is capability-specific; no generic layer may automatically retry a possibly-dispatched mutation.
+
+## 12. Packaging and deployment
+
+Declarative package/module source is authoritative for installed service files, D-Bus policy and polkit policy.
+
+Development helpers must not silently overwrite package-manager/Nix-owned service configuration or compete for a production D-Bus name without making that ownership explicit.
+
+A packaged daemon being present does not prove it is running or usable; capability discovery handles service absence honestly.
+
+## 13. Security acceptance for a new privileged capability
+
+Before enabling a new privileged mutation in the product:
+
+1. define the exact hardware/user concept;
+2. identify the real write owner and non-mutating support evidence;
+3. define the smallest typed API;
+4. validate every untrusted input at the owning boundary;
+5. preserve original caller authorization;
+6. define read-back, Pending, Accepted and unknown-outcome semantics;
+7. test denied, unavailable, malformed and partial-failure paths;
+8. verify packaging/sandbox policy grants only the required access;
+9. perform controlled device-specific live validation if physical behavior is being claimed.
+
+## 14. Assumptions
+
+- the attacker does not already control root or the system bus;
+- the kernel and installed system services are host TCB, though their APIs/data may be unavailable or incompatible from Orbis' perspective;
+- arbitrary same-user processes may call user-accessible APIs;
+- package/repository integrity and host policy configuration are trusted at installation time.
+
+Changes to these assumptions or to the fundamental privilege boundary require an explicit security review/ADR. Ordinary product refactors within these boundaries do not.
