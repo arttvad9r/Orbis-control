@@ -1,0 +1,5 @@
+[env]
+# The hardwared policy test historically received this path from the Nix build.
+# Keep the test source-independent by providing the repository-owned policy to
+# every Cargo invocation from this checkout.
+ORBIS_HARDWARED_POLKIT_POLICY = { value = "data/polkit-1/actions/io.github.orbiscontrol.hardware.policy", relative = true }
