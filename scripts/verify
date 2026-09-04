@@ -7,8 +7,9 @@ Usage:
   scripts/verify full
   scripts/verify crate <crate-name>
 
-The runner executes real build/test tools. It intentionally does not maintain
-status documents, evidence logs, source-marker contracts, or JSON reports.
+The runner executes real Rust/build/package checks and has no Nix dependency.
+It intentionally does not maintain status documents, evidence logs, source-marker
+contracts, or JSON reports.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -34,14 +36,12 @@ def project_root() -> Path:
     return Path(result.stdout.strip()).resolve()
 
 
-def ensure_cargo(root: Path, argv: list[str]) -> None:
-    if shutil.which("cargo"):
-        return
-    if shutil.which("nix"):
-        command = ["nix", "develop", "--command", sys.executable, str(Path(__file__).resolve()), *argv]
-        print("+", " ".join(command), flush=True)
-        raise SystemExit(subprocess.run(command, cwd=root, check=False).returncode)
-    raise SystemExit("cargo is unavailable; install Rust or use the project Nix dev shell")
+def ensure_tools() -> None:
+    missing = [tool for tool in ("cargo", "git") if not shutil.which(tool)]
+    if missing:
+        raise SystemExit(
+            "missing required tools: " + ", ".join(missing) + ". Install the Rust toolchain and base development tools."
+        )
 
 
 def cargo_base(root: Path) -> None:
@@ -71,11 +71,24 @@ def crate_task(root: Path, crate: str) -> None:
     run(["git", "diff", "--check"], root)
 
 
+def validate_packaging_assets(root: Path) -> None:
+    xml_files = [
+        root / "data/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf",
+        root / "data/polkit-1/actions/io.github.orbiscontrol.hardware.policy",
+        root / "data/metainfo/io.github.orbiscontrol.Orbis.metainfo.xml",
+    ]
+    for path in xml_files:
+        print(f"+ parse XML {path.relative_to(root)}", flush=True)
+        ET.parse(path)
+
+    run(["bash", "-n", "packaging/deploy-dev-hardwared.sh"], root)
+    run(["bash", "-n", "scripts/validate-support-matrix.sh"], root)
+
+
 def full(root: Path) -> None:
     workspace_task(root)
-    if not shutil.which("nix"):
-        raise SystemExit("full verification requires Nix")
-    run(["nix", "flake", "check", "--max-jobs", "1", "--cores", "4", "--print-build-logs"], root)
+    run(["cargo", "build", "--workspace", "--release", "--locked"], root)
+    validate_packaging_assets(root)
 
 
 def usage() -> int:
@@ -88,7 +101,7 @@ def main(argv: list[str]) -> int:
         return usage() if not argv else 0
 
     root = project_root()
-    ensure_cargo(root, argv)
+    ensure_tools()
 
     if argv == ["quick"]:
         workspace_check(root)
