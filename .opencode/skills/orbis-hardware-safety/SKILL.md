@@ -20,7 +20,7 @@ These rules protect real hardware. They must not turn ordinary software developm
 
 ## Development versus live execution
 
-You may freely implement, refactor, compile and test hardware-facing software using mocks, fixtures, private P2P D-Bus transports, fake sysfs, or existing VM tests.
+You may freely implement, refactor, compile and test hardware-facing software using mocks, fixtures, private P2P D-Bus transports, fake sysfs, fake services, or disposable non-hardware integration environments.
 
 Do not execute real hardware writes, `sudo`, real privileged mutation calls, or uncontrolled system-bus experiments unless the user's task explicitly authorizes that real-hardware operation.
 
