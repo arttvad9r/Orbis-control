@@ -1,330 +1,222 @@
 # Architecture — Orbis Control
 
-> Роль: **CURRENT DESIGN**.
-> Source snapshot: development branch (consolidates the former `asus-hardware-validation-20260821` line).
-> Operational readiness — [`current-state.md`](current-state.md), future work — [`roadmap.md`](roadmap.md), stable decisions — [`adr/`](adr/).
+This document describes durable system boundaries and semantics. It is not a status report, backlog, release checklist, or instruction to preserve obsolete implementation details. Current work is driven by production source, executable behavior, and `TODO.md`.
 
-## 1. Architectural invariants
+## 1. System boundaries
 
-- GUI is a normal user-session process. Interactive euid-0 rejection occurs before preferences, runtime, or bus setup; screenshot/offscreen paths remain available for tests.
-- `orbis-sessiond` is a read/session boundary, never a privileged mutation deputy.
-- Privileged writes go only through typed `Hardware1` methods owned by `orbis-hardwared`.
-- No generic root filesystem/sysfs/shell/D-Bus proxy API.
-- Capability support comes from runtime evidence, not model-name tables.
-- Read and write evidence are independent.
-- `Unsupported`, `BackendMissing`, `TemporarilyUnavailable`, `PermissionDenied` and `Unknown` remain distinct.
-- `ApplyResult::Accepted` never means `Applied`.
-- Authoritative UI state is updated only from reads/read-back, not optimistic local mutation.
-- Product-disabled controls remain fail-closed even when implementation code exists.
-- Hardware claims are revision- and environment-scoped.
-
-## 2. Layering
+Orbis is split into three trust domains:
 
 ```text
-Slint UI / read-only status CLI / explicit validation CLI
-  ↓ typed requests / observations
-orbis-ui runtime + orbis-application services
-  ↓
-provider traits + capability registry
-  ├─ Session1 reads → orbis-sessiond → UPower / kernel / supergfxd / asusd
-  ├─ direct read-only providers → sysfs / Wayland observation
-  └─ Hardware1 mutations → orbis-hardwared → polkit → typed backend
+normal user UI / CLI
+        ↓
+application + user-session services
+        ↓
+privileged typed hardware service (only where required)
 ```
 
-Primary crate ownership:
+### GUI
+
+`orbis-ui` is a normal user-session application. It owns presentation, interaction, runtime composition and user-visible state. It must not perform direct privileged hardware writes.
+
+### Session service
+
+`orbis-sessiond` owns user-session/read-oriented integration that is better isolated behind D-Bus. It is not a privileged mutation deputy.
+
+### Privileged service
+
+`orbis-hardwared` owns the narrow privileged mutation surface. Its API is semantic and typed. It must never become a generic root filesystem, sysfs, shell-command or arbitrary D-Bus proxy.
+
+## 2. Crate ownership
 
 | Crate | Responsibility |
 |---|---|
-| `orbis-core` | Domain types, state/action invariants |
-| `orbis-config` | XDG preferences/state/autostart/desired-state persistence |
-| `orbis-capabilities` | Typed evidence and immutable registry snapshots |
-| `orbis-providers` | Platform/provider implementations and bounded call primitive |
-| `orbis-application` | Use cases and command/read-back composition |
-| `orbis-session-protocol` | Session1 wire contract |
-| `orbis-session-client` | Session1 readers and caller-preserving Hardware1 clients |
-| `orbis-sessiond` | User-session read daemon |
-| `orbis-hardwared` | Narrow privileged service |
-| `orbis-ui` | Slint surfaces, production composition, worker runtime |
-| `orbis-cli` | Read-only status CLI and explicit Hardware1 validation tool |
-| `orbis-test-support` | Fixtures/screenshots/tests; release-graph cleanup #115 closed in source |
+| `orbis-core` | Domain types, state semantics and invariants |
+| `orbis-config` | Preferences, persisted intent and XDG state |
+| `orbis-capabilities` | Runtime capability evidence and snapshots |
+| `orbis-providers` | Platform/backend traits and concrete implementations |
+| `orbis-application` | Use cases and application-level orchestration |
+| `orbis-session-protocol` | Session D-Bus wire contract |
+| `orbis-session-client` | Session readers and Hardware1 client composition |
+| `orbis-sessiond` | User-session daemon/read boundary |
+| `orbis-hardwared` | Narrow privileged mutation service |
+| `orbis-ui` | Slint UI, runtime composition and worker execution |
+| `orbis-cli` | Command-line inspection/diagnostic entry points |
+| `orbis-test-support` | Development/test fixtures only |
 
-The active production worker is `crates/orbis-ui/src/worker_runtime.rs`. Legacy large worker files are not the source of truth for new runtime fixes.
+The current UI worker implementation is `crates/orbis-ui/src/worker_runtime.rs`. Slint source lives under `ui/`.
 
 ## 3. Read path
 
-```text
-authoritative source
-→ Session1 or typed read-only provider
-→ bounded provider/application read
-→ worker / CLI / diagnostics
-→ presentation
-```
-
-Current read concepts include:
-
-- Battery charge-limit state;
-- Performance current/available profiles;
-- independent GPU power, physical MUX and access policy;
-- profile-specific fan curves and active fan curves;
-- sysfs telemetry;
-- selected display/ASUS diagnostics.
-
-Read failures are capability-local. Missing Battery/UPower must not collapse unrelated GPU/Performance/Fan reads.
-
-Provider operations are bounded and timeout results are capability-local. A
-timeout maps to `TemporarilyUnavailable`, while invalid data remains `Unknown`,
-permission failures remain `PermissionDenied`, and structural backend absence
-does not become a timeout or `Unsupported` by guesswork.
-
-`orbisctl status` and `status --json` use only read providers. The JSON schema is versioned and carries explicit observation states rather than fake values.
-
-## 4. Privileged mutation path
+A normal read flows from an authoritative or explicitly best-effort platform source into a typed provider and then upward:
 
 ```text
-original GUI/application caller
-→ Hardware1 system bus
-→ per-capability polkit
-→ narrow typed backend
-→ authoritative read-back / explicit Pending / failure
+kernel / sysfs / UPower / asusd / supergfxd / compositor API / other typed source
+→ provider
+→ application or session boundary
+→ runtime worker
+→ UI / CLI / diagnostics
 ```
 
-Current product enablement is intentionally narrow:
+Rules:
 
-- **Performance** — platform-profile mutation with read-back;
-- **Battery** — conditional typed mutation after fail-closed ownership/effective-threshold evidence.
+- failures stay local to the affected capability whenever possible;
+- absence, unsupported hardware, permission failure, temporary backend failure and malformed data are distinct states;
+- unknown values remain unknown rather than being replaced with product defaults;
+- independent concepts are read independently rather than inferred from one another;
+- time-bounded provider reads must not turn a timeout into false `Unsupported` evidence.
 
-Production `Hardware1` composition keeps these writes disabled:
+## 4. Mutation path
 
-- raw GPU mutation;
-- Fan set/reset;
-- Panel Overdrive;
-- Keyboard Backlight;
-- Aura Static RGB.
-
-Typed code existence does not override this policy. Packaged polkit and the service sandbox provide additional defense-in-depth. The intended direct sysfs writable surface of `hardwared` is only `/sys/firmware/acpi/platform_profile` until separately promoted controls are validated.
-
-### Privileged backend activation lifecycle
-
-The service binaries, service contracts and activation policy are separate
-artifacts. Their presence in the repository or in a package does not mean that
-either daemon is running.
-
-#### Development
-
-- `services.orbis-control.enable` defaults to `false`; no `orbis-sessiond` user
-  unit or `orbis-hardwared` system unit is enabled by default.
-- `nixosModules.orbis-hardwared-policies` is a **policy-only** integration. It
-  installs static D-Bus policy and polkit action files, but does not create or
-  start a daemon.
-- The standalone `orbis-hardwared` package and
-  `packaging/deploy-dev-hardwared.sh` provide a separate development lifecycle.
-  This path must not be combined with the NixOS-managed unit because both use
-  the same `Hardware1` bus name.
-- Tests use fake sysfs/P2P boundaries and do not start host daemons.
-
-#### Production
-
-Enabling `services.orbis-control` in the NixOS module is the production
-activation mechanism. The module then:
-
-- starts `orbis-sessiond` as a user-session D-Bus service at
-  `graphical-session.target`;
-- starts `orbis-hardwared` as a root system D-Bus service after `dbus.service`;
-- uses the packaged `orbis-sessiond` and `orbis-hardwared` binaries;
-- installs the Hardware1 system-bus policy and per-capability polkit actions;
-- applies the narrow hardwared sandbox, with only
-  `/sys/firmware/acpi/platform_profile` writable.
-
-The flake exposes the full `orbis-control` package, a standalone
-`orbis-hardwared` package, and a policy-only package. The full package source
-contains the workspace binaries used by the module, while the standalone
-package intentionally builds only `orbis-hardwared` and does not define a
-systemd unit.
-
-The FA707NV `Hardware1 unavailable` result is therefore classified as a
-deployment/lifecycle gap, not as missing Rust implementation or an intentional
-product capability disablement: the crate, package recipe, NixOS unit,
-Hardware1 D-Bus contract and polkit action exist, but the host has no enabled or
-installed Orbis service, no owned Hardware1 bus name, and no activatable service
-registration. A policy file alone cannot activate the daemon or provide a
-write path.
-
-## 5. Capability registry
-
-The registry is immutable and generation-based. Each capability carries operation-level evidence; mutation controls must gate from `operations.write.status` or an equivalent typed product-write status, not overall capability presence.
-
-Refresh contract:
-
-1. re-query mutation-status evidence;
-2. execute read-only capability probes;
-3. build a complete next-generation snapshot;
-4. publish by whole-snapshot replacement.
-
-Explicit and periodic refresh now use the same canonical path (#112 source-complete).
-
-Public probes use bounded adapters. A probe timeout is local `TemporarilyUnavailable`, not `Unsupported`, and should not abort unrelated discovery.
-
-## 6. Bounded execution
-
-`orbis_providers::bounded_provider_call()` owns provider-declared read deadlines and performs no retry.
-
-Current source coverage includes:
-
-- public capability probes;
-- `orbisctl` reads;
-- worker Battery refresh;
-- worker Performance refresh and Automation recovery read;
-- worker Fan curve refresh;
-- independent GPU power/MUX/access refreshes.
-
-GPU primitive reads run concurrently with separate provider deadlines, so one hung concept does not serially block the other two.
-
-Remaining #123 boundary:
-
-- telemetry must expose/use a canonical deadline path;
-- Hardware1 mutation-status requery is bounded (`HARDWARE1_STATUS_DEADLINE`, timeout → `Unknown`); executable validation of the exact revision remains;
-- mutation timeout after possible dispatch is classified as `CommandError::Unconfirmed`/recovery: never success, never retried, rollback not auto-triggered; the outcome is obtained only through a subsequent authoritative read-back that confirms or refutes the desired state.
-
-## 7. Battery model
-
-```rust
-ChargeLimit {
-    enabled: bool,
-    configured_percent: Option<Percent>,
-    effective_percent: Option<Percent>,
-    bounds: Option<ChargeLimitBounds>,
-}
-```
-
-Sources remain independent:
-
-- `enabled` — policy/backend state;
-- configured threshold — backend configuration;
-- effective threshold — kernel observation;
-- bounds — only when actually reported/proven.
-
-Wire payloads are strict-decoded; absent values are not replaced by defaults. Production startup avoids activating a stopped asusd simply to prove writability. Dynamic owner/interface liveness remains #107.
-
-## 8. Performance model
-
-Read and write remain distinct:
+Privileged mutations use a bounded semantic path:
 
 ```text
-read:  Session1 → platform_profile / choices
-write: original caller → Hardware1 → polkit → fixed path → read-back
+original application caller
+→ typed Hardware1 request
+→ capability-specific authorization
+→ narrow backend operation
+→ authoritative read-back, explicit pending state, or honest failure
 ```
 
-Unknown wire values are protocol failures, not guessed profiles. UI selection is authoritative only after a successful read/read-back.
+A feature may use an unprivileged owner when the platform already exposes a safe user-session API; the same semantic rules still apply.
 
-## 9. GPU model
+Mutation invariants:
 
-These are separate concepts:
+- validate input at the owning boundary;
+- never accept arbitrary caller-controlled privileged paths or commands;
+- preserve the original caller identity through authorization where the architecture requires it;
+- perform one deliberate mutation attempt;
+- do not present requested state as observed state;
+- `ApplyResult::Accepted` means the request was accepted, not that physical state was proven applied;
+- if transport times out after dispatch may have occurred, the result is unknown and must not be blindly retried;
+- when authoritative confirmation is available, read it back before showing success;
+- when confirmation requires reboot/logout/later observation, represent that explicitly as pending.
 
-```text
-physical MUX
-!= dGPU access policy
-!= runtime dGPU power
-!= requested product GPU mode
-!= pending reboot/logout requirement
-```
+## 5. Capability model
 
-Production supports the first three as independent reads. Eco/Standard/Ultimate/Optimized remain product policy, not aliases for a raw backend enum.
+Capability evidence is runtime evidence, not a static model-name allowlist.
 
-## 10. Fan model
+Read and write support are separate dimensions. A readable value, an existing backend method, or a known ASUS model does not by itself prove that mutation is safe and supported.
 
-Two different observations exist:
+Useful states remain semantically distinct, including:
 
-- active curve from sysfs;
-- stored profile-specific curve from asusd/Session1.
+- supported;
+- read-only;
+- unsupported;
+- backend missing;
+- temporarily unavailable;
+- permission denied;
+- unknown.
 
-Per-fan profile reads now target a concrete `(profile, fan)`; the old requirement that one requested fan read must contain both CPU and GPU is no longer true in this branch.
+The UI should derive control availability from the evidence for the actual operation, not from broad feature presence.
 
-Remaining evidence problems:
+Capability snapshots may be generation-based so a refresh can publish one coherent state rather than exposing partially updated observations.
 
-- aggregate `FeatureId::FanCurves` is published only when **both** CPU and GPU read contracts are proven; a single-fan read failure (including `BackendMissing`/`PermissionDenied`) suppresses the aggregate — no CPU→GPU inference (#109 source-complete);
-- stored custom-curve `enabled` is now carried through typed Session1/client/UI observation (#116 source-complete).
+## 6. Desired, Observed and Pending
 
-Writes remain hard-blocked in production despite completed #104/#105/#109/#116
-evidence; any promotion requires a separate explicit product/policy decision.
-
-## 11. Telemetry
-
-`SysfsTelemetryProvider` is read-only and dynamically discovers hwmon/power-supply sources. Partial metrics are allowed; unsupported derived values are not invented.
-
-Freshness must mean recent useful observation, not merely `Ok(Telemetry)`. Empty/partial/field-local failure evidence is implemented and pinned by #117's tests.
-
-## 12. Desired / Observed / Pending
+Hardware intent and actual state are deliberately separate:
 
 ```text
-Desired  = explicit persisted/user/policy intent
+Desired  = what the user or policy wants
 Observed = authoritative runtime evidence
-Pending  = unconfirmed transition + requirement/recovery state
+Pending  = a requested transition that is not yet conclusively observed
 ```
 
-Loading configuration must never itself trigger hardware mutation. Reconciliation is not a generic “apply config” loop; it must compare fresh Observed state, evaluate capability/policy, perform one deliberate action, then read back.
+Loading configuration is inert. It must not mutate hardware merely because persisted values exist.
 
-Legacy config defaults are hardware-inert and new stores use checked XDG paths. Deprecated compatibility helpers remain #113.
+Any reconciliation/execution flow should:
 
-Pure research-foundation modules (preset/policy selection, reconciliation decisions, transaction phases, readiness, software fan-policy computations) exist in `orbis-core`/`orbis-config`/`orbis-providers` but no production executor consumes them yet; they remain FOUNDATION-only until a deliberate wiring step preserves the separation above.
+1. obtain sufficiently fresh Observed state;
+2. compare it with Desired state;
+3. verify capability and policy for the concrete operation;
+4. execute at most the intended mutation;
+5. observe again;
+6. publish Applied/Pending/Unknown/Error truthfully.
 
-## 13. Preferences / desktop lifecycle
+## 7. Product concepts must stay separate
 
-Separate stores/owners remain separate:
+Do not collapse distinct platform concepts simply because one backend exposes similar enum values.
 
-- `preferences.toml` — application behavior/presentation;
-- window-state file — position only;
-- owned XDG autostart desktop entry — startup source of truth;
-- `desired-state.toml` — hardware intent foundation.
+Examples include:
 
-Source wiring now includes:
+- GPU product policy vs physical MUX vs dGPU access policy vs runtime power;
+- stored fan profile vs currently active fan curve;
+- configured battery threshold vs effective kernel-observed threshold;
+- requested display mode vs compositor-observed mode;
+- accepted configuration vs confirmed physical effect.
 
-- Autostart read/write/read-back (#110 closed);
-- Start Minimized persistence;
-- Remember Position on supported X11-style sessions;
-- explicit Wayland fail-closed positioning;
-- StatusNotifier tray lifecycle;
-- `HideToTray` only with a live host;
-- explicit Quit event-loop termination (#121 closed).
+This separation belongs in domain/application semantics, not in ad-hoc UI conditionals.
 
-These are user-level lifecycle settings, not Desired hardware state.
+## 8. UI architecture
 
-## 14. Diagnostics
+Slint is the presentation layer. UI callbacks express user intent; Rust runtime/application code owns system behavior.
 
-Diagnostics is read-only and privacy-bounded:
+A user-visible control is considered connected only when its path reaches real production behavior and returns real state/error semantics. Mock-only or fixture-only behavior must not be presented as device state in a production build.
 
-```text
-allowlisted typed sources
-→ DiagnosticsSnapshot
-→ DiagnosticsUiDto
-→ UI/text/JSON projection
-```
+The UI may hide or disable unsupported controls, but it must not simulate successful actions.
 
-The active branch initializes `DiagnosticsRuntime`, tracks capability generation replacement, performs one-shot Refresh off the Slint callback thread, and supports privacy-bounded Export/Copy (#111 closed). Open Logs remains intentionally disabled until a safe typed host-opening contract exists.
+## 9. Provider and backend design
 
-## 15. Automation
+Prefer typed provider traits around platform concepts rather than leaking concrete sysfs paths, D-Bus object layouts or vendor-specific values into domain/UI code.
 
-The current worker owns policy revision, lifecycle observations, AC/Battery debounce, resume freshness/coalescing, capability-generation preflight, replay-resistant serialization and Performance unknown-outcome recovery.
+Concrete backends may evolve or be replaced without changing the user-facing meaning of the operation.
 
-After a paired logind resume observation, the worker refreshes authoritative read-only provider state and publishes a new capability generation. Resume is not a mutation trigger: desired presets are not restored, and automation observation is restricted to dry-run preparation on this path.
+When upstream semantics are uncertain:
 
-A Performance-only executor contract exists with mandatory authoritative read-back, but `AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED` remains `false`. GPU/Fan/Battery/Display/Lighting unattended executors remain disabled.
+- inspect official/upstream APIs and existing project evidence;
+- preserve uncertainty in the type/state model;
+- keep the unsafe/unsupported path fail-closed;
+- do not create guessed behavior solely to make a feature appear complete.
 
-## 16. Display / Updates / ambiguous controls
+## 10. Timeouts and concurrency
 
-Display Refresh has typed target/request/read-back semantics but no concrete compositor mutation owner. No shell fallback is accepted.
+External providers can hang or disappear. Reads that can block should have bounded execution appropriate to the provider.
 
-Updates can classify installation ownership/blockers but has no canonical signed release feed or universal installer owner. It must not invent package-manager/self-replacement behavior.
+Independent reads may execute concurrently so one failed source does not unnecessarily serialize unrelated state collection.
 
-Ambiguous ASUS controls stay disabled until exact upstream/domain ownership and confirmation semantics are proven.
+Retry policy is operation-specific. Generic infrastructure must never automatically retry a mutation whose first attempt may already have reached hardware.
 
-## 17. Mock/test boundary
+## 11. Persistence
 
-Mock/fixture data is test/development evidence only. Production cannot treat fixture values as hardware observations.
+Persist only user/application intent and presentation state that has a clear owner.
 
-The release-graph defect #115 is closed in source: the production GUI depends on neither `orbis-test-support` nor fixture-derived bootstrap. Interactive startup constructs `UiState::production_initial` (Loading/Unknown/non-writable, compile-time package version); fixture construction exists only as a dev-dependency and behind the explicit `ui-review` feature used by screenshot/review builds.
+Preferences, window state, autostart and hardware Desired state are different concerns and should not be conflated into one implicit "apply everything" configuration object.
 
-## 18. Release boundary
+Persistent data should use checked XDG locations, deterministic schemas where needed, and safe replacement/write behavior.
 
-Executable release claims require the exact candidate revision to pass Rust/Slint/Nix/package validation. Static contracts are useful fail-fast checks, not compilation evidence.
+## 12. Packaging and service ownership
 
-Current blockers are independent fan/GPU/extended-write promotion gates and packaging/release acceptance. Hosted CI is optional by project policy; fan/GPU/extended writes remain blocked by their separate evidence gates.
+Declarative package/module source owns installed binaries, desktop/AppStream metadata, D-Bus policy, polkit policy and system/user service definitions.
+
+Do not edit generated system files as the source of truth.
+
+Development helpers and production service ownership must not compete for the same D-Bus name or privileged resource simultaneously.
+
+A package containing a daemon does not by itself prove the daemon is enabled/running; runtime capability discovery must handle service absence honestly.
+
+## 13. Testing boundary
+
+Default automated tests must not mutate the developer's real ASUS hardware.
+
+Use, as appropriate:
+
+- ordinary Rust unit/behavior tests;
+- mock providers and fixtures;
+- private P2P D-Bus tests;
+- fake sysfs/filesystem state;
+- NixOS VM integration tests.
+
+These can prove software behavior, protocol wiring, service policy and packaging integration. They do not prove physical device behavior.
+
+Live hardware validation is device/revision specific and should be recorded separately when it is actually performed. Lack of live hardware does not block implementing and testing the software path with honest capability gating.
+
+## 14. Security properties worth preserving
+
+- GUI does not need root privileges.
+- Privileged surface remains narrow and typed.
+- Untrusted D-Bus/wire values are validated before entering trusted domain state.
+- No arbitrary privileged command/path execution API.
+- Unsupported and uncertain operations fail closed.
+- Unknown mutation outcomes are not silently converted to success or retried.
+- Test/mock state cannot escape into normal production state.
+
+Everything outside these durable boundaries may be simplified, refactored or removed when doing so makes the product easier to finish and maintain.
