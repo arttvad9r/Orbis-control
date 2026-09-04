@@ -41,6 +41,16 @@ The following are **not** reasons to stop:
 
 If a check is unavailable, use the strongest available alternative, state the limitation at the end, and keep implementing work that does not depend on that check.
 
+## Development platform
+
+The canonical developer environment is **Arch Linux** with the native Rust toolchain and system packages documented in `README.md`.
+
+- Do not introduce Nix, NixOS modules, flakes, derivations or Nix-only verification as project dependencies.
+- Use Cargo for Rust build/test/lint work.
+- Use normal Linux/systemd/D-Bus/polkit assets for system integration.
+- Keep production code distribution-agnostic where practical; Arch is the primary development/package target, not an excuse to hard-code user-machine paths into domain code.
+- If CI runs on another Linux distribution, treat it as a portability build environment only. It must exercise the same Cargo code and distro-neutral integration assets.
+
 ## Product-first rules
 
 - Production code and working user flows have priority over documentation.
@@ -99,7 +109,7 @@ Use the repository runner when convenient:
 scripts/verify crate <affected-crate>  # targeted crate
 scripts/verify quick                   # fmt + workspace check
 scripts/verify task                    # fmt + check + tests + clippy
-scripts/verify full                    # task checks + full Nix flake checks
+scripts/verify full                    # task checks + release build + packaging assets
 ```
 
 Direct Cargo commands are also fine. Do not repeatedly run `scripts/verify full` while still making small edits.
@@ -121,7 +131,7 @@ Orbis Control is a Rust + Slint Linux system application for ASUS ROG/TUF/Zephyr
 - Unsupported or blocked mutations must fail honestly; never simulate success.
 - Keep unsafe Rust forbidden unless the user explicitly requests a reviewed exception and there is no safe alternative.
 
-Real hardware writes, privileged commands, and mutation calls must only be executed when the user's task explicitly authorizes that exact real-hardware work. **This restriction does not prevent implementing, refactoring, compiling, or testing the software path with fakes/mocks/VMs.** Lack of physical hardware blocks live-validation claims, not ordinary software development.
+Real hardware writes, privileged commands, and mutation calls must only be executed when the user's task explicitly authorizes that exact real-hardware work. **This restriction does not prevent implementing, refactoring, compiling, or testing the software path with fakes, mocks, private D-Bus peers or other non-mutating test environments.** Lack of physical hardware blocks live-validation claims, not ordinary software development.
 
 ## Project map
 
