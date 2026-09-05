@@ -1,13 +1,10 @@
-// AppWindow — Orbis Control single-window shell (reference design 2026-08-25):
-// frameless 1200×800 window, 44px title bar, 230px sidebar, card-based pages.
-// Sidebar: Главная / Производительность Питание Охлаждение Графика Подсветка
-// Экран Система / Настройки О программе. All hardware state stays in UiState;
-// callbacks keep their worker-owned request semantics.
-import { ScrollView } from "std-widgets.slint";
+// Orbis Control single-window shell. The shell owns product navigation and
+// stable window geometry; hardware state remains in UiState and backend-owned
+// callbacks keep their existing semantics.
 import { UiState, Section, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState } from "model.slint";
 import { TitleBar } from "../components/title-bar.slint";
 import { NavItem } from "../components/nav-item.slint";
-import { ThemeBridge } from "common.slint";
+import { ThemeBridge, LayoutMetrics } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 import { DashboardSection } from "sections/dashboard.slint";
 import { PerformanceSection } from "sections/performance.slint";
@@ -21,10 +18,10 @@ import { SettingsSection } from "sections/settings.slint";
 import { AboutSection } from "sections/about.slint";
 
 export component AppWindow inherits Window {
-    preferred-width: 1200px;
-    preferred-height: 800px;
-    min-width: 980px;
-    min-height: 680px;
+    preferred-width: 1240px;
+    preferred-height: 820px;
+    min-width: 1024px;
+    min-height: 700px;
     no-frame: true;
     background: transparent;
     title: "Orbis Control";
@@ -47,8 +44,6 @@ export component AppWindow inherits Window {
         fan-pwm-0: 0, fan-pwm-1: 0, fan-pwm-2: 0, fan-pwm-3: 0, fan-pwm-4: 0, fan-pwm-5: 0, fan-pwm-6: 0, fan-pwm-7: 0,
     };
 
-    // Privacy-safe DMI identity (vendor/product/board/BIOS), read once at
-    // startup through the existing read-only provider. Empty = unknown.
     in property <string> device-name: "";
     in property <string> device-board: "";
     in property <string> bios-version: "";
@@ -62,7 +57,6 @@ export component AppWindow inherits Window {
     callback titlebar-drag-started;
     in property <bool> maximized: false;
 
-    // Performance page surface.
     callback perf-clicked(int);
     callback gpu-clicked(int);
     callback charge-changed(float);
@@ -78,7 +72,6 @@ export component AppWindow inherits Window {
     in property <string> startup-status: "Unavailable";
     callback quit-requested;
 
-    // Cooling page surface.
     in property <bool> mutation-safety-blocked: false;
     in property <bool> factory-reset-available: true;
     in property <string> policy-status: "Кривая применяется через Hardware1 с read-back";
@@ -89,7 +82,6 @@ export component AppWindow inherits Window {
     callback fan-apply-clicked(bool);
     callback aura-static-rgb-requested(int, int, int);
 
-    // Hardware observation surface (backlight/display/system pages).
     in property <bool> backend-ready: false;
     in property <bool> applying: false;
     in property <string> status: "Advanced controls backend unavailable";
@@ -148,13 +140,14 @@ export component AppWindow inherits Window {
     }
 
     root-rect := Rectangle {
-        border-radius: 12px;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: Palette.border-default;
         clip: true;
         background: Palette.window-background;
 
         VerticalLayout {
             TitleBar {
-                height: 44px;
                 maximized: root.maximized;
                 minimize-requested => { root.titlebar-minimize-requested(); }
                 maximize-requested => { root.titlebar-maximize-requested(); }
@@ -165,14 +158,16 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 vertical-stretch: 1;
 
-                // ── Sidebar ─────────────────────────────────────────────
                 Rectangle {
-                    width: 230px;
+                    width: LayoutMetrics.sidebar-width;
                     background: Palette.titlebar-background;
 
                     VerticalLayout {
-                        padding: 12px;
-                        spacing: 2px;
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        spacing: 3px;
 
                         NavItem {
                             label: "Главная";
@@ -181,7 +176,15 @@ export component AppWindow inherits Window {
                             clicked => { root.open-section(Section.Dashboard); }
                         }
 
-                        Rectangle { height: 8px; background: transparent; }
+                        Rectangle { height: 12px; background: transparent; }
+                        Text {
+                            height: 22px;
+                            text: "УПРАВЛЕНИЕ";
+                            font-size: 10px;
+                            font-weight: 650;
+                            color: Palette.text-disabled;
+                            vertical-alignment: center;
+                        }
 
                         NavItem {
                             label: "Производительность";
@@ -227,7 +230,14 @@ export component AppWindow inherits Window {
                         }
 
                         Rectangle { vertical-stretch: 1; background: transparent; }
-
+                        Text {
+                            height: 22px;
+                            text: "ПРИЛОЖЕНИЕ";
+                            font-size: 10px;
+                            font-weight: 650;
+                            color: Palette.text-disabled;
+                            vertical-alignment: center;
+                        }
                         NavItem {
                             label: "Настройки";
                             icon-kind: 8;
@@ -242,7 +252,6 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Right border of the sidebar.
                     Rectangle {
                         x: parent.width - 1px;
                         width: 1px;
@@ -251,7 +260,6 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // ── Content ─────────────────────────────────────────────
                 Rectangle {
                     horizontal-stretch: 1;
                     clip: true;
@@ -358,7 +366,7 @@ export component AppWindow inherits Window {
                         start-minimized-changed(v) => { root.start-minimized-changed(v); }
                         remember-position <=> root.remember-position;
                         remember-position-enabled <=> root.remember-position-enabled;
-                        remember-position-changed(v) => { root.remember-position-changed(v); }
+                        remember-position-changed(v) => { root.remember_position_changed(v); }
                         close-action <=> root.close-action;
                         close-action-enabled <=> root.close-action-enabled;
                         hide-to-tray-enabled <=> root.hide-to-tray-enabled;
