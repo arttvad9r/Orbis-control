@@ -27,24 +27,30 @@ export component AboutSection inherits Rectangle {
                     padding: 24px;
                     spacing: 20px;
                     AppMark { width: 72px; height: 72px; }
-                    VerticalLayout {
+                    Rectangle {
                         horizontal-stretch: 1;
-                        alignment: center;
-                        spacing: 5px;
-                        Text {
-                            text: "Orbis Control";
-                            font-size: 24px;
-                            font-weight: 700;
-                            color: Palette.text-primary;
+                        background: transparent;
+                        VerticalLayout {
+                            width: parent.width;
+                            alignment: center;
+                            spacing: 5px;
+                            Text {
+                                width: parent.width;
+                                text: "Orbis Control";
+                                font-size: 24px;
+                                font-weight: 700;
+                                color: Palette.text-primary;
+                            }
+                            Text {
+                                width: parent.width;
+                                text: "Нативный Linux control center для ASUS ROG / TUF / Zephyrus";
+                                font-size: 13px;
+                                color: Palette.text-secondary;
+                                overflow: elide;
+                            }
+                            Rectangle { height: 4px; background: transparent; }
+                            StatusPill { width: 126px; text: "Версия " + root.version; accent: Palette.accent-default; }
                         }
-                        Text {
-                            text: "Нативный Linux control center для ASUS ROG / TUF / Zephyrus";
-                            font-size: 13px;
-                            color: Palette.text-secondary;
-                            overflow: elide;
-                        }
-                        Rectangle { height: 4px; background: transparent; }
-                        StatusPill { width: 126px; text: "Версия " + root.version; accent: Palette.accent-default; }
                     }
                 }
             }
