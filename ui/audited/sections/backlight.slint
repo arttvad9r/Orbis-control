@@ -1,10 +1,50 @@
-// Backlight page — keyboard brightness levels and observed Aura state.
-// Writes stay request-only and gated by Hardware1 write evidence; when the
-// privileged writer is not supported the UI says so instead of pretending.
+// Backlight page — keyboard brightness and Aura state/presets.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow, StatusPill, LayoutMetrics } from "../common.slint";
 import { Icon } from "../../components/icon.slint";
 import { Palette } from "../../themes/dark.slint";
+
+component ColorPresetButton inherits Rectangle {
+    in property <string> label;
+    in property <color> swatch;
+    in property <bool> disabled: false;
+    callback clicked;
+
+    horizontal-stretch: 1;
+    height: 54px;
+    border-radius: 11px;
+    border-width: 1px;
+    border-color: touch.has-hover && !root.disabled ? Palette.border-strong : Palette.border-default;
+    background: root.disabled ? Palette.surface-disabled : touch.has-hover ? Palette.surface-hover : Palette.surface-raised;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        alignment: center;
+        Rectangle {
+            width: 24px;
+            height: 24px;
+            border-radius: 12px;
+            border-width: 2px;
+            border-color: Palette.border-strong;
+            background: root.swatch;
+        }
+        Text {
+            text: root.label;
+            font-size: 12.5px;
+            font-weight: 600;
+            color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+            vertical-alignment: center;
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+    }
+
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.clicked(); }
+    }
+}
 
 export component BacklightSection inherits Rectangle {
     in property <bool> keyboard-state-ready: false;
@@ -18,9 +58,9 @@ export component BacklightSection inherits Rectangle {
     callback aura-static-rgb-requested(int, int, int);
 
     function keyboard-status() -> string {
-        if (!root.keyboard-state-ready) { return "Состояние подсветки недоступно"; }
-        if (root.keyboard-control-ready) { return "Запись подтверждается чтением после применения"; }
-        return "Запись отключена · уровень только для чтения";
+        if (!root.keyboard-state-ready) { return "Получение состояния подсветки"; }
+        if (root.keyboard-control-ready) { return "Изменение яркости подтверждается чтением фактического уровня"; }
+        return "Текущий уровень доступен только для чтения";
     }
 
     function aura-effect-label() -> string {
@@ -41,55 +81,53 @@ export component BacklightSection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * LayoutMetrics.page-margin;
+            x: LayoutMetrics.page-margin;
+            spacing: LayoutMetrics.page-gap;
+            padding-top: 14px;
+            padding-bottom: 26px;
 
             PageHeader {
                 title: "Подсветка";
-                description: "Яркость клавиатуры и наблюдаемые эффекты Aura.";
+                description: "Яркость клавиатуры, состояние Aura и быстрые цветовые пресеты.";
             }
 
             SectionCard {
                 VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 14px;
 
-                    SectionTitle {
-                        title: "Подсветка клавиатуры";
-                        detail: root.keyboard-state-ready ? "" : "недоступно";
-                        detail-color: Palette.text-disabled;
+                    HorizontalLayout {
+                        height: 30px;
+                        SectionTitle { horizontal-stretch: 1; title: "Подсветка клавиатуры"; }
+                        StatusPill {
+                            text: root.keyboard-state-ready ? (root.keyboard-control-ready ? "Доступно" : "Только чтение") : "Определяется";
+                            accent: root.keyboard-control-ready ? Palette.success : root.keyboard-state-ready ? Palette.text-secondary : Palette.warning;
+                        }
                     }
 
                     if (root.keyboard-state-ready) : HorizontalLayout {
-                        height: 40px;
-                        spacing: 8px;
+                        height: 46px;
+                        spacing: 10px;
                         for level in 4: Rectangle {
-                            min-width: 96px;
+                            min-width: 104px;
                             horizontal-stretch: 1;
-                            border-radius: 8px;
+                            border-radius: 11px;
                             border-width: root.keyboard-brightness == level && root.keyboard-control-ready ? 1.5px : 1px;
-                            border-color: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default
-                                : kb-touch.has-hover && root.keyboard-control-ready ? Palette.border-strong
-                                : Palette.border-default;
-                            background: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-soft
-                                : kb-touch.pressed && root.keyboard-control-ready ? Palette.surface-pressed
-                                : kb-touch.has-hover && root.keyboard-control-ready ? Palette.surface-hover
-                                : Palette.surface-default;
+                            border-color: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default : Palette.border-default;
+                            background: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-soft : Palette.surface-raised;
                             HorizontalLayout {
                                 alignment: center;
-                                spacing: 7px;
+                                spacing: 8px;
                                 Icon {
                                     kind: 5;
-                                    tint: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default : Palette.text-disabled;
+                                    tint: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default : Palette.text-secondary;
                                 }
                                 Text {
-                                    text: level == 0 ? "Выкл" : "Уровень " + level;
+                                    text: level == 0 ? "Выключено" : "Уровень " + level;
                                     font-size: 12.5px;
-                                    font-weight: 500;
-                                    color: root.keyboard-control-ready ? Palette.text-primary : Palette.text-disabled;
+                                    font-weight: 600;
+                                    color: root.keyboard-control-ready ? Palette.text-primary : Palette.text-secondary;
                                     vertical-alignment: center;
                                 }
                             }
@@ -102,50 +140,70 @@ export component BacklightSection inherits Rectangle {
 
                     LocalStatus {
                         text: root.keyboard-status();
-                        accent: root.keyboard-control-ready ? Palette.success : Palette.text-secondary;
+                        accent: root.keyboard-control-ready ? Palette.success : root.keyboard-state-ready ? Palette.text-secondary : Palette.warning;
                     }
                 }
             }
 
             SectionCard {
                 VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 14px;
 
-                    SectionTitle {
-                        title: "Aura";
-                        detail: root.aura-state-ready ? (root.aura-control-ready ? "config read-back" : "наблюдается") : "недоступно";
-                        detail-color: root.aura-control-ready ? Palette.success : root.aura-state-ready ? Palette.text-secondary : Palette.text-disabled;
+                    HorizontalLayout {
+                        height: 30px;
+                        SectionTitle { horizontal-stretch: 1; title: "Aura"; }
+                        StatusPill {
+                            text: root.aura-state-ready ? (root.aura-control-ready ? "Управление" : "Наблюдение") : "Определяется";
+                            accent: root.aura-control-ready ? Palette.success : root.aura-state-ready ? Palette.text-secondary : Palette.warning;
+                        }
                     }
 
-                    InfoRow { label: "Эффект"; value: root.aura-effect-label(); }
-                    InfoRow { label: "Скорость"; value: root.aura-speed-label(); }
-
-                    Text {
-                        text: root.aura-control-ready ? "Static RGB · config-level read-back" : "Static RGB недоступен";
-                        font-size: 11.5px;
-                        color: Palette.text-secondary;
-                        overflow: elide;
+                    HorizontalLayout {
+                        spacing: 18px;
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 4px;
+                            InfoRow { label: "Эффект"; value: root.aura-effect-label(); }
+                            InfoRow { label: "Скорость"; value: root.aura-speed-label(); }
+                        }
+                        Rectangle { width: 1px; background: Palette.border-default; }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 8px;
+                            Text {
+                                text: "Быстрый Static RGB";
+                                font-size: 12.5px;
+                                font-weight: 600;
+                                color: Palette.text-secondary;
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                ColorPresetButton {
+                                    label: "Красный"; swatch: #ff414d; disabled: !root.aura-control-ready;
+                                    clicked => { root.aura-static-rgb-requested(255, 65, 77); }
+                                }
+                                ColorPresetButton {
+                                    label: "Голубой"; swatch: #38c9ff; disabled: !root.aura-control-ready;
+                                    clicked => { root.aura-static-rgb-requested(56, 201, 255); }
+                                }
+                                ColorPresetButton {
+                                    label: "Белый"; swatch: #f4f7ff; disabled: !root.aura-control-ready;
+                                    clicked => { root.aura-static-rgb-requested(244, 247, 255); }
+                                }
+                            }
+                        }
                     }
 
-                    if (root.aura-control-ready) : HorizontalLayout {
-                        height: 34px;
-                        spacing: 8px;
-                        Rectangle {
-                            width: 34px; height: 34px; border-radius: 17px; background: #ff3030;
-                            TouchArea { clicked => { root.aura-static-rgb-requested(255, 48, 48); } }
-                        }
-                        Rectangle {
-                            width: 34px; height: 34px; border-radius: 17px; background: #00d8ff;
-                            TouchArea { clicked => { root.aura-static-rgb-requested(0, 216, 255); } }
-                        }
-                        Rectangle {
-                            width: 34px; height: 34px; border-radius: 17px; background: #ffffff;
-                            TouchArea { clicked => { root.aura-static-rgb-requested(255, 255, 255); } }
-                        }
+                    LocalStatus {
+                        text: root.aura-control-ready
+                            ? "Static RGB применяется с config-level read-back"
+                            : root.aura-state-ready ? "Aura определяется, управление для этого backend пока не опубликовано" : "Получение состояния Aura";
+                        accent: root.aura-control-ready ? Palette.success : Palette.text-secondary;
                     }
                 }
             }
+
             Rectangle { vertical-stretch: 100; background: transparent; }
         }
     }
