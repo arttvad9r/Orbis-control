@@ -1,0 +1,76 @@
+name: Verify debug once
+
+on:
+  push:
+    branches:
+      - agent/finish-v01
+    paths:
+      - .github/workflows/verify-debug-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/finish-v01
+          persist-credentials: false
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libdbus-1-dev \
+            libssl-dev \
+            libsystemd-dev \
+            libglib2.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            libgdk-pixbuf-2.0-dev
+
+      - name: Install Rust 1.87
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.87'
+          components: rustfmt, clippy
+
+      - name: Run verification and capture compact diagnostics
+        shell: bash
+        run: |
+          set +e
+          scripts/verify full > verify-full.log 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            echo "===== ERROR-LIKE LINES ====="
+            grep -nEi 'error|failed|failure|warning|diff|panic|abort' verify-full.log | tail -n 160 || true
+            echo "===== LAST 220 LINES ====="
+            tail -n 220 verify-full.log
+          } > verify-tail.txt
+          cat verify-tail.txt
+          exit 0
+
+      - name: Upload compact diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-debug
+          path: verify-tail.txt
+          retention-days: 1
