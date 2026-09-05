@@ -1,16 +1,12 @@
-// Cooling page — fan curves (write path stays safety-gated), current RPM and
-// the honest mutation-safety status.
+// Cooling page — full fan curve workspace with explicit state and action bar.
 import { ScrollView } from "std-widgets.slint";
 import { UiState } from "../model.slint";
-import { PageHeader, SectionCard, LocalStatus, ActionButton } from "../common.slint";
+import { PageHeader, SectionCard, LocalStatus, ActionButton, StatusPill, LayoutMetrics } from "../common.slint";
 import { FanCurveEditor } from "../fan-curve-editor-v3.slint";
 import { Palette } from "../../themes/dark.slint";
 
 export component CoolingSection inherits Rectangle {
     in property <UiState> ui-state;
-
-    // Backend/policy presentation contract. Today production keeps mutation
-    // blocked; later backend wiring only needs to publish these facts.
     in property <bool> mutation-safety-blocked: false;
     in property <bool> factory-reset-available: true;
     in property <string> policy-status: "Кривая применяется через Hardware1 с read-back";
@@ -26,15 +22,13 @@ export component CoolingSection inherits Rectangle {
     function status-text() -> string {
         if (root.ui-state.fan-curve-error) { return "Операция с кривой завершилась ошибкой"; }
         if (root.mutation-safety-blocked) { return root.policy-status; }
-        if (root.factory-reset-pending) { return "Заводские значения выбраны · ещё не применены"; }
-        if (!root.ui-state.fan-curve-writable) { return "Только чтение"; }
-        if (root.ui-state.fan-curve-dirty) { return "Кривая изменена · ещё не применена"; }
+        if (root.factory-reset-pending) { return "Выбраны заводские значения · подтвердите применение"; }
+        if (!root.ui-state.fan-curve-writable) { return "Кривая доступна только для чтения"; }
+        if (root.ui-state.fan-curve-dirty) { return "Есть неприменённые изменения"; }
         if (root.ui-state.fan-curve-enabled-known) {
-            return root.ui-state.fan-curve-enabled
-                ? "Своя кривая включена"
-                : "Сохранённая своя кривая отключена";
+            return root.ui-state.fan-curve-enabled ? "Пользовательская кривая включена" : "Пользовательская кривая сохранена, но выключена";
         }
-        return "Текущая сохранённая кривая · состояние включённости неизвестно";
+        return "Состояние пользовательской кривой уточняется";
     }
 
     function status-color() -> color {
@@ -45,23 +39,39 @@ export component CoolingSection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * LayoutMetrics.page-margin;
+            x: LayoutMetrics.page-margin;
+            spacing: LayoutMetrics.page-gap;
+            padding-top: 14px;
+            padding-bottom: 26px;
 
             PageHeader {
                 title: "Охлаждение";
-                description: "Кривые вентиляторов по профилям BIOS и текущие обороты.";
+                description: "Профили BIOS, кривые CPU/GPU и подтверждённое применение настроек вентиляторов.";
+            }
+
+            HorizontalLayout {
+                height: 36px;
+                LocalStatus {
+                    horizontal-stretch: 1;
+                    text: root.status-text();
+                    accent: root.status-color();
+                }
+                Rectangle { width: 10px; background: transparent; }
+                StatusPill {
+                    text: root.ui-state.fan-curve-writable ? "Редактирование" : "Наблюдение";
+                    accent: root.ui-state.fan-curve-writable ? Palette.success : Palette.text-secondary;
+                }
             }
 
             SectionCard {
+                min-height: 548px;
                 VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 14px;
 
                     FanCurveEditor {
+                        vertical-stretch: 1;
                         state: root.ui-state.fan-curve-state;
                         writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked;
                         error-state: root.ui-state.fan-curve-error;
@@ -78,23 +88,28 @@ export component CoolingSection inherits Rectangle {
                         pwm-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-pwm-point-changed(i, v); }
                     }
 
+                    Rectangle { height: 1px; background: Palette.border-default; }
+
                     HorizontalLayout {
-                        height: 32px;
+                        height: 40px;
                         spacing: 10px;
-
-                        LocalStatus {
+                        Text {
                             horizontal-stretch: 1;
-                            text: root.status-text();
-                            accent: root.status-color();
+                            text: root.factory-reset-pending
+                                ? "Заводская кривая будет применена к выбранному профилю BIOS."
+                                : "Изменения отправляются только после нажатия «Применить».";
+                            font-size: 12px;
+                            color: Palette.text-secondary;
+                            vertical-alignment: center;
+                            overflow: elide;
                         }
-
                         ActionButton {
                             label: "Заводские значения";
                             disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error;
                             clicked => { root.factory-reset-pending = true; }
                         }
                         ActionButton {
-                            label: root.factory-reset-pending ? "Применить заводские" : "Применить кривую";
+                            label: root.factory-reset-pending ? "Применить заводские" : "Применить изменения";
                             accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
                             disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
                             clicked => {
@@ -106,7 +121,6 @@ export component CoolingSection inherits Rectangle {
                     }
                 }
             }
-            Rectangle { vertical-stretch: 100; background: transparent; }
         }
     }
 }
