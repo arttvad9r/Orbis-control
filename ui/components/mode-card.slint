@@ -1,6 +1,5 @@
-// ModeCard — large segmented-card selector (reference design):
-// icon left, title + short description right. Selected = accent border +
-// soft accent tint + accent icon; no glow, no filled accent blocks.
+// Product mode selector. A selected mode is emphasized by hierarchy, not by a
+// large saturated fill; pending remains visually distinct from selected.
 import { Icon } from "icon.slint";
 import { Palette } from "../themes/dark.slint";
 
@@ -17,76 +16,72 @@ export component ModeCard inherits Rectangle {
     callback clicked;
 
     horizontal-stretch: 1;
-    min-height: 64px;
-    border-radius: 10px;
+    min-height: 76px;
+    border-radius: 12px;
     border-width: root.selected || root.pending ? 1.5px : 1px;
     border-color: root.selected || root.pending ? root.accent
         : touch.has-hover && !root.disabled ? Palette.border-strong
         : Palette.border-default;
 
-    property <bool> hover: touch.has-hover;
-    property <bool> down: touch.pressed;
-    // Shared with the icon as an arc mask (gauge glyph).
     property <color> card-bg: root.disabled ? Palette.surface-disabled
-        : root.down ? Palette.surface-pressed
-        : root.selected || root.pending ? Palette.accent-soft
-        : root.hover ? Palette.surface-hover
-        : Palette.surface-default;
-
+        : touch.pressed ? Palette.surface-pressed
+        : root.selected || root.pending ? root.accent.transparentize(0.90)
+        : touch.has-hover ? Palette.surface-hover
+        : Palette.surface-raised;
     background: root.card-bg;
 
+    if (root.selected || root.pending) : Rectangle {
+        x: 0px;
+        y: 12px;
+        width: 3px;
+        height: parent.height - 24px;
+        border-radius: 1.5px;
+        background: root.accent;
+    }
+
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 12px;
-        spacing: 11px;
+        padding-left: 16px;
+        padding-right: 14px;
+        spacing: 12px;
         alignment: center;
 
         if (root.icon-visible) : Rectangle {
-            width: 22px;
-            background: transparent;
-            VerticalLayout {
-                alignment: center;
-                Rectangle {
-                    width: 22px;
-                    height: 22px;
-                    property <color> tint: root.disabled ? Palette.text-disabled
-                        : root.selected || root.pending ? root.accent
-                        : Palette.text-secondary;
-                    background: transparent;
-                    // 22px glyph: the shared 18px icon scaled by a wrapper is
-                    // not supported by the software renderer, so mode glyphs
-                    // reuse the Icon at native size inside a centering box.
-                    Icon {
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        kind: root.icon-kind;
-                        tint: parent.tint;
-                        mask: root.card-bg;
-                    }
-                }
+            width: 32px;
+            height: 32px;
+            border-radius: 9px;
+            background: root.disabled ? Palette.surface-muted : root.accent.transparentize(0.88);
+            Icon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                kind: root.icon-kind;
+                tint: root.disabled ? Palette.text-disabled
+                    : root.selected || root.pending ? root.accent
+                    : Palette.text-secondary;
+                mask: parent.background;
             }
         }
 
         VerticalLayout {
             vertical-stretch: 1;
             alignment: center;
-            spacing: 2px;
+            spacing: 3px;
             Text {
                 text: root.title;
-                font-size: 13.5px;
-                font-weight: 600;
+                font-size: 14px;
+                font-weight: 650;
                 color: root.disabled ? Palette.text-disabled : Palette.text-primary;
                 overflow: elide;
             }
             if (root.description != "") : Text {
                 text: root.description;
-                font-size: 11.5px;
+                font-size: 12px;
                 color: root.disabled ? Palette.text-disabled : Palette.text-secondary;
                 overflow: elide;
             }
             if (root.pending && !root.disabled) : Text {
                 text: root.pending-note;
-                font-size: 10px;
+                font-size: 10.5px;
+                font-weight: 600;
                 color: root.accent;
                 overflow: elide;
             }
