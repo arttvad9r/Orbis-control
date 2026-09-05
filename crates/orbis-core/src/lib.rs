@@ -17,8 +17,6 @@
 
 pub mod action;
 pub mod aura;
-pub mod automation;
-pub mod automation_policy;
 pub mod battery;
 pub mod capability;
 pub mod desired_observed;
@@ -65,11 +63,6 @@ pub mod warning;
 pub use action::{ActionRequirement, ApplyResult, PendingAction};
 pub use aura::{
     AuraBrightness, AuraDirection, AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraState, AuraZone,
-};
-pub use automation::{AutomationAction, AutomationRule, AutomationTrigger};
-pub use automation_policy::{
-    PolicyCondition, PolicyContext, PolicyEvent, PolicyRule, PolicySelection, PolicyTrigger,
-    select_policy_preset,
 };
 pub use battery::{
     BatteryThresholdConfidence, BatteryThresholdEvidence, BatteryThresholdEvidenceState,

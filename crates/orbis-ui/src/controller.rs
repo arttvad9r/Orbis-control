@@ -341,14 +341,14 @@ fn gpu_index(m: GpuMode) -> i32 {
 
 /// Map an ASUS product GPU wire value to a UI mode-card index.
 ///
-/// Hybrid renders on the Eco card (0), Integrated on Standard (1), Ultimate
+/// Hybrid renders on the Standard card (1), Integrated on Eco (0), Ultimate
 /// stays Ultimate (2). `Optimized` is never produced: the ASUS Armoury
 /// product API has no such mode, so unknown sentinels (`u32::MAX`) and any
 /// other value map to `None` and must not overwrite UI evidence.
 pub fn asus_product_gpu_index(raw: u32) -> Option<i32> {
     match raw {
-        0 => Some(0),
-        1 => Some(1),
+        0 => Some(1),
+        1 => Some(0),
         2 => Some(2),
         _ => None,
     }

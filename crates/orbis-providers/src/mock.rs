@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use tokio::sync::RwLock;
 
 use orbis_core::action::{ActionRequirement, ApplyResult, PendingAction};
-use orbis_core::automation::{AutomationAction, AutomationRule, AutomationTrigger};
 use orbis_core::battery::{ChargeLimit, ChargeLimitBounds};
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::display::DisplayMode;
@@ -28,11 +27,10 @@ use orbis_core::telemetry::Telemetry;
 
 use crate::error::{OperationId, ProviderError, ValidationResult};
 use crate::traits::{
-    AnimeProvider, AutomationProvider, BatteryProvider, DisplayProvider, FanCurveMutationProvider,
-    FanCurvePoints, FanProvider, FirmwareUpdate, FirmwareUpdateProvider, GpuAccessProvider,
-    GpuMuxProvider, GpuPowerProvider, GpuProvider, HotkeyProvider, LightingProvider,
-    PanelOverdriveProvider, PerformanceProvider, PowerLimitProvider, Provider, ProviderHealth,
-    TelemetryProvider,
+    AnimeProvider, BatteryProvider, DisplayProvider, FanCurveMutationProvider, FanCurvePoints,
+    FanProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, GpuProvider, HotkeyProvider,
+    LightingProvider, PanelOverdriveProvider, PerformanceProvider, PowerLimitProvider, Provider,
+    ProviderHealth, TelemetryProvider,
 };
 
 /// Способ имитации ошибки в mock-режиме.
@@ -809,40 +807,6 @@ impl TelemetryProvider for MockProvider {
 
     fn default_poll_interval(&self) -> Duration {
         Duration::from_secs(1)
-    }
-}
-
-#[async_trait]
-impl AutomationProvider for MockProvider {
-    async fn rules(&self) -> Result<Vec<AutomationRule>, ProviderError> {
-        Ok(vec![
-            AutomationRule::new(
-                "ac-profile",
-                AutomationTrigger::OnAc,
-                AutomationAction::SetProfile(PerformanceProfile::Balanced),
-                10,
-            ),
-            AutomationRule::new(
-                "battery-profile",
-                AutomationTrigger::OnBattery,
-                AutomationAction::SetProfile(PerformanceProfile::Silent),
-                10,
-            ),
-        ])
-    }
-
-    async fn apply_rule(&self, rule: &AutomationRule) -> Result<(), ProviderError> {
-        if let AutomationAction::SetProfile(p) = &rule.action {
-            let _ = self.set_profile(*p).await?;
-        }
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl FirmwareUpdateProvider for MockProvider {
-    async fn check_updates(&self) -> Result<Vec<FirmwareUpdate>, ProviderError> {
-        Ok(vec![])
     }
 }
 

@@ -64,6 +64,13 @@ export component DashboardSection inherits Rectangle {
         return Palette.text-primary;
     }
 
+    function ac-status-label() -> string {
+        if (root.ui-state.ac-online == "On AC") { return "От сети"; }
+        if (root.ui-state.ac-online == "On battery") { return "От батареи"; }
+        if (root.ui-state.ac-online == "—") { return "Источник питания неизвестен"; }
+        return root.ui-state.ac-online;
+    }
+
     function battery-frac() -> float {
         if (root.ui-state.battery-percent-value < 0) { return 0; }
         return Math.min(Math.max(root.ui-state.battery-percent-value / 100, 0), 1);
@@ -183,6 +190,12 @@ export component DashboardSection inherits Rectangle {
                             color: root.battery-status-color();
                             overflow: elide;
                         }
+                        Text {
+                            text: root.ac-status-label();
+                            font-size: 11px;
+                            color: Palette.text-secondary;
+                            overflow: elide;
+                        }
                     }
 
                     Divider { width: 1px; }
@@ -258,6 +271,13 @@ export component DashboardSection inherits Rectangle {
                 MetricCard { label: "GPU"; value: root.ui-state.gpu-temp; detail: "дискретная графика"; icon-kind: 4; }
                 MetricCard { label: "Потребление"; value: root.ui-state.power-ac-mw; detail: "от адаптера питания"; icon-kind: 13; }
                 MetricCard { label: "dGPU"; value: root.ui-state.gpu-power; detail: "потребление графики"; icon-kind: 4; }
+            }
+            if (!root.ui-state.telemetry-fresh) : Text {
+                text: "Телеметрия не подтверждена свежим чтением; показанные значения могут быть устаревшими.";
+                font-size: 12px;
+                color: Palette.warning;
+                horizontal-alignment: center;
+                overflow: elide;
             }
 
             // ── Fans ────────────────────────────────────────────────────

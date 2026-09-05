@@ -82,7 +82,7 @@ async fn run(profile: AsusdFanProfile) -> Result<(), String> {
     }
 
     // 4. same-value CPU write from the freshly stored wire data.
-    let Some((cpu_name, cpu_temps, cpu_pwms, enabled_before)) =
+    let Some((cpu_name, cpu_pwms, cpu_temps, enabled_before)) =
         find(&after_reset_raw, "CPU").cloned()
     else {
         return Err("post-reset FanCurveData has no CPU entry".into());

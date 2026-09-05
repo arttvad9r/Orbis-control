@@ -654,6 +654,44 @@ pub struct ProductGpuMutationResult {
     pub reboot_required: bool,
 }
 
+/// Read-only current and queued ASUS product GPU state.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, zbus::zvariant::Type,
+)]
+pub struct ProductGpuStatus {
+    pub current_mode: u32,
+    pub queued_mode: u32,
+    pub reboot_required: bool,
+}
+
+pub async fn handle_product_gpu_status(
+    backend: Option<&dyn asus_gpu_mode::AsusProductGpuMutationOperation>,
+) -> zbus::fdo::Result<ProductGpuStatus> {
+    let backend = backend.ok_or_else(|| {
+        zbus::fdo::Error::NotSupported("ASUS product GPU backend unavailable".into())
+    })?;
+    let snapshot = backend.read_mode().await.map_err(provider_error_to_dbus)?;
+    Ok(ProductGpuStatus {
+        current_mode: product_gpu_mode_to_wire(snapshot.current_mode),
+        queued_mode: snapshot
+            .queued_mode
+            .map(product_gpu_mode_to_wire)
+            .unwrap_or(u32::MAX),
+        reboot_required: snapshot.reboot_required(),
+    })
+}
+
+fn product_gpu_mode_to_wire(mode: orbis_providers::asus_gpu_mode::AsusGpuMode) -> u32 {
+    match mode {
+        orbis_providers::asus_gpu_mode::AsusGpuMode::Hybrid => 0,
+        orbis_providers::asus_gpu_mode::AsusGpuMode::Integrated => 1,
+        orbis_providers::asus_gpu_mode::AsusGpuMode::Ultimate => 2,
+        orbis_providers::asus_gpu_mode::AsusGpuMode::Incomplete
+        | orbis_providers::asus_gpu_mode::AsusGpuMode::Unknown { .. }
+        | orbis_providers::asus_gpu_mode::AsusGpuMode::Conflicted { .. } => u32::MAX,
+    }
+}
+
 pub async fn handle_set_product_gpu_mode(
     authorizer: &dyn Authorizer,
     backend: Option<&dyn asus_gpu_mode::AsusProductGpuMutationOperation>,
@@ -1039,6 +1077,10 @@ impl HardwareService {
         .await
     }
 
+    async fn product_gpu_status(&self) -> zbus::fdo::Result<ProductGpuStatus> {
+        handle_product_gpu_status(self.product_gpu_backend.as_deref()).await
+    }
+
     /// Read-only typed evidence about Battery mutation backend availability.
     ///
     /// This is capability metadata, not a mutation: no authorization is
@@ -1281,6 +1323,7 @@ pub trait Hardware1 {
     fn set_charge_limit(&self, percent: u8) -> zbus::Result<u8>;
     fn set_gpu_mode(&self, requested_mode: u32) -> zbus::Result<GpuMutationResult>;
     fn set_product_gpu_mode(&self, requested_mode: u32) -> zbus::Result<ProductGpuMutationResult>;
+    fn product_gpu_status(&self) -> zbus::Result<ProductGpuStatus>;
     /// Read-only typed Battery mutation backend availability (wire enum).
     fn battery_mutation_status(&self) -> zbus::Result<u8>;
 
@@ -1665,6 +1708,12 @@ mod tests {
 
     #[async_trait]
     impl asus_gpu_mode::AsusProductGpuMutationOperation for FakeProductGpuBackend {
+        async fn read_mode(
+            &self,
+        ) -> Result<orbis_providers::asus_gpu_mode::AsusGpuModeSnapshot, ProviderError> {
+            Ok(product_gpu_readback().snapshot)
+        }
+
         async fn set_mode(
             &self,
             _requested: AsusGpuMode,

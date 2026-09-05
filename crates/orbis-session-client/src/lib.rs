@@ -35,6 +35,7 @@ use orbis_hardwared::{DBUS_OBJECT_PATH, Hardware1Proxy};
 /// consumers can name the Hardware1 wire contract without depending on the
 /// privileged daemon crate directly.
 pub use orbis_hardwared::ProductGpuMutationResult;
+pub use orbis_hardwared::ProductGpuStatus;
 use orbis_providers::traits::{
     BatteryProvider, FanCurveMutationProvider, FanCurvePoints, FanProvider, GpuAccessProvider,
     GpuMuxProvider, GpuPowerProvider, PerformanceProvider, Provider, ProviderHealth,
@@ -726,6 +727,9 @@ pub trait HardwarePerformanceSource: Send + Sync {
 /// Testable direct Hardware1 source for ASUS product GPU mutation.
 #[async_trait]
 pub trait HardwareProductGpuSource: Send + Sync {
+    /// Read current and queued ASUS product GPU state without mutation.
+    async fn product_gpu_status(&self) -> Result<orbis_hardwared::ProductGpuStatus, ProviderError>;
+
     /// Queue an exact product GPU wire target and preserve the complete reply.
     async fn set_product_gpu_mode(
         &self,
@@ -1051,6 +1055,19 @@ impl ZbusHardwareProductGpuSource {
 
 #[async_trait]
 impl HardwareProductGpuSource for ZbusHardwareProductGpuSource {
+    async fn product_gpu_status(&self) -> Result<orbis_hardwared::ProductGpuStatus, ProviderError> {
+        let proxy = Hardware1Proxy::builder(&self.connection)
+            .path(DBUS_OBJECT_PATH)
+            .expect("valid hardware object path")
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .product_gpu_status()
+            .await
+            .map_err(zbus_error_to_provider)
+    }
+
     async fn set_product_gpu_mode(
         &self,
         requested_mode: u32,

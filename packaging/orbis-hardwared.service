@@ -1,8 +1,8 @@
-# orbis-hardwared.service — standalone system service for local Arch/Linux installs.
+# orbis-hardwared.service — package-owned system service.
 #
-# Installed by packaging/deploy-dev-hardwared.sh as a regular file in
-# /etc/systemd/system/. Privileged mutation stays behind the typed Hardware1
-# D-Bus API and per-capability polkit actions.
+# Local installers substitute their /usr/local prefix before installing this
+# template. Privileged mutation stays behind the typed Hardware1 D-Bus API and
+# per-capability polkit actions.
 
 [Unit]
 Description=Orbis Control hardware helper
@@ -12,7 +12,7 @@ Requires=dbus.service
 [Service]
 Type=dbus
 BusName=io.github.orbiscontrol.Hardware
-ExecStart=/usr/local/bin/orbis-hardwared
+ExecStart=/usr/bin/orbis-hardwared
 Restart=on-failure
 RestartSec=2s
 

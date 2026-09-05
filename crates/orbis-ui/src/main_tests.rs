@@ -295,8 +295,8 @@ fn performance_unconfirmed_error_preserves_ui() {
 
 #[test]
 fn gpu_index_mapping() {
-    assert_eq!(gpu_mode_from_index(0), Some(0)); // Hybrid
-    assert_eq!(gpu_mode_from_index(1), Some(1)); // Integrated
+    assert_eq!(gpu_mode_from_index(0), Some(1)); // Eco -> Integrated
+    assert_eq!(gpu_mode_from_index(1), Some(0)); // Standard -> Hybrid
     assert_eq!(gpu_mode_from_index(2), Some(2)); // Ultimate
     // The ASUS product API has no Optimized mode; card 3 issues no request.
     assert_eq!(gpu_mode_from_index(3), None);
@@ -1898,8 +1898,8 @@ fn product_gpu_result(
 
 #[test]
 fn product_gpu_wire_index_maps_only_three_product_modes() {
-    assert_eq!(controller::asus_product_gpu_index(0), Some(0)); // Hybrid == Eco card
-    assert_eq!(controller::asus_product_gpu_index(1), Some(1)); // Integrated == Standard card
+    assert_eq!(controller::asus_product_gpu_index(0), Some(1)); // Hybrid == Standard card
+    assert_eq!(controller::asus_product_gpu_index(1), Some(0)); // Integrated == Eco card
     assert_eq!(controller::asus_product_gpu_index(2), Some(2)); // Ultimate
     // Optimized (3) is never generated: the ASUS Armoury product API has no
     // such mode; unknown sentinels and arbitrary values are rejected too.
@@ -1923,7 +1923,26 @@ fn product_gpu_current_read_back_selects_the_card() {
         )),
     );
 
-    assert_eq!(s.gpu_selected, 0);
+    assert_eq!(s.gpu_selected, 1);
+}
+
+#[test]
+fn product_gpu_status_promotes_all_supported_modes() {
+    let mut s = controller::UiState::production_initial();
+
+    apply_product_gpu_status(
+        &mut s,
+        Ok(orbis_session_client::ProductGpuStatus {
+            current_mode: 0,
+            queued_mode: u32::MAX,
+            reboot_required: false,
+        }),
+    );
+
+    assert_eq!(s.gpu_selected, 1);
+    assert_eq!(s.available_gpu_mask, 0b111);
+    assert!(!s.gpu_ultimate_disabled);
+    assert!(s.gpu_mode_writable);
 }
 
 #[test]

@@ -654,11 +654,11 @@ fn gpu_mode_card_disabled(state: &controller::UiState, _index: i32, mask_bit: i3
 fn gpu_mode_from_index(index: i32) -> Option<u32> {
     // Exact product wire targets for Hardware1.SetProductGpuMode.
     //
-    // The ASUS Armoury product API has no `Optimized` mode, so card 3 never
-    // issues a product request.
+    // UI cards use Eco=iGPU-only and Standard=Hybrid, while ASUS Armoury
+    // wires those modes as Integrated=1 and Hybrid=0 respectively.
     match index {
-        0 => Some(0), // Hybrid
-        1 => Some(1), // Integrated
+        0 => Some(1), // Eco -> Integrated
+        1 => Some(0), // Standard -> Hybrid
         2 => Some(2), // Ultimate
         _ => None,
     }
@@ -812,6 +812,35 @@ fn apply_product_gpu_result(
             state.gpu_mode_writable = false;
             state.gpu_section_error = true;
             tracing::warn!("product gpu: команда не выполнена: {e:?}");
+        }
+    }
+}
+
+fn apply_product_gpu_status(
+    state: &mut controller::UiState,
+    result: Result<orbis_session_client::ProductGpuStatus, ProviderError>,
+) {
+    match result {
+        Ok(status) => {
+            let Some(current) = controller::asus_product_gpu_index(status.current_mode) else {
+                state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
+                state.gpu_mode_writable = false;
+                state.gpu_section_error = true;
+                return;
+            };
+            state.gpu_selected = current;
+            state.available_gpu_mask = 0b111;
+            state.gpu_queued = controller::asus_product_gpu_index(status.queued_mode).unwrap_or(-1);
+            state.gpu_reboot_required = status.reboot_required;
+            state.gpu_ultimate_disabled = false;
+            state.gpu_mode_state = controller::GpuModeHwState::Ready;
+            state.gpu_mode_writable = true;
+            state.gpu_section_error = false;
+        }
+        Err(error) => {
+            state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
+            state.gpu_mode_writable = false;
+            tracing::warn!("product gpu status unavailable: {error:?}");
         }
     }
 }
@@ -1024,6 +1053,7 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         }
         WorkerEvent::Gpu(result) => apply_gpu_result(state, result),
         WorkerEvent::ProductGpu(result) => apply_product_gpu_result(state, result),
+        WorkerEvent::ProductGpuStatus(result) => apply_product_gpu_status(state, result),
         WorkerEvent::ChargeLimit(result) => apply_charge_limit_result(state, result),
         WorkerEvent::ChargeLimitRefresh(result) => apply_charge_limit_refresh(state, result),
         WorkerEvent::GpuPowerRefresh(result) => apply_gpu_power_refresh(state, result),
@@ -1631,7 +1661,7 @@ fn main() -> anyhow::Result<()> {
         launch_context::LaunchMode::Interactive
     };
     launch_context::LaunchContext::new(launch_mode, effective_uid()).validate()?;
-    let mut state = if args.screenshot.is_some() {
+    let state = if args.screenshot.is_some() {
         scenario_state(&args.ui_state)?
     } else {
         controller::UiState::production_initial()
@@ -1663,9 +1693,6 @@ fn main() -> anyhow::Result<()> {
         session_connection,
         system_connection,
     ))?;
-    state.perf_writable = false;
-    state.charge_limit_writable = false;
-
     let poll_interval = application_runtime.telemetry.poll_interval();
     diagnostics_backend::initialize(
         runtime.handle().clone(),
@@ -1709,6 +1736,9 @@ fn main() -> anyhow::Result<()> {
     }
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshGpuCapabilities) {
         tracing::warn!("worker закрыт, initial gpu capabilities refresh не отправлен: {e:?}");
+    }
+    if let Err(e) = worker_tx.send(WorkerCommand::RefreshProductGpuStatus) {
+        tracing::warn!("worker закрыт, initial product GPU status refresh не отправлен: {e:?}");
     }
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshPerformance) {
         tracing::warn!("worker закрыт, initial performance refresh не отправлен: {e:?}");

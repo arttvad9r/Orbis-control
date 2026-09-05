@@ -189,15 +189,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     init_tracing();
     let connection = zbus::connection::Builder::system()?.build().await?;
 
-    // Product-gated paths are probed read-only so release diagnostics can
-    // distinguish "implementation structurally available" from "product policy
-    // approved". These results never select a mutation backend in this build.
+    // Product-gated paths are probed read-only before their narrow mutation
+    // backends are exposed. Aura confirmation remains config-level, not a
+    // claim that the write-only hardware LED state was independently read back.
     let panel_preflight = product_preflight::preflight_panel_overdrive(&connection).await;
     let aura_preflight = product_preflight::preflight_aura_static_rgb(&connection).await;
     tracing::info!(
         ?panel_preflight,
         ?aura_preflight,
-        "product mutation startup preflight complete; Aura writes remain release-disabled"
+        "product mutation startup preflight complete; Aura writes use config-level confirmation"
     );
 
     let battery_backend = build_battery_backend(&connection).await;

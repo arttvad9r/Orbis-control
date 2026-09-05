@@ -67,10 +67,7 @@ export component AppWindow inherits Window {
     callback gpu-clicked(int);
     callback charge-changed(float);
     in property <bool> display-state-ready: false;
-    in property <bool> display-control-ready: false;
-    in property <int> display-mode: -1;
     in property <string> display-status: "Unavailable";
-    callback display-mode-requested(int);
     in property <bool> keyboard-state-ready: false;
     in property <bool> keyboard-control-ready: false;
     in property <int> keyboard-brightness: -1;
@@ -82,9 +79,9 @@ export component AppWindow inherits Window {
     callback quit-requested;
 
     // Cooling page surface.
-    in property <bool> mutation-safety-blocked: true;
-    in property <bool> factory-reset-available: false;
-    in property <string> policy-status: "Fan writes are safety-blocked";
+    in property <bool> mutation-safety-blocked: false;
+    in property <bool> factory-reset-available: true;
+    in property <string> policy-status: "Кривая применяется через Hardware1 с read-back";
     callback fan-changed(int);
     callback fan-profile-changed(int);
     callback fan-temp-point-changed(int, int);
@@ -309,10 +306,7 @@ export component AppWindow inherits Window {
                     }
                     if (root.active-section == Section.Display) : DisplaySection {
                         display-state-ready <=> root.display-state-ready;
-                        display-control-ready <=> root.display-control-ready;
-                        display-mode <=> root.display-mode;
                         display-status <=> root.display-status;
-                        display-mode-requested(i) => { root.display-mode-requested(i); }
                         panel-overdrive-state-ready <=> root.panel-overdrive-state-ready;
                         panel-overdrive-control-ready <=> root.panel-overdrive-control-ready;
                         panel-overdrive <=> root.panel-overdrive;

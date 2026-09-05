@@ -21,7 +21,6 @@ pub mod asus_gpu_mode;
 pub mod aura;
 pub mod bounded_probes;
 pub mod display_diagnostics;
-pub mod display_refresh_owner;
 pub mod error;
 pub mod execution;
 pub mod fan_defaults;
@@ -35,12 +34,12 @@ pub mod readiness;
 pub mod service_presence;
 pub mod service_readiness;
 pub mod supergfxd;
+pub mod sysfs_gpu_power;
 pub mod sysfs_telemetry;
 pub mod system_metadata;
 pub mod telemetry_diagnostics;
 pub mod traits;
 pub mod wayland_output;
-pub mod wayland_output_management;
 pub mod wlr_output_head;
 
 #[cfg(feature = "mock")]
@@ -59,10 +58,6 @@ pub use bounded_probes::{
     probe_screen_auto_brightness,
 };
 pub use display_diagnostics::display_diagnostics_snapshot;
-pub use display_refresh_owner::{
-    DisplayRefreshMutationOwner, validate_display_refresh_readback,
-    validate_display_refresh_request,
-};
 pub use error::{OperationId, ProviderError, ValidationResult};
 pub use execution::{bounded_operation, bounded_provider_call};
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
@@ -76,12 +71,12 @@ pub use native_asus_eco::*;
 pub use readiness::{bounded_readiness_probe, join_readiness2};
 pub use service_presence::*;
 pub use service_readiness::readiness_from_service_diagnostics;
+pub use sysfs_gpu_power::SysfsGpuPowerProvider;
 pub use sysfs_telemetry::SysfsTelemetryProvider;
 pub use system_metadata::SystemMetadataProvider;
 pub use telemetry_diagnostics::telemetry_diagnostics_after_attempt;
 pub use traits::*;
 pub use wayland_output::*;
-pub use wayland_output_management::*;
 pub use wlr_output_head::*;
 
 #[cfg(feature = "mock")]

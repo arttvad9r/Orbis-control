@@ -11,9 +11,9 @@ export component CoolingSection inherits Rectangle {
 
     // Backend/policy presentation contract. Today production keeps mutation
     // blocked; later backend wiring only needs to publish these facts.
-    in property <bool> mutation-safety-blocked: true;
-    in property <bool> factory-reset-available: false;
-    in property <string> policy-status: "Запись кривых вентиляторов заблокирована по безопасности";
+    in property <bool> mutation-safety-blocked: false;
+    in property <bool> factory-reset-available: true;
+    in property <string> policy-status: "Кривая применяется через Hardware1 с read-back";
 
     property <bool> factory-reset-pending: false;
 

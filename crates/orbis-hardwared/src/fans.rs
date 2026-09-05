@@ -121,8 +121,8 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
         enabled: bool,
     ) -> Result<(), ProviderError> {
         let name = fan_wire_name(fan)?;
-        let mut temps = [0u8; 8];
         let mut pwms = [0u8; 8];
+        let mut temps = [0u8; 8];
         for (i, (t, p)) in curve.temps.iter().zip(curve.pwms.iter()).enumerate() {
             temps[i] = u8::try_from(t.get()).map_err(|_| {
                 ProviderError::InvalidRequest(format!(
@@ -134,7 +134,8 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
         }
         // enabled: pass through the authoritative stored enabled state so a
         // custom write does not silently disable the curve (#104).
-        let wire = (name.to_string(), temps, pwms, enabled);
+        // asusd FanCurveData/SetFanCurve wire order is PWM first, temperature second.
+        let wire = (name.to_string(), pwms, temps, enabled);
         self.proxy()
             .await?
             .set_fan_curve(profile.wire(), wire)
@@ -397,7 +398,7 @@ where
 
         // 4. fresh read-back: точки И enabled должны сохраниться.
         let raw = self.asusd.read_curves(profile).await?;
-        let matched = raw.iter().any(|(n, temps, pwms, enabled)| {
+        let matched = raw.iter().any(|(n, pwms, temps, enabled)| {
             if n != name {
                 return false;
             }
@@ -812,10 +813,11 @@ mod tests {
                 {
                     p[7] = p[7].wrapping_add(1);
                 }
+                // Match asusd's wire order: PWM array, then temperature array.
                 out.push((
                     name.1.clone(),
-                    t,
                     p,
+                    t,
                     if invert_enabled { !*enabled } else { *enabled },
                 ));
             }
@@ -1091,7 +1093,7 @@ mod tests {
     // Regression: wire order + PWM >100 roundtrip
     // -----------------------------------------------------------------------
 
-    /// Verify that wire order is (name, temps, pwms, enabled) by writing a
+    /// Verify that wire order is (name, pwms, temps, enabled) by writing a
     /// curve with PWM > 100 and reading it back. If arrays were swapped,
     /// the readback would return temps where pwms should be and vice versa.
     #[tokio::test]
@@ -1114,8 +1116,8 @@ mod tests {
             .iter()
             .find(|(n, _, _, _)| n == "GPU")
             .expect("GPU entry");
-        assert_eq!(gpu.1, [40, 42, 43, 60, 65, 69, 74, 78]);
-        assert_eq!(gpu.2, [5, 20, 38, 43, 56, 66, 84, 112]);
+        assert_eq!(gpu.1, [5, 20, 38, 43, 56, 66, 84, 112]);
+        assert_eq!(gpu.2, [40, 42, 43, 60, 65, 69, 74, 78]);
     }
 
     #[tokio::test]
@@ -1144,10 +1146,10 @@ mod tests {
         let raw = asusd.read_curves(AsusdFanProfile::Balanced).await.unwrap();
         let cpu_entry = raw.iter().find(|(n, _, _, _)| n == "CPU").expect("CPU");
         let gpu_entry = raw.iter().find(|(n, _, _, _)| n == "GPU").expect("GPU");
-        assert_eq!(cpu_entry.1, [45, 49, 54, 68, 74, 79, 84, 89]);
-        assert_eq!(cpu_entry.2, [5, 22, 38, 45, 56, 63, 81, 94]);
-        assert_eq!(gpu_entry.1, [40, 42, 43, 60, 65, 69, 74, 78]);
-        assert_eq!(gpu_entry.2, [5, 20, 38, 43, 56, 66, 84, 112]);
+        assert_eq!(cpu_entry.1, [5, 22, 38, 45, 56, 63, 81, 94]);
+        assert_eq!(cpu_entry.2, [45, 49, 54, 68, 74, 79, 84, 89]);
+        assert_eq!(gpu_entry.1, [5, 20, 38, 43, 56, 66, 84, 112]);
+        assert_eq!(gpu_entry.2, [40, 42, 43, 60, 65, 69, 74, 78]);
     }
 
     #[test]

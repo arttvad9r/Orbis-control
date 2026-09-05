@@ -10,7 +10,7 @@ use crate::composition::build_upower_session_server;
 use crate::fans::{AsusdFanCurveSource, ZbusAsusdFanCurveSource};
 use crate::performance::{KernelPerformanceProvider, SysfsKernelPlatformProfileSource};
 use crate::server::GpuCapabilities;
-use crate::supergfxd::{SupergfxdGpuPowerProvider, ZbusSupergfxdGpuPowerSource};
+use orbis_providers::SysfsGpuPowerProvider;
 
 /// Ошибка bootstrap: сохраняет класс ошибки отдельно для D-Bus startup и
 /// для battery discovery/provider.
@@ -75,12 +75,10 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
     let upower_connection = zbus::Connection::system().await?;
     let session_builder = zbus::connection::Builder::session()?;
 
-    // Read-only GPU capabilities:
-    // - power → supergfxd (переиспользуем ту же system connection);
-    // - mux/access → kernel ASUS Armoury firmware-attributes (sysfs).
-    let gpu_power: Arc<dyn orbis_providers::traits::GpuPowerProvider> = Arc::new(
-        SupergfxdGpuPowerProvider::new(ZbusSupergfxdGpuPowerSource::new(upower_connection.clone())),
-    );
+    // Read-only GPU capabilities. All three paths work without supergfxd:
+    // power → kernel DRM sysfs, mux/access → ASUS Armoury firmware-attributes.
+    let gpu_power: Arc<dyn orbis_providers::traits::GpuPowerProvider> =
+        Arc::new(SysfsGpuPowerProvider::default());
     let gpu_mux: Arc<dyn orbis_providers::traits::GpuMuxProvider> =
         Arc::new(ArmouryGpuProvider::new(SysfsArmouryGpuSource::default()));
     let gpu_access: Arc<dyn orbis_providers::traits::GpuAccessProvider> =

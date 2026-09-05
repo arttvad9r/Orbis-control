@@ -26,14 +26,14 @@ if ! command -v cargo >/dev/null 2>&1; then
   echo "ERROR: cargo not found. Install rustup/Rust first." >&2
   exit 1
 fi
-if ! command -v sudo >/dev/null 2>&1; then
-  echo "ERROR: sudo is required for system installation." >&2
+if ! command -v pkexec >/dev/null 2>&1; then
+  echo "ERROR: pkexec is required for system installation." >&2
   exit 1
 fi
 
 if [[ "${1:-}" == "--stop" ]]; then
   echo "→ Stopping ${SERVICE_NAME}…"
-  sudo systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || true
+  pkexec systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || true
 fi
 
 # Build as the invoking user, not as root.
@@ -47,19 +47,24 @@ BINARY="${PROJECT_ROOT}/target/release/orbis-hardwared"
 # Install the complete privileged-service contract together so a fresh Arch
 # checkout does not depend on distro-specific packaging.
 echo "→ Installing binary and service assets…"
-sudo install -d -m 0755 "$BIN_DIR" "$SYSTEMD_DIR" "$DBUS_DIR" "$POLKIT_DIR"
-sudo install -m 0755 "$BINARY" "${BIN_DIR}/orbis-hardwared"
-sudo install -m 0644 "${SCRIPT_DIR}/orbis-hardwared.service" "$SERVICE_FILE"
-sudo install -m 0644 "$DBUS_POLICY_SOURCE" "${DBUS_DIR}/io.github.orbiscontrol.Hardware.conf"
-sudo install -m 0644 "$POLKIT_POLICY_SOURCE" "${POLKIT_DIR}/io.github.orbiscontrol.hardware.policy"
+UNIT_TMPFILE="$(mktemp)"
+trap 'rm -f "$UNIT_TMPFILE"' EXIT
+sed "s#/usr/bin/#${BIN_DIR}/#g" \
+  "${SCRIPT_DIR}/orbis-hardwared.service" >"$UNIT_TMPFILE"
+pkexec install -d -m 0755 "$BIN_DIR" "$SYSTEMD_DIR" "$DBUS_DIR" "$POLKIT_DIR"
+pkexec install -m 0755 "$BINARY" "${BIN_DIR}/orbis-hardwared"
+pkexec install -m 0644 "$UNIT_TMPFILE" "$SERVICE_FILE"
+pkexec install -m 0644 "$DBUS_POLICY_SOURCE" "${DBUS_DIR}/io.github.orbiscontrol.Hardware.conf"
+pkexec install -m 0644 "$POLKIT_POLICY_SOURCE" "${POLKIT_DIR}/io.github.orbiscontrol.hardware.policy"
 
-sudo systemctl daemon-reload
-sudo systemctl enable "${SERVICE_NAME}.service"
-sudo systemctl restart "${SERVICE_NAME}.service"
+pkexec systemctl daemon-reload
+pkexec systemctl reload dbus.service
+pkexec systemctl enable "${SERVICE_NAME}.service"
+pkexec systemctl restart "${SERVICE_NAME}.service"
 
 echo ""
 echo "=== Verification ==="
-sudo systemctl is-active --quiet "${SERVICE_NAME}.service"
+pkexec systemctl is-active --quiet "${SERVICE_NAME}.service"
 echo "✓ Service active"
 
 if busctl list 2>/dev/null | grep -q "io.github.orbiscontrol.Hardware"; then

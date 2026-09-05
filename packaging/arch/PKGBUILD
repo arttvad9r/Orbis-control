@@ -1,0 +1,45 @@
+pkgname=orbis-control
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='ASUS laptop monitoring and control for Linux'
+arch=('x86_64')
+url='https://github.com/arttvad9r/Orbis-control'
+license=('GPL-3.0-or-later')
+depends=('dbus' 'glibc' 'polkit' 'wayland' 'libx11' 'libxcb' 'libxkbcommon')
+makedepends=('cargo' 'git')
+source=("git+https://github.com/arttvad9r/Orbis-control.git#branch=main")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/Orbis-control"
+  printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$srcdir/Orbis-control"
+  cargo build --workspace --release --locked --bins
+}
+
+package() {
+  cd "$srcdir/Orbis-control"
+
+  install -Dm755 target/release/orbis-control "$pkgdir/usr/bin/orbis-control"
+  install -Dm755 target/release/orbisctl "$pkgdir/usr/bin/orbisctl"
+  install -Dm755 target/release/orbis-sessiond "$pkgdir/usr/bin/orbis-sessiond"
+  install -Dm755 target/release/orbis-hardwared "$pkgdir/usr/bin/orbis-hardwared"
+
+  install -Dm644 packaging/orbis-hardwared.service \
+    "$pkgdir/usr/lib/systemd/system/orbis-hardwared.service"
+  install -Dm644 data/systemd/user/orbis-sessiond.service \
+    "$pkgdir/usr/lib/systemd/user/orbis-sessiond.service"
+  install -Dm644 data/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf \
+    "$pkgdir/usr/share/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf"
+  install -Dm644 data/polkit-1/actions/io.github.orbiscontrol.hardware.policy \
+    "$pkgdir/usr/share/polkit-1/actions/io.github.orbiscontrol.hardware.policy"
+  install -Dm644 data/applications/io.github.orbiscontrol.Orbis.desktop \
+    "$pkgdir/usr/share/applications/io.github.orbiscontrol.Orbis.desktop"
+  install -Dm644 data/metainfo/io.github.orbiscontrol.Orbis.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/io.github.orbiscontrol.Orbis.metainfo.xml"
+  install -Dm644 data/icons/hicolor/scalable/apps/io.github.orbiscontrol.Orbis.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.orbiscontrol.Orbis.svg"
+}
