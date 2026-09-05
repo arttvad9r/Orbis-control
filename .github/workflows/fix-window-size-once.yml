@@ -1,0 +1,36 @@
+name: Fix production window size once
+
+on:
+  push:
+    branches:
+      - agent/finish-v01
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/finish-v01
+          persist-credentials: true
+
+      - name: Align startup size with product shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=crates/orbis-ui/src/main.rs
+          if ! grep -q 'LogicalSize::new(760.0, 600.0)' "$file"; then
+            echo 'Production startup size already aligned.'
+            exit 0
+          fi
+          sed -i 's/LogicalSize::new(760\.0, 600\.0)/LogicalSize::new(1240.0, 820.0)/' "$file"
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$file"
+          git commit -m 'Align production window with product shell'
+          git push origin HEAD:agent/finish-v01
