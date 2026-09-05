@@ -60,4 +60,11 @@
     <message xml:lang="ru">Изменить Aura Static RGB с подтверждением конфигурации</message>
     <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>yes</allow_active></defaults>
   </action>
+  <action id="io.github.orbiscontrol.hardware.set-boot-sound">
+    <description>Change the ASUS BIOS/POST boot sound</description>
+    <description xml:lang="ru">Изменить звук включения BIOS/POST ASUS</description>
+    <message>Change the ASUS BIOS/POST boot sound</message>
+    <message xml:lang="ru">Изменить звук включения BIOS/POST ASUS</message>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>yes</allow_active></defaults>
+  </action>
 </policyconfig>

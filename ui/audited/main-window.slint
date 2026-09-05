@@ -90,6 +90,7 @@ export component AppWindow inherits Window {
     in property <bool> panel-overdrive-state-ready: false;
     in property <bool> panel-overdrive-control-ready: false;
     in property <bool> boot-sound-state-ready: false;
+    in property <bool> boot-sound-control-ready: false;
     in-out property <int> m1-action: 0;
     in-out property <int> m2-action: 0;
     in-out property <int> m3-action: 0;
@@ -108,6 +109,7 @@ export component AppWindow inherits Window {
     in-out property <int> p-cores: 1;
     in-out property <int> e-cores: 0;
     callback reload-requested;
+    callback boot-sound-requested(bool);
     callback apply-requested;
     callback panel-overdrive-requested(bool);
     callback theme-changed(bool);
@@ -331,6 +333,7 @@ export component AppWindow inherits Window {
                         applying <=> root.applying;
                         status <=> root.status;
                         boot-sound-state-ready <=> root.boot-sound-state-ready;
+                        boot-sound-control-ready <=> root.boot-sound-control-ready;
                         boot-sound <=> root.boot-sound;
                         m1-action <=> root.m1-action;
                         m2-action <=> root.m2-action;
@@ -346,6 +349,7 @@ export component AppWindow inherits Window {
                         p-cores <=> root.p-cores;
                         e-cores <=> root.e-cores;
                         reload-requested => { root.reload-requested(); }
+                        boot-sound-requested(v) => { root.boot-sound-requested(v); }
                         apply-requested => { root.apply-requested(); }
                         diagnostics-summary <=> root.diagnostics-summary;
                         refresh-enabled <=> root.refresh-enabled;

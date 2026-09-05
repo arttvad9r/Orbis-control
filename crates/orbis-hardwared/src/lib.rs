@@ -27,6 +27,7 @@ pub mod asus_gpu_mode;
 pub mod aura;
 pub mod battery;
 pub mod fans;
+pub mod firmware;
 pub mod keyboard_backlight;
 pub mod panel;
 pub mod supergfxd;
@@ -225,6 +226,8 @@ pub const KEYBOARD_BACKLIGHT_POLKIT_ACTION: &str =
 pub const AURA_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-aura-static-rgb";
 /// Polkit action id for ASUS Armoury product GPU mode queueing.
 pub const PRODUCT_GPU_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-product-gpu-mode";
+/// Polkit action id for ASUS BIOS/POST sound mutation.
+pub const BOOT_SOUND_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-boot-sound";
 
 /// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
 pub mod wire {
@@ -771,6 +774,8 @@ pub struct HardwareService {
     kb_backend: Option<Box<dyn keyboard_backlight::KeyboardBacklightMutationBackend>>,
     aura_authorizer: Box<dyn Authorizer>,
     aura_backend: Option<Box<dyn aura::AuraStaticRgbMutationBackend>>,
+    boot_sound_authorizer: Box<dyn Authorizer>,
+    boot_sound_backend: Option<Box<dyn firmware::BootSoundMutationOperation>>,
 }
 
 impl HardwareService {
@@ -793,6 +798,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
         }
     }
 
@@ -819,6 +826,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
         }
     }
 
@@ -847,6 +856,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
         }
     }
 
@@ -873,6 +884,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
         }
     }
 
@@ -903,6 +916,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
         }
     }
 
@@ -930,6 +945,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
         }
     }
 
@@ -983,6 +1000,17 @@ impl HardwareService {
     ) -> Self {
         self.product_gpu_backend = Some(backend);
         self.product_gpu_authorizer = authorizer;
+        self
+    }
+
+    /// Attach the typed ASUS POST sound mutation backend.
+    pub fn with_boot_sound(
+        mut self,
+        backend: Box<dyn firmware::BootSoundMutationOperation>,
+        authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.boot_sound_backend = Some(backend);
+        self.boot_sound_authorizer = authorizer;
         self
     }
 }
@@ -1230,6 +1258,36 @@ impl HardwareService {
                 .map(|b| b.mutation_status())
                 .unwrap_or(panel::PanelOverdriveMutationStatus::Unknown),
         )
+    }
+
+    /// Set ASUS BIOS/POST sound and return the authoritative boolean read-back.
+    async fn set_boot_sound(
+        &self,
+        enabled: bool,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<u8> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.boot_sound_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("boot sound backend unavailable".into())
+        })?;
+        firmware::handle_set_boot_sound(
+            self.boot_sound_authorizer.as_ref(),
+            backend,
+            enabled,
+            &sender,
+        )
+        .await
+    }
+
+    /// Read-only runtime evidence for ASUS BIOS/POST sound mutation.
+    async fn boot_sound_mutation_status(&self) -> u8 {
+        firmware::boot_sound_mutation_wire::to_wire(match self.boot_sound_backend.as_deref() {
+            Some(backend) => backend.mutation_status().await,
+            None => firmware::BootSoundMutationStatus::Unknown,
+        })
     }
 
     /// Установить keyboard backlight brightness.

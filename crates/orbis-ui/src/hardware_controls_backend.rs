@@ -33,6 +33,9 @@ trait HardwareProductControls {
 
     fn aura_mutation_status(&self) -> zbus::Result<u8>;
     fn set_aura_static_rgb(&self, r: u8, g: u8, b: u8) -> zbus::Result<AuraMutationWire>;
+
+    fn boot_sound_mutation_status(&self) -> zbus::Result<u8>;
+    fn set_boot_sound(&self, enabled: bool) -> zbus::Result<u8>;
 }
 
 const AURA_OUTCOME_CONFIG_CONFIRMED: u32 = 0;
@@ -119,6 +122,37 @@ impl HardwareProductControlClient {
         let proxy = self.proxy().await?;
         let raw = timed("Aura mutation status", proxy.aura_mutation_status()).await?;
         decode_status(raw, "Aura")
+    }
+
+    pub(crate) async fn boot_sound_status(&self) -> Result<ProductWriteStatus, ProviderError> {
+        let proxy = self.proxy().await?;
+        let raw = timed(
+            "boot sound mutation status",
+            proxy.boot_sound_mutation_status(),
+        )
+        .await?;
+        decode_status(raw, "boot sound")
+    }
+
+    pub(crate) async fn set_boot_sound(&self, enabled: bool) -> Result<bool, ProviderError> {
+        require_supported(self.boot_sound_status().await?, "boot sound")?;
+        let proxy = self.proxy().await?;
+        let raw = timed("boot sound mutation", proxy.set_boot_sound(enabled)).await?;
+        let observed = match raw {
+            0 => false,
+            1 => true,
+            other => {
+                return Err(ProviderError::Internal(format!(
+                    "Hardware1 boot sound returned non-boolean read-back {other}"
+                )));
+            }
+        };
+        if observed != enabled {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "Hardware1 boot sound read-back mismatch: requested={enabled}, observed={observed}"
+            )));
+        }
+        Ok(observed)
     }
 
     pub(crate) async fn set_panel_overdrive(&self, enabled: bool) -> Result<bool, ProviderError> {

@@ -78,7 +78,8 @@ READ_WRITE_PATHS="$(systemctl show "${SERVICE_NAME}.service" -p ReadWritePaths -
 for expected in \
   "/sys/firmware/acpi/platform_profile" \
   "/sys/class/leds/asus::kbd_backlight/brightness" \
-  "/sys/class/leds/asus::kbd_backlight/max_brightness"; do
+  "/sys/class/leds/asus::kbd_backlight/max_brightness" \
+  "/sys/class/firmware-attributes/asus-armoury/attributes/boot_sound/current_value"; do
   if grep -Fq "$expected" <<<"$READ_WRITE_PATHS"; then
     echo "✓ Sandbox write path: $expected"
   else

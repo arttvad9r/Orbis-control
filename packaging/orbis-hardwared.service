@@ -33,6 +33,7 @@ ReadOnlyPaths=/sys
 ReadWritePaths=-/sys/firmware/acpi/platform_profile
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/brightness
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/max_brightness
+ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/boot_sound/current_value
 
 [Install]
 WantedBy=multi-user.target

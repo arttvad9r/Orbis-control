@@ -72,6 +72,7 @@ fn reset_readiness(window: &AppWindow) {
     window.set_panel_overdrive_state_ready(false);
     window.set_panel_overdrive_control_ready(false);
     window.set_boot_sound_state_ready(false);
+    window.set_boot_sound_control_ready(false);
 }
 
 pub(crate) fn wire_window(window: &AppWindow) {
@@ -99,6 +100,15 @@ pub(crate) fn wire_window(window: &AppWindow) {
 
     {
         let weak = window.as_weak();
+        window.on_boot_sound_requested(move |enabled| {
+            if let Some(window) = weak.upgrade() {
+                request_boot_sound(&window, enabled);
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
         window.on_panel_overdrive_requested(move |enabled| {
             let Some(window) = weak.upgrade() else {
                 return;
@@ -107,10 +117,16 @@ pub(crate) fn wire_window(window: &AppWindow) {
         });
     }
 
-    window.on_apply_requested(|| {
+    let weak = window.as_weak();
+    window.on_apply_requested(move || {
         tracing::warn!(
-            "Extra Controls Apply ignored: remaining multi-field advanced backend is not connected"
+            "Advanced multi-field Apply rejected: no typed owners for the remaining controls"
         );
+        if let Some(window) = weak.upgrade() {
+            window.set_status(
+                "Apply rejected · remaining ASUS parameters have no typed owner yet".into(),
+            );
+        }
     });
 }
 
@@ -121,6 +137,7 @@ fn begin_mutation(window: &AppWindow) -> Option<ExtraContext> {
     }
     window.set_applying(true);
     window.set_panel_overdrive_control_ready(false);
+    window.set_boot_sound_control_ready(false);
     Some(context)
 }
 
@@ -174,6 +191,53 @@ fn request_panel_overdrive(window: &AppWindow, enabled: bool) {
     });
 }
 
+fn request_boot_sound(window: &AppWindow, enabled: bool) {
+    if !window.get_boot_sound_control_ready() {
+        tracing::warn!(
+            requested = enabled,
+            "Extra boot sound request ignored: write evidence unavailable"
+        );
+        return;
+    }
+    let Some(context) = begin_mutation(window) else {
+        return;
+    };
+
+    window.set_status("Applying BIOS/POST sound through Hardware1…".into());
+    let weak = window.as_weak();
+    let completion = context.mutating.clone();
+    context.runtime.spawn(async move {
+        let result = async {
+            let client = HardwareProductControlClient::connect_system().await?;
+            client.set_boot_sound(enabled).await
+        }
+        .await;
+        completion.store(false, Ordering::Release);
+
+        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
+            window.set_applying(false);
+            match result {
+                Ok(observed) => {
+                    window.set_boot_sound(observed);
+                    window.set_status(
+                        format!(
+                            "BIOS/POST sound {} · authoritative read-back confirmed",
+                            if observed { "on" } else { "off" }
+                        )
+                        .into(),
+                    );
+                }
+                Err(error) => window.set_status(
+                    format!("Boot sound write failed · {}", write_error_label(&error)).into(),
+                ),
+            }
+            refresh(&window);
+        }) {
+            tracing::warn!(error = ?error, "failed to publish boot sound mutation result");
+        }
+    });
+}
+
 pub(crate) fn refresh(window: &AppWindow) {
     let context = CONTEXT.with(|slot| slot.borrow().clone());
     let Some(context) = context else {
@@ -210,11 +274,15 @@ pub(crate) fn refresh(window: &AppWindow) {
         let aura = aura_observed(aura_result);
         let panel = panel_observed(panel_result);
         let boot_sound = boot_sound_observed(boot_sound_result);
-        let (_keyboard_write, panel_write) = match write_statuses {
+        let (_keyboard_write, panel_write, boot_sound_write) = match write_statuses {
             Ok(statuses) => statuses,
             Err(error) => {
                 tracing::debug!(error = ?error, "Extra Hardware1 mutation-status read unavailable");
-                (ProductWriteStatus::Unknown, ProductWriteStatus::Unknown)
+                (
+                    ProductWriteStatus::Unknown,
+                    ProductWriteStatus::Unknown,
+                    ProductWriteStatus::Unknown,
+                )
             }
         };
         completion.store(false, Ordering::Release);
@@ -232,6 +300,8 @@ pub(crate) fn refresh(window: &AppWindow) {
             window.set_panel_overdrive(panel.enabled);
 
             window.set_boot_sound_state_ready(boot_sound.ready);
+            window
+                .set_boot_sound_control_ready(boot_sound.ready && boot_sound_write.is_supported());
             window.set_boot_sound(boot_sound.enabled);
 
             let any_ready = aura.ready || panel.ready || boot_sound.ready;
@@ -286,11 +356,15 @@ async fn bounded_boot_sound_read(
         .map_err(|_| ProviderError::Timeout("Extra boot-sound read timed out".into()))?
 }
 
-async fn bounded_write_statuses() -> Result<(ProductWriteStatus, ProductWriteStatus), ProviderError>
-{
+async fn bounded_write_statuses()
+-> Result<(ProductWriteStatus, ProductWriteStatus, ProductWriteStatus), ProviderError> {
     let client = HardwareProductControlClient::connect_system().await?;
-    let (keyboard, panel) = tokio::join!(client.keyboard_status(), client.panel_status());
-    Ok((keyboard?, panel?))
+    let (keyboard, panel, boot_sound) = tokio::join!(
+        client.keyboard_status(),
+        client.panel_status(),
+        client.boot_sound_status(),
+    );
+    Ok((keyboard?, panel?, boot_sound?))
 }
 
 fn aura_observed(result: Result<orbis_core::aura::AuraState, ProviderError>) -> AuraObserved {
@@ -460,15 +534,15 @@ mod tests {
     }
 
     #[test]
-    fn boot_sound_is_observation_only_and_unrelated_draft_stays_disabled() {
+    fn boot_sound_uses_typed_hardware1_and_unrelated_draft_stays_disabled() {
         let source = include_str!("extra_backend.rs");
         assert!(source.contains("AsusBootSoundProvider"));
         assert!(source.contains("set_boot_sound_state_ready"));
         assert!(source.contains("set_backend_ready(false)"));
         assert!(source.contains("set_aura_control_ready(false)"));
         assert!(!source.contains(&["set_aura", "_static_rgb"].concat()));
-        let boot_sound_mutation = ["client.", "set_boot_sound("].concat();
-        assert!(!source.contains(&boot_sound_mutation));
+        assert!(source.contains("set_boot_sound(enabled)"));
+        assert!(source.contains("boot_sound_status()"));
         assert!(!source.contains(&["set_gpu", "_mode"].concat()));
         assert!(!source.contains(&["set_fan", "_curve"].concat()));
     }
