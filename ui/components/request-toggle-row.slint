@@ -1,7 +1,7 @@
 import { Palette } from "../themes/dark.slint";
 
 // Settings row with a backend-owned switch. Disabled rows remain legible and
-// product-like: they communicate availability without looking broken.
+// preserve their observed checked state instead of looking falsely off.
 export component RequestToggleRow inherits Rectangle {
     in property <string> label;
     in property <string> description: "";
@@ -46,8 +46,11 @@ export component RequestToggleRow inherits Rectangle {
             height: 24px;
             border-radius: 12px;
             border-width: 1px;
-            border-color: root.checked && !root.disabled ? Palette.accent-default : Palette.border-strong;
-            background: root.checked && !root.disabled ? Palette.accent-default
+            border-color: root.checked
+                ? (root.disabled ? Palette.accent-default.transparentize(0.45) : Palette.accent-default)
+                : Palette.border-strong;
+            background: root.checked
+                ? (root.disabled ? Palette.accent-default.transparentize(0.68) : Palette.accent-default)
                 : root.disabled ? Palette.surface-muted
                 : Palette.surface-pressed;
 
@@ -57,7 +60,9 @@ export component RequestToggleRow inherits Rectangle {
                 x: root.checked ? 23px : 2px;
                 y: 2px;
                 border-radius: 9px;
-                background: root.disabled ? Palette.text-disabled : Palette.text-on-accent;
+                background: root.checked ? Palette.text-on-accent
+                    : root.disabled ? Palette.text-disabled
+                    : Palette.text-on-accent;
             }
         }
     }
