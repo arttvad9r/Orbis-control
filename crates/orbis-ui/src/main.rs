@@ -1707,7 +1707,7 @@ fn main() -> anyhow::Result<()> {
     let app = build_app(&state, Some(worker_tx.clone()))?;
     quick_controls_backend::force_refresh(&app);
     wire_settings_section(&app);
-    app.window().set_size(LogicalSize::new(760.0, 600.0));
+    app.window().set_size(LogicalSize::new(1240.0, 820.0));
     apply_start_minimized(startup_preferences.start_minimized, |minimized| {
         app.window().set_minimized(minimized);
     });
