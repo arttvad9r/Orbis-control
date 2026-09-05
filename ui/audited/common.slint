@@ -1,9 +1,21 @@
 import { Palette as WidgetPalette } from "std-widgets.slint";
 import { Palette, ThemeState, ThemeMode } from "../themes/dark.slint";
 
-// Standard Slint widgets (ComboBox/SpinBox/etc.) have their own style palette.
-// Every top-level Orbis window instantiates this zero-size bridge so the native
-// widget color scheme follows the application theme rather than the OS theme.
+// Canonical geometry for the product UI. Pages may still compose differently,
+// but they share one rhythm instead of carrying per-screen magic numbers.
+export global LayoutMetrics {
+    in property <length> sidebar-width: 224px;
+    in property <length> titlebar-height: 48px;
+    in property <length> page-margin: 28px;
+    in property <length> page-gap: 18px;
+    in property <length> card-padding: 18px;
+    in property <length> card-radius: 14px;
+    in property <length> control-height: 40px;
+    in property <length> compact-control-height: 36px;
+}
+
+// Standard Slint widgets (ScrollView/ComboBox/etc.) have their own style
+// palette. Keep it synchronized with the runtime Orbis theme.
 export component ThemeBridge inherits Rectangle {
     width: 0px;
     height: 0px;
@@ -21,28 +33,26 @@ export component ThemeBridge inherits Rectangle {
     changed observed-mode => { root.sync-widget-theme(); }
 }
 
-// Card — the base white surface with a thin border (reference design).
 export component SectionCard inherits Rectangle {
-    border-radius: 12px;
+    border-radius: LayoutMetrics.card-radius;
     border-width: 1px;
     border-color: Palette.border-default;
     background: Palette.surface-default;
 }
 
-// Card heading (14–16 px, 600 weight).
 export component SectionTitle inherits Rectangle {
     in property <string> title;
     in property <string> detail: "";
     in property <color> detail-color: Palette.text-secondary;
-    height: 22px;
+    height: 28px;
     background: transparent;
 
     HorizontalLayout {
-        spacing: 8px;
+        spacing: 10px;
         Text {
             text: root.title;
-            font-size: 14px;
-            font-weight: 600;
+            font-size: 15px;
+            font-weight: 650;
             color: Palette.text-primary;
             vertical-alignment: center;
             overflow: elide;
@@ -50,7 +60,8 @@ export component SectionTitle inherits Rectangle {
         Rectangle { horizontal-stretch: 1; background: transparent; }
         if (root.detail != "") : Text {
             text: root.detail;
-            font-size: 12px;
+            font-size: 12.5px;
+            font-weight: 500;
             color: root.detail-color;
             vertical-alignment: center;
             horizontal-alignment: right;
@@ -59,26 +70,25 @@ export component SectionTitle inherits Rectangle {
     }
 }
 
-// Page title block (22 px/650 + short secondary description).
 export component PageHeader inherits Rectangle {
     in property <string> title;
     in property <string> description: "";
-    height: root.description == "" ? 30px : 52px;
+    height: root.description == "" ? 38px : 62px;
     background: transparent;
 
     VerticalLayout {
         alignment: center;
-        spacing: 3px;
+        spacing: 5px;
         Text {
             text: root.title;
-            font-size: 22px;
-            font-weight: 650;
+            font-size: 25px;
+            font-weight: 700;
             color: Palette.text-primary;
             overflow: elide;
         }
         if (root.description != "") : Text {
             text: root.description;
-            font-size: 13px;
+            font-size: 13.5px;
             color: Palette.text-secondary;
             overflow: elide;
         }
@@ -88,23 +98,23 @@ export component PageHeader inherits Rectangle {
 export component WindowHeader inherits Rectangle {
     in property <string> title;
     in property <string> subtitle: "";
-    height: 40px;
+    height: 44px;
     background: transparent;
 
     HorizontalLayout {
         alignment: center;
         VerticalLayout {
             alignment: center;
-            spacing: 1px;
+            spacing: 2px;
             Text {
                 text: root.title;
-                font-size: 15px;
+                font-size: 17px;
                 font-weight: 650;
                 color: Palette.text-primary;
             }
             if (root.subtitle != "") : Text {
                 text: root.subtitle;
-                font-size: 11px;
+                font-size: 12px;
                 color: Palette.text-secondary;
                 overflow: elide;
             }
@@ -113,25 +123,22 @@ export component WindowHeader inherits Rectangle {
     }
 }
 
-// Thin 1px separator line. Consumers set the cross size explicitly
-// (horizontal: width from layout + height 1px; vertical: width 1px + height).
 export component Divider inherits Rectangle {
     background: Palette.border-default;
 }
 
-// Settings-style read-only information row: label left, value right.
 export component InfoRow inherits Rectangle {
     in property <string> label;
     in property <string> value;
     in property <color> value-color: Palette.text-secondary;
-    height: 30px;
+    height: 38px;
     background: transparent;
 
     HorizontalLayout {
-        spacing: 12px;
+        spacing: 16px;
         Text {
             text: root.label;
-            font-size: 13px;
+            font-size: 13.5px;
             font-weight: 500;
             color: Palette.text-primary;
             vertical-alignment: center;
@@ -140,7 +147,8 @@ export component InfoRow inherits Rectangle {
         Rectangle { horizontal-stretch: 1; background: transparent; }
         Text {
             text: root.value;
-            font-size: 13px;
+            font-size: 13.5px;
+            font-weight: 500;
             color: root.value-color;
             vertical-alignment: center;
             horizontal-alignment: right;
@@ -149,33 +157,80 @@ export component InfoRow inherits Rectangle {
     }
 }
 
-// Segmented choice button (theme, close action, small option groups).
+export component SubsectionLabel inherits Rectangle {
+    in property <string> text;
+    height: 28px;
+    background: transparent;
+    Text {
+        text: root.text;
+        font-size: 11.5px;
+        font-weight: 650;
+        letter-spacing: 0.6px;
+        color: Palette.text-secondary;
+        vertical-alignment: center;
+    }
+}
+
+export component StatusPill inherits Rectangle {
+    in property <string> text;
+    in property <color> accent: Palette.text-secondary;
+    min-width: 84px;
+    height: 26px;
+    border-radius: 13px;
+    border-width: 1px;
+    border-color: root.accent.transparentize(0.48);
+    background: root.accent.transparentize(0.90);
+
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 10px;
+        spacing: 7px;
+        alignment: center;
+        Rectangle {
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: root.accent;
+        }
+        Text {
+            text: root.text;
+            font-size: 11.5px;
+            font-weight: 600;
+            color: root.accent;
+            vertical-alignment: center;
+        }
+    }
+}
+
 export component ChoiceButton inherits Rectangle {
     in property <string> label;
     in property <bool> selected: false;
     in property <bool> disabled: false;
     callback clicked;
 
-    min-width: 110px;
-    height: 36px;
-    border-radius: 8px;
+    min-width: 112px;
+    height: LayoutMetrics.control-height;
+    border-radius: 10px;
     border-width: root.selected ? 1.5px : 1px;
     border-color: root.selected ? Palette.accent-default
         : touch.has-hover && !root.disabled ? Palette.border-strong
         : Palette.border-default;
-    background: root.selected ? Palette.accent-soft
-        : touch.pressed && !root.disabled ? Palette.surface-pressed
-        : touch.has-hover && !root.disabled ? Palette.surface-hover
-        : Palette.surface-default;
+    background: root.disabled ? Palette.surface-disabled
+        : touch.pressed ? Palette.surface-pressed
+        : root.selected ? Palette.accent-soft
+        : touch.has-hover ? Palette.surface-hover
+        : Palette.surface-raised;
+
     Text {
         text: root.label;
-        font-size: 12.5px;
-        font-weight: 500;
+        font-size: 13px;
+        font-weight: root.selected ? 650 : 550;
         color: root.disabled ? Palette.text-disabled
             : root.selected ? Palette.accent-default
             : Palette.text-primary;
         horizontal-alignment: center;
         vertical-alignment: center;
+        overflow: elide;
     }
     touch := TouchArea {
         enabled: !root.disabled;
@@ -186,13 +241,12 @@ export component ChoiceButton inherits Rectangle {
 export component ActionButton inherits Rectangle {
     in property <string> label;
     in property <bool> disabled: false;
-    // accent means selected/important, not a permanently filled primary action.
     in property <bool> accent: false;
     callback clicked;
 
-    height: 32px;
-    min-width: 76px;
-    border-radius: 8px;
+    height: LayoutMetrics.compact-control-height;
+    min-width: 88px;
+    border-radius: 9px;
     border-width: 1px;
     border-color: root.accent && !root.disabled ? Palette.accent-default
         : touch.has-hover && !root.disabled ? Palette.border-strong
@@ -201,12 +255,12 @@ export component ActionButton inherits Rectangle {
         : touch.pressed ? Palette.surface-pressed
         : root.accent ? Palette.accent-soft
         : touch.has-hover ? Palette.surface-hover
-        : Palette.surface-default;
+        : Palette.surface-raised;
 
     Text {
         text: root.label;
-        font-size: 12.5px;
-        font-weight: root.accent ? 600 : 500;
+        font-size: 13px;
+        font-weight: root.accent ? 650 : 550;
         color: root.disabled ? Palette.text-disabled
             : root.accent ? Palette.accent-default
             : Palette.text-primary;
@@ -224,31 +278,31 @@ export component ActionButton inherits Rectangle {
 export component LocalStatus inherits Rectangle {
     in property <string> text;
     in property <color> accent: Palette.text-secondary;
-    height: 28px;
-    border-radius: 8px;
+    height: LayoutMetrics.compact-control-height;
+    border-radius: 10px;
     border-width: 1px;
-    border-color: root.accent;
-    background: Palette.surface-default;
+    border-color: root.accent.transparentize(0.55);
+    background: root.accent.transparentize(0.92);
 
-    // Absolute positioning: deterministic in both the femtovg and software
-    // renderers (centered layouts of mixed fixed/stretch children render
-    // unreliably offscreen).
-    Rectangle {
-        x: 10px;
-        y: (parent.height - self.height) / 2;
-        width: 7px;
-        height: 7px;
-        border-radius: 3.5px;
-        background: root.accent;
-    }
-    Text {
-        x: 26px;
-        width: parent.width - 38px;
-        height: parent.height;
-        text: root.text;
-        font-size: 12px;
-        color: Palette.text-secondary;
-        vertical-alignment: center;
-        overflow: elide;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 9px;
+        alignment: center;
+        Rectangle {
+            width: 7px;
+            height: 7px;
+            border-radius: 3.5px;
+            background: root.accent;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.text;
+            font-size: 12.5px;
+            font-weight: 500;
+            color: Palette.text-secondary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
     }
 }
