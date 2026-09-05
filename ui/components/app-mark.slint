@@ -1,0 +1,42 @@
+import { Palette } from "../themes/dark.slint";
+
+// Product mark shared by window chrome and About. Geometry is vector-like and
+// renderer-independent so it stays crisp in both software screenshots and the
+// production renderer.
+export component AppMark inherits Rectangle {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    border-width: 1px;
+    border-color: Palette.accent-default.transparentize(0.48);
+    background: Palette.accent-soft;
+
+    Rectangle {
+        x: parent.width * 0.22;
+        y: parent.height * 0.22;
+        width: parent.width * 0.56;
+        height: parent.height * 0.56;
+        border-radius: self.width / 2;
+        border-width: 1.6px;
+        border-color: Palette.accent-default;
+        background: transparent;
+    }
+    Rectangle {
+        x: parent.width * 0.42;
+        y: parent.height * 0.42;
+        width: parent.width * 0.16;
+        height: parent.height * 0.16;
+        border-radius: self.width / 2;
+        background: Palette.accent-default;
+    }
+    Rectangle {
+        x: parent.width * 0.68;
+        y: parent.height * 0.18;
+        width: parent.width * 0.15;
+        height: parent.height * 0.15;
+        border-radius: self.width / 2;
+        border-width: 1px;
+        border-color: Palette.surface-default;
+        background: Palette.accent-default;
+    }
+}
