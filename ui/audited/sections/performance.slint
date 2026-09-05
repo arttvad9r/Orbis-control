@@ -3,6 +3,7 @@ import { ScrollView } from "std-widgets.slint";
 import { UiState, PerformanceHwState } from "../model.slint";
 import { PageHeader, SectionCard, SectionTitle, ActionButton, StatusPill, LayoutMetrics } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
+import { MetricCard } from "../../components/metric-card.slint";
 import { Palette } from "../../themes/dark.slint";
 
 export component PerformanceSection inherits Rectangle {
@@ -57,6 +58,7 @@ export component PerformanceSection inherits Rectangle {
                             detail: root.perf-reason();
                         }
                         StatusPill {
+                            width: 156px;
                             text: root.current-profile();
                             accent: root.ui-state.perf-state == PerformanceHwState.Ready ? Palette.balanced : Palette.text-secondary;
                         }
@@ -96,6 +98,15 @@ export component PerformanceSection inherits Rectangle {
                 }
             }
 
+            HorizontalLayout {
+                height: 108px;
+                spacing: 14px;
+                MetricCard { label: "CPU"; value: root.ui-state.cpu-temp; detail: "температура процессора"; icon-kind: 10; }
+                MetricCard { label: "GPU"; value: root.ui-state.gpu-temp; detail: "температура графики"; icon-kind: 4; }
+                MetricCard { label: "CPU FAN"; value: root.ui-state.cpu-fan-rpm; detail: "скорость вентилятора"; icon-kind: 3; }
+                MetricCard { label: "ПИТАНИЕ"; value: root.ui-state.power-ac-mw; detail: "потребление от адаптера"; icon-kind: 13; }
+            }
+
             SectionCard {
                 min-height: 108px;
                 HorizontalLayout {
@@ -110,7 +121,7 @@ export component PerformanceSection inherits Rectangle {
                             text: "Режим GPU настраивается отдельно и может требовать перезагрузку.";
                             font-size: 12.5px;
                             color: Palette.text-secondary;
-                            overflow: elide;
+                            wrap: word-wrap;
                         }
                     }
                     ActionButton { label: "Открыть графику"; clicked => { root.graphics-open-requested(); } }
