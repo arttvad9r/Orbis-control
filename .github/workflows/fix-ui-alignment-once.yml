@@ -1,0 +1,153 @@
+name: Fix UI alignment once
+
+on:
+  push:
+    branches: [agent/finish-v01]
+    paths:
+      - '.github/workflows/fix-ui-alignment-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/finish-v01
+          persist-credentials: true
+
+      - name: Apply systematic cross-axis alignment fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text()
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f"{path}: expected {count} matches, found {actual}\n--- needle ---\n{old}")
+              p.write_text(text.replace(old, new))
+
+          replace(
+              "ui/components/nav-item.slint",
+              '''        Rectangle {\n            width: 22px;\n            background: transparent;\n            Icon {\n                x: (parent.width - self.width) / 2;\n                y: (parent.height - self.height) / 2;\n                kind: root.icon-kind;\n                tint: root.selected ? Palette.accent-default : Palette.text-secondary;\n            }\n        }''',
+              '''        Rectangle {\n            width: 22px;\n            vertical-stretch: 1;\n            background: transparent;\n            Icon {\n                x: (parent.width - self.width) / 2;\n                y: (parent.height - self.height) / 2 + 1px;\n                kind: root.icon-kind;\n                tint: root.selected ? Palette.accent-default : Palette.text-secondary;\n            }\n        }'''
+          )
+
+          replace(
+              "ui/components/mode-card.slint",
+              '''        if (root.icon-visible) : Rectangle {\n            width: 32px;\n            height: 32px;\n            border-radius: 9px;\n            background: root.disabled ? Palette.surface-muted : root.accent.transparentize(0.88);\n            Icon {\n                x: (parent.width - self.width) / 2;\n                y: (parent.height - self.height) / 2;\n                kind: root.icon-kind;\n                tint: root.disabled ? Palette.text-disabled\n                    : root.selected || root.pending ? root.accent\n                    : Palette.text-secondary;\n                mask: parent.background;\n            }\n        }''',
+              '''        if (root.icon-visible) : Rectangle {\n            width: 32px;\n            vertical-stretch: 1;\n            background: transparent;\n            Rectangle {\n                width: 32px;\n                height: 32px;\n                y: (parent.height - self.height) / 2 + 1px;\n                border-radius: 9px;\n                background: root.disabled ? Palette.surface-muted : root.accent.transparentize(0.88);\n                Icon {\n                    x: (parent.width - self.width) / 2;\n                    y: (parent.height - self.height) / 2;\n                    kind: root.icon-kind;\n                    tint: root.disabled ? Palette.text-disabled\n                        : root.selected || root.pending ? root.accent\n                        : Palette.text-secondary;\n                    mask: parent.background;\n                }\n            }\n        }'''
+          )
+
+          replace(
+              "ui/components/metric-card.slint",
+              '''                    y: (parent.height - self.height) / 2;\n                    kind: root.icon-kind;''',
+              '''                    y: (parent.height - self.height) / 2 + 1px;\n                    kind: root.icon-kind;'''
+          )
+
+          replace(
+              "ui/components/title-bar.slint",
+              '''                AppMark { width: 28px; height: 28px; }''',
+              '''                Rectangle {\n                    width: 28px;\n                    vertical-stretch: 1;\n                    background: transparent;\n                    AppMark {\n                        width: 28px;\n                        height: 28px;\n                        y: (parent.height - self.height) / 2 + 1px;\n                    }\n                }'''
+          )
+
+          replace(
+              "ui/components/request-toggle-row.slint",
+              '''        Rectangle {\n            width: 44px;\n            height: 24px;\n            border-radius: 12px;\n            border-width: 1px;\n            border-color: root.checked\n                ? (root.disabled ? Palette.accent-default.transparentize(0.45) : Palette.accent-default)\n                : Palette.border-strong;\n            background: root.checked\n                ? (root.disabled ? Palette.accent-default.transparentize(0.68) : Palette.accent-default)\n                : root.disabled ? Palette.surface-muted\n                : Palette.surface-pressed;\n\n            Rectangle {\n                width: 18px;\n                height: 18px;\n                x: root.checked ? 23px : 2px;\n                y: 2px;\n                border-radius: 9px;\n                background: root.checked ? Palette.text-on-accent\n                    : root.disabled ? Palette.text-disabled\n                    : Palette.text-on-accent;\n            }\n        }''',
+              '''        Rectangle {\n            width: 44px;\n            vertical-stretch: 1;\n            background: transparent;\n            Rectangle {\n                width: 44px;\n                height: 24px;\n                y: (parent.height - self.height) / 2;\n                border-radius: 12px;\n                border-width: 1px;\n                border-color: root.checked\n                    ? (root.disabled ? Palette.accent-default.transparentize(0.45) : Palette.accent-default)\n                    : Palette.border-strong;\n                background: root.checked\n                    ? (root.disabled ? Palette.accent-default.transparentize(0.68) : Palette.accent-default)\n                    : root.disabled ? Palette.surface-muted\n                    : Palette.surface-pressed;\n\n                Rectangle {\n                    width: 18px;\n                    height: 18px;\n                    x: root.checked ? 23px : 2px;\n                    y: 2px;\n                    border-radius: 9px;\n                    background: root.checked ? Palette.text-on-accent\n                        : root.disabled ? Palette.text-disabled\n                        : Palette.text-on-accent;\n                }\n            }\n        }'''
+          )
+
+          replace(
+              "ui/audited/common.slint",
+              '''        Rectangle {\n            width: 6px;\n            height: 6px;\n            border-radius: 3px;\n            background: root.accent;\n        }''',
+              '''        Rectangle {\n            width: 6px;\n            vertical-stretch: 1;\n            background: transparent;\n            Rectangle {\n                width: 6px;\n                height: 6px;\n                y: (parent.height - self.height) / 2 + 1px;\n                border-radius: 3px;\n                background: root.accent;\n            }\n        }'''
+          )
+
+          replace(
+              "ui/audited/common.slint",
+              '''        Rectangle {\n            width: 7px;\n            height: 7px;\n            border-radius: 3.5px;\n            background: root.accent;\n        }''',
+              '''        Rectangle {\n            width: 7px;\n            vertical-stretch: 1;\n            background: transparent;\n            Rectangle {\n                width: 7px;\n                height: 7px;\n                y: (parent.height - self.height) / 2 + 1px;\n                border-radius: 3.5px;\n                background: root.accent;\n            }\n        }'''
+          )
+
+          replace(
+              "ui/audited/sections/dashboard.slint",
+              '''                    AppMark { width: 54px; height: 54px; }''',
+              '''                    Rectangle {\n                        width: 54px;\n                        vertical-stretch: 1;\n                        background: transparent;\n                        AppMark {\n                            width: 54px;\n                            height: 54px;\n                            y: (parent.height - self.height) / 2 + 1px;\n                        }\n                    }'''
+          )
+
+          replace(
+              "ui/audited/sections/dashboard.slint",
+              '''                                Icon { kind: 3; tint: Palette.text-secondary; }''',
+              '''                                Rectangle {\n                                    width: 18px;\n                                    vertical-stretch: 1;\n                                    background: transparent;\n                                    Icon {\n                                        kind: 3;\n                                        tint: Palette.text-secondary;\n                                        y: (parent.height - self.height) / 2 + 1px;\n                                    }\n                                }''',
+              count=2
+          )
+
+          replace(
+              "ui/audited/sections/backlight.slint",
+              '''        Rectangle {\n            width: 24px;\n            height: 24px;\n            border-radius: 12px;\n            border-width: 2px;\n            border-color: Palette.border-strong;\n            background: root.swatch;\n        }''',
+              '''        Rectangle {\n            width: 24px;\n            vertical-stretch: 1;\n            background: transparent;\n            Rectangle {\n                width: 24px;\n                height: 24px;\n                y: (parent.height - self.height) / 2 + 1px;\n                border-radius: 12px;\n                border-width: 2px;\n                border-color: Palette.border-strong;\n                background: root.swatch;\n            }\n        }'''
+          )
+
+          replace(
+              "ui/audited/sections/backlight.slint",
+              '''                                Icon {\n                                    kind: 5;\n                                    tint: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default : Palette.text-secondary;\n                                }''',
+              '''                                Rectangle {\n                                    width: 18px;\n                                    vertical-stretch: 1;\n                                    background: transparent;\n                                    Icon {\n                                        kind: 5;\n                                        tint: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default : Palette.text-secondary;\n                                        y: (parent.height - self.height) / 2 + 1px;\n                                    }\n                                }'''
+          )
+
+          replace(
+              "ui/audited/sections/about.slint",
+              '''                    AppMark { width: 72px; height: 72px; }''',
+              '''                    Rectangle {\n                        width: 72px;\n                        vertical-stretch: 1;\n                        background: transparent;\n                        AppMark {\n                            width: 72px;\n                            height: 72px;\n                            y: (parent.height - self.height) / 2 + 1px;\n                        }\n                    }'''
+          )
+
+          print("Alignment fixes applied")
+          PY
+
+          git diff --check
+          git diff --stat
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libfontconfig1-dev libfreetype6-dev libgl1-mesa-dev \
+            libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            wayland-protocols libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libdbus-1-dev libssl-dev libsystemd-dev libglib2.0-dev libcairo2-dev \
+            libpango1.0-dev libgdk-pixbuf-2.0-dev
+
+      - name: Install Rust 1.87
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.87'
+
+      - name: Compile UI
+        run: cargo check -p orbis-ui --locked
+
+      - name: Render all canonical screenshots
+        run: bash scripts/update-ui-screenshots.sh
+
+      - name: Upload visual review
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbis-ui-aligned
+          path: screenshots/*.png
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Commit alignment pass
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A ui screenshots
+          git diff --cached --check
+          git commit -m "Align UI icons and controls"
+          git push origin HEAD:agent/finish-v01
