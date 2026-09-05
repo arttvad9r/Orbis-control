@@ -1,7 +1,5 @@
-// Fan curve editor: fan/profile selection, shared FanCurveChart and per-point
-// temperature steppers. Write gating stays outside this component: `writable`
-// is authoritative write evidence, and mutations are emitted as point/apply
-// requests only.
+// Fan curve editor: fan/profile selection, curve chart and per-point temperature
+// controls. Write gating remains authoritative outside this visual component.
 import { FanCurveHwState } from "model.slint";
 import { SectionCard, SectionTitle, LocalStatus } from "common.slint";
 import { FanCurveChart } from "../components/fan-curve-chart.slint";
@@ -12,9 +10,9 @@ component TabButton inherits Rectangle {
     in property <bool> selected: false;
     callback clicked;
 
-    height: 32px;
-    min-width: 96px;
-    border-radius: 8px;
+    height: 38px;
+    min-width: 104px;
+    border-radius: 10px;
     border-width: root.selected ? 1.5px : 1px;
     border-color: root.selected ? Palette.accent-default
         : touch.has-hover ? Palette.border-strong
@@ -22,12 +20,12 @@ component TabButton inherits Rectangle {
     background: touch.pressed ? Palette.surface-pressed
         : root.selected ? Palette.accent-soft
         : touch.has-hover ? Palette.surface-hover
-        : Palette.surface-default;
+        : Palette.surface-raised;
 
     Text {
         text: root.label;
-        font-size: 12.5px;
-        font-weight: root.selected ? 600 : 500;
+        font-size: 13px;
+        font-weight: root.selected ? 650 : 550;
         color: root.selected ? Palette.accent-default : Palette.text-primary;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -41,18 +39,19 @@ component StepButton inherits Rectangle {
     in property <bool> editable: false;
     callback clicked;
 
-    width: 20px;
-    height: 20px;
-    border-radius: 6px;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
     border-width: 1px;
     border-color: Palette.border-default;
     background: !root.editable ? Palette.surface-disabled
         : step-touch.pressed ? Palette.surface-pressed
         : step-touch.has-hover ? Palette.surface-hover
-        : Palette.window-background;
+        : Palette.surface-raised;
     Text {
         text: root.glyph;
-        font-size: 11px;
+        font-size: 13px;
+        font-weight: 600;
         color: root.editable ? Palette.text-primary : Palette.text-disabled;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -69,37 +68,37 @@ component TempStepper inherits Rectangle {
     in property <bool> editable: false;
     callback changed(int, int);
 
-    min-width: 52px;
+    min-width: 66px;
     horizontal-stretch: 1;
-    height: 56px;
-    border-radius: 8px;
+    height: 72px;
+    border-radius: 10px;
     border-width: 1px;
     border-color: Palette.border-default;
-    background: Palette.surface-default;
+    background: root.editable ? Palette.surface-raised : Palette.surface-muted;
 
     Text {
         x: 0px;
-        y: 5px;
+        y: 7px;
         width: parent.width;
-        height: 18px;
+        height: 20px;
         text: root.value + "°";
-        font-size: 11.5px;
-        font-weight: 600;
+        font-size: 12.5px;
+        font-weight: 650;
         color: root.editable ? Palette.text-primary : Palette.text-secondary;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
 
     StepButton {
-        x: 6px;
-        y: 29px;
+        x: 7px;
+        y: 36px;
         glyph: "−";
         editable: root.editable;
         clicked => { root.changed(root.index, root.value - 1); }
     }
     StepButton {
-        x: parent.width - 26px;
-        y: 29px;
+        x: parent.width - 35px;
+        y: 36px;
         glyph: "+";
         editable: root.editable;
         clicked => { root.changed(root.index, root.value + 1); }
@@ -124,14 +123,14 @@ export component FanCurveEditor inherits Rectangle {
     callback pwm-point-changed(int, int);
 
     background: transparent;
-    min-height: 470px;
+    min-height: 510px;
 
     function state-text() -> string {
         if (root.error-state) { return "Ошибка кривой"; }
         if (root.state == FanCurveHwState.Loading) { return "Чтение"; }
         if (root.state == FanCurveHwState.Unavailable) { return "Недоступно"; }
         if (!root.writable) { return "Только чтение"; }
-        if (root.dirty) { return "Изменено"; }
+        if (root.dirty) { return "Есть изменения"; }
         return "Актуальна";
     }
 
@@ -143,10 +142,10 @@ export component FanCurveEditor inherits Rectangle {
     }
 
     VerticalLayout {
-        spacing: 10px;
+        spacing: 14px;
 
         HorizontalLayout {
-            height: 32px;
+            height: 38px;
             spacing: 8px;
             TabButton {
                 label: "CPU";
@@ -160,21 +159,21 @@ export component FanCurveEditor inherits Rectangle {
             }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             LocalStatus {
-                width: 150px;
+                width: 180px;
                 text: root.state-text();
                 accent: root.state-color();
             }
         }
 
         HorizontalLayout {
-            height: 32px;
+            height: 38px;
             spacing: 8px;
             Text {
-                width: 110px;
+                width: 100px;
                 text: "Профиль BIOS";
                 font-size: 13px;
-                font-weight: 500;
-                color: Palette.text-primary;
+                font-weight: 550;
+                color: Palette.text-secondary;
                 vertical-alignment: center;
             }
             TabButton {
@@ -198,22 +197,17 @@ export component FanCurveEditor inherits Rectangle {
                 clicked => { root.profile-changed(3); }
             }
             Rectangle { horizontal-stretch: 1; background: transparent; }
-            Text {
-                text: root.writable ? "Тяните точки кривой или измените температуры ниже" : "Авторитетная кривая · только чтение";
-                font-size: 11.5px;
-                color: Palette.text-secondary;
-                vertical-alignment: center;
-                overflow: elide;
-            }
         }
 
         SectionCard {
             vertical-stretch: 1;
+            background: Palette.surface-raised;
             VerticalLayout {
-                padding: 14px;
+                padding: 16px;
+                spacing: 10px;
                 SectionTitle {
                     title: root.fan-selected == 0 ? "Кривая вентилятора CPU" : "Кривая вентилятора GPU";
-                    detail: "PWM · °C";
+                    detail: root.writable ? "Перетащите точки или измените температуры ниже" : "Авторитетная кривая · только чтение";
                 }
                 FanCurveChart {
                     vertical-stretch: 1;
@@ -231,8 +225,8 @@ export component FanCurveEditor inherits Rectangle {
         }
 
         HorizontalLayout {
-            height: 56px;
-            spacing: 6px;
+            height: 72px;
+            spacing: 8px;
             TempStepper { index: 0; value: root.temp-0; editable: root.writable && root.state == FanCurveHwState.Ready; changed(i,v) => { root.temp-point-changed(i,v); } }
             TempStepper { index: 1; value: root.temp-1; editable: root.writable && root.state == FanCurveHwState.Ready; changed(i,v) => { root.temp-point-changed(i,v); } }
             TempStepper { index: 2; value: root.temp-2; editable: root.writable && root.state == FanCurveHwState.Ready; changed(i,v) => { root.temp-point-changed(i,v); } }
