@@ -21,36 +21,35 @@ export component AboutSection inherits Rectangle {
             }
 
             SectionCard {
-                min-height: 172px;
+                min-height: 180px;
                 background: Palette.surface-raised;
                 HorizontalLayout {
                     padding: 24px;
                     spacing: 20px;
+                    alignment: center;
+
                     AppMark { width: 72px; height: 72px; }
-                    Rectangle {
+
+                    VerticalLayout {
                         horizontal-stretch: 1;
-                        background: transparent;
-                        VerticalLayout {
-                            width: parent.width;
-                            alignment: center;
-                            spacing: 5px;
-                            Text {
-                                width: parent.width;
-                                text: "Orbis Control";
-                                font-size: 24px;
-                                font-weight: 700;
-                                color: Palette.text-primary;
-                            }
-                            Text {
-                                width: parent.width;
-                                text: "Нативный Linux control center для ASUS ROG / TUF / Zephyrus";
-                                font-size: 13px;
-                                color: Palette.text-secondary;
-                                overflow: elide;
-                            }
-                            Rectangle { height: 4px; background: transparent; }
-                            StatusPill { width: 126px; text: "Версия " + root.version; accent: Palette.accent-default; }
+                        alignment: center;
+                        spacing: 5px;
+                        Text {
+                            text: "Orbis Control";
+                            font-size: 24px;
+                            font-weight: 700;
+                            color: Palette.text-primary;
                         }
+                        Text {
+                            height: 36px;
+                            text: "Нативный Linux control center для ASUS ROG / TUF / Zephyrus";
+                            font-size: 13px;
+                            color: Palette.text-secondary;
+                            wrap: word-wrap;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { height: 4px; background: transparent; }
+                        StatusPill { width: 126px; text: "Версия " + root.version; accent: Palette.accent-default; }
                     }
                 }
             }
