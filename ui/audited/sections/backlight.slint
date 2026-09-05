@@ -24,11 +24,17 @@ component ColorPresetButton inherits Rectangle {
         alignment: center;
         Rectangle {
             width: 24px;
-            height: 24px;
-            border-radius: 12px;
-            border-width: 2px;
-            border-color: Palette.border-strong;
-            background: root.swatch;
+            vertical-stretch: 1;
+            background: transparent;
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                y: (parent.height - self.height) / 2 + 1px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: Palette.border-strong;
+                background: root.swatch;
+            }
         }
         Text {
             text: root.label;
@@ -119,9 +125,15 @@ export component BacklightSection inherits Rectangle {
                             HorizontalLayout {
                                 alignment: center;
                                 spacing: 8px;
-                                Icon {
-                                    kind: 5;
-                                    tint: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default : Palette.text-secondary;
+                                Rectangle {
+                                    width: 18px;
+                                    vertical-stretch: 1;
+                                    background: transparent;
+                                    Icon {
+                                        kind: 5;
+                                        tint: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default : Palette.text-secondary;
+                                        y: (parent.height - self.height) / 2 + 1px;
+                                    }
                                 }
                                 Text {
                                     text: level == 0 ? "Выключено" : "Уровень " + level;

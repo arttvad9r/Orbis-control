@@ -28,7 +28,16 @@ export component AboutSection inherits Rectangle {
                     spacing: 20px;
                     alignment: center;
 
-                    AppMark { width: 72px; height: 72px; }
+                    Rectangle {
+                        width: 72px;
+                        vertical-stretch: 1;
+                        background: transparent;
+                        AppMark {
+                            width: 72px;
+                            height: 72px;
+                            y: (parent.height - self.height) / 2 + 1px;
+                        }
+                    }
 
                     VerticalLayout {
                         width: 430px;

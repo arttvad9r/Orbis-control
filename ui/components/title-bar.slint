@@ -64,7 +64,16 @@ export component TitleBar inherits Rectangle {
                 padding-right: 12px;
                 spacing: 10px;
                 alignment: center;
-                AppMark { width: 28px; height: 28px; }
+                Rectangle {
+                    width: 28px;
+                    vertical-stretch: 1;
+                    background: transparent;
+                    AppMark {
+                        width: 28px;
+                        height: 28px;
+                        y: (parent.height - self.height) / 2 + 1px;
+                    }
+                }
                 VerticalLayout {
                     alignment: center;
                     spacing: 0px;

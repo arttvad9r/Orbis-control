@@ -190,9 +190,15 @@ export component StatusPill inherits Rectangle {
         alignment: center;
         Rectangle {
             width: 6px;
-            height: 6px;
-            border-radius: 3px;
-            background: root.accent;
+            vertical-stretch: 1;
+            background: transparent;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                y: (parent.height - self.height) / 2 + 1px;
+                border-radius: 3px;
+                background: root.accent;
+            }
         }
         Text {
             text: root.text;
@@ -294,9 +300,15 @@ export component LocalStatus inherits Rectangle {
         alignment: center;
         Rectangle {
             width: 7px;
-            height: 7px;
-            border-radius: 3.5px;
-            background: root.accent;
+            vertical-stretch: 1;
+            background: transparent;
+            Rectangle {
+                width: 7px;
+                height: 7px;
+                y: (parent.height - self.height) / 2 + 1px;
+                border-radius: 3.5px;
+                background: root.accent;
+            }
         }
         Text {
             horizontal-stretch: 1;

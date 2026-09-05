@@ -43,26 +43,32 @@ export component RequestToggleRow inherits Rectangle {
 
         Rectangle {
             width: 44px;
-            height: 24px;
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: root.checked
-                ? (root.disabled ? Palette.accent-default.transparentize(0.45) : Palette.accent-default)
-                : Palette.border-strong;
-            background: root.checked
-                ? (root.disabled ? Palette.accent-default.transparentize(0.68) : Palette.accent-default)
-                : root.disabled ? Palette.surface-muted
-                : Palette.surface-pressed;
-
+            vertical-stretch: 1;
+            background: transparent;
             Rectangle {
-                width: 18px;
-                height: 18px;
-                x: root.checked ? 23px : 2px;
-                y: 2px;
-                border-radius: 9px;
-                background: root.checked ? Palette.text-on-accent
-                    : root.disabled ? Palette.text-disabled
-                    : Palette.text-on-accent;
+                width: 44px;
+                height: 24px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: root.checked
+                    ? (root.disabled ? Palette.accent-default.transparentize(0.45) : Palette.accent-default)
+                    : Palette.border-strong;
+                background: root.checked
+                    ? (root.disabled ? Palette.accent-default.transparentize(0.68) : Palette.accent-default)
+                    : root.disabled ? Palette.surface-muted
+                    : Palette.surface-pressed;
+
+                Rectangle {
+                    width: 18px;
+                    height: 18px;
+                    x: root.checked ? 23px : 2px;
+                    y: 2px;
+                    border-radius: 9px;
+                    background: root.checked ? Palette.text-on-accent
+                        : root.disabled ? Palette.text-disabled
+                        : Palette.text-on-accent;
+                }
             }
         }
     }

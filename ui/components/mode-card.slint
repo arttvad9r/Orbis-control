@@ -47,17 +47,23 @@ export component ModeCard inherits Rectangle {
 
         if (root.icon-visible) : Rectangle {
             width: 32px;
-            height: 32px;
-            border-radius: 9px;
-            background: root.disabled ? Palette.surface-muted : root.accent.transparentize(0.88);
-            Icon {
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                kind: root.icon-kind;
-                tint: root.disabled ? Palette.text-disabled
-                    : root.selected || root.pending ? root.accent
-                    : Palette.text-secondary;
-                mask: parent.background;
+            vertical-stretch: 1;
+            background: transparent;
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                y: (parent.height - self.height) / 2 + 1px;
+                border-radius: 9px;
+                background: root.disabled ? Palette.surface-muted : root.accent.transparentize(0.88);
+                Icon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    kind: root.icon-kind;
+                    tint: root.disabled ? Palette.text-disabled
+                        : root.selected || root.pending ? root.accent
+                        : Palette.text-secondary;
+                    mask: parent.background;
+                }
             }
         }
 
