@@ -44,10 +44,17 @@ export component DisplaySection inherits Rectangle {
                             overflow: elide;
                         }
                     }
-                    StatusPill {
-                        text: root.display-state-ready ? "Наблюдается" : "Получение данных";
-                        accent: root.display-state-ready ? Palette.success : Palette.warning;
-                    }
+                    Rectangle {
+              width: root.display-state-ready ? 114px : 146px;
+              vertical-stretch: 1;
+              background: transparent;
+              StatusPill {
+                  width: parent.width;
+                  y: (parent.height - self.height) / 2;
+                  text: root.display-state-ready ? "Наблюдается" : "Получение данных";
+                  accent: root.display-state-ready ? Palette.success : Palette.warning;
+              }
+          }
                 }
             }
 

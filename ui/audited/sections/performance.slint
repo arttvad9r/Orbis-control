@@ -124,7 +124,17 @@ export component PerformanceSection inherits Rectangle {
                             wrap: word-wrap;
                         }
                     }
-                    ActionButton { label: "Открыть графику"; clicked => { root.graphics-open-requested(); } }
+                    Rectangle {
+              width: 126px;
+              vertical-stretch: 1;
+              background: transparent;
+              ActionButton {
+                  width: parent.width;
+                  y: (parent.height - self.height) / 2;
+                  label: "Открыть графику";
+                  clicked => { root.graphics-open-requested(); }
+              }
+          }
                 }
             }
 

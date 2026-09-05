@@ -244,9 +244,9 @@ export component DashboardSection inherits Rectangle {
                                         y: (parent.height - self.height) / 2 + 1px;
                                     }
                                 }
-                                Text { text: "CPU"; font-size: 12.5px; color: Palette.text-secondary; }
+                                Text { vertical-stretch: 1; text: "CPU"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
                                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                                Text { text: root.ui-state.cpu-fan-rpm; font-size: 14px; font-weight: 650; color: Palette.text-primary; }
+                                Text { vertical-stretch: 1; text: root.ui-state.cpu-fan-rpm; font-size: 14px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }
                             }
                         }
                         Rectangle {
@@ -265,9 +265,9 @@ export component DashboardSection inherits Rectangle {
                                         y: (parent.height - self.height) / 2 + 1px;
                                     }
                                 }
-                                Text { text: "GPU"; font-size: 12.5px; color: Palette.text-secondary; }
+                                Text { vertical-stretch: 1; text: "GPU"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
                                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                                Text { text: root.ui-state.gpu-fan-rpm; font-size: 14px; font-weight: 650; color: Palette.text-primary; }
+                                Text { vertical-stretch: 1; text: root.ui-state.gpu-fan-rpm; font-size: 14px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }
                             }
                         }
                         Rectangle { vertical-stretch: 1; background: transparent; }

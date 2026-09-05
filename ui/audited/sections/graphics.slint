@@ -84,10 +84,17 @@ export component GraphicsSection inherits Rectangle {
                             Text { text: root.mode-label(root.ui-state.gpu-selected); font-size: 17px; font-weight: 700; color: Palette.text-primary; }
                         }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
-                        StatusPill {
-                            text: root.ui-state.gpu-mode-writable ? "Доступно" : "Наблюдение";
-                            accent: root.ui-state.gpu-mode-writable ? Palette.success : Palette.text-secondary;
-                        }
+                        Rectangle {
+                  width: root.ui-state.gpu-mode-writable ? 88px : 112px;
+                  vertical-stretch: 1;
+                  background: transparent;
+                  StatusPill {
+                      width: parent.width;
+                      y: (parent.height - self.height) / 2;
+                      text: root.ui-state.gpu-mode-writable ? "Доступно" : "Наблюдение";
+                      accent: root.ui-state.gpu-mode-writable ? Palette.success : Palette.text-secondary;
+                  }
+              }
                     }
                 }
                 SectionCard {
@@ -101,7 +108,17 @@ export component GraphicsSection inherits Rectangle {
                             Text { text: root.mode-label(root.ui-state.gpu-queued); font-size: 17px; font-weight: 700; color: root.ui-state.gpu-queued >= 0 ? Palette.warning : Palette.text-disabled; }
                         }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
-                        if (root.ui-state.gpu-reboot-required) : StatusPill { text: "Нужен перезапуск"; accent: Palette.warning; }
+                        if (root.ui-state.gpu-reboot-required) : Rectangle {
+                  width: 150px;
+                  vertical-stretch: 1;
+                  background: transparent;
+                  StatusPill {
+                      width: parent.width;
+                      y: (parent.height - self.height) / 2;
+                      text: "Нужен перезапуск";
+                      accent: Palette.warning;
+                  }
+              }
                     }
                 }
             }

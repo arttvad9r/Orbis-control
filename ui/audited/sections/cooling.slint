@@ -58,10 +58,17 @@ export component CoolingSection inherits Rectangle {
                     accent: root.status-color();
                 }
                 Rectangle { width: 10px; background: transparent; }
-                StatusPill {
-                    text: root.ui-state.fan-curve-writable ? "Редактирование" : "Наблюдение";
-                    accent: root.ui-state.fan-curve-writable ? Palette.success : Palette.text-secondary;
-                }
+                Rectangle {
+          width: root.ui-state.fan-curve-writable ? 130px : 112px;
+          vertical-stretch: 1;
+          background: transparent;
+          StatusPill {
+              width: parent.width;
+              y: (parent.height - self.height) / 2;
+              text: root.ui-state.fan-curve-writable ? "Редактирование" : "Наблюдение";
+              accent: root.ui-state.fan-curve-writable ? Palette.success : Palette.text-secondary;
+          }
+      }
             }
 
             SectionCard {
@@ -103,21 +110,35 @@ export component CoolingSection inherits Rectangle {
                             vertical-alignment: center;
                             overflow: elide;
                         }
-                        ActionButton {
-                            label: "Заводские значения";
-                            disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error;
-                            clicked => { root.factory-reset-pending = true; }
-                        }
-                        ActionButton {
-                            label: root.factory-reset-pending ? "Применить заводские" : "Применить изменения";
-                            accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
-                            disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
-                            clicked => {
-                                let reset = root.factory-reset-pending;
-                                root.fan-apply-clicked(reset);
-                                if (reset) { root.factory-reset-pending = false; }
-                            }
-                        }
+                        Rectangle {
+                  width: 146px;
+                  vertical-stretch: 1;
+                  background: transparent;
+                  ActionButton {
+                      width: parent.width;
+                      y: (parent.height - self.height) / 2;
+                      label: "Заводские значения";
+                      disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error;
+                      clicked => { root.factory-reset-pending = true; }
+                  }
+              }
+              Rectangle {
+                  width: 168px;
+                  vertical-stretch: 1;
+                  background: transparent;
+                  ActionButton {
+                      width: parent.width;
+                      y: (parent.height - self.height) / 2;
+                      label: root.factory-reset-pending ? "Применить заводские" : "Применить изменения";
+                      accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
+                      disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
+                      clicked => {
+                          let reset = root.factory-reset-pending;
+                          root.fan-apply-clicked(reset);
+                          if (reset) { root.factory-reset-pending = false; }
+                      }
+                  }
+              }
                     }
                 }
             }
