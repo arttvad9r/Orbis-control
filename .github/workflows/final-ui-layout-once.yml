@@ -1,0 +1,79 @@
+name: Final UI layout cleanup once
+
+on:
+  push:
+    branches:
+      - agent/finish-v01
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v5
+        with:
+          ref: agent/finish-v01
+          persist-credentials: true
+
+      - name: Fix final layout constraints
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if new in text:
+                  return False
+              if old not in text:
+                  raise SystemExit(f"expected layout fragment not found in {path}: {old!r}")
+              p.write_text(text.replace(old, new, 1))
+              return True
+
+          changed = False
+          changed |= replace_once(
+              "ui/audited/common.slint",
+              "in property <length> sidebar-width: 224px;",
+              "in property <length> sidebar-width: 244px;",
+          )
+          changed |= replace_once(
+              "ui/audited/sections/dashboard.slint",
+              "VerticalLayout {\n                        horizontal-stretch: 1;\n                        alignment: center;\n                        spacing: 4px;",
+              "VerticalLayout {\n                        width: 300px;\n                        alignment: center;\n                        spacing: 4px;",
+          )
+          changed |= replace_once(
+              "ui/audited/sections/dashboard.slint",
+              "width: 150px;\n                        alignment: center;",
+              "width: 110px;\n                        alignment: center;",
+          )
+          changed |= replace_once(
+              "ui/audited/sections/dashboard.slint",
+              "width: 144px;\n                        alignment: center;",
+              "width: 110px;\n                        alignment: center;",
+          )
+          changed |= replace_once(
+              "ui/audited/sections/about.slint",
+              "VerticalLayout {\n                        horizontal-stretch: 1;\n                        alignment: center;",
+              "VerticalLayout {\n                        width: 430px;\n                        alignment: center;",
+          )
+
+          if not changed:
+              print("Final layout already applied.")
+
+      - name: Commit final layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No layout changes to commit.'
+            exit 0
+          fi
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ui/audited/common.slint ui/audited/sections/dashboard.slint ui/audited/sections/about.slint
+          git commit -m 'Fix final product layout constraints'
+          git push origin HEAD:agent/finish-v01
