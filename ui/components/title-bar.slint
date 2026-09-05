@@ -1,7 +1,8 @@
-// Frameless title bar: app identity above the sidebar, drag surface,
-// minimize/maximize/close on the right (reference design).
-// Window glyphs are text primitives; drag goes through the winit accessor.
+// Frameless product chrome: compact app identity, generous drag surface and
+// conventional window controls.
 import { Palette } from "../themes/dark.slint";
+import { LayoutMetrics } from "../audited/common.slint";
+import { AppMark } from "app-mark.slint";
 
 component WindowButton inherits Rectangle {
     in property <string> glyph;
@@ -9,25 +10,27 @@ component WindowButton inherits Rectangle {
     in property <bool> danger: false;
     callback clicked;
 
-    width: 44px;
+    width: 46px;
+    height: LayoutMetrics.titlebar-height;
     background: btn-touch.has-hover
         ? (root.danger ? Palette.error : Palette.surface-hover)
         : transparent;
+
     Text {
         text: root.glyph;
-        font-size: 13px;
+        font-size: 14px;
         color: btn-touch.has-hover && root.danger ? Palette.text-on-accent : Palette.text-secondary;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
     if (root.rect-glyph) : Rectangle {
-        width: 9px;
-        height: 9px;
+        width: 10px;
+        height: 10px;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         border-radius: 2px;
         border-width: 1.3px;
-        border-color: btn-touch.has-hover && root.danger ? Palette.text-on-accent : Palette.text-secondary;
+        border-color: Palette.text-secondary;
         background: transparent;
     }
     btn-touch := TouchArea { clicked => { root.clicked(); } }
@@ -41,11 +44,9 @@ export component TitleBar inherits Rectangle {
     callback close-requested;
     callback drag-started;
 
-    height: 44px;
+    height: LayoutMetrics.titlebar-height;
     background: Palette.titlebar-background;
 
-    // Declared first: buttons below sit on top of this surface, so presses on
-    // them never reach the drag handler.
     drag-touch := TouchArea {
         pointer-event(event) => {
             if (event.kind == PointerEventKind.down) {
@@ -55,43 +56,51 @@ export component TitleBar inherits Rectangle {
     }
 
     HorizontalLayout {
-        // App identity aligned with the sidebar column.
         Rectangle {
-            width: 230px;
+            width: LayoutMetrics.sidebar-width;
             background: transparent;
             HorizontalLayout {
-                padding-left: 16px;
-                spacing: 9px;
+                padding-left: 14px;
+                padding-right: 12px;
+                spacing: 10px;
                 alignment: center;
-                Rectangle {
-                    width: 18px;
-                    height: 18px;
-                    border-radius: 5px;
-                    background: Palette.accent-default;
-                    Rectangle {
-                        width: 6px;
-                        height: 6px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        border-radius: 1.5px;
-                        background: Palette.text-on-accent;
+                AppMark { width: 28px; height: 28px; }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 0px;
+                    Text {
+                        text: root.app-title;
+                        font-size: 13.5px;
+                        font-weight: 650;
+                        color: Palette.text-primary;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: "ASUS Control Center";
+                        font-size: 9.5px;
+                        font-weight: 550;
+                        color: Palette.text-disabled;
+                        vertical-alignment: center;
+                        overflow: elide;
                     }
                 }
-                Text {
-                    text: root.app-title;
-                    font-size: 13px;
-                    font-weight: 600;
-                    color: Palette.text-primary;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
             }
         }
 
+        Rectangle { width: 1px; background: Palette.border-default; }
         Rectangle { horizontal-stretch: 1; background: transparent; }
 
         WindowButton { glyph: "–"; clicked => { root.minimize-requested(); } }
         WindowButton { rect-glyph: true; clicked => { root.maximize-requested(); } }
         WindowButton { glyph: "\u{00D7}"; danger: true; clicked => { root.close-requested(); } }
+    }
+
+    Rectangle {
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: Palette.border-default;
     }
 }
