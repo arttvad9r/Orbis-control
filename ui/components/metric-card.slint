@@ -1,6 +1,4 @@
-// MetricCard — compact telemetry tile (reference design):
-// small icon + label on top, large primary metric, short secondary line.
-// Values arrive as display strings; "—" is the honest loading/absence form.
+// Compact telemetry tile with a stable label/value/detail hierarchy.
 import { Icon } from "icon.slint";
 import { Palette } from "../themes/dark.slint";
 
@@ -12,30 +10,38 @@ export component MetricCard inherits Rectangle {
     in property <color> value-color: Palette.text-primary;
 
     horizontal-stretch: 1;
-    min-height: 92px;
-    border-radius: 12px;
+    min-height: 104px;
+    border-radius: 13px;
     border-width: 1px;
     border-color: Palette.border-default;
     background: Palette.surface-default;
 
     VerticalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        padding-top: 12px;
-        padding-bottom: 12px;
-        spacing: 5px;
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 14px;
+        padding-bottom: 14px;
+        spacing: 6px;
 
         HorizontalLayout {
-            height: 18px;
+            height: 24px;
             spacing: 8px;
-            Icon {
-                y: (parent.height - self.height) / 2;
-                kind: root.icon-kind;
-                tint: Palette.text-secondary;
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 7px;
+                background: Palette.surface-muted;
+                Icon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    kind: root.icon-kind;
+                    tint: Palette.text-secondary;
+                }
             }
             Text {
                 text: root.label;
-                font-size: 12px;
+                font-size: 12.5px;
+                font-weight: 550;
                 color: Palette.text-secondary;
                 vertical-alignment: center;
                 overflow: elide;
@@ -47,15 +53,15 @@ export component MetricCard inherits Rectangle {
 
         Text {
             text: root.value;
-            font-size: 20px;
-            font-weight: 650;
+            font-size: 22px;
+            font-weight: 700;
             color: root.value-color;
             overflow: elide;
         }
         if (root.detail != "") : Text {
             text: root.detail;
             font-size: 11.5px;
-            color: Palette.text-secondary;
+            color: Palette.text-disabled;
             overflow: elide;
         }
     }
