@@ -175,6 +175,8 @@ export component StatusPill inherits Rectangle {
     in property <string> text;
     in property <color> accent: Palette.text-secondary;
     min-width: 84px;
+    max-width: 190px;
+    horizontal-stretch: 0;
     height: 26px;
     border-radius: 13px;
     border-width: 1px;
@@ -198,6 +200,7 @@ export component StatusPill inherits Rectangle {
             font-weight: 600;
             color: root.accent;
             vertical-alignment: center;
+            overflow: elide;
         }
     }
 }
@@ -281,8 +284,8 @@ export component LocalStatus inherits Rectangle {
     height: LayoutMetrics.compact-control-height;
     border-radius: 10px;
     border-width: 1px;
-    border-color: root.accent.transparentize(0.55);
-    background: root.accent.transparentize(0.92);
+    border-color: Palette.border-default;
+    background: Palette.surface-muted;
 
     HorizontalLayout {
         padding-left: 12px;
