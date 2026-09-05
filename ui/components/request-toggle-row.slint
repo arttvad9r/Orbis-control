@@ -1,8 +1,7 @@
 import { Palette } from "../themes/dark.slint";
 
-// Settings row with a backend-owned switch. A click emits the requested value
-// but never changes `checked` locally; the owner must publish the new
-// authoritative value.
+// Settings row with a backend-owned switch. Disabled rows remain legible and
+// product-like: they communicate availability without looking broken.
 export component RequestToggleRow inherits Rectangle {
     in property <string> label;
     in property <string> description: "";
@@ -10,24 +9,24 @@ export component RequestToggleRow inherits Rectangle {
     in property <bool> disabled: false;
     callback toggled(bool);
 
-    height: root.description == "" ? 40px : 50px;
-    border-radius: 8px;
+    height: root.description == "" ? 46px : 58px;
+    border-radius: 10px;
     background: touch.has-hover && !root.disabled ? Palette.surface-hover : transparent;
 
     HorizontalLayout {
-        padding-left: 8px;
-        padding-right: 8px;
-        spacing: 12px;
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 14px;
 
         VerticalLayout {
             vertical-stretch: 1;
             alignment: center;
-            spacing: 2px;
+            spacing: 3px;
             Text {
                 text: root.label;
-                font-size: 13px;
-                font-weight: 500;
-                color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+                font-size: 13.5px;
+                font-weight: 550;
+                color: root.disabled ? Palette.text-secondary : Palette.text-primary;
                 vertical-alignment: center;
                 overflow: elide;
             }
@@ -43,19 +42,21 @@ export component RequestToggleRow inherits Rectangle {
         Rectangle { horizontal-stretch: 1; background: transparent; }
 
         Rectangle {
-            width: 40px;
-            height: 22px;
-            border-radius: 11px;
+            width: 44px;
+            height: 24px;
+            border-radius: 12px;
             border-width: 1px;
-            border-color: root.checked && !root.disabled ? Palette.accent-default : Palette.border-default;
-            background: root.checked && !root.disabled ? Palette.accent-default : Palette.surface-pressed;
+            border-color: root.checked && !root.disabled ? Palette.accent-default : Palette.border-strong;
+            background: root.checked && !root.disabled ? Palette.accent-default
+                : root.disabled ? Palette.surface-muted
+                : Palette.surface-pressed;
 
             Rectangle {
-                width: 16px;
-                height: 16px;
-                x: root.checked ? 22px : 2px;
+                width: 18px;
+                height: 18px;
+                x: root.checked ? 23px : 2px;
                 y: 2px;
-                border-radius: 8px;
+                border-radius: 9px;
                 background: root.disabled ? Palette.text-disabled : Palette.text-on-accent;
             }
         }
