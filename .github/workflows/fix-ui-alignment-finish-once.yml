@@ -25,44 +25,39 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
-          def replace(path, old, new, count=1):
+          def replace(path, old, new):
               p = Path(path)
               text = p.read_text()
-              actual = text.count(old)
-              if actual != count:
-                  raise SystemExit(f"{path}: expected {count} matches, found {actual}\n--- needle ---\n{old}")
-              p.write_text(text.replace(old, new))
+              if text.count(old) != 1:
+                  raise SystemExit(f"{path}: expected one exact match, found {text.count(old)}: {old[:100]!r}")
+              p.write_text(text.replace(old, new, 1))
 
-          # Fan rows: after centering the icon slot, center both adjacent labels
-          # in the same 54px cross-axis instead of leaving their implicit-height
-          # text boxes at the top of the layout.
-          replace(
-              "ui/audited/sections/dashboard.slint",
+          def regex_replace(path, pattern, replacement):
+              p = Path(path)
+              text = p.read_text()
+              text, n = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if n != 1:
+                  raise SystemExit(f"{path}: expected one regex match, found {n}: {pattern}")
+              p.write_text(text)
+
+          # Dashboard fan rows: icon and both labels share the same vertical center.
+          replace("ui/audited/sections/dashboard.slint",
               'Text { text: "CPU"; font-size: 12.5px; color: Palette.text-secondary; }',
-              'Text { vertical-stretch: 1; text: "CPU"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }'
-          )
-          replace(
-              "ui/audited/sections/dashboard.slint",
+              'Text { vertical-stretch: 1; text: "CPU"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }')
+          replace("ui/audited/sections/dashboard.slint",
               'Text { text: root.ui-state.cpu-fan-rpm; font-size: 14px; font-weight: 650; color: Palette.text-primary; }',
-              'Text { vertical-stretch: 1; text: root.ui-state.cpu-fan-rpm; font-size: 14px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }'
-          )
-          replace(
-              "ui/audited/sections/dashboard.slint",
+              'Text { vertical-stretch: 1; text: root.ui-state.cpu-fan-rpm; font-size: 14px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }')
+          replace("ui/audited/sections/dashboard.slint",
               'Text { text: "GPU"; font-size: 12.5px; color: Palette.text-secondary; }',
-              'Text { vertical-stretch: 1; text: "GPU"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }'
-          )
-          replace(
-              "ui/audited/sections/dashboard.slint",
+              'Text { vertical-stretch: 1; text: "GPU"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }')
+          replace("ui/audited/sections/dashboard.slint",
               'Text { text: root.ui-state.gpu-fan-rpm; font-size: 14px; font-weight: 650; color: Palette.text-primary; }',
-              'Text { vertical-stretch: 1; text: root.ui-state.gpu-fan-rpm; font-size: 14px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }'
-          )
+              'Text { vertical-stretch: 1; text: root.ui-state.gpu-fan-rpm; font-size: 14px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }')
 
-          # A fixed-height action button inside a much taller card was laid out
-          # at the top edge. Give it a full-height slot and center the actual
-          # 36px control inside that slot.
-          replace(
-              "ui/audited/sections/performance.slint",
+          # Performance footer action: center the 36px visual control in the tall card.
+          replace("ui/audited/sections/performance.slint",
               '                    ActionButton { label: "Открыть графику"; clicked => { root.graphics-open-requested(); } }',
               '''                    Rectangle {
                         width: 126px;
@@ -74,19 +69,12 @@ jobs:
                             label: "Открыть графику";
                             clicked => { root.graphics-open-requested(); }
                         }
-                    }'''
-          )
+                    }''')
 
-          # Status pills in the 74px GPU overview cards need a centered slot;
-          # header-row pills elsewhere are already visually centered and are
-          # intentionally left untouched.
-          replace(
-              "ui/audited/sections/graphics.slint",
-              '''                        StatusPill {
-                            text: root.ui-state.gpu-mode-writable ? "Доступно" : "Наблюдение";
-                            accent: root.ui-state.gpu-mode-writable ? Palette.success : Palette.text-secondary;
-                        }''',
-              '''                        Rectangle {
+          # GPU overview pills: format-tolerant matching because Slint formatting may vary.
+          regex_replace("ui/audited/sections/graphics.slint",
+              r'StatusPill\s*\{\s*text:\s*root\.ui-state\.gpu-mode-writable\s*\?\s*"Доступно"\s*:\s*"Наблюдение";\s*accent:\s*root\.ui-state\.gpu-mode-writable\s*\?\s*Palette\.success\s*:\s*Palette\.text-secondary;\s*\}',
+              '''Rectangle {
                             width: root.ui-state.gpu-mode-writable ? 88px : 112px;
                             vertical-stretch: 1;
                             background: transparent;
@@ -96,12 +84,10 @@ jobs:
                                 text: root.ui-state.gpu-mode-writable ? "Доступно" : "Наблюдение";
                                 accent: root.ui-state.gpu-mode-writable ? Palette.success : Palette.text-secondary;
                             }
-                        }'''
-          )
-          replace(
-              "ui/audited/sections/graphics.slint",
-              '                        if (root.ui-state.gpu-reboot-required) : StatusPill { text: "Нужен перезапуск"; accent: Palette.warning; }',
-              '''                        if (root.ui-state.gpu-reboot-required) : Rectangle {
+                        }''')
+          regex_replace("ui/audited/sections/graphics.slint",
+              r'if\s*\(root\.ui-state\.gpu-reboot-required\)\s*:\s*StatusPill\s*\{\s*text:\s*"Нужен перезапуск";\s*accent:\s*Palette\.warning;\s*\}',
+              '''if (root.ui-state.gpu-reboot-required) : Rectangle {
                             width: 150px;
                             vertical-stretch: 1;
                             background: transparent;
@@ -111,17 +97,12 @@ jobs:
                                 text: "Нужен перезапуск";
                                 accent: Palette.warning;
                             }
-                        }'''
-          )
+                        }''')
 
-          # Same tall-card case on Display.
-          replace(
-              "ui/audited/sections/display.slint",
-              '''                    StatusPill {
-                        text: root.display-state-ready ? "Наблюдается" : "Получение данных";
-                        accent: root.display-state-ready ? Palette.success : Palette.warning;
-                    }''',
-              '''                    Rectangle {
+          # Display overview pill: center against the two-line mode block.
+          regex_replace("ui/audited/sections/display.slint",
+              r'StatusPill\s*\{\s*text:\s*root\.display-state-ready\s*\?\s*"Наблюдается"\s*:\s*"Получение данных";\s*accent:\s*root\.display-state-ready\s*\?\s*Palette\.success\s*:\s*Palette\.warning;\s*\}',
+              '''Rectangle {
                         width: root.display-state-ready ? 114px : 146px;
                         vertical-stretch: 1;
                         background: transparent;
@@ -131,20 +112,12 @@ jobs:
                             text: root.display-state-ready ? "Наблюдается" : "Получение данных";
                             accent: root.display-state-ready ? Palette.success : Palette.warning;
                         }
-                    }''',
-              count=1
-          )
+                    }''')
 
-          # Cooling uses a 36px status row and a 40px action row. Center the
-          # smaller visual controls explicitly rather than relying on layout
-          # cross-axis behavior.
-          replace(
-              "ui/audited/sections/cooling.slint",
-              '''                StatusPill {
-                    text: root.ui-state.fan-curve-writable ? "Редактирование" : "Наблюдение";
-                    accent: root.ui-state.fan-curve-writable ? Palette.success : Palette.text-secondary;
-                }''',
-              '''                Rectangle {
+          # Cooling status and action rows: center smaller controls in 36/40px rows.
+          regex_replace("ui/audited/sections/cooling.slint",
+              r'StatusPill\s*\{\s*text:\s*root\.ui-state\.fan-curve-writable\s*\?\s*"Редактирование"\s*:\s*"Наблюдение";\s*accent:\s*root\.ui-state\.fan-curve-writable\s*\?\s*Palette\.success\s*:\s*Palette\.text-secondary;\s*\}',
+              '''Rectangle {
                     width: root.ui-state.fan-curve-writable ? 130px : 112px;
                     vertical-stretch: 1;
                     background: transparent;
@@ -154,26 +127,10 @@ jobs:
                         text: root.ui-state.fan-curve-writable ? "Редактирование" : "Наблюдение";
                         accent: root.ui-state.fan-curve-writable ? Palette.success : Palette.text-secondary;
                     }
-                }'''
-          )
-          replace(
-              "ui/audited/sections/cooling.slint",
-              '''                        ActionButton {
-                            label: "Заводские значения";
-                            disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error;
-                            clicked => { root.factory-reset-pending = true; }
-                        }
-                        ActionButton {
-                            label: root.factory-reset-pending ? "Применить заводские" : "Применить изменения";
-                            accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
-                            disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
-                            clicked => {
-                                let reset = root.factory-reset-pending;
-                                root.fan-apply-clicked(reset);
-                                if (reset) { root.factory-reset-pending = false; }
-                            }
-                        }''',
-              '''                        Rectangle {
+                }''')
+          regex_replace("ui/audited/sections/cooling.slint",
+              r'ActionButton\s*\{\s*label:\s*"Заводские значения";\s*disabled:\s*root\.mutation-safety-blocked\s*\|\|\s*!root\.factory-reset-available\s*\|\|\s*!root\.ui-state\.fan-curve-writable\s*\|\|\s*root\.ui-state\.fan-curve-error;\s*clicked\s*=>\s*\{\s*root\.factory-reset-pending\s*=\s*true;\s*\}\s*\}\s*ActionButton\s*\{\s*label:\s*root\.factory-reset-pending\s*\?\s*"Применить заводские"\s*:\s*"Применить изменения";\s*accent:\s*root\.factory-reset-pending\s*\|\|\s*root\.ui-state\.fan-curve-dirty;\s*disabled:\s*root\.mutation-safety-blocked\s*\|\|\s*!root\.ui-state\.fan-curve-writable\s*\|\|\s*root\.ui-state\.fan-curve-error\s*\|\|\s*\(!root\.factory-reset-pending\s*&&\s*!root\.ui-state\.fan-curve-dirty\);\s*clicked\s*=>\s*\{\s*let reset\s*=\s*root\.factory-reset-pending;\s*root\.fan-apply-clicked\(reset\);\s*if\s*\(reset\)\s*\{\s*root\.factory-reset-pending\s*=\s*false;\s*\}\s*\}\s*\}',
+              '''Rectangle {
                             width: 146px;
                             vertical-stretch: 1;
                             background: transparent;
@@ -201,12 +158,10 @@ jobs:
                                     if (reset) { root.factory-reset-pending = false; }
                                 }
                             }
-                        }'''
-          )
+                        }''')
 
           print("Final alignment fixes applied")
           PY
-
           git diff --check
           git diff --stat
 
