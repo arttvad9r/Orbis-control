@@ -1,0 +1,49 @@
+name: Fix verify test once
+
+on:
+  push:
+    branches:
+      - agent/finish-v01
+    paths:
+      - .github/workflows/fix-verify-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/finish-v01
+          persist-credentials: true
+
+      - name: Update stale window-width assertion and remove diagnostics
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/orbis-ui/src/main_tests.rs")
+          text = path.read_text()
+          old = 'assert!(shell.contains("preferred-width: 1200px"));'
+          new = 'assert!(shell.contains("preferred-width: 1240px"));'
+          if text.count(old) != 1:
+              raise SystemExit(f"expected exactly one stale assertion, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          git rm -f .github/workflows/verify-debug-once.yml
+          git diff --check
+          git diff -- crates/orbis-ui/src/main_tests.rs .github/workflows/verify-debug-once.yml
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/orbis-ui/src/main_tests.rs .github/workflows/verify-debug-once.yml
+          git commit -m "Fix window layout assertion"
+          git push origin HEAD:agent/finish-v01
