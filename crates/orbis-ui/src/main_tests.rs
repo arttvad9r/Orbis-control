@@ -2084,7 +2084,7 @@ fn main_window_renders_queued_target_and_reboot_state() {
 fn shell_hosts_four_sections_and_frameless_chrome() {
     let shell = include_str!("../../../ui/audited/main-window.slint");
     assert!(shell.contains("no-frame: true"));
-    assert!(shell.contains("preferred-width: 1200px"));
+    assert!(shell.contains("preferred-width: 1240px"));
     assert!(shell.contains("Section.Dashboard"));
     assert!(shell.contains("Section.Performance"));
     assert!(shell.contains("Section.Power"));
