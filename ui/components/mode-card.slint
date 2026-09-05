@@ -16,7 +16,7 @@ export component ModeCard inherits Rectangle {
     callback clicked;
 
     horizontal-stretch: 1;
-    min-height: 76px;
+    min-height: 82px;
     border-radius: 12px;
     border-width: root.selected || root.pending ? 1.5px : 1px;
     border-color: root.selected || root.pending ? root.accent
@@ -74,9 +74,10 @@ export component ModeCard inherits Rectangle {
             }
             if (root.description != "") : Text {
                 text: root.description;
-                font-size: 12px;
+                font-size: 11.5px;
                 color: root.disabled ? Palette.text-disabled : Palette.text-secondary;
-                overflow: elide;
+                wrap: word-wrap;
+                vertical-alignment: center;
             }
             if (root.pending && !root.disabled) : Text {
                 text: root.pending-note;
