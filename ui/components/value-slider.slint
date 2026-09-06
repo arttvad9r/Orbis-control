@@ -7,6 +7,7 @@ export component ValueSlider inherits Rectangle {
     in property <int> max: 100;
     in property <int> step: 1;
     in property <int> value: 80;
+    in property <string> unit: "%";
     in property <bool> disabled: false;
     callback changed(float);
 
@@ -109,7 +110,7 @@ export component ValueSlider inherits Rectangle {
             border-color: Palette.border-default;
             background: Palette.surface-muted;
             Text {
-                text: round(root.internal-value) + " %";
+                text: round(root.internal-value) + " " + root.unit;
                 font-size: 13px;
                 font-weight: 650;
                 color: root.disabled ? Palette.text-disabled : Palette.text-primary;

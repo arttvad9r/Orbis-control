@@ -17,12 +17,13 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
-use orbis_core::aura::AuraRgb;
+use orbis_core::aura::{AuraDirection, AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraZone};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::asus_gpu_mode::{AsusGpuMode, ProductGpuOutcome};
 use orbis_providers::error::ProviderError;
 use orbis_providers::supergfxd::{SupergfxdMode, SupergfxdStagedState, SupergfxdUserAction};
 
+pub mod aspm;
 pub mod asus_gpu_mode;
 pub mod aura;
 pub mod battery;
@@ -36,6 +37,9 @@ use battery::{BatteryMutationBackend, BatteryMutationReadback};
 
 /// Фиксированный production path kernel ABI: current profile.
 pub const PLATFORM_PROFILE_PATH: &str = "/sys/firmware/acpi/platform_profile";
+
+/// Wire tuple returned after config-confirmed Aura effect mutation.
+pub type AuraEffectMutationWire = (u32, String, (u8, u8, u8), (u8, u8, u8), u32);
 /// Фиксированный production path kernel ABI: доступные профили.
 pub const PLATFORM_PROFILE_CHOICES_PATH: &str = "/sys/firmware/acpi/platform_profile_choices";
 
@@ -209,6 +213,8 @@ pub const DBUS_OBJECT_PATH: &str = "/io/github/orbiscontrol/Hardware";
 pub const DBUS_INTERFACE_NAME: &str = "io.github.orbiscontrol.Hardware1";
 /// Polkit action id для Performance mutation.
 pub const POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-performance-profile";
+/// Polkit action id for PCIe ASPM policy mutation.
+pub const ASPM_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-aspm";
 /// Polkit action id for Battery charge-limit mutation.
 pub const BATTERY_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-charge-limit";
 /// Polkit action id for the injectable GPU mutation boundary.
@@ -228,6 +234,8 @@ pub const AURA_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-aura-s
 pub const PRODUCT_GPU_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-product-gpu-mode";
 /// Polkit action id for ASUS BIOS/POST sound mutation.
 pub const BOOT_SOUND_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-boot-sound";
+/// Polkit action id for ASUS iGPU memory mutation.
+pub const APU_MEMORY_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-apu-memory";
 
 /// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
 pub mod wire {
@@ -442,6 +450,26 @@ where
             "hardwared: операция не подтверждена: {other:?}"
         ))),
     }
+}
+
+pub async fn handle_set_aspm<A, S>(
+    authorizer: &A,
+    writer: &aspm::AspmWriter<S>,
+    disabled: bool,
+    sender: &str,
+) -> zbus::fdo::Result<bool>
+where
+    A: Authorizer + ?Sized,
+    S: aspm::AspmIo,
+{
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+    writer
+        .set_disabled(disabled)
+        .map_err(provider_error_to_dbus)?;
+    Ok(disabled)
 }
 
 /// Обработка Battery mutation до публичного D-Bus boundary.
@@ -758,6 +786,7 @@ pub async fn handle_set_product_gpu_mode(
 /// Service object интерфейса `io.github.orbiscontrol.Hardware1`.
 pub struct HardwareService {
     authorizer: Box<dyn Authorizer>,
+    aspm_authorizer: Box<dyn Authorizer>,
     writer: PlatformProfileWriter<StdProfileIo>,
     battery_authorizer: Box<dyn Authorizer>,
     battery_backend: Option<Box<dyn BatteryMutationBackend>>,
@@ -776,12 +805,15 @@ pub struct HardwareService {
     aura_backend: Option<Box<dyn aura::AuraStaticRgbMutationBackend>>,
     boot_sound_authorizer: Box<dyn Authorizer>,
     boot_sound_backend: Option<Box<dyn firmware::BootSoundMutationOperation>>,
+    apu_memory_authorizer: Box<dyn Authorizer>,
+    apu_memory_backend: Option<Box<dyn firmware::ApuMemoryMutationOperation>>,
 }
 
 impl HardwareService {
     pub fn new(authorizer: Box<dyn Authorizer>) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -800,6 +832,8 @@ impl HardwareService {
             aura_backend: None,
             boot_sound_authorizer: Box::new(DisabledAuthorizer),
             boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -810,6 +844,7 @@ impl HardwareService {
     ) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -828,6 +863,8 @@ impl HardwareService {
             aura_backend: None,
             boot_sound_authorizer: Box::new(DisabledAuthorizer),
             boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -840,6 +877,7 @@ impl HardwareService {
     ) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -858,6 +896,8 @@ impl HardwareService {
             aura_backend: None,
             boot_sound_authorizer: Box::new(DisabledAuthorizer),
             boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -868,6 +908,7 @@ impl HardwareService {
     ) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -886,6 +927,8 @@ impl HardwareService {
             aura_backend: None,
             boot_sound_authorizer: Box::new(DisabledAuthorizer),
             boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -900,6 +943,7 @@ impl HardwareService {
     ) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -918,6 +962,8 @@ impl HardwareService {
             aura_backend: None,
             boot_sound_authorizer: Box::new(DisabledAuthorizer),
             boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -929,6 +975,7 @@ impl HardwareService {
     ) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -947,6 +994,8 @@ impl HardwareService {
             aura_backend: None,
             boot_sound_authorizer: Box::new(DisabledAuthorizer),
             boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -1013,6 +1062,22 @@ impl HardwareService {
         self.boot_sound_authorizer = authorizer;
         self
     }
+
+    /// Attach the typed ASUS iGPU memory mutation backend.
+    pub fn with_apu_memory(
+        mut self,
+        backend: Box<dyn firmware::ApuMemoryMutationOperation>,
+        authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.apu_memory_backend = Some(backend);
+        self.apu_memory_authorizer = authorizer;
+        self
+    }
+
+    pub fn with_aspm_authorizer(mut self, authorizer: Box<dyn Authorizer>) -> Self {
+        self.aspm_authorizer = authorizer;
+        self
+    }
 }
 
 struct DisabledAuthorizer;
@@ -1048,6 +1113,31 @@ impl HardwareService {
     fn performance_mutation_status(&self) -> u8 {
         use performance_mutation_wire;
         performance_mutation_wire::to_wire(self.writer.mutation_status())
+    }
+
+    async fn set_aspm_disabled(
+        &self,
+        disabled: bool,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let writer = aspm::AspmWriter::default();
+        handle_set_aspm(self.aspm_authorizer.as_ref(), &writer, disabled, &sender).await
+    }
+
+    fn aspm_mutation_status(&self) -> u8 {
+        aspm::mutation_wire::to_wire(aspm::AspmWriter::default().mutation_status())
+    }
+
+    fn aspm_disabled(&self) -> zbus::fdo::Result<bool> {
+        match aspm::AspmWriter::default().current_policy() {
+            Ok(aspm::AspmPolicy::Performance) => Ok(true),
+            Ok(_) => Ok(false),
+            Err(error) => Err(provider_error_to_dbus(error)),
+        }
     }
 
     /// Установить Battery configured threshold; возвращает подтверждённый
@@ -1290,6 +1380,49 @@ impl HardwareService {
         })
     }
 
+    /// Read the current ASUS iGPU memory enum value without authorization.
+    async fn apu_memory_state(&self) -> zbus::fdo::Result<u8> {
+        let backend = self
+            .apu_memory_backend
+            .as_deref()
+            .ok_or_else(|| zbus::fdo::Error::NotSupported("apu_mem backend unavailable".into()))?;
+        backend
+            .read_apu_memory()
+            .await
+            .map_err(provider_error_to_dbus)
+    }
+
+    /// Set ASUS iGPU memory and report confirmed pending-reboot state.
+    async fn set_apu_memory(
+        &self,
+        value: u8,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<(u8, u8, u8)> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self
+            .apu_memory_backend
+            .as_deref()
+            .ok_or_else(|| zbus::fdo::Error::NotSupported("apu_mem backend unavailable".into()))?;
+        firmware::handle_set_apu_memory(
+            self.apu_memory_authorizer.as_ref(),
+            backend,
+            value,
+            &sender,
+        )
+        .await
+    }
+
+    /// Read-only runtime evidence for ASUS iGPU memory mutation.
+    async fn apu_memory_mutation_status(&self) -> u8 {
+        firmware::apu_memory_mutation_wire::to_wire(match self.apu_memory_backend.as_deref() {
+            Some(backend) => backend.mutation_status().await,
+            None => firmware::ApuMemoryMutationStatus::Unknown,
+        })
+    }
+
     /// Установить keyboard backlight brightness.
     async fn set_keyboard_backlight(
         &self,
@@ -1349,6 +1482,63 @@ impl HardwareService {
         .await
     }
 
+    /// Set Aura mode, speed and both colours through the same typed asusd owner.
+    async fn set_aura_effect(
+        &self,
+        mode: u32,
+        speed: String,
+        colour1: (u8, u8, u8),
+        colour2: (u8, u8, u8),
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<AuraEffectMutationWire> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.aura_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("aura effect backend unavailable".into())
+        })?;
+        let readback = aura::handle_set_aura_effect(
+            self.aura_authorizer.as_ref(),
+            backend,
+            AuraEffect {
+                mode: AuraMode::from_u32(mode),
+                zone: AuraZone::None,
+                colour1: AuraRgb {
+                    r: colour1.0,
+                    g: colour1.1,
+                    b: colour1.2,
+                },
+                colour2: AuraRgb {
+                    r: colour2.0,
+                    g: colour2.1,
+                    b: colour2.2,
+                },
+                speed: speed
+                    .parse::<AuraSpeed>()
+                    .unwrap_or(AuraSpeed::Unknown(speed)),
+                direction: AuraDirection::Right,
+            },
+            &sender,
+        )
+        .await?;
+        Ok((
+            readback.observed.mode.to_u32(),
+            readback.observed.speed.as_str().to_string(),
+            (
+                readback.observed.colour1.r,
+                readback.observed.colour1.g,
+                readback.observed.colour1.b,
+            ),
+            (
+                readback.observed.colour2.r,
+                readback.observed.colour2.g,
+                readback.observed.colour2.b,
+            ),
+            aura::AURA_OUTCOME_CONFIG_CONFIRMED,
+        ))
+    }
+
     /// Read-only typed evidence about Aura Static RGB mutation backend
     /// availability.
     ///
@@ -1375,6 +1565,9 @@ pub trait Hardware1 {
     fn set_performance_profile(&self, profile: u8) -> zbus::Result<u8>;
     /// Read-only typed Performance mutation backend availability (wire enum).
     fn performance_mutation_status(&self) -> zbus::Result<u8>;
+    fn set_aspm_disabled(&self, disabled: bool) -> zbus::Result<bool>;
+    fn aspm_mutation_status(&self) -> zbus::Result<u8>;
+    fn aspm_disabled(&self) -> zbus::Result<bool>;
 
     /// Установить Battery configured threshold; возвращает подтверждённый
     /// configured percent, effective value остаётся отдельным read-model field.
@@ -1414,6 +1607,14 @@ pub trait Hardware1 {
 
     /// Read-only typed Aura Static RGB mutation backend availability (wire enum).
     fn aura_mutation_status(&self) -> zbus::Result<u8>;
+
+    fn set_aura_effect(
+        &self,
+        mode: u32,
+        speed: String,
+        colour1: (u8, u8, u8),
+        colour2: (u8, u8, u8),
+    ) -> zbus::Result<AuraEffectMutationWire>;
 }
 
 #[cfg(test)]

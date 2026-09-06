@@ -91,6 +91,15 @@ export component AppWindow inherits Window {
     in property <bool> panel-overdrive-control-ready: false;
     in property <bool> boot-sound-state-ready: false;
     in property <bool> boot-sound-control-ready: false;
+    in property <bool> igpu-memory-state-ready: false;
+    in property <bool> igpu-memory-control-ready: false;
+    in property <bool> igpu-memory-pending: false;
+    in property <bool> status-led-state-ready: false;
+    in property <bool> status-led-control-ready: false;
+    in property <bool> auto-clamshell-state-ready: false;
+    in property <bool> auto-clamshell-control-ready: false;
+    in property <bool> aspm-state-ready: false;
+    in property <bool> aspm-control-ready: false;
     in-out property <int> m1-action: 0;
     in-out property <int> m2-action: 0;
     in-out property <int> m3-action: 0;
@@ -98,6 +107,24 @@ export component AppWindow inherits Window {
     in-out property <int> m5-action: 0;
     in-out property <int> keyboard-effect: -1;
     in-out property <int> keyboard-speed: -1;
+    in-out property <int> rgb-red: 255;
+    in-out property <int> rgb-green: 65;
+    in-out property <int> rgb-blue: 77;
+    in property <bool> aura-static-supported: false;
+    in property <bool> aura-breathe-supported: false;
+    in property <bool> aura-rainbow-supported: false;
+    in property <bool> aura-rainbow-wave-supported: false;
+    in property <bool> aura-star-supported: false;
+    in property <bool> aura-rain-supported: false;
+    in property <bool> aura-highlight-supported: false;
+    in property <bool> aura-laser-supported: false;
+    in property <bool> aura-ripple-supported: false;
+    in property <bool> aura-pulse-supported: false;
+    in property <bool> aura-comet-supported: false;
+    in property <bool> aura-flash-supported: false;
+    in-out property <int> aura-secondary-red: 0;
+    in-out property <int> aura-secondary-green: 0;
+    in-out property <int> aura-secondary-blue: 0;
     in-out property <bool> boot-sound: false;
     in-out property <bool> status-led: false;
     in-out property <bool> panel-overdrive: false;
@@ -110,9 +137,13 @@ export component AppWindow inherits Window {
     in-out property <int> e-cores: 0;
     callback reload-requested;
     callback boot-sound-requested(bool);
+    callback igpu-memory-requested(int);
     callback apply-requested;
     callback panel-overdrive-requested(bool);
+    callback aspm-requested(bool);
+    callback auto-clamshell-requested(bool);
     callback theme-changed(bool);
+    callback aura-effect-requested(int, int, int, int, int, int, int, int);
     callback start-minimized-changed(bool);
     callback remember-position-changed(bool);
     callback close-action-changed(int);
@@ -312,6 +343,25 @@ export component AppWindow inherits Window {
                         aura-control-ready <=> root.aura-control-ready;
                         keyboard-effect <=> root.keyboard-effect;
                         keyboard-speed <=> root.keyboard-speed;
+                        rgb-red <=> root.rgb-red;
+                        rgb-green <=> root.rgb-green;
+                        rgb-blue <=> root.rgb-blue;
+                        aura-static-supported <=> root.aura-static-supported;
+                        aura-breathe-supported <=> root.aura-breathe-supported;
+                        aura-rainbow-supported <=> root.aura-rainbow-supported;
+                        aura-rainbow-wave-supported <=> root.aura-rainbow-wave-supported;
+                        aura-star-supported <=> root.aura-star-supported;
+                        aura-rain-supported <=> root.aura-rain-supported;
+                        aura-highlight-supported <=> root.aura-highlight-supported;
+                        aura-laser-supported <=> root.aura-laser-supported;
+                        aura-ripple-supported <=> root.aura-ripple-supported;
+                        aura-pulse-supported <=> root.aura-pulse-supported;
+                        aura-comet-supported <=> root.aura-comet-supported;
+                        aura-flash-supported <=> root.aura-flash-supported;
+                        aura-secondary-red <=> root.aura-secondary-red;
+                        aura-secondary-green <=> root.aura-secondary-green;
+                        aura-secondary-blue <=> root.aura-secondary-blue;
+                        aura-effect-requested(a, b, c, d, e, f, g, h) => { root.aura-effect-requested(a, b, c, d, e, f, g, h); }
                         aura-static-rgb-requested(a, b, c) => { root.aura-static-rgb-requested(a, b, c); }
                     }
                     if (root.active-section == Section.Display) : DisplaySection {
@@ -335,6 +385,15 @@ export component AppWindow inherits Window {
                         boot-sound-state-ready <=> root.boot-sound-state-ready;
                         boot-sound-control-ready <=> root.boot-sound-control-ready;
                         boot-sound <=> root.boot-sound;
+                        igpu-memory-state-ready <=> root.igpu-memory-state-ready;
+                        igpu-memory-control-ready <=> root.igpu-memory-control-ready;
+                        igpu-memory-pending <=> root.igpu-memory-pending;
+                        status-led-state-ready <=> root.status-led-state-ready;
+                        status-led-control-ready <=> root.status-led-control-ready;
+                        auto-clamshell-state-ready <=> root.auto-clamshell-state-ready;
+                        auto-clamshell-control-ready <=> root.auto-clamshell-control-ready;
+                        aspm-state-ready <=> root.aspm-state-ready;
+                        aspm-control-ready <=> root.aspm-control-ready;
                         m1-action <=> root.m1-action;
                         m2-action <=> root.m2-action;
                         m3-action <=> root.m3-action;
@@ -350,7 +409,10 @@ export component AppWindow inherits Window {
                         e-cores <=> root.e-cores;
                         reload-requested => { root.reload-requested(); }
                         boot-sound-requested(v) => { root.boot-sound-requested(v); }
+                        igpu-memory-requested(v) => { root.igpu-memory-requested(v); }
                         apply-requested => { root.apply-requested(); }
+                        aspm-requested(v) => { root.aspm-requested(v); }
+                        auto-clamshell-requested(v) => { root.auto-clamshell-requested(v); }
                         diagnostics-summary <=> root.diagnostics-summary;
                         refresh-enabled <=> root.refresh-enabled;
                         refresh-pending <=> root.refresh-pending;

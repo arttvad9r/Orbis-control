@@ -26,7 +26,7 @@ use orbis_config::{
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
-use orbis_core::profile::PerformanceProfile;
+use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_providers::error::ProviderError;
 use orbis_session_client::{
     HardwareProductGpuSource, ProductGpuMutationResult, ZbusHardwareProductGpuSource,
@@ -1099,6 +1099,13 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             }
         },
         WorkerEvent::FanCurveDefaults { profile, result } => match result {
+            Ok(ApplyResult::Applied) => {
+                tracing::debug!(
+                    "fan factory reset confirmed for profile={profile:?}; authoritative curves were read back"
+                );
+                state.fan_curve_error = false;
+                state.fan_curve_dirty = false;
+            }
             Ok(ApplyResult::Accepted) => {
                 tracing::debug!(
                     "fan factory reset accepted for profile={profile:?}; confirmation of platform defaults unavailable"
@@ -1133,19 +1140,20 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
     }
 }
 
+fn factory_reset_profile_for_refresh(event: &WorkerEvent) -> Option<AsusdFanProfile> {
+    match event {
+        WorkerEvent::FanCurveDefaults { profile, .. } => Some(*profile),
+        _ => None,
+    }
+}
+
 fn handle_worker_event(
     app: &AppWindow,
     event: WorkerEvent,
     worker_tx: &UnboundedSender<WorkerCommand>,
 ) {
     // Check if this is a factory reset accepted event and extract profile for refresh.
-    let refresh_fan_curve = match &event {
-        WorkerEvent::FanCurveDefaults {
-            profile,
-            result: Ok(ApplyResult::Accepted),
-        } => Some(*profile),
-        _ => None,
-    };
+    let refresh_fan_curve = factory_reset_profile_for_refresh(&event);
 
     let refresh_quick_controls = matches!(&event, WorkerEvent::TelemetryRefresh(_));
     if let WorkerEvent::RegistryChange(Ok((_generation, snapshot))) = &event {

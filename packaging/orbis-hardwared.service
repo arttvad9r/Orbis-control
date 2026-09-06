@@ -6,8 +6,9 @@
 
 [Unit]
 Description=Orbis Control hardware helper
-After=dbus.service
+After=dbus.service asusd.service
 Requires=dbus.service
+Wants=asusd.service
 
 [Service]
 Type=dbus
@@ -34,6 +35,7 @@ ReadWritePaths=-/sys/firmware/acpi/platform_profile
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/brightness
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/max_brightness
 ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/boot_sound/current_value
+ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/apu_mem/current_value
 
 [Install]
 WantedBy=multi-user.target

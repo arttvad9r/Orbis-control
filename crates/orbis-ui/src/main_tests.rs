@@ -838,6 +838,21 @@ fn successful_factory_reset_is_accepted_not_applied() {
 }
 
 #[test]
+fn confirmed_factory_reset_clears_dirty_state() {
+    let mut s = base_state();
+    s.fan_curve_dirty = true;
+    apply_performance_event(
+        &mut s,
+        WorkerEvent::FanCurveDefaults {
+            profile: AsusdFanProfile::Balanced,
+            result: Ok(ApplyResult::Applied),
+        },
+    );
+    assert!(!s.fan_curve_dirty);
+    assert!(!s.fan_curve_error);
+}
+
+#[test]
 fn accepted_is_not_applied_for_factory_reset() {
     // ApplyResult::Accepted must return false for is_applied()
     assert!(!ApplyResult::Accepted.is_applied());
@@ -1126,6 +1141,19 @@ fn factory_reset_accepted_not_rendered_as_applied() {
             "Accepted must not be considered Applied"
         );
     }
+}
+
+#[test]
+fn factory_reset_failure_still_requests_readback_refresh() {
+    let event = definitive_factory_reset_error_outcome(
+        AsusdFanProfile::Balanced,
+        ProviderError::Dbus("post-reset readback failed".into()),
+    );
+
+    assert_eq!(
+        factory_reset_profile_for_refresh(&event),
+        Some(AsusdFanProfile::Balanced)
+    );
 }
 
 #[test]
@@ -2099,4 +2127,30 @@ fn shell_hosts_four_sections_and_frameless_chrome() {
     assert!(shell.contains("titlebar-drag-started"));
     assert!(!shell.contains("UpdatesWindow"));
     assert!(!shell.contains("AutomationWindow"));
+}
+
+#[test]
+fn backlight_exposes_editable_rgb_channels() {
+    let source = include_str!("../../../ui/audited/sections/backlight.slint");
+
+    assert!(source.contains("import { ValueSlider }"));
+    assert!(source.contains("rgb-red"));
+    assert!(source.contains("rgb-green"));
+    assert!(source.contains("rgb-blue"));
+    assert!(source.matches("changed(v) =>").count() >= 3);
+    assert!(source.contains("root.aura-effect-requested"));
+    assert!(source.contains("aura-secondary-red"));
+    assert!(source.contains("aura-breathe-supported"));
+    for label in [
+        "Rainbow Wave",
+        "Rain",
+        "Highlight",
+        "Laser",
+        "Ripple",
+        "Pulse",
+        "Comet",
+        "Flash",
+    ] {
+        assert!(source.contains(label), "missing Aura mode label: {label}");
+    }
 }

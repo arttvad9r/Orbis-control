@@ -21,10 +21,10 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use orbis_hardwared::{
-    AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION, BOOT_SOUND_POLKIT_ACTION, DBUS_NAME,
-    DBUS_OBJECT_PATH, FAN_POLKIT_ACTION, GPU_POLKIT_ACTION, HardwareService,
-    KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION, PRODUCT_GPU_POLKIT_ACTION,
-    PolkitAuthorizer,
+    APU_MEMORY_POLKIT_ACTION, ASPM_POLKIT_ACTION, AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION,
+    BOOT_SOUND_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION, GPU_POLKIT_ACTION,
+    HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
+    PRODUCT_GPU_POLKIT_ACTION, PolkitAuthorizer,
     asus_gpu_mode::{AsusGpuMutationBackend, AsusdGpuMutationClient},
     aura::{AsusdAuraStaticRgbMutationBackend, ZbusAsusdAuraClient},
     battery::{
@@ -33,7 +33,9 @@ use orbis_hardwared::{
         ZbusAsusdBatteryClient, discover_effective_reader,
     },
     fans::{AsusdFanCurveMutationBackend, ZbusAsusdFanCurveClient},
-    firmware::{BootSoundMutationBackend, SysfsBootSoundIo},
+    firmware::{
+        ApuMemoryMutationBackend, BootSoundMutationBackend, SysfsApuMemoryIo, SysfsBootSoundIo,
+    },
     keyboard_backlight::{SysfsKeyboardBacklightIo, SysfsKeyboardBacklightMutationBackend},
     panel::{
         AsusdPanelOverdriveMutationBackend, PanelOverdriveMutationBackend,
@@ -276,6 +278,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             BOOT_SOUND_POLKIT_ACTION,
         )),
     );
+    let service = service.with_apu_memory(
+        Box::new(ApuMemoryMutationBackend::new(SysfsApuMemoryIo::default())),
+        Box::new(PolkitAuthorizer::with_action(
+            connection.clone(),
+            APU_MEMORY_POLKIT_ACTION,
+        )),
+    );
+    let service = service.with_aspm_authorizer(Box::new(PolkitAuthorizer::with_action(
+        connection.clone(),
+        ASPM_POLKIT_ACTION,
+    )));
 
     connection
         .object_server()

@@ -232,7 +232,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let (width, height) = match kind.as_str() {
-        "dialog" => (470, 248),
+        "dialog" => (470, 228),
         _ => (1240, 820),
     };
 

@@ -31,10 +31,7 @@ if ! command -v pkexec >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ "${1:-}" == "--stop" ]]; then
-  echo "→ Stopping ${SERVICE_NAME}…"
-  pkexec systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || true
-fi
+STOP_SERVICE="${1:-}"
 
 # Build as the invoking user, not as root.
 echo "→ Building orbis-hardwared with Cargo…"
@@ -51,20 +48,26 @@ UNIT_TMPFILE="$(mktemp)"
 trap 'rm -f "$UNIT_TMPFILE"' EXIT
 sed "s#/usr/bin/#${BIN_DIR}/#g" \
   "${SCRIPT_DIR}/orbis-hardwared.service" >"$UNIT_TMPFILE"
-pkexec install -d -m 0755 "$BIN_DIR" "$SYSTEMD_DIR" "$DBUS_DIR" "$POLKIT_DIR"
-pkexec install -m 0755 "$BINARY" "${BIN_DIR}/orbis-hardwared"
-pkexec install -m 0644 "$UNIT_TMPFILE" "$SERVICE_FILE"
-pkexec install -m 0644 "$DBUS_POLICY_SOURCE" "${DBUS_DIR}/io.github.orbiscontrol.Hardware.conf"
-pkexec install -m 0644 "$POLKIT_POLICY_SOURCE" "${POLKIT_DIR}/io.github.orbiscontrol.hardware.policy"
-
-pkexec systemctl daemon-reload
-pkexec systemctl reload dbus.service
-pkexec systemctl enable "${SERVICE_NAME}.service"
-pkexec systemctl restart "${SERVICE_NAME}.service"
+pkexec /bin/sh -c '
+  set -eu
+  if [ "$1" = "--stop" ]; then
+    systemctl stop "${10}.service" 2>/dev/null || true
+  fi
+  install -d -m 0755 "$2" "$3" "$4" "$5"
+  install -m 0755 "$6" "$2/orbis-hardwared"
+  install -m 0644 "$7" "$3/orbis-hardwared.service"
+  install -m 0644 "$8" "$4/io.github.orbiscontrol.Hardware.conf"
+  install -m 0644 "$9" "$5/io.github.orbiscontrol.hardware.policy"
+  systemctl daemon-reload
+  systemctl reload dbus.service
+  systemctl enable "orbis-hardwared.service"
+  systemctl restart "orbis-hardwared.service"
+' _ "$STOP_SERVICE" "$BIN_DIR" "$SYSTEMD_DIR" "$DBUS_DIR" "$POLKIT_DIR" \
+  "$BINARY" "$UNIT_TMPFILE" "$DBUS_POLICY_SOURCE" "$POLKIT_POLICY_SOURCE" "$SERVICE_NAME"
 
 echo ""
 echo "=== Verification ==="
-pkexec systemctl is-active --quiet "${SERVICE_NAME}.service"
+systemctl is-active --quiet "${SERVICE_NAME}.service"
 echo "✓ Service active"
 
 if busctl list 2>/dev/null | grep -q "io.github.orbiscontrol.Hardware"; then
@@ -79,7 +82,8 @@ for expected in \
   "/sys/firmware/acpi/platform_profile" \
   "/sys/class/leds/asus::kbd_backlight/brightness" \
   "/sys/class/leds/asus::kbd_backlight/max_brightness" \
-  "/sys/class/firmware-attributes/asus-armoury/attributes/boot_sound/current_value"; do
+  "/sys/class/firmware-attributes/asus-armoury/attributes/boot_sound/current_value" \
+  "/sys/class/firmware-attributes/asus-armoury/attributes/apu_mem/current_value"; do
   if grep -Fq "$expected" <<<"$READ_WRITE_PATHS"; then
     echo "✓ Sandbox write path: $expected"
   else

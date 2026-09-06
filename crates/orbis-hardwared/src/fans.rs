@@ -57,6 +57,9 @@ pub trait AsusdFanCurveClient: Send + Sync {
     async fn reset_curves_to_defaults(&self, profile: AsusdFanProfile)
     -> Result<(), ProviderError>;
 
+    /// Reset the stored profile curves and device curves to platform defaults.
+    async fn reset_profile_curves(&self, profile: AsusdFanProfile) -> Result<(), ProviderError>;
+
     /// Прочитать сохранённые кривые профиля (fresh read-back).
     async fn read_curves(
         &self,
@@ -96,6 +99,8 @@ trait AsusdFanCurves {
     ) -> zbus::Result<()>;
 
     fn set_curves_to_defaults(&self, profile: u32) -> zbus::Result<()>;
+
+    fn reset_profile_curves(&self, profile: u32) -> zbus::Result<()>;
 
     fn fan_curve_data(&self, profile: u32) -> zbus::Result<Vec<AsusdCurveWire>>;
 }
@@ -152,6 +157,14 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
             .set_curves_to_defaults(profile.wire())
             .await
             .map_err(|error| ProviderError::Dbus(format!("asusd SetCurvesToDefaults: {error}")))
+    }
+
+    async fn reset_profile_curves(&self, profile: AsusdFanProfile) -> Result<(), ProviderError> {
+        self.proxy()
+            .await?
+            .reset_profile_curves(profile.wire())
+            .await
+            .map_err(|error| ProviderError::Dbus(format!("asusd ResetProfileCurves: {error}")))
     }
 
     async fn read_curves(
@@ -427,15 +440,14 @@ where
         })
     }
 
-    /// Ask asusd to restore platform defaults for the whole profile, then
-    /// perform a fresh FanCurveData read. The current upstream asusd reset is
-    /// inherently a mutation, so Orbis never calls this for UI preview; it is
-    /// invoked only from the explicit Apply path.
+    /// Ask asusd to restore the stored and device curves for the whole profile,
+    /// then perform a fresh FanCurveData read. The upstream reset is inherently
+    /// a mutation, so Orbis invokes it only from the explicit Apply path.
     pub async fn reset_curves_to_defaults(
         &self,
         profile: AsusdFanProfile,
     ) -> Result<FanCurveDefaultsReadback, ProviderError> {
-        self.asusd.reset_curves_to_defaults(profile).await?;
+        self.asusd.reset_profile_curves(profile).await?;
         let raw = self.asusd.read_curves(profile).await?;
         let observed_curves = raw
             .iter()
@@ -692,6 +704,7 @@ mod tests {
         read_index: std::sync::atomic::AtomicUsize,
         setter_calls: std::sync::atomic::AtomicUsize,
         reset_calls: std::sync::atomic::AtomicUsize,
+        reset_profile_calls: std::sync::atomic::AtomicUsize,
     }
 
     impl FakeAsusd {
@@ -707,6 +720,7 @@ mod tests {
                 read_index: std::sync::atomic::AtomicUsize::new(0),
                 setter_calls: std::sync::atomic::AtomicUsize::new(0),
                 reset_calls: std::sync::atomic::AtomicUsize::new(0),
+                reset_profile_calls: std::sync::atomic::AtomicUsize::new(0),
             }
         }
 
@@ -721,6 +735,27 @@ mod tests {
                 .lock()
                 .unwrap()
                 .insert((profile.wire(), name.to_string()), (temps, pwms, enabled));
+        }
+
+        fn store_defaults(&self, profile: AsusdFanProfile) {
+            let mut stored = self.stored.lock().unwrap();
+            for (name, temps, pwms) in [
+                (
+                    "CPU",
+                    [50u8, 55, 60, 65, 70, 75, 79, 85],
+                    [0u8, 8, 13, 26, 36, 54, 77, 100],
+                ),
+                (
+                    "GPU",
+                    [50u8, 55, 60, 65, 70, 75, 79, 85],
+                    [0u8, 8, 13, 26, 36, 54, 77, 100],
+                ),
+            ] {
+                stored.insert(
+                    (profile.wire(), name.to_string()),
+                    (temps.to_vec(), pwms.to_vec(), true),
+                );
+            }
         }
     }
 
@@ -757,24 +792,20 @@ mod tests {
             if self.fail_reset.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err(ProviderError::Dbus("reset failed".into()));
             }
-            let mut stored = self.stored.lock().unwrap();
-            for (name, temps, pwms) in [
-                (
-                    "CPU",
-                    [50u8, 55, 60, 65, 70, 75, 79, 85],
-                    [0u8, 8, 13, 26, 36, 54, 77, 100],
-                ),
-                (
-                    "GPU",
-                    [50u8, 55, 60, 65, 70, 75, 79, 85],
-                    [0u8, 8, 13, 26, 36, 54, 77, 100],
-                ),
-            ] {
-                stored.insert(
-                    (profile.wire(), name.to_string()),
-                    (temps.to_vec(), pwms.to_vec(), true),
-                );
+            self.store_defaults(profile);
+            Ok(())
+        }
+
+        async fn reset_profile_curves(
+            &self,
+            profile: AsusdFanProfile,
+        ) -> Result<(), ProviderError> {
+            self.reset_profile_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fail_reset.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(ProviderError::Dbus("reset failed".into()));
             }
+            self.store_defaults(profile);
             Ok(())
         }
 
@@ -844,6 +875,13 @@ mod tests {
             (**self).reset_curves_to_defaults(profile).await
         }
 
+        async fn reset_profile_curves(
+            &self,
+            profile: AsusdFanProfile,
+        ) -> Result<(), ProviderError> {
+            (**self).reset_profile_curves(profile).await
+        }
+
         async fn read_curves(
             &self,
             profile: AsusdFanProfile,
@@ -896,6 +934,12 @@ mod tests {
         assert_eq!(result.observed_curves, 2);
         assert_eq!(
             asusd.reset_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert_eq!(
+            asusd
+                .reset_profile_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
             1
         );
     }
@@ -1263,7 +1307,7 @@ mod tests {
         for forbidden in [
             ["Platform", "Profile", "Writer"].concat(),
             ["platform", "_profile"].concat(),
-            ["set_", "profile"].concat(),
+            ["set_", "profile("].concat(),
         ] {
             assert!(
                 !source.contains(&forbidden),

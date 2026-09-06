@@ -11,6 +11,13 @@
     <message xml:lang="ru">Для изменения профиля производительности требуется разрешение</message>
     <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>yes</allow_active></defaults>
   </action>
+  <action id="io.github.orbiscontrol.hardware.set-aspm">
+    <description>Change the Orbis Control PCIe ASPM policy</description>
+    <description xml:lang="ru">Изменить политику PCIe ASPM Orbis Control</description>
+    <message>Permission is required to change the PCIe ASPM policy</message>
+    <message xml:lang="ru">Для изменения политики PCIe ASPM требуется разрешение</message>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>yes</allow_active></defaults>
+  </action>
   <action id="io.github.orbiscontrol.hardware.set-charge-limit">
     <description>Change the Orbis Control battery charge limit</description>
     <description xml:lang="ru">Изменить лимит заряда батареи Orbis Control</description>
@@ -65,6 +72,13 @@
     <description xml:lang="ru">Изменить звук включения BIOS/POST ASUS</description>
     <message>Change the ASUS BIOS/POST boot sound</message>
     <message xml:lang="ru">Изменить звук включения BIOS/POST ASUS</message>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>yes</allow_active></defaults>
+  </action>
+  <action id="io.github.orbiscontrol.hardware.set-apu-memory">
+    <description>Change the ASUS iGPU memory allocation</description>
+    <description xml:lang="ru">Изменить распределение памяти iGPU ASUS</description>
+    <message>Change the ASUS iGPU memory allocation; reboot is required</message>
+    <message xml:lang="ru">Изменить распределение памяти iGPU ASUS; требуется перезагрузка</message>
     <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>yes</allow_active></defaults>
   </action>
 </policyconfig>

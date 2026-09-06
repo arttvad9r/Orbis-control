@@ -411,9 +411,8 @@ pub trait FanServiceRuntime: Send + Sync {
     /// Restore platform factory defaults for all fan curves of a profile.
     ///
     /// This is a profile-wide operation. The mutation is sent directly to
-    /// Hardware1 (original caller identity preserved). The result is
-    /// `ApplyResult::Accepted` — the command was accepted but observed state
-    /// cannot be independently verified as platform factory defaults.
+    /// Hardware1 (original caller identity preserved). `Applied` is returned
+    /// only after Hardware1 confirms the reset and reads back a known curve.
     async fn reset_fan_curves_to_defaults(
         &self,
         profile: AsusdFanProfile,
@@ -423,7 +422,7 @@ pub trait FanServiceRuntime: Send + Sync {
     ///
     /// Returns a typed `Capability` for the `FanCurves` feature. The write
     /// status is controlled by `mutation_status` (typed Hardware1 evidence),
-    /// the read status is derived from the `active_curve` read contract.
+    /// while read status comes from the profile-specific `FanCurveData` path.
     async fn probe_fan_capability(
         &self,
         fan: FanId,
@@ -882,7 +881,7 @@ where
             }
         })?;
 
-    // Fan curve read capabilities: CPU and GPU active curve reads. Write
+    // Fan curve read capabilities: CPU and GPU profile-specific curve reads. Write
     // capability comes from typed Hardware1 fan mutation evidence
     // (fan_mutation_status). Curve points never enter the registry — only
     // support metadata.
@@ -1155,7 +1154,7 @@ pub async fn build_production_runtime(
     //   (`ZbusAsusdFanCurveSource::read_curves(profile)`), GUI напрямую asusd
     //   НЕ читает;
     // - активная кривая остаётся через existing sysfs `asus_custom_fan_curve`;
-    // - capability probe остаётся на active sysfs curve;
+    // - capability probe использует profile-specific Session1/asusd read;
     // - mutation (`set_fan_curve`) остаётся напрямую через Hardware1 (original
     //   caller). Write capability определяется наличием production Hardware1
     //   mutation backend (hardware_owner). No writes, no privileged APIs.

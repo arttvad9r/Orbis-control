@@ -30,7 +30,7 @@ export component DashboardSection inherits Rectangle {
 
     function perf-reason() -> string {
         if (root.ui-state.perf-state == PerformanceHwState.Ready) {
-            return root.ui-state.perf-writable ? "Готово к применению" : "Только чтение";
+            return root.ui-state.perf-writable ? "Доступно" : "Только чтение";
         }
         return root.ui-state.perf-unavailable-reason;
     }
@@ -75,7 +75,7 @@ export component DashboardSection inherits Rectangle {
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
             padding-top: 14px;
-            padding-bottom: 26px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Главная";

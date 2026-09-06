@@ -19,7 +19,7 @@ export component DisplaySection inherits Rectangle {
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
             padding-top: 14px;
-            padding-bottom: 26px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Экран";
@@ -87,13 +87,13 @@ export component DisplaySection inherits Rectangle {
                         height: 30px;
                         SectionTitle { horizontal-stretch: 1; title: "Панель"; }
                         StatusPill {
-                            text: root.panel-overdrive-state-ready ? (root.panel-overdrive-control-ready ? "Управление" : "Только чтение") : "Определяется";
+                            text: root.panel-overdrive-state-ready ? (root.panel-overdrive-control-ready ? "Доступно" : "Только чтение") : "Определяется";
                             accent: root.panel-overdrive-control-ready ? Palette.success : root.panel-overdrive-state-ready ? Palette.text-secondary : Palette.warning;
                         }
                     }
 
                     RequestToggleRow {
-                        label: "Panel Overdrive";
+                        label: "Ускорение отклика панели (Overdrive)";
                         description: root.panel-overdrive-state-ready
                             ? (root.panel-overdrive-control-ready ? "Уменьшает время отклика панели; результат подтверждается чтением состояния" : "Текущее состояние доступно только для чтения")
                             : "Поддержка панели определяется по возможностям устройства";

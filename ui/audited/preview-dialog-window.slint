@@ -4,7 +4,7 @@ import { Palette } from "../themes/dark.slint";
 
 export component PreviewDialogWindow inherits Window {
     width: 470px;
-    height: 248px;
+    height: 228px;
     title: "Orbis Control";
     background: Palette.window-background;
 
@@ -17,7 +17,7 @@ export component PreviewDialogWindow inherits Window {
 
     VerticalLayout {
         padding: 18px;
-        spacing: 14px;
+        spacing: 12px;
 
         HorizontalLayout {
             height: 46px;
@@ -56,7 +56,7 @@ export component PreviewDialogWindow inherits Window {
         }
 
         HorizontalLayout {
-            height: 38px;
+            height: 36px;
             spacing: 8px;
             Rectangle { horizontal-stretch: 1; background: transparent; }
             if (root.kind != 2) : ActionButton { label: "Отмена"; clicked => { root.dismiss-clicked(); } }

@@ -43,7 +43,7 @@ export component CoolingSection inherits Rectangle {
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
             padding-top: 14px;
-            padding-bottom: 26px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Охлаждение";
@@ -65,7 +65,7 @@ export component CoolingSection inherits Rectangle {
           StatusPill {
               width: parent.width;
               y: (parent.height - self.height) / 2;
-              text: root.ui-state.fan-curve-writable ? "Редактирование" : "Наблюдение";
+              text: root.ui-state.fan-curve-writable ? "Доступно" : "Только чтение";
               accent: root.ui-state.fan-curve-writable ? Palette.success : Palette.text-secondary;
           }
       }

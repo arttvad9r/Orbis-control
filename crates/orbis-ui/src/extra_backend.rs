@@ -1,9 +1,11 @@
 use std::cell::RefCell;
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use orbis_core::aura::{AuraMode, AuraSpeed};
+use orbis_core::aura::{AuraMode, AuraRgb, AuraSpeed};
 use orbis_core::display::PanelOverdriveState;
 use orbis_core::firmware::BootSoundState;
 use orbis_providers::error::ProviderError;
@@ -23,6 +25,7 @@ struct ExtraContext {
     runtime: tokio::runtime::Handle,
     refreshing: Arc<AtomicBool>,
     mutating: Arc<AtomicBool>,
+    clamshell: Arc<Mutex<Option<Child>>>,
 }
 
 thread_local! {
@@ -34,7 +37,17 @@ struct AuraObserved {
     ready: bool,
     effect: i32,
     speed: i32,
+    supported_modes: [bool; 13],
+    colour1: AuraRgb,
+    colour2: AuraRgb,
     status: String,
+}
+
+struct AuraEffectRequest {
+    mode: i32,
+    speed: i32,
+    colour1: [i32; 3],
+    colour2: [i32; 3],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,18 +64,30 @@ struct BootSoundObserved {
     status: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ApuMemoryObserved {
+    ready: bool,
+    value: i32,
+    status: String,
+}
+
 pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
     CONTEXT.with(|slot| {
         *slot.borrow_mut() = Some(ExtraContext {
             runtime,
             refreshing: Arc::new(AtomicBool::new(false)),
             mutating: Arc::new(AtomicBool::new(false)),
+            clamshell: Arc::new(Mutex::new(None)),
         });
     });
 }
 
 pub(crate) fn clear() {
-    CONTEXT.with(|slot| *slot.borrow_mut() = None);
+    CONTEXT.with(|slot| {
+        if let Some(context) = slot.borrow_mut().take() {
+            stop_clamshell(&context.clamshell);
+        }
+    });
 }
 
 fn reset_readiness(window: &AppWindow) {
@@ -73,13 +98,36 @@ fn reset_readiness(window: &AppWindow) {
     window.set_panel_overdrive_control_ready(false);
     window.set_boot_sound_state_ready(false);
     window.set_boot_sound_control_ready(false);
+    window.set_igpu_memory_state_ready(false);
+    window.set_igpu_memory_control_ready(false);
+    window.set_aspm_control_ready(false);
+    window.set_auto_clamshell_state_ready(false);
+    window.set_auto_clamshell_control_ready(false);
+    window.set_igpu_memory_pending(false);
+    window.set_status_led_state_ready(false);
+    window.set_status_led_control_ready(false);
+    window.set_aspm_state_ready(false);
+    window.set_aspm_control_ready(false);
 }
 
 pub(crate) fn wire_window(window: &AppWindow) {
     reset_readiness(window);
     window.set_keyboard_effect(-1);
     window.set_keyboard_speed(-1);
+    window.set_aura_static_supported(false);
+    window.set_aura_breathe_supported(false);
+    window.set_aura_rainbow_supported(false);
+    window.set_aura_rainbow_wave_supported(false);
+    window.set_aura_star_supported(false);
+    window.set_aura_rain_supported(false);
+    window.set_aura_highlight_supported(false);
+    window.set_aura_laser_supported(false);
+    window.set_aura_ripple_supported(false);
+    window.set_aura_pulse_supported(false);
+    window.set_aura_comet_supported(false);
+    window.set_aura_flash_supported(false);
     window.set_boot_sound(false);
+    window.set_igpu_memory(0);
     window.set_status(
         if CONTEXT.with(|slot| slot.borrow().is_some()) {
             "Reading advanced hardware observations…"
@@ -88,12 +136,42 @@ pub(crate) fn wire_window(window: &AppWindow) {
         }
         .into(),
     );
+    let clamshell_ready = systemd_inhibit_available();
+    window.set_auto_clamshell_state_ready(clamshell_ready);
+    window.set_auto_clamshell_control_ready(clamshell_ready);
+    window.set_auto_clamshell(clamshell_is_active());
+
+    {
+        let weak = window.as_weak();
+        window.on_aura_effect_requested(move |mode, speed, r1, g1, b1, r2, g2, b2| {
+            if let Some(window) = weak.upgrade() {
+                request_aura_effect(
+                    &window,
+                    AuraEffectRequest {
+                        mode,
+                        speed,
+                        colour1: [r1, g1, b1],
+                        colour2: [r2, g2, b2],
+                    },
+                );
+            }
+        });
+    }
 
     {
         let weak = window.as_weak();
         window.on_reload_requested(move || {
             if let Some(window) = weak.upgrade() {
                 refresh(&window);
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        window.on_igpu_memory_requested(move |value| {
+            if let Some(window) = weak.upgrade() {
+                request_apu_memory(&window, value);
             }
         });
     }
@@ -117,6 +195,24 @@ pub(crate) fn wire_window(window: &AppWindow) {
         });
     }
 
+    {
+        let weak = window.as_weak();
+        window.on_aspm_requested(move |disabled| {
+            if let Some(window) = weak.upgrade() {
+                request_aspm(&window, disabled);
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        window.on_auto_clamshell_requested(move |enabled| {
+            if let Some(window) = weak.upgrade() {
+                request_clamshell(&window, enabled);
+            }
+        });
+    }
+
     let weak = window.as_weak();
     window.on_apply_requested(move || {
         tracing::warn!(
@@ -136,9 +232,138 @@ fn begin_mutation(window: &AppWindow) -> Option<ExtraContext> {
         return None;
     }
     window.set_applying(true);
+    window.set_aura_control_ready(false);
     window.set_panel_overdrive_control_ready(false);
     window.set_boot_sound_control_ready(false);
+    window.set_igpu_memory_control_ready(false);
+    window.set_aspm_control_ready(false);
+    window.set_auto_clamshell_control_ready(false);
     Some(context)
+}
+
+fn request_aura_effect(window: &AppWindow, request: AuraEffectRequest) {
+    let AuraEffectRequest {
+        mode,
+        speed,
+        colour1,
+        colour2,
+    } = request;
+    if !window.get_aura_control_ready()
+        || !(0..=12).contains(&mode)
+        || !(0..=2).contains(&speed)
+        || colour1
+            .iter()
+            .chain(colour2.iter())
+            .any(|v| !(0..=255).contains(v))
+    {
+        tracing::warn!(
+            mode,
+            speed,
+            "Aura effect request rejected by UI gate or range"
+        );
+        return;
+    }
+    let Some(context) = begin_mutation(window) else {
+        return;
+    };
+    let speed = match speed {
+        0 => "Low",
+        1 => "Med",
+        _ => "High",
+    }
+    .to_string();
+    let colour1 = AuraRgb {
+        r: colour1[0] as u8,
+        g: colour1[1] as u8,
+        b: colour1[2] as u8,
+    };
+    let colour2 = AuraRgb {
+        r: colour2[0] as u8,
+        g: colour2[1] as u8,
+        b: colour2[2] as u8,
+    };
+    let weak = window.as_weak();
+    let completion = context.mutating.clone();
+    context.runtime.spawn(async move {
+        let result = async {
+            let client = HardwareProductControlClient::connect_system().await?;
+            client
+                .set_aura_effect(mode as u32, speed, colour1, colour2)
+                .await
+        }
+        .await;
+        completion.store(false, Ordering::Release);
+        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
+            window.set_applying(false);
+            match result {
+                Ok(observed) => {
+                    window.set_keyboard_effect(observed.mode as i32);
+                    window.set_keyboard_speed(match observed.speed.as_str() {
+                        "Low" => 0,
+                        "Med" => 1,
+                        "High" => 2,
+                        _ => -1,
+                    });
+                    window.set_rgb_red(observed.colour1.r as i32);
+                    window.set_rgb_green(observed.colour1.g as i32);
+                    window.set_rgb_blue(observed.colour1.b as i32);
+                    window.set_aura_secondary_red(observed.colour2.r as i32);
+                    window.set_aura_secondary_green(observed.colour2.g as i32);
+                    window.set_aura_secondary_blue(observed.colour2.b as i32);
+                    window.set_status("Aura effect accepted · config read-back confirmed".into());
+                }
+                Err(error) => window.set_status(format!("Aura effect failed · {error}").into()),
+            }
+            refresh(&window);
+        }) {
+            tracing::warn!(error = ?error, "failed to publish Aura effect mutation result");
+        }
+    });
+}
+
+fn request_apu_memory(window: &AppWindow, value: i32) {
+    if !window.get_igpu_memory_control_ready() || !(0..=8).contains(&value) {
+        tracing::warn!(
+            value,
+            "Extra iGPU memory request ignored: write evidence unavailable or invalid"
+        );
+        return;
+    }
+    let Some(context) = begin_mutation(window) else {
+        return;
+    };
+    window.set_status("Applying iGPU memory through Hardware1… reboot required".into());
+    let weak = window.as_weak();
+    let completion = context.mutating.clone();
+    context.runtime.spawn(async move {
+        let result = async {
+            let client = HardwareProductControlClient::connect_system().await?;
+            client.set_apu_memory(value as u8).await
+        }
+        .await;
+        completion.store(false, Ordering::Release);
+        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
+            window.set_applying(false);
+            match result {
+                Ok((observed, pending)) => {
+                    window.set_igpu_memory_state_ready(true);
+                    window.set_igpu_memory_control_ready(true);
+                    window.set_igpu_memory(observed as i32);
+                    window.set_igpu_memory_pending(pending);
+                    window.set_status(
+                        format!("iGPU memory set to {observed} · reboot required").into(),
+                    );
+                    return;
+                }
+                Err(error) => window.set_status(
+                    format!("iGPU memory write failed · {}", write_error_label(&error)).into(),
+                ),
+            }
+            refresh(&window);
+        }) {
+            tracing::warn!(error = ?error, "failed to publish iGPU memory mutation result");
+        }
+    });
 }
 
 fn request_panel_overdrive(window: &AppWindow, enabled: bool) {
@@ -189,6 +414,166 @@ fn request_panel_overdrive(window: &AppWindow, enabled: bool) {
             tracing::warn!(error = ?error, "failed to publish Extra panel mutation result");
         }
     });
+}
+
+fn request_aspm(window: &AppWindow, disabled: bool) {
+    if !window.get_aspm_control_ready() {
+        return;
+    }
+    let Some(context) = begin_mutation(window) else {
+        return;
+    };
+    window.set_status("Applying PCIe ASPM policy through Hardware1…".into());
+    let weak = window.as_weak();
+    let completion = context.mutating.clone();
+    context.runtime.spawn(async move {
+        let result = async {
+            let client = HardwareProductControlClient::connect_system().await?;
+            client.set_aspm_disabled(disabled).await
+        }
+        .await;
+        completion.store(false, Ordering::Release);
+        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
+            window.set_applying(false);
+            match result {
+                Ok(observed) => {
+                    window.set_disable_aspm(observed);
+                    window.set_status(
+                        format!(
+                            "PCIe ASPM {} · read-back confirmed",
+                            if observed { "disabled" } else { "enabled" }
+                        )
+                        .into(),
+                    );
+                }
+                Err(error) => window.set_status(
+                    format!("ASPM write failed · {}", write_error_label(&error)).into(),
+                ),
+            }
+            refresh(&window);
+        }) {
+            tracing::warn!(error = ?error, "failed to publish ASPM mutation result");
+        }
+    });
+}
+
+fn request_clamshell(window: &AppWindow, enabled: bool) {
+    if !window.get_auto_clamshell_control_ready() {
+        return;
+    }
+    let Some(context) = begin_mutation(window) else {
+        return;
+    };
+    window.set_status("Updating closed-lid mode…".into());
+    let weak = window.as_weak();
+    let completion = context.mutating.clone();
+    let clamshell = context.clamshell.clone();
+    context.runtime.spawn(async move {
+        let result = if enabled {
+            start_clamshell(&clamshell).map(|()| true)
+        } else {
+            stop_clamshell(&clamshell);
+            Ok(false)
+        };
+        completion.store(false, Ordering::Release);
+        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
+            window.set_applying(false);
+            window.set_auto_clamshell_control_ready(true);
+            match result {
+                Ok(active) => {
+                    window.set_auto_clamshell(active);
+                    window.set_status(
+                        format!(
+                            "Closed-lid mode {} · session inhibitor active",
+                            if active { "on" } else { "off" }
+                        )
+                        .into(),
+                    );
+                }
+                Err(error) => {
+                    window.set_auto_clamshell(false);
+                    window.set_status(format!("Closed-lid mode failed · {error}").into());
+                }
+            }
+        }) {
+            tracing::warn!(error = ?error, "failed to publish clamshell result");
+        }
+    });
+}
+
+fn clamshell_inhibit_command() -> Command {
+    let mut command = Command::new("systemd-inhibit");
+    command.args([
+        "--what=handle-lid-switch",
+        "--mode=block",
+        "--who=Orbis Control",
+        "--why=Closed-lid mode",
+        "sleep",
+        "infinity",
+    ]);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    command
+}
+
+fn systemd_inhibit_available() -> bool {
+    Command::new("systemd-inhibit")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn start_clamshell(clamshell: &Mutex<Option<Child>>) -> Result<(), String> {
+    let mut state = clamshell
+        .lock()
+        .map_err(|_| "clamshell state lock poisoned".to_string())?;
+    if let Some(child) = state.as_mut() {
+        if child
+            .try_wait()
+            .map_err(|error| format!("checking inhibitor: {error}"))?
+            .is_none()
+        {
+            return Ok(());
+        }
+        *state = None;
+    }
+    *state = Some(
+        clamshell_inhibit_command()
+            .spawn()
+            .map_err(|error| format!("starting systemd-inhibit: {error}"))?,
+    );
+    Ok(())
+}
+
+fn stop_clamshell(clamshell: &Mutex<Option<Child>>) {
+    let Ok(mut state) = clamshell.lock() else {
+        return;
+    };
+    if let Some(mut child) = state.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+fn clamshell_is_active() -> bool {
+    CONTEXT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|context| context.clamshell.lock().ok())
+            .and_then(|mut state| {
+                let child = state.as_mut()?;
+                if child.try_wait().ok()?.is_some() {
+                    *state = None;
+                    None
+                } else {
+                    Some(true)
+                }
+            })
+            .unwrap_or(false)
+    })
 }
 
 fn request_boot_sound(window: &AppWindow, enabled: bool) {
@@ -264,21 +649,32 @@ pub(crate) fn refresh(window: &AppWindow) {
         let panel_provider = AsusArmouryPanelOverdriveProvider::default();
         let boot_sound_provider = AsusBootSoundProvider::default();
 
-        let (aura_result, panel_result, boot_sound_result, write_statuses) = tokio::join!(
+        let (aura_result, panel_result, boot_sound_result, apu_result, aspm_result, write_statuses) = tokio::join!(
             bounded_aura_read(),
             bounded_panel_read(&panel_provider),
             bounded_boot_sound_read(&boot_sound_provider),
+            bounded_apu_memory_read(),
+            bounded_aspm_read(),
             bounded_write_statuses(),
         );
 
         let aura = aura_observed(aura_result);
         let panel = panel_observed(panel_result);
         let boot_sound = boot_sound_observed(boot_sound_result);
-        let (_keyboard_write, panel_write, boot_sound_write) = match write_statuses {
+        let apu = apu_observed(apu_result);
+        let (aspm_disabled, aspm_write) = match aspm_result {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::debug!(error = ?error, "ASPM observation unavailable");
+                (false, ProductWriteStatus::Unknown)
+            }
+        };
+        let (_keyboard_write, panel_write, boot_sound_write, apu_write) = match write_statuses {
             Ok(statuses) => statuses,
             Err(error) => {
                 tracing::debug!(error = ?error, "Extra Hardware1 mutation-status read unavailable");
                 (
+                    ProductWriteStatus::Unknown,
                     ProductWriteStatus::Unknown,
                     ProductWriteStatus::Unknown,
                     ProductWriteStatus::Unknown,
@@ -294,6 +690,24 @@ pub(crate) fn refresh(window: &AppWindow) {
             window.set_aura_state_ready(aura.ready);
             window.set_keyboard_effect(aura.effect);
             window.set_keyboard_speed(aura.speed);
+            window.set_aura_static_supported(aura.supported_modes[0]);
+            window.set_aura_breathe_supported(aura.supported_modes[1]);
+            window.set_aura_rainbow_supported(aura.supported_modes[2]);
+            window.set_aura_rainbow_wave_supported(aura.supported_modes[3]);
+            window.set_aura_star_supported(aura.supported_modes[4]);
+            window.set_aura_rain_supported(aura.supported_modes[5]);
+            window.set_aura_highlight_supported(aura.supported_modes[6]);
+            window.set_aura_laser_supported(aura.supported_modes[7]);
+            window.set_aura_ripple_supported(aura.supported_modes[8]);
+            window.set_aura_pulse_supported(aura.supported_modes[10]);
+            window.set_aura_comet_supported(aura.supported_modes[11]);
+            window.set_aura_flash_supported(aura.supported_modes[12]);
+            window.set_rgb_red(aura.colour1.r as i32);
+            window.set_rgb_green(aura.colour1.g as i32);
+            window.set_rgb_blue(aura.colour1.b as i32);
+            window.set_aura_secondary_red(aura.colour2.r as i32);
+            window.set_aura_secondary_green(aura.colour2.g as i32);
+            window.set_aura_secondary_blue(aura.colour2.b as i32);
 
             window.set_panel_overdrive_state_ready(panel.ready);
             window.set_panel_overdrive_control_ready(panel.ready && panel_write.is_supported());
@@ -303,20 +717,30 @@ pub(crate) fn refresh(window: &AppWindow) {
             window
                 .set_boot_sound_control_ready(boot_sound.ready && boot_sound_write.is_supported());
             window.set_boot_sound(boot_sound.enabled);
+            window.set_igpu_memory_state_ready(apu.ready);
+            window.set_igpu_memory_control_ready(apu.ready && apu_write.is_supported());
+            window.set_igpu_memory(apu.value);
+            window.set_igpu_memory_pending(false);
+            window.set_aspm_state_ready(aspm_write != ProductWriteStatus::Unknown);
+            window.set_aspm_control_ready(aspm_write.is_supported());
+            window.set_disable_aspm(aspm_disabled);
 
-            let any_ready = aura.ready || panel.ready || boot_sound.ready;
+            let any_ready = aura.ready || panel.ready || boot_sound.ready || apu.ready || aspm_write != ProductWriteStatus::Unknown;
             window.set_status(
                 if any_ready {
                     format!(
-                        "Observed · {} · panel {} · {}",
+                        "Observed · {} · panel {} · {} · iGPU {}",
                         aura.status,
                         panel_write.short_label(),
                         boot_sound.status,
+                        apu.status,
                     )
                 } else {
                     format!(
-                        "Advanced observations unavailable · {} · {}",
-                        aura.status, boot_sound.status
+                        "Advanced observations unavailable · {} · {} · iGPU {}",
+                        aura.status,
+                        boot_sound.status,
+                        apu.status,
                     )
                 }
                 .into(),
@@ -356,15 +780,37 @@ async fn bounded_boot_sound_read(
         .map_err(|_| ProviderError::Timeout("Extra boot-sound read timed out".into()))?
 }
 
-async fn bounded_write_statuses()
--> Result<(ProductWriteStatus, ProductWriteStatus, ProductWriteStatus), ProviderError> {
+async fn bounded_apu_memory_read() -> Result<u8, ProviderError> {
     let client = HardwareProductControlClient::connect_system().await?;
-    let (keyboard, panel, boot_sound) = tokio::join!(
+    tokio::time::timeout(READ_TIMEOUT, client.apu_memory_state())
+        .await
+        .map_err(|_| ProviderError::Timeout("Extra iGPU memory read timed out".into()))?
+}
+
+async fn bounded_aspm_read() -> Result<(bool, ProductWriteStatus), ProviderError> {
+    let client = HardwareProductControlClient::connect_system().await?;
+    tokio::time::timeout(READ_TIMEOUT, client.aspm_state())
+        .await
+        .map_err(|_| ProviderError::Timeout("Extra ASPM read timed out".into()))?
+}
+
+async fn bounded_write_statuses() -> Result<
+    (
+        ProductWriteStatus,
+        ProductWriteStatus,
+        ProductWriteStatus,
+        ProductWriteStatus,
+    ),
+    ProviderError,
+> {
+    let client = HardwareProductControlClient::connect_system().await?;
+    let (keyboard, panel, boot_sound, apu) = tokio::join!(
         client.keyboard_status(),
         client.panel_status(),
         client.boot_sound_status(),
+        client.apu_memory_status(),
     );
-    Ok((keyboard?, panel?, boot_sound?))
+    Ok((keyboard?, panel?, boot_sound?, apu?))
 }
 
 fn aura_observed(result: Result<orbis_core::aura::AuraState, ProviderError>) -> AuraObserved {
@@ -373,6 +819,23 @@ fn aura_observed(result: Result<orbis_core::aura::AuraState, ProviderError>) -> 
             ready: true,
             effect: aura_effect_index(state.current_mode),
             speed: aura_speed_index(&state.current_effect.speed),
+            supported_modes: [
+                state.supported_modes.contains(&AuraMode::Static),
+                state.supported_modes.contains(&AuraMode::Breathe),
+                state.supported_modes.contains(&AuraMode::RainbowCycle),
+                state.supported_modes.contains(&AuraMode::RainbowWave),
+                state.supported_modes.contains(&AuraMode::Star),
+                state.supported_modes.contains(&AuraMode::Rain),
+                state.supported_modes.contains(&AuraMode::Highlight),
+                state.supported_modes.contains(&AuraMode::Laser),
+                state.supported_modes.contains(&AuraMode::Ripple),
+                false,
+                state.supported_modes.contains(&AuraMode::Pulse),
+                state.supported_modes.contains(&AuraMode::Comet),
+                state.supported_modes.contains(&AuraMode::Flash),
+            ],
+            colour1: state.current_effect.colour1,
+            colour2: state.current_effect.colour2,
             status: format!(
                 "Aura mode={} speed={}",
                 aura_mode_label(state.current_mode),
@@ -383,6 +846,9 @@ fn aura_observed(result: Result<orbis_core::aura::AuraState, ProviderError>) -> 
             ready: false,
             effect: -1,
             speed: -1,
+            supported_modes: [false; 13],
+            colour1: AuraRgb { r: 0, g: 0, b: 0 },
+            colour2: AuraRgb { r: 0, g: 0, b: 0 },
             status: error_status("Aura", &error),
         },
     }
@@ -422,6 +888,26 @@ fn boot_sound_observed(result: Result<BootSoundState, ProviderError>) -> BootSou
             ready: false,
             enabled: false,
             status: error_status("boot sound", &error),
+        },
+    }
+}
+
+fn apu_observed(result: Result<u8, ProviderError>) -> ApuMemoryObserved {
+    match result {
+        Ok(value) if value <= 8 => ApuMemoryObserved {
+            ready: true,
+            value: value as i32,
+            status: format!("{value} selected"),
+        },
+        Ok(value) => ApuMemoryObserved {
+            ready: false,
+            value: 0,
+            status: format!("invalid value {value}"),
+        },
+        Err(error) => ApuMemoryObserved {
+            ready: false,
+            value: 0,
+            status: error_status("iGPU memory", &error),
         },
     }
 }
@@ -545,5 +1031,28 @@ mod tests {
         assert!(source.contains("boot_sound_status()"));
         assert!(!source.contains(&["set_gpu", "_mode"].concat()));
         assert!(!source.contains(&["set_fan", "_curve"].concat()));
+    }
+
+    #[test]
+    fn unsupported_advanced_controls_are_explicitly_unavailable() {
+        let source = include_str!("../../../ui/audited/sections/system.slint");
+        assert!(source.contains("Недоступно: typed owner не обнаружен"));
+        assert!(source.contains("status-led-control-ready"));
+        assert!(
+            source.contains("Часть параметров доступна только после обнаружения typed backend")
+        );
+    }
+
+    #[test]
+    fn clamshell_uses_a_user_session_inhibitor() {
+        let command = clamshell_inhibit_command();
+        assert_eq!(command.get_program(), "systemd-inhibit");
+        let args: Vec<_> = command.get_args().collect();
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--what=handle-lid-switch", "--mode=block"])
+        );
+        assert_eq!(args[args.len() - 2], "sleep");
+        assert_eq!(args[args.len() - 1], "infinity");
     }
 }

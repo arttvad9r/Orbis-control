@@ -31,7 +31,7 @@ export component PowerSection inherits Rectangle {
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
             padding-top: 14px;
-            padding-bottom: 26px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Питание";
@@ -55,7 +55,7 @@ export component PowerSection inherits Rectangle {
                     SectionTitle {
                         title: "Ограничение заряда батареи";
                         detail: root.ui-state.charge-limit-state == ChargeLimitState.Ready
-                            ? (root.ui-state.charge-limit-writable ? "Управление доступно" : "Только чтение")
+                            ? (root.ui-state.charge-limit-writable ? "Доступно" : "Только чтение")
                             : "Получение состояния";
                     }
 

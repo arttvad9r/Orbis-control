@@ -18,6 +18,8 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(2);
 // signature. A tuple keeps this UI adapter independent from daemon crate types
 // and avoids adding a direct serde dependency to orbis-ui.
 type AuraMutationWire = (u8, u8, u8, u8, u8, u8, u32);
+type AuraEffectWire = (u32, String, (u8, u8, u8), (u8, u8, u8), u32);
+type ApuMemoryMutationWire = (u8, u8, u8);
 
 #[zbus::proxy(
     interface = "io.github.orbiscontrol.Hardware1",
@@ -33,9 +35,24 @@ trait HardwareProductControls {
 
     fn aura_mutation_status(&self) -> zbus::Result<u8>;
     fn set_aura_static_rgb(&self, r: u8, g: u8, b: u8) -> zbus::Result<AuraMutationWire>;
+    fn set_aura_effect(
+        &self,
+        mode: u32,
+        speed: String,
+        colour1: (u8, u8, u8),
+        colour2: (u8, u8, u8),
+    ) -> zbus::Result<AuraEffectWire>;
+
+    fn aspm_mutation_status(&self) -> zbus::Result<u8>;
+    fn aspm_disabled(&self) -> zbus::Result<bool>;
+    fn set_aspm_disabled(&self, disabled: bool) -> zbus::Result<bool>;
 
     fn boot_sound_mutation_status(&self) -> zbus::Result<u8>;
     fn set_boot_sound(&self, enabled: bool) -> zbus::Result<u8>;
+
+    fn apu_memory_state(&self) -> zbus::Result<u8>;
+    fn apu_memory_mutation_status(&self) -> zbus::Result<u8>;
+    fn set_apu_memory(&self, value: u8) -> zbus::Result<ApuMemoryMutationWire>;
 }
 
 const AURA_OUTCOME_CONFIG_CONFIRMED: u32 = 0;
@@ -72,6 +89,15 @@ impl ProductWriteStatus {
 pub(crate) struct AuraConfigObservation {
     pub(crate) requested: AuraRgb,
     pub(crate) observed: AuraRgb,
+    pub(crate) result: ApplyResult,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AuraEffectObservation {
+    pub(crate) mode: u32,
+    pub(crate) speed: String,
+    pub(crate) colour1: AuraRgb,
+    pub(crate) colour2: AuraRgb,
     pub(crate) result: ApplyResult,
 }
 
@@ -134,6 +160,21 @@ impl HardwareProductControlClient {
         decode_status(raw, "boot sound")
     }
 
+    pub(crate) async fn aspm_state(&self) -> Result<(bool, ProductWriteStatus), ProviderError> {
+        let proxy = self.proxy().await?;
+        let status = decode_status(
+            timed("ASPM mutation status", proxy.aspm_mutation_status()).await?,
+            "ASPM",
+        )?;
+        let disabled = timed("ASPM state", proxy.aspm_disabled()).await?;
+        Ok((disabled, status))
+    }
+
+    pub(crate) async fn set_aspm_disabled(&self, disabled: bool) -> Result<bool, ProviderError> {
+        let proxy = self.proxy().await?;
+        timed("ASPM mutation", proxy.set_aspm_disabled(disabled)).await
+    }
+
     pub(crate) async fn set_boot_sound(&self, enabled: bool) -> Result<bool, ProviderError> {
         require_supported(self.boot_sound_status().await?, "boot sound")?;
         let proxy = self.proxy().await?;
@@ -153,6 +194,53 @@ impl HardwareProductControlClient {
             )));
         }
         Ok(observed)
+    }
+
+    pub(crate) async fn apu_memory_state(&self) -> Result<u8, ProviderError> {
+        let proxy = self.proxy().await?;
+        let value = timed("iGPU memory state", proxy.apu_memory_state()).await?;
+        if value > 8 {
+            return Err(ProviderError::Internal(format!(
+                "Hardware1 apu_mem returned out-of-range value {value}"
+            )));
+        }
+        Ok(value)
+    }
+
+    pub(crate) async fn apu_memory_status(&self) -> Result<ProductWriteStatus, ProviderError> {
+        let proxy = self.proxy().await?;
+        decode_status(
+            timed(
+                "iGPU memory mutation status",
+                proxy.apu_memory_mutation_status(),
+            )
+            .await?,
+            "iGPU memory",
+        )
+    }
+
+    pub(crate) async fn set_apu_memory(&self, value: u8) -> Result<(u8, bool), ProviderError> {
+        if value > 8 {
+            return Err(ProviderError::InvalidRequest(format!(
+                "iGPU memory value must be 0..=8, got {value}"
+            )));
+        }
+        require_supported(self.apu_memory_status().await?, "iGPU memory")?;
+        let proxy = self.proxy().await?;
+        let wire = timed("iGPU memory mutation", proxy.set_apu_memory(value)).await?;
+        if wire.0 != value || wire.1 != value {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "Hardware1 iGPU memory read-back mismatch: requested={value}, returned=({}, {})",
+                wire.0, wire.1
+            )));
+        }
+        if wire.2 != 1 {
+            return Err(ProviderError::Internal(format!(
+                "Hardware1 iGPU memory returned unknown outcome {}",
+                wire.2
+            )));
+        }
+        Ok((wire.1, true))
     }
 
     pub(crate) async fn set_panel_overdrive(&self, enabled: bool) -> Result<bool, ProviderError> {
@@ -234,6 +322,59 @@ impl HardwareProductControlClient {
         Ok(AuraConfigObservation {
             requested,
             observed,
+            result: ApplyResult::Accepted,
+        })
+    }
+
+    pub(crate) async fn set_aura_effect(
+        &self,
+        mode: u32,
+        speed: String,
+        colour1: AuraRgb,
+        colour2: AuraRgb,
+    ) -> Result<AuraEffectObservation, ProviderError> {
+        require_supported(self.aura_status().await?, "Aura effect")?;
+        let proxy = self.proxy().await?;
+        let wire = timed(
+            "Aura effect mutation",
+            proxy.set_aura_effect(
+                mode,
+                speed.clone(),
+                (colour1.r, colour1.g, colour1.b),
+                (colour2.r, colour2.g, colour2.b),
+            ),
+        )
+        .await?;
+        let observed_colour1 = AuraRgb {
+            r: wire.2.0,
+            g: wire.2.1,
+            b: wire.2.2,
+        };
+        let observed_colour2 = AuraRgb {
+            r: wire.3.0,
+            g: wire.3.1,
+            b: wire.3.2,
+        };
+        if wire.0 != mode
+            || wire.1 != speed
+            || observed_colour1 != colour1
+            || observed_colour2 != colour2
+        {
+            return Err(ProviderError::BackendUnavailable(
+                "Hardware1 Aura effect config read-back mismatch".into(),
+            ));
+        }
+        if wire.4 != AURA_OUTCOME_CONFIG_CONFIRMED {
+            return Err(ProviderError::Internal(format!(
+                "Hardware1 Aura effect returned unknown outcome {}",
+                wire.4
+            )));
+        }
+        Ok(AuraEffectObservation {
+            mode: wire.0,
+            speed: wire.1,
+            colour1: observed_colour1,
+            colour2: observed_colour2,
             result: ApplyResult::Accepted,
         })
     }

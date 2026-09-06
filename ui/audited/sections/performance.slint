@@ -18,7 +18,7 @@ export component PerformanceSection inherits Rectangle {
 
     function perf-reason() -> string {
         if (root.ui-state.perf-state == PerformanceHwState.Ready) {
-            return root.ui-state.perf-writable ? "Управление доступно" : "Только чтение";
+            return root.ui-state.perf-writable ? "Доступно" : "Только чтение";
         }
         if (root.ui-state.perf-state == PerformanceHwState.Loading) { return "Получение профиля"; }
         return root.ui-state.perf-unavailable-reason;
@@ -38,7 +38,7 @@ export component PerformanceSection inherits Rectangle {
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
             padding-top: 14px;
-            padding-bottom: 26px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Производительность";
@@ -103,7 +103,7 @@ export component PerformanceSection inherits Rectangle {
                 spacing: 14px;
                 MetricCard { label: "CPU"; value: root.ui-state.cpu-temp; detail: "температура процессора"; icon-kind: 10; }
                 MetricCard { label: "GPU"; value: root.ui-state.gpu-temp; detail: "температура графики"; icon-kind: 4; }
-                MetricCard { label: "CPU FAN"; value: root.ui-state.cpu-fan-rpm; detail: "скорость вентилятора"; icon-kind: 3; }
+                MetricCard { label: "Вентилятор CPU"; value: root.ui-state.cpu-fan-rpm; detail: "скорость вентилятора"; icon-kind: 3; }
                 MetricCard { label: "ПИТАНИЕ"; value: root.ui-state.power-ac-mw; detail: "потребление от адаптера"; icon-kind: 13; }
             }
 

@@ -177,22 +177,22 @@ export component FanCurveEditor inherits Rectangle {
                 vertical-alignment: center;
             }
             TabButton {
-                label: "Balanced";
+                 label: "Баланс";
                 selected: root.profile-selected == 0;
                 clicked => { root.profile-changed(0); }
             }
             TabButton {
-                label: "Performance";
+                 label: "Производ.";
                 selected: root.profile-selected == 1;
                 clicked => { root.profile-changed(1); }
             }
             TabButton {
-                label: "Quiet";
+                 label: "Тихий";
                 selected: root.profile-selected == 2;
                 clicked => { root.profile-changed(2); }
             }
             TabButton {
-                label: "Low Power";
+                 label: "Эко";
                 selected: root.profile-selected == 3;
                 clicked => { root.profile-changed(3); }
             }

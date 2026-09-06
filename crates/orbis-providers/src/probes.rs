@@ -204,8 +204,8 @@ fn write_from_mutation_status(status: CapabilityStatus) -> OperationCapability {
 
 /// Probe fan curve read capability for a specific fan.
 ///
-/// Reads the active curve (read-only) to establish the read contract; the
-/// curve points are discarded and never enter the capability metadata.
+/// Reads a profile-specific curve (read-only) to establish the read contract;
+/// the curve points are discarded and never enter the capability metadata.
 ///
 /// Write capability comes from typed runtime evidence about the mutation
 /// backend (`mutation_status`), NOT from `validate_curve` or readable curve
@@ -219,7 +219,10 @@ pub async fn probe_fan_curve<P>(
 where
     P: FanProvider + ?Sized,
 {
-    match provider.active_curve(fan).await {
+    match provider
+        .fan_curve_for_profile(orbis_core::profile::AsusdFanProfile::Balanced, fan)
+        .await
+    {
         Ok(_) => Ok(capability_from_operations(
             CapabilityOperations {
                 read: ProbeOperationResult::classified(ProbeClassification::Supported)
@@ -1279,6 +1282,7 @@ mod tests {
     /// Mock FanProvider: scripted active_curve результат.
     struct ScriptedFanProvider {
         active: Scripted<orbis_core::fan::FanCurve>,
+        profile: Scripted<orbis_core::fan::FanCurve>,
     }
 
     impl ScriptedFanProvider {
@@ -1299,12 +1303,35 @@ mod tests {
                         ),
                     ],
                 }),
+                profile: Scripted::Value(orbis_core::fan::FanCurve {
+                    profile: PerformanceProfile::Balanced,
+                    fan: orbis_core::fan::FanId::Cpu,
+                    enabled: Some(true),
+                    points: vec![
+                        orbis_core::fan::FanCurvePoint::new(
+                            orbis_core::newtypes::TemperatureC::new(40).unwrap(),
+                            orbis_core::newtypes::FanPwm::new(20).unwrap(),
+                        ),
+                        orbis_core::fan::FanCurvePoint::new(
+                            orbis_core::newtypes::TemperatureC::new(50).unwrap(),
+                            orbis_core::newtypes::FanPwm::new(40).unwrap(),
+                        ),
+                    ],
+                }),
             }
         }
 
         fn backend_missing() -> Self {
             Self {
                 active: Scripted::Error(ScriptedError::BackendMissing),
+                profile: Scripted::Error(ScriptedError::BackendMissing),
+            }
+        }
+
+        fn profile_only() -> Self {
+            Self {
+                active: Scripted::Error(ScriptedError::BackendMissing),
+                profile: Self::ok().profile,
             }
         }
     }
@@ -1361,7 +1388,7 @@ mod tests {
             _profile: orbis_core::profile::AsusdFanProfile,
             _fan: &orbis_core::fan::FanId,
         ) -> Result<orbis_core::fan::FanCurve, ProviderError> {
-            Err(ProviderError::Unsupported("no profile curve".into()))
+            self.profile.result()
         }
 
         async fn active_curve(
@@ -1416,6 +1443,26 @@ mod tests {
         assert_eq!(
             capability.operations.write.status,
             CapabilityStatus::Unsupported
+        );
+    }
+
+    #[tokio::test]
+    async fn fan_curve_probe_uses_profile_read_when_active_curve_is_unavailable() {
+        let provider = ScriptedFanProvider::profile_only();
+        let capability = probe_fan_curve(
+            &provider,
+            &orbis_core::fan::FanId::Cpu,
+            CapabilityStatus::Supported,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            capability.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            capability.operations.write.status,
+            CapabilityStatus::Supported
         );
     }
 

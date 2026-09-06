@@ -17,7 +17,7 @@ export component GraphicsSection inherits Rectangle {
 
     function mode-reason() -> string {
         if (root.ui-state.gpu-mode-state == GpuModeHwState.Ready) {
-            return root.ui-state.gpu-mode-writable ? "Управление доступно" : "Только чтение";
+            return root.ui-state.gpu-mode-writable ? "Доступно" : "Только чтение";
         }
         if (root.ui-state.gpu-mode-state == GpuModeHwState.Loading) { return "Получение состояния"; }
         return "Управление недоступно";
@@ -63,7 +63,7 @@ export component GraphicsSection inherits Rectangle {
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
             padding-top: 14px;
-            padding-bottom: 26px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Графика";
@@ -91,7 +91,7 @@ export component GraphicsSection inherits Rectangle {
                   StatusPill {
                       width: parent.width;
                       y: (parent.height - self.height) / 2;
-                      text: root.ui-state.gpu-mode-writable ? "Доступно" : "Наблюдение";
+                      text: root.ui-state.gpu-mode-writable ? "Доступно" : "Только чтение";
                       accent: root.ui-state.gpu-mode-writable ? Palette.success : Palette.text-secondary;
                   }
               }

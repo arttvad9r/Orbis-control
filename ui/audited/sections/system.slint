@@ -21,6 +21,15 @@ export component SystemSection inherits Rectangle {
     in property <bool> boot-sound-state-ready: false;
     in property <bool> boot-sound-control-ready: false;
     in-out property <bool> boot-sound: false;
+    in property <bool> igpu-memory-state-ready: false;
+    in property <bool> igpu-memory-control-ready: false;
+    in property <bool> igpu-memory-pending: false;
+    in property <bool> status-led-state-ready: false;
+    in property <bool> status-led-control-ready: false;
+    in property <bool> auto-clamshell-state-ready: false;
+    in property <bool> auto-clamshell-control-ready: false;
+    in property <bool> aspm-state-ready: false;
+    in property <bool> aspm-control-ready: false;
     in-out property <int> m1-action: 0;
     in-out property <int> m2-action: 0;
     in-out property <int> m3-action: 0;
@@ -36,7 +45,10 @@ export component SystemSection inherits Rectangle {
     in-out property <int> e-cores: 0;
     callback reload-requested;
     callback boot-sound-requested(bool);
+    callback igpu-memory-requested(int);
     callback apply-requested;
+    callback aspm-requested(bool);
+    callback auto-clamshell-requested(bool);
 
     in property <string> diagnostics-summary: "";
     in property <bool> refresh-enabled: false;
@@ -57,7 +69,7 @@ export component SystemSection inherits Rectangle {
         if (index == 5) { return "Микрофон"; }
         if (index == 6) { return "Экран"; }
         if (index == 7) { return "Aura"; }
-        if (index == 8) { return "Performance"; }
+        if (index == 8) { return "Производительность"; }
         if (index == 9) { return "GPU Mode"; }
         return "По умолчанию";
     }
@@ -69,6 +81,9 @@ export component SystemSection inherits Rectangle {
         if (index == 3) { return "2 ГБ"; }
         if (index == 4) { return "4 ГБ"; }
         if (index == 5) { return "8 ГБ"; }
+        if (index == 6) { return "16 ГБ"; }
+        if (index == 7) { return "32 ГБ"; }
+        if (index == 8) { return "64 ГБ"; }
         return "Авто";
     }
 
@@ -93,7 +108,7 @@ export component SystemSection inherits Rectangle {
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
             padding-top: 14px;
-            padding-bottom: 26px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Система";
@@ -148,7 +163,7 @@ export component SystemSection inherits Rectangle {
                         height: 30px;
                         SectionTitle { horizontal-stretch: 1; title: "Расширенные параметры ASUS"; }
                         StatusPill {
-                            text: root.backend-ready ? (root.applying ? "Применение" : "Доступно") : "Поддержка готовится";
+                             text: root.backend-ready ? (root.applying ? "Применение" : "Доступно") : "Есть ограничения";
                             accent: root.backend-ready ? Palette.success : Palette.warning;
                         }
                     }
@@ -156,35 +171,35 @@ export component SystemSection inherits Rectangle {
                     LocalStatus {
                         text: root.backend-ready
                             ? root.status
-                            : "Интерфейс функций уже сформирован; управление включится автоматически после публикации подтверждённого backend.";
+                             : "Часть параметров доступна только после обнаружения typed backend; остальные недоступны на этой системе.";
                         accent: root.backend-ready ? Palette.text-secondary : Palette.warning;
                     }
 
                     SubsectionLabel { text: "ПОВЕДЕНИЕ И ЭНЕРГОСБЕРЕЖЕНИЕ"; }
                     RequestToggleRow {
                         label: "Светодиоды состояния";
-                        description: "Управление системными индикаторами ноутбука";
-                        checked: root.status-led;
-                        disabled: !root.backend-ready || root.applying;
-                        toggled(value) => { root.status-led = value; }
+                         description: root.status-led-state-ready ? "Управление системными индикаторами ноутбука" : "Недоступно: typed owner не обнаружен";
+                         checked: root.status-led;
+                         disabled: !root.status-led-control-ready || root.applying;
+                         toggled(value) => { root.status-led = value; }
                     }
                     RequestToggleRow {
-                        label: "Автоматический режим clamshell";
-                        description: "Поведение устройства при работе с закрытой крышкой";
-                        checked: root.auto-clamshell;
-                        disabled: !root.backend-ready || root.applying;
-                        toggled(value) => { root.auto-clamshell = value; }
+                          label: "Автоматический режим закрытой крышки";
+                          description: root.auto-clamshell-state-ready ? "Поведение устройства при работе с закрытой крышкой" : "Недоступно: session owner не обнаружен";
+                         checked: root.auto-clamshell;
+                         disabled: !root.auto-clamshell-control-ready || root.applying;
+                         toggled(value) => { root.auto-clamshell = value; root.auto-clamshell-requested(value); }
                     }
                     RequestToggleRow {
-                        label: "Отключать PCIe ASPM от сети";
-                        description: "Профиль энергосбережения PCIe при питании от адаптера";
-                        checked: root.disable-aspm;
-                        disabled: !root.backend-ready || root.applying;
-                        toggled(value) => { root.disable-aspm = value; }
+                         label: "Отключать PCIe ASPM при работе от сети";
+                          description: root.aspm-state-ready ? "Профиль энергосбережения PCIe при питании от адаптера" : "Недоступно: typed owner не обнаружен";
+                         checked: root.disable-aspm;
+                         disabled: !root.aspm-control-ready || root.applying;
+                         toggled(value) => { root.disable-aspm = value; root.aspm-requested(value); }
                     }
                     RequestToggleRow {
-                        label: "Отключать сеть в Modern Standby";
-                        description: "Сетевое поведение во время современного режима ожидания";
+                         label: "Отключать сеть в современном режиме ожидания";
+                         description: root.backend-ready ? "Сетевое поведение во время современного режима ожидания" : "Недоступно: typed owner не обнаружен";
                         checked: root.disable-standby-networking;
                         disabled: !root.backend-ready || root.applying;
                         toggled(value) => { root.disable-standby-networking = value; }
@@ -194,14 +209,14 @@ export component SystemSection inherits Rectangle {
                     HorizontalLayout {
                         height: 44px;
                         spacing: 12px;
-                        Text { width: 190px; text: "Память iGPU"; font-size: 13.5px; font-weight: 550; color: root.backend-ready ? Palette.text-primary : Palette.text-secondary; vertical-alignment: center; }
-                        OptionStepper {
-                            label: root.igpu-label(root.igpu-memory);
-                            disabled: !root.backend-ready || root.applying;
-                            can-previous: root.igpu-memory > 0;
-                            can-next: root.igpu-memory < 5;
-                            previous => { root.igpu-memory = Math.max(0, root.igpu-memory - 1); }
-                            next => { root.igpu-memory = Math.min(5, root.igpu-memory + 1); }
+                         Text { width: 190px; text: "Память iGPU"; font-size: 13.5px; font-weight: 550; color: root.igpu-memory-state-ready ? Palette.text-primary : Palette.text-secondary; vertical-alignment: center; }
+                         OptionStepper {
+                             label: root.igpu-memory-pending ? root.igpu-label(root.igpu-memory) + " · Перезагрузка" : root.igpu-label(root.igpu-memory);
+                             disabled: !root.igpu-memory-control-ready || root.applying;
+                             can-previous: root.igpu-memory > 0;
+                             can-next: root.igpu-memory < 8;
+                             previous => { root.igpu-memory = Math.max(0, root.igpu-memory - 1); root.igpu-memory-requested(root.igpu-memory); }
+                             next => { root.igpu-memory = Math.min(8, root.igpu-memory + 1); root.igpu-memory-requested(root.igpu-memory); }
                         }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }

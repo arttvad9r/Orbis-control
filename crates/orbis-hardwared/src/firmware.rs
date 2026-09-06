@@ -13,6 +13,12 @@ use crate::{AuthorizeError, Authorizer, provider_error_to_dbus};
 pub const BOOT_SOUND_CURRENT_VALUE_PATH: &str =
     "/sys/class/firmware-attributes/asus-armoury/attributes/boot_sound/current_value";
 
+/// Fixed kernel ABI path for the ASUS iGPU memory attribute.
+pub const APU_MEMORY_CURRENT_VALUE_PATH: &str =
+    "/sys/class/firmware-attributes/asus-armoury/attributes/apu_mem/current_value";
+
+pub const APU_MEMORY_MAX: u8 = 8;
+
 /// Narrow IO contract for the ASUS POST sound attribute.
 #[async_trait]
 pub trait BootSoundIo: Send + Sync {
@@ -237,6 +243,210 @@ where
     }
 }
 
+#[async_trait]
+pub trait ApuMemoryIo: Send + Sync {
+    async fn read(&self) -> Result<u8, ProviderError>;
+    async fn write(&self, value: u8) -> Result<(), ProviderError>;
+}
+
+pub struct SysfsApuMemoryIo {
+    path: PathBuf,
+}
+
+impl Default for SysfsApuMemoryIo {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::from(APU_MEMORY_CURRENT_VALUE_PATH),
+        }
+    }
+}
+
+impl SysfsApuMemoryIo {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+fn map_apu_error(path: &Path, error: std::io::Error) -> ProviderError {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => ProviderError::Unsupported(format!(
+            "asus-armoury apu_mem attribute absent: {}",
+            path.display()
+        )),
+        std::io::ErrorKind::PermissionDenied => ProviderError::PermissionDenied(format!(
+            "asus-armoury apu_mem write denied: {}",
+            path.display()
+        )),
+        _ => ProviderError::Io(error),
+    }
+}
+
+fn parse_apu_memory(raw: &str) -> Result<u8, ProviderError> {
+    let value = raw.trim().parse::<u8>().map_err(|error| {
+        ProviderError::Internal(format!("asus-armoury apu_mem malformed value: {error}"))
+    })?;
+    if value > APU_MEMORY_MAX {
+        return Err(ProviderError::Internal(format!(
+            "asus-armoury apu_mem value outside ABI: {value}"
+        )));
+    }
+    Ok(value)
+}
+
+#[async_trait]
+impl ApuMemoryIo for SysfsApuMemoryIo {
+    async fn read(&self) -> Result<u8, ProviderError> {
+        let raw = std::fs::read_to_string(&self.path)
+            .map_err(|error| map_apu_error(&self.path, error))?;
+        parse_apu_memory(&raw)
+    }
+
+    async fn write(&self, value: u8) -> Result<(), ProviderError> {
+        std::fs::write(&self.path, format!("{value}\n"))
+            .map_err(|error| map_apu_error(&self.path, error))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApuMemoryMutationReadback {
+    pub requested: u8,
+    pub observed: u8,
+    pub result: ApplyResult,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApuMemoryMutationStatus {
+    Supported,
+    Unsupported,
+    TemporarilyUnavailable,
+    PermissionDenied,
+    Unknown,
+}
+
+pub mod apu_memory_mutation_wire {
+    use super::ApuMemoryMutationStatus;
+
+    pub const SUPPORTED: u8 = 0;
+    pub const UNSUPPORTED: u8 = 1;
+    pub const TEMPORARILY_UNAVAILABLE: u8 = 2;
+    pub const PERMISSION_DENIED: u8 = 3;
+    pub const UNKNOWN: u8 = 4;
+    pub const PENDING_REBOOT: u8 = 1;
+
+    pub fn to_wire(status: ApuMemoryMutationStatus) -> u8 {
+        match status {
+            ApuMemoryMutationStatus::Supported => SUPPORTED,
+            ApuMemoryMutationStatus::Unsupported => UNSUPPORTED,
+            ApuMemoryMutationStatus::TemporarilyUnavailable => TEMPORARILY_UNAVAILABLE,
+            ApuMemoryMutationStatus::PermissionDenied => PERMISSION_DENIED,
+            ApuMemoryMutationStatus::Unknown => UNKNOWN,
+        }
+    }
+}
+
+pub struct ApuMemoryMutationBackend<I> {
+    io: I,
+}
+
+impl<I> ApuMemoryMutationBackend<I> {
+    pub fn new(io: I) -> Self {
+        Self { io }
+    }
+}
+
+impl<I: ApuMemoryIo> ApuMemoryMutationBackend<I> {
+    pub async fn read_apu_memory(&self) -> Result<u8, ProviderError> {
+        self.io.read().await
+    }
+
+    pub async fn set_apu_memory(
+        &self,
+        value: u8,
+    ) -> Result<ApuMemoryMutationReadback, ProviderError> {
+        if value > APU_MEMORY_MAX {
+            return Err(ProviderError::InvalidRequest(format!(
+                "hardwared: apu_mem value must be 0..={APU_MEMORY_MAX}, got {value}"
+            )));
+        }
+        self.io.write(value).await?;
+        let observed = self.io.read().await?;
+        if observed != value {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "asus-armoury apu_mem read-back mismatch: expected={value}, got={observed}"
+            )));
+        }
+        Ok(ApuMemoryMutationReadback {
+            requested: value,
+            observed,
+            result: ApplyResult::Pending {
+                requirement: orbis_core::action::ActionRequirement::Reboot,
+            },
+        })
+    }
+
+    pub async fn mutation_status(&self) -> ApuMemoryMutationStatus {
+        match self.io.read().await {
+            Ok(_) => ApuMemoryMutationStatus::Supported,
+            Err(ProviderError::Unsupported(_)) => ApuMemoryMutationStatus::Unsupported,
+            Err(ProviderError::PermissionDenied(_)) => ApuMemoryMutationStatus::PermissionDenied,
+            Err(ProviderError::Io(_)) | Err(ProviderError::Timeout(_)) => {
+                ApuMemoryMutationStatus::TemporarilyUnavailable
+            }
+            Err(_) => ApuMemoryMutationStatus::Unknown,
+        }
+    }
+}
+
+#[async_trait]
+pub trait ApuMemoryMutationOperation: Send + Sync {
+    async fn read_apu_memory(&self) -> Result<u8, ProviderError>;
+    async fn set_apu_memory(&self, value: u8) -> Result<ApuMemoryMutationReadback, ProviderError>;
+    async fn mutation_status(&self) -> ApuMemoryMutationStatus;
+}
+
+#[async_trait]
+impl<I: ApuMemoryIo> ApuMemoryMutationOperation for ApuMemoryMutationBackend<I> {
+    async fn read_apu_memory(&self) -> Result<u8, ProviderError> {
+        self.read_apu_memory().await
+    }
+    async fn set_apu_memory(&self, value: u8) -> Result<ApuMemoryMutationReadback, ProviderError> {
+        self.set_apu_memory(value).await
+    }
+    async fn mutation_status(&self) -> ApuMemoryMutationStatus {
+        self.mutation_status().await
+    }
+}
+
+pub async fn handle_set_apu_memory(
+    authorizer: &dyn Authorizer,
+    backend: &dyn ApuMemoryMutationOperation,
+    value: u8,
+    sender: &str,
+) -> zbus::fdo::Result<(u8, u8, u8)> {
+    authorizer
+        .authorize(sender)
+        .await
+        .map_err(|error| match error {
+            AuthorizeError::Denied(message) => zbus::fdo::Error::AccessDenied(message),
+            AuthorizeError::Failed(message) => zbus::fdo::Error::Failed(message),
+        })?;
+    let readback = backend
+        .set_apu_memory(value)
+        .await
+        .map_err(provider_error_to_dbus)?;
+    let outcome = match readback.result {
+        ApplyResult::Pending {
+            requirement: orbis_core::action::ActionRequirement::Reboot,
+        } => apu_memory_mutation_wire::PENDING_REBOOT,
+        other => {
+            return Err(zbus::fdo::Error::Failed(format!(
+                "hardwared: apu_mem operation not pending reboot: {other:?}"
+            )));
+        }
+    };
+    Ok((readback.requested, readback.observed, outcome))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{
@@ -322,5 +532,74 @@ mod tests {
             BOOT_SOUND_CURRENT_VALUE_PATH,
             "/sys/class/firmware-attributes/asus-armoury/attributes/boot_sound/current_value"
         );
+    }
+}
+
+#[cfg(test)]
+mod apu_memory_tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn valid_apu_memory_request_is_pending_reboot_after_readback() {
+        let backend = ApuMemoryMutationBackend::new(FakeApuMemoryIo::new(0, false));
+        let result = backend.set_apu_memory(5).await.unwrap();
+        assert_eq!(result.requested, 5);
+        assert_eq!(result.observed, 5);
+        assert_eq!(
+            result.result,
+            ApplyResult::Pending {
+                requirement: orbis_core::action::ActionRequirement::Reboot
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn apu_memory_rejects_values_outside_kernel_enum() {
+        let backend = ApuMemoryMutationBackend::new(FakeApuMemoryIo::new(0, false));
+        assert!(matches!(
+            backend.set_apu_memory(9).await,
+            Err(ProviderError::InvalidRequest(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn mismatched_apu_memory_readback_is_not_success() {
+        let backend = ApuMemoryMutationBackend::new(FakeApuMemoryIo::new(0, true));
+        assert!(matches!(
+            backend.set_apu_memory(5).await,
+            Err(ProviderError::BackendUnavailable(_))
+        ));
+    }
+
+    struct FakeApuMemoryIo {
+        value: Arc<Mutex<u8>>,
+        mismatch: bool,
+    }
+
+    impl FakeApuMemoryIo {
+        fn new(value: u8, mismatch: bool) -> Self {
+            Self {
+                value: Arc::new(Mutex::new(value)),
+                mismatch,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ApuMemoryIo for FakeApuMemoryIo {
+        async fn read(&self) -> Result<u8, ProviderError> {
+            Ok(if self.mismatch {
+                0
+            } else {
+                *self.value.lock().unwrap()
+            })
+        }
+
+        async fn write(&self, value: u8) -> Result<(), ProviderError> {
+            *self.value.lock().unwrap() = value;
+            Ok(())
+        }
     }
 }
