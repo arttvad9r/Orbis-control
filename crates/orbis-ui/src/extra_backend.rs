@@ -103,6 +103,11 @@ fn reset_readiness(window: &AppWindow) {
     window.set_aspm_control_ready(false);
     window.set_auto_clamshell_state_ready(false);
     window.set_auto_clamshell_control_ready(false);
+    window.set_standby_networking_control_ready(false);
+    window.set_hibernate_control_ready(false);
+    window.set_core_count_control_ready(false);
+    window.set_binding_control_ready(false);
+    window.set_advanced_apply_ready(false);
     window.set_igpu_memory_pending(false);
     window.set_status_led_state_ready(false);
     window.set_status_led_control_ready(false);
@@ -1038,6 +1043,11 @@ mod tests {
         let source = include_str!("../../../ui/audited/sections/system.slint");
         assert!(source.contains("Недоступно: typed owner не обнаружен"));
         assert!(source.contains("status-led-control-ready"));
+        assert!(source.contains("standby-networking-control-ready"));
+        assert!(source.contains("hibernate-control-ready"));
+        assert!(source.contains("core-count-control-ready"));
+        assert!(source.contains("binding-control-ready"));
+        assert!(source.contains("advanced-apply-ready"));
         assert!(
             source.contains("Часть параметров доступна только после обнаружения typed backend")
         );

@@ -98,6 +98,11 @@ export component AppWindow inherits Window {
     in property <bool> status-led-control-ready: false;
     in property <bool> auto-clamshell-state-ready: false;
     in property <bool> auto-clamshell-control-ready: false;
+    in property <bool> standby-networking-control-ready: false;
+    in property <bool> hibernate-control-ready: false;
+    in property <bool> core-count-control-ready: false;
+    in property <bool> binding-control-ready: false;
+    in property <bool> advanced-apply-ready: false;
     in property <bool> aspm-state-ready: false;
     in property <bool> aspm-control-ready: false;
     in-out property <int> m1-action: 0;
@@ -392,6 +397,11 @@ export component AppWindow inherits Window {
                         status-led-control-ready <=> root.status-led-control-ready;
                         auto-clamshell-state-ready <=> root.auto-clamshell-state-ready;
                         auto-clamshell-control-ready <=> root.auto-clamshell-control-ready;
+                        standby-networking-control-ready <=> root.standby-networking-control-ready;
+                        hibernate-control-ready <=> root.hibernate-control-ready;
+                        core-count-control-ready <=> root.core-count-control-ready;
+                        binding-control-ready <=> root.binding-control-ready;
+                        advanced-apply-ready <=> root.advanced-apply-ready;
                         aspm-state-ready <=> root.aspm-state-ready;
                         aspm-control-ready <=> root.aspm-control-ready;
                         m1-action <=> root.m1-action;

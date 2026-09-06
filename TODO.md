@@ -43,7 +43,7 @@ As part of this block, perform one **source-driven pass over every enabled user 
 
 ---
 
-## [ ] 2. Finish safe Fan Factory Defaults semantics
+## [x] 2. Finish safe Fan Factory Defaults semantics
 
 The UI intentionally contains **Factory Defaults**. A typed Hardware1 reset path already exists, but the current provider can only return `Accepted`: it cannot prove that post-reset observed curves equal the vendor defaults.
 

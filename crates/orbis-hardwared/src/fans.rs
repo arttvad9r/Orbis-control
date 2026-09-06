@@ -139,7 +139,7 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
         }
         // enabled: pass through the authoritative stored enabled state so a
         // custom write does not silently disable the curve (#104).
-        // asusd FanCurveData/SetFanCurve wire order is PWM first, temperature second.
+        // asusd SetFanCurve wire order is PWM first, temperature second.
         let wire = (name.to_string(), pwms, temps, enabled);
         self.proxy()
             .await?
@@ -194,6 +194,38 @@ pub struct FanCurveDefaultsReadback {
     pub result: ApplyResult,
     /// Number of recognized fan curves in the authoritative post-reset read.
     pub observed_curves: usize,
+}
+
+fn validate_factory_reset_readback(
+    curves: &[(String, [u8; 8], [u8; 8], bool)],
+) -> Result<usize, ProviderError> {
+    let mut cpu = false;
+    let mut gpu = false;
+    let mut mid = false;
+    for (name, _, _, _) in curves {
+        let seen = match name.as_str() {
+            "CPU" => &mut cpu,
+            "GPU" => &mut gpu,
+            "MID" => &mut mid,
+            other => {
+                return Err(ProviderError::BackendUnavailable(format!(
+                    "hardwared: factory-default reset returned unknown fan '{other}'"
+                )));
+            }
+        };
+        if *seen {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "hardwared: factory-default reset returned duplicate fan '{name}'"
+            )));
+        }
+        *seen = true;
+    }
+    if !cpu || !gpu {
+        return Err(ProviderError::BackendUnavailable(
+            "hardwared: factory-default reset read-back is missing CPU or GPU curve".into(),
+        ));
+    }
+    Ok(curves.len())
 }
 
 /// Typed runtime evidence for fan curve mutation backend availability.
@@ -447,17 +479,13 @@ where
         &self,
         profile: AsusdFanProfile,
     ) -> Result<FanCurveDefaultsReadback, ProviderError> {
-        self.asusd.reset_profile_curves(profile).await?;
+        self.asusd.reset_curves_to_defaults(profile).await?;
         let raw = self.asusd.read_curves(profile).await?;
-        let observed_curves = raw
-            .iter()
-            .filter(|(name, _, _, _)| matches!(name.as_str(), "CPU" | "GPU" | "MID"))
-            .count();
-        if observed_curves == 0 {
-            return Err(ProviderError::BackendUnavailable(format!(
-                "hardwared: factory-default reset completed but FanCurveData returned no recognized curves (profile={profile:?})"
-            )));
-        }
+        let observed_curves = validate_factory_reset_readback(&raw).map_err(|error| {
+            ProviderError::BackendUnavailable(format!(
+                "hardwared: factory-default reset read-back invalid (profile={profile:?}): {error}"
+            ))
+        })?;
         Ok(FanCurveDefaultsReadback {
             requested_profile: profile,
             result: ApplyResult::Applied,
@@ -934,13 +962,13 @@ mod tests {
         assert_eq!(result.observed_curves, 2);
         assert_eq!(
             asusd.reset_calls.load(std::sync::atomic::Ordering::SeqCst),
-            0
+            1
         );
         assert_eq!(
             asusd
                 .reset_profile_calls
                 .load(std::sync::atomic::Ordering::SeqCst),
-            1
+            0
         );
     }
 
@@ -956,6 +984,12 @@ mod tests {
             .await
             .expect_err("reset error");
         assert!(matches!(err, ProviderError::Dbus(_)));
+    }
+
+    #[test]
+    fn factory_reset_rejects_partial_cpu_only_readback() {
+        let curves = vec![("CPU".to_string(), [0; 8], [0; 8], true)];
+        assert!(validate_factory_reset_readback(&curves).is_err());
     }
 
     #[tokio::test]
