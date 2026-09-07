@@ -52,13 +52,14 @@ dirs = "6"
 tempfile = "3"
 proptest = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }
-slint = { version = "1", features = [
+slint = { version = "1", default-features = false, features = [
     "std",
     "backend-winit-wayland",
     "backend-winit-x11",
     "renderer-winit-software",
     "software-renderer-systemfonts",
     "image-default-formats",
+    "compat-1-2",
 ] }
 
 orbis-core = { path = "crates/orbis-core", version = "0.1.0" }
