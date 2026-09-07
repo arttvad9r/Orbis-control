@@ -15,6 +15,8 @@ use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
+use futures_util::StreamExt;
+
 use orbis_application::{
     ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome, PerformanceCommandOutcome,
     PerformanceState, SetChargeLimitError, SetGpuModeError,
@@ -39,6 +41,43 @@ use slint::{ComponentHandle, LogicalSize, PhysicalSize, Rgb8Pixel, WindowSize};
 use tokio::sync::mpsc::UnboundedSender;
 
 slint::include_modules!();
+
+#[zbus::proxy(
+    interface = "org.freedesktop.login1.Manager",
+    default_service = "org.freedesktop.login1",
+    default_path = "/org/freedesktop/login1"
+)]
+trait LoginManager {
+    #[zbus(signal)]
+    fn prepare_for_sleep(start: bool) -> zbus::Result<()>;
+}
+
+async fn watch_resume_lifecycle(
+    connection: zbus::Connection,
+    worker_tx: UnboundedSender<WorkerCommand>,
+    app: slint::Weak<AppWindow>,
+) -> zbus::Result<()> {
+    let proxy = LoginManagerProxy::new(&connection).await?;
+    let mut signals = proxy.receive_prepare_for_sleep().await?;
+    tracing::info!("logind PrepareForSleep watcher connected");
+    while let Some(signal) = signals.next().await {
+        let args = signal.args()?;
+        if !args.start {
+            tracing::info!("system resume observed; requesting authoritative Orbis refresh");
+            if worker_tx.send(WorkerCommand::RefreshTelemetry).is_err()
+                || worker_tx.send(WorkerCommand::RefreshCapabilities).is_err()
+            {
+                break;
+            }
+            if let Err(error) = app.upgrade_in_event_loop(|window| {
+                diagnostics_backend::refresh(&window);
+            }) {
+                tracing::warn!(?error, "failed to refresh diagnostics after resume");
+            }
+        }
+    }
+    Ok(())
+}
 
 thread_local! {
     static PREVIEW_DIALOG_WINDOW: RefCell<Option<PreviewDialogWindow>> = const { RefCell::new(None) };
@@ -1692,6 +1731,7 @@ fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
     let diagnostics_session_connection = session_connection.clone();
     let diagnostics_system_connection = system_connection.clone();
+    let lifecycle_connection = system_connection.clone();
     // Original application caller identity for the ASUS product GPU Hardware1
     // operation: the GUI owns this connection and passes it through the worker
     // FIFO. The operation stays fail-closed until polkit/backend promotion.
@@ -1731,6 +1771,16 @@ fn main() -> anyhow::Result<()> {
             tracing::warn!("не удалось вернуть событие worker-а в event loop: {e:?}");
         }
     };
+    let lifecycle_worker_tx = worker_tx.clone();
+    let lifecycle_app = app.as_weak();
+    runtime.spawn(async move {
+        if let Err(error) =
+            watch_resume_lifecycle(lifecycle_connection, lifecycle_worker_tx, lifecycle_app).await
+        {
+            tracing::warn!(?error, "logind resume watcher stopped");
+        }
+    });
+
     runtime.spawn(run_worker_with_product_gpu(
         application_runtime,
         worker_rx,

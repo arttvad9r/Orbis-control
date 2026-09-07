@@ -236,6 +236,7 @@ async fn run_worker_inner<G, B, R, F>(
     const CAPABILITY_REFRESH_INTERVAL: u32 = 30;
     let mut gpu_refresh_counter = 0_u32;
     let mut capability_refresh_counter = 0_u32;
+    let mut automation_last: Option<(bool, PerformanceProfile)> = None;
 
     loop {
         let command = match deferred_command.take() {
@@ -246,6 +247,34 @@ async fn run_worker_inner<G, B, R, F>(
                         command = receiver.recv() => command,
                         snapshot = snapshot_rx.recv(), if poll_in_progress => {
                             if let Some(snapshot) = snapshot {
+                                if let Ok(telemetry) = &snapshot {
+                                    let configured = match telemetry.ac_online {
+                                        Some(true) => runtime
+                                            .performance
+                                            .provider_performance()
+                                            .profile_on_ac()
+                                            .await
+                                            .ok()
+                                            .flatten(),
+                                        Some(false) => runtime
+                                            .performance
+                                            .provider_performance()
+                                            .profile_on_battery()
+                                            .await
+                                            .ok()
+                                            .flatten(),
+                                        None => None,
+                                    };
+                                    if let Some(profile) = automatic_profile_transition(
+                                        telemetry.ac_online,
+                                        configured,
+                                        &mut automation_last,
+                                    ) {
+                                        emit(WorkerEvent::Performance(
+                                            runtime.performance.set_performance(profile).await,
+                                        ));
+                                    }
+                                }
                                 emit(WorkerEvent::TelemetryRefresh(snapshot));
                                 poll_in_progress = false;
                             }
@@ -390,6 +419,20 @@ async fn run_worker_inner<G, B, R, F>(
         };
         emit(event);
     }
+}
+
+fn automatic_profile_transition(
+    ac_online: Option<bool>,
+    configured: Option<PerformanceProfile>,
+    last: &mut Option<(bool, PerformanceProfile)>,
+) -> Option<PerformanceProfile> {
+    let ac_online = ac_online?;
+    let profile = configured?;
+    if *last == Some((ac_online, profile)) {
+        return None;
+    }
+    *last = Some((ac_online, profile));
+    Some(profile)
 }
 
 /// Canonical capability refresh path used by both explicit and periodic refresh.

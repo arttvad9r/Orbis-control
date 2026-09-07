@@ -314,6 +314,15 @@ export component SystemSection inherits Rectangle {
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
                     LocalStatus { text: root.diagnostics-status; accent: Palette.text-secondary; }
+                    Text {
+                        text: root.diagnostics-summary == "" ? "Нажми «Обновить», чтобы получить снимок состояния." : root.diagnostics-summary;
+                        color: Palette.text-secondary;
+                        font-size: 11.5px;
+                        horizontal-stretch: 1;
+                        height: 170px;
+                        vertical-alignment: top;
+                        overflow: elide;
+                    }
                 }
             }
         }

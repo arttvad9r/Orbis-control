@@ -17,6 +17,7 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
+futures-util = { workspace = true }
 zbus = { workspace = true }
 rustix = { workspace = true }
 tracing = { workspace = true }
