@@ -731,6 +731,7 @@ pub(crate) fn refresh(window: &AppWindow) {
             window.set_disable_aspm(aspm_disabled);
 
             let any_ready = aura.ready || panel.ready || boot_sound.ready || apu.ready || aspm_write != ProductWriteStatus::Unknown;
+             window.set_backend_ready(any_ready);
             window.set_status(
                 if any_ready {
                     format!(
