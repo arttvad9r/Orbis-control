@@ -47,7 +47,7 @@ export component CoolingSection inherits Rectangle {
 
             PageHeader {
                 title: "Охлаждение";
-                description: "Профили BIOS, кривые CPU/GPU и подтверждённое применение настроек вентиляторов.";
+                description: "Выбери вентилятор и профиль, измени точки кривой и подтверди применение.";
             }
 
             HorizontalLayout {
@@ -72,10 +72,10 @@ export component CoolingSection inherits Rectangle {
             }
 
             SectionCard {
-                min-height: 548px;
+                min-height: 500px;
                 VerticalLayout {
                     padding: LayoutMetrics.card-padding;
-                    spacing: 14px;
+                    spacing: 10px;
 
                     FanCurveEditor {
                         vertical-stretch: 1;

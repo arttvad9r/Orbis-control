@@ -1041,7 +1041,7 @@ mod tests {
     #[test]
     fn unsupported_advanced_controls_are_explicitly_unavailable() {
         let source = include_str!("../../../ui/audited/sections/system.slint");
-        assert!(source.contains("Недоступно: typed owner не обнаружен"));
+        assert!(source.contains("Недоступно: поддержка функции не обнаружена"));
         assert!(source.contains("status-led-control-ready"));
         assert!(source.contains("standby-networking-control-ready"));
         assert!(source.contains("hibernate-control-ready"));
@@ -1049,7 +1049,9 @@ mod tests {
         assert!(source.contains("binding-control-ready"));
         assert!(source.contains("advanced-apply-ready"));
         assert!(
-            source.contains("Часть параметров доступна только после обнаружения typed backend")
+            source.contains(
+                "Параметры станут редактируемыми после подтверждения поддержки устройства."
+            )
         );
     }
 

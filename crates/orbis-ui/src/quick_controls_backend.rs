@@ -90,6 +90,7 @@ pub(crate) fn wire_window(app: &AppWindow) {
     app.set_keyboard_state_ready(false);
     app.set_keyboard_control_ready(false);
     app.set_keyboard_brightness(-1);
+    app.set_keyboard_mutation_error("".into());
     app.set_aura_control_ready(false);
 
     {
@@ -125,6 +126,7 @@ pub(crate) fn wire_window(app: &AppWindow) {
             // the authoritative observed brightness until Hardware1 confirms a
             // fresh read-back. The client re-checks mutation status just before
             // the setter, so a stale UI readiness bit cannot authorize a write.
+            app.set_keyboard_mutation_error("".into());
             app.set_keyboard_control_ready(false);
             let weak = app.as_weak();
             context.runtime.spawn(async move {
@@ -137,9 +139,13 @@ pub(crate) fn wire_window(app: &AppWindow) {
                 if let Err(error) = weak.upgrade_in_event_loop(move |app| {
                     match result {
                         Ok(observed) => {
+                            app.set_keyboard_mutation_error("".into());
                             app.set_keyboard_brightness(i32::from(observed));
                         }
                         Err(error) => {
+                            app.set_keyboard_mutation_error(
+                                keyboard_mutation_error_status(&error).into(),
+                            );
                             tracing::warn!(error = ?error, "keyboard brightness mutation failed");
                         }
                     }
@@ -381,6 +387,10 @@ fn write_error_label(error: &ProviderError) -> &'static str {
     }
 }
 
+fn keyboard_mutation_error_status(error: &ProviderError) -> String {
+    format!("Keyboard brightness {}", write_error_label(error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,5 +487,13 @@ mod tests {
         assert!(source.contains("get_keyboard_control_ready"));
         assert!(source.contains("set_keyboard_backlight(level)"));
         assert!(source.contains("refresh(&app, None)"));
+    }
+
+    #[test]
+    fn keyboard_mutation_error_status_is_user_visible() {
+        assert_eq!(
+            keyboard_mutation_error_status(&ProviderError::PermissionDenied("denied".into())),
+            "Keyboard brightness write denied"
+        );
     }
 }

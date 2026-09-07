@@ -17,7 +17,7 @@ export component SystemSection inherits Rectangle {
 
     in property <bool> backend-ready: false;
     in property <bool> applying: false;
-    in property <string> status: "Advanced controls backend unavailable";
+    in property <string> status: "Расширенные функции недоступны";
     in property <bool> boot-sound-state-ready: false;
     in property <bool> boot-sound-control-ready: false;
     in-out property <bool> boot-sound: false;
@@ -59,7 +59,7 @@ export component SystemSection inherits Rectangle {
     in property <bool> refresh-enabled: false;
     in property <bool> refresh-pending: false;
     in property <bool> export-enabled: false;
-    in property <string> diagnostics-status: "Diagnostics unavailable · lifecycle wiring pending";
+    in property <string> diagnostics-status: "Диагностика недоступна · подключение ещё не готово";
     callback diagnostics-refresh-requested;
     callback diagnostics-export-requested;
 
@@ -117,7 +117,7 @@ export component SystemSection inherits Rectangle {
 
             PageHeader {
                 title: "Система";
-                description: "Устройство, прошивка, расширенные функции ASUS и диагностика Orbis.";
+                description: "Сведения об устройстве, расширенные параметры и диагностика.";
             }
 
             HorizontalLayout {
@@ -166,7 +166,7 @@ export component SystemSection inherits Rectangle {
 
                     HorizontalLayout {
                         height: 30px;
-                        SectionTitle { horizontal-stretch: 1; title: "Расширенные параметры ASUS"; }
+                        SectionTitle { horizontal-stretch: 1; title: "Расширенные параметры ASUS"; detail: root.backend-ready ? "Изменения доступны" : "Только чтение"; }
                         StatusPill {
                              text: root.backend-ready ? (root.applying ? "Применение" : "Доступно") : "Есть ограничения";
                             accent: root.backend-ready ? Palette.success : Palette.warning;
@@ -176,35 +176,35 @@ export component SystemSection inherits Rectangle {
                     LocalStatus {
                         text: root.backend-ready
                             ? root.status
-                             : "Часть параметров доступна только после обнаружения typed backend; остальные недоступны на этой системе.";
+                             : "Недоступные параметры останутся заблокированными до появления поддержки устройства.";
                         accent: root.backend-ready ? Palette.text-secondary : Palette.warning;
                     }
 
                     SubsectionLabel { text: "ПОВЕДЕНИЕ И ЭНЕРГОСБЕРЕЖЕНИЕ"; }
                     RequestToggleRow {
                         label: "Светодиоды состояния";
-                         description: root.status-led-state-ready ? "Управление системными индикаторами ноутбука" : "Недоступно: typed owner не обнаружен";
+                         description: root.status-led-state-ready ? "Управление системными индикаторами ноутбука" : "Недоступно: поддержка функции не обнаружена";
                          checked: root.status-led;
                          disabled: !root.status-led-control-ready || root.applying;
                          toggled(value) => { root.status-led = value; }
                     }
                     RequestToggleRow {
                           label: "Автоматический режим закрытой крышки";
-                          description: root.auto-clamshell-state-ready ? "Поведение устройства при работе с закрытой крышкой" : "Недоступно: session owner не обнаружен";
+                          description: root.auto-clamshell-state-ready ? "Поведение устройства при работе с закрытой крышкой" : "Недоступно: компонент сессии не подключён";
                          checked: root.auto-clamshell;
                          disabled: !root.auto-clamshell-control-ready || root.applying;
                          toggled(value) => { root.auto-clamshell = value; root.auto-clamshell-requested(value); }
                     }
                     RequestToggleRow {
                          label: "Отключать PCIe ASPM при работе от сети";
-                          description: root.aspm-state-ready ? "Профиль энергосбережения PCIe при питании от адаптера" : "Недоступно: typed owner не обнаружен";
+                          description: root.aspm-state-ready ? "Профиль энергосбережения PCIe при питании от адаптера" : "Недоступно: поддержка функции не обнаружена";
                          checked: root.disable-aspm;
                          disabled: !root.aspm-control-ready || root.applying;
                          toggled(value) => { root.disable-aspm = value; root.aspm-requested(value); }
                     }
                     RequestToggleRow {
                          label: "Отключать сеть в современном режиме ожидания";
-                          description: root.standby-networking-control-ready ? "Сетевое поведение во время современного режима ожидания" : "Недоступно: typed owner не обнаружен";
+                          description: root.standby-networking-control-ready ? "Сетевое поведение во время современного режима ожидания" : "Недоступно: поддержка функции не обнаружена";
                          checked: root.disable-standby-networking;
                          disabled: !root.standby-networking-control-ready || root.applying;
                         toggled(value) => { root.disable-standby-networking = value; }
@@ -277,7 +277,7 @@ export component SystemSection inherits Rectangle {
                         spacing: 10px;
                         Text {
                             horizontal-stretch: 1;
-                            text: root.backend-ready ? "Изменения сохраняются как набор и применяются после подтверждения." : "Значения станут редактируемыми после появления подтверждённой поддержки.";
+                            text: root.backend-ready ? "Проверь значения и нажми «Применить»." : "Параметры станут редактируемыми после подтверждения поддержки устройства.";
                             font-size: 12px;
                             color: Palette.text-secondary;
                             vertical-alignment: center;
@@ -295,7 +295,7 @@ export component SystemSection inherits Rectangle {
                     spacing: 12px;
                     HorizontalLayout {
                         height: 30px;
-                        SectionTitle { horizontal-stretch: 1; title: "Диагностика"; }
+                        SectionTitle { horizontal-stretch: 1; title: "Диагностика"; detail: root.refresh-enabled ? "Сводка системы" : "Недоступно"; }
                         StatusPill {
                             text: root.refresh-enabled ? "Готово" : "Недоступно";
                             accent: root.refresh-enabled ? Palette.success : Palette.text-secondary;

@@ -70,7 +70,7 @@ component TempStepper inherits Rectangle {
 
     min-width: 66px;
     horizontal-stretch: 1;
-    height: 72px;
+    height: 64px;
     border-radius: 10px;
     border-width: 1px;
     border-color: Palette.border-default;
@@ -91,14 +91,14 @@ component TempStepper inherits Rectangle {
 
     StepButton {
         x: 7px;
-        y: 36px;
+        y: 32px;
         glyph: "−";
         editable: root.editable;
         clicked => { root.changed(root.index, root.value - 1); }
     }
     StepButton {
         x: parent.width - 35px;
-        y: 36px;
+        y: 32px;
         glyph: "+";
         editable: root.editable;
         clicked => { root.changed(root.index, root.value + 1); }
@@ -123,7 +123,7 @@ export component FanCurveEditor inherits Rectangle {
     callback pwm-point-changed(int, int);
 
     background: transparent;
-    min-height: 510px;
+    min-height: 450px;
 
     function state-text() -> string {
         if (root.error-state) { return "Ошибка кривой"; }
@@ -142,7 +142,7 @@ export component FanCurveEditor inherits Rectangle {
     }
 
     VerticalLayout {
-        spacing: 14px;
+        spacing: 10px;
 
         HorizontalLayout {
             height: 38px;
@@ -225,7 +225,7 @@ export component FanCurveEditor inherits Rectangle {
         }
 
         HorizontalLayout {
-            height: 72px;
+            height: 64px;
             spacing: 8px;
             TempStepper { index: 0; value: root.temp-0; editable: root.writable && root.state == FanCurveHwState.Ready; changed(i,v) => { root.temp-point-changed(i,v); } }
             TempStepper { index: 1; value: root.temp-1; editable: root.writable && root.state == FanCurveHwState.Ready; changed(i,v) => { root.temp-point-changed(i,v); } }

@@ -61,15 +61,16 @@ export component AppWindow inherits Window {
     callback gpu-clicked(int);
     callback charge-changed(float);
     in property <bool> display-state-ready: false;
-    in property <string> display-status: "Unavailable";
+    in property <string> display-status: "Недоступно";
     in property <bool> keyboard-state-ready: false;
     in property <bool> keyboard-control-ready: false;
     in property <int> keyboard-brightness: -1;
+    in property <string> keyboard-mutation-error: "";
     callback keyboard-brightness-requested(int);
     callback startup-changed(bool);
     in-out property <bool> startup: false;
     in-out property <bool> startup-enabled: false;
-    in property <string> startup-status: "Unavailable";
+    in property <string> startup-status: "Недоступно";
     callback quit-requested;
 
     in property <bool> mutation-safety-blocked: false;
@@ -84,7 +85,7 @@ export component AppWindow inherits Window {
 
     in property <bool> backend-ready: false;
     in property <bool> applying: false;
-    in property <string> status: "Advanced controls backend unavailable";
+    in property <string> status: "Расширенные функции недоступны";
     in property <bool> aura-state-ready: false;
     in property <bool> aura-control-ready: false;
     in property <bool> panel-overdrive-state-ready: false;
@@ -163,10 +164,10 @@ export component AppWindow inherits Window {
     in property <bool> refresh-pending: false;
     in property <string> diagnostics-summary: "";
     in property <bool> export-enabled: false;
-    in property <string> diagnostics-status: "Diagnostics unavailable · lifecycle wiring pending";
+    in property <string> diagnostics-status: "Диагностика недоступна · подключение ещё не готово";
     callback diagnostics-refresh-requested;
     callback diagnostics-export-requested;
-    in-out property <string> settings-local-status: "Theme changes are saved immediately";
+    in-out property <string> settings-local-status: "Изменения темы сохраняются сразу";
 
     callback preview-dialog-clicked(int);
 
@@ -310,6 +311,7 @@ export component AppWindow inherits Window {
                         keyboard-state-ready <=> root.keyboard-state-ready;
                         keyboard-control-ready <=> root.keyboard-control-ready;
                         keyboard-brightness <=> root.keyboard-brightness;
+                        keyboard-mutation-error <=> root.keyboard-mutation-error;
                         keyboard-brightness-requested(i) => { root.keyboard-brightness-requested(i); }
                         perf-clicked(i) => { root.perf-clicked(i); }
                         charge-changed(v) => { root.charge-changed(v); }
@@ -343,6 +345,7 @@ export component AppWindow inherits Window {
                         keyboard-state-ready <=> root.keyboard-state-ready;
                         keyboard-control-ready <=> root.keyboard-control-ready;
                         keyboard-brightness <=> root.keyboard-brightness;
+                        keyboard-mutation-error <=> root.keyboard-mutation-error;
                         keyboard-brightness-requested(i) => { root.keyboard-brightness-requested(i); }
                         aura-state-ready <=> root.aura-state-ready;
                         aura-control-ready <=> root.aura-control-ready;

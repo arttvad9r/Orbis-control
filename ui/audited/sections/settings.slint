@@ -9,7 +9,7 @@ export component SettingsSection inherits Rectangle {
     callback startup-changed(bool);
     in-out property <bool> startup: false;
     in-out property <bool> startup-enabled: false;
-    in property <string> startup-status: "Unavailable";
+    in property <string> startup-status: "Недоступно";
     callback start-minimized-changed(bool);
     in property <bool> start-minimized: false;
     in property <bool> start-minimized-enabled: false;
@@ -141,7 +141,7 @@ export component SettingsSection inherits Rectangle {
                     }
 
                     LocalStatus {
-                        text: root.startup-status != "" && root.startup-status != "Unavailable" ? root.startup-status : root.settings-local-status;
+                        text: root.startup-status != "" && root.startup-status != "Недоступно" ? root.startup-status : root.settings-local-status;
                         accent: Palette.text-secondary;
                     }
                 }

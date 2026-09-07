@@ -83,6 +83,7 @@ export component BacklightSection inherits Rectangle {
     in property <bool> keyboard-state-ready: false;
     in property <bool> keyboard-control-ready: false;
     in property <int> keyboard-brightness: -1;
+    in property <string> keyboard-mutation-error: "";
     callback keyboard-brightness-requested(int);
     in property <bool> aura-state-ready: false;
     in property <bool> aura-control-ready: false;
@@ -139,6 +140,7 @@ export component BacklightSection inherits Rectangle {
     }
 
     function keyboard-status() -> string {
+        if (root.keyboard-mutation-error != "") { return root.keyboard-mutation-error; }
         if (!root.keyboard-state-ready) { return "Получение состояния подсветки"; }
         if (root.keyboard-control-ready) { return "Изменение яркости подтверждается чтением фактического уровня"; }
         return "Текущий уровень доступен только для чтения";
@@ -192,7 +194,7 @@ export component BacklightSection inherits Rectangle {
                         SectionTitle { horizontal-stretch: 1; title: "Подсветка клавиатуры"; }
                         StatusPill {
                             text: root.keyboard-state-ready ? (root.keyboard-control-ready ? "Доступно" : "Только чтение") : "Определяется";
-                            accent: root.keyboard-control-ready ? Palette.success : root.keyboard-state-ready ? Palette.text-secondary : Palette.warning;
+                            accent: root.keyboard-mutation-error != "" ? Palette.warning : root.keyboard-control-ready ? Palette.success : root.keyboard-state-ready ? Palette.text-secondary : Palette.warning;
                         }
                     }
 

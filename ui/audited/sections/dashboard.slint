@@ -18,6 +18,7 @@ export component DashboardSection inherits Rectangle {
     in property <bool> keyboard-state-ready: false;
     in property <bool> keyboard-control-ready: false;
     in property <int> keyboard-brightness: -1;
+    in property <string> keyboard-mutation-error: "";
     callback keyboard-brightness-requested(int);
     callback perf-clicked(int);
     callback charge-changed(float);
@@ -334,7 +335,7 @@ export component DashboardSection inherits Rectangle {
                         spacing: 9px;
                         SectionTitle {
                             title: "Подсветка клавиатуры";
-                            detail: root.keyboard-state-ready ? (root.keyboard-control-ready ? "Доступно" : "Только чтение") : "Определяется";
+                            detail: root.keyboard-mutation-error != "" ? root.keyboard-mutation-error : root.keyboard-state-ready ? (root.keyboard-control-ready ? "Доступно" : "Только чтение") : "Определяется";
                         }
                         if (root.keyboard-state-ready) : HorizontalLayout {
                             height: 40px;

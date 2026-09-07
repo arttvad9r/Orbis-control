@@ -7,12 +7,12 @@ export global LayoutMetrics {
     in property <length> sidebar-width: 244px;
     in property <length> titlebar-height: 48px;
     in property <length> page-margin: 28px;
-    in property <length> page-gap: 18px;
-    in property <length> card-padding: 18px;
+    in property <length> page-gap: 15px;
+    in property <length> card-padding: 16px;
     in property <length> card-radius: 14px;
     in property <length> control-height: 40px;
     in property <length> compact-control-height: 36px;
-    in property <length> page-bottom-padding: 42px;
+    in property <length> page-bottom-padding: 28px;
 }
 
 // Standard Slint widgets (ScrollView/ComboBox/etc.) have their own style
@@ -162,13 +162,21 @@ export component SubsectionLabel inherits Rectangle {
     in property <string> text;
     height: 28px;
     background: transparent;
-    Text {
-        text: root.text;
-        font-size: 11.5px;
-        font-weight: 650;
-        letter-spacing: 0.6px;
-        color: Palette.text-secondary;
-        vertical-alignment: center;
+    HorizontalLayout {
+        spacing: 10px;
+        Text {
+            text: root.text;
+            font-size: 11.5px;
+            font-weight: 650;
+            letter-spacing: 0.6px;
+            color: Palette.text-secondary;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            height: 1px;
+            background: Palette.border-default;
+        }
     }
 }
 
