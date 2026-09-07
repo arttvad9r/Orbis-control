@@ -396,7 +396,7 @@ impl Authorizer for PolkitAuthorizer {
                 &subject,
                 self.action,
                 &std::collections::HashMap::new(),
-                Default::default(),
+                zbus_polkit::policykit1::CheckAuthorizationFlags::AllowUserInteraction.into(),
                 "",
             )
             .await
