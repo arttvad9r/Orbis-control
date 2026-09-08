@@ -25,6 +25,7 @@ struct ExtraContext {
     runtime: tokio::runtime::Handle,
     refreshing: Arc<AtomicBool>,
     mutating: Arc<AtomicBool>,
+    advanced_dirty: Arc<AtomicBool>,
     clamshell: Arc<Mutex<Option<Child>>>,
 }
 
@@ -71,12 +72,24 @@ struct ApuMemoryObserved {
     status: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AdvancedApplyDraft {
+    boot_sound: bool,
+    igpu_memory: u8,
+    aspm_disabled: bool,
+}
+
+fn advanced_apply_ready(dirty: bool, boot_sound: bool, igpu_memory: bool, aspm: bool) -> bool {
+    dirty && (boot_sound || igpu_memory || aspm)
+}
+
 pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
     CONTEXT.with(|slot| {
         *slot.borrow_mut() = Some(ExtraContext {
             runtime,
             refreshing: Arc::new(AtomicBool::new(false)),
             mutating: Arc::new(AtomicBool::new(false)),
+            advanced_dirty: Arc::new(AtomicBool::new(false)),
             clamshell: Arc::new(Mutex::new(None)),
         });
     });
@@ -176,7 +189,7 @@ pub(crate) fn wire_window(window: &AppWindow) {
         let weak = window.as_weak();
         window.on_igpu_memory_requested(move |value| {
             if let Some(window) = weak.upgrade() {
-                request_apu_memory(&window, value);
+                stage_apu_memory(&window, value);
             }
         });
     }
@@ -185,7 +198,7 @@ pub(crate) fn wire_window(window: &AppWindow) {
         let weak = window.as_weak();
         window.on_boot_sound_requested(move |enabled| {
             if let Some(window) = weak.upgrade() {
-                request_boot_sound(&window, enabled);
+                stage_boot_sound(&window, enabled);
             }
         });
     }
@@ -204,7 +217,7 @@ pub(crate) fn wire_window(window: &AppWindow) {
         let weak = window.as_weak();
         window.on_aspm_requested(move |disabled| {
             if let Some(window) = weak.upgrade() {
-                request_aspm(&window, disabled);
+                stage_aspm(&window, disabled);
             }
         });
     }
@@ -220,15 +233,47 @@ pub(crate) fn wire_window(window: &AppWindow) {
 
     let weak = window.as_weak();
     window.on_apply_requested(move || {
-        tracing::warn!(
-            "Advanced multi-field Apply rejected: no typed owners for the remaining controls"
-        );
         if let Some(window) = weak.upgrade() {
-            window.set_status(
-                "Apply rejected · remaining ASUS parameters have no typed owner yet".into(),
-            );
+            apply_advanced(&window);
         }
     });
+}
+
+fn stage_advanced(window: &AppWindow) {
+    let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) else {
+        return;
+    };
+    context.advanced_dirty.store(true, Ordering::Release);
+    window.set_advanced_apply_ready(advanced_apply_ready(
+        true,
+        window.get_boot_sound_control_ready(),
+        window.get_igpu_memory_control_ready(),
+        window.get_aspm_control_ready(),
+    ));
+}
+
+fn stage_boot_sound(window: &AppWindow, enabled: bool) {
+    if !window.get_boot_sound_control_ready() {
+        return;
+    }
+    window.set_boot_sound(enabled);
+    stage_advanced(window);
+}
+
+fn stage_apu_memory(window: &AppWindow, value: i32) {
+    if !window.get_igpu_memory_control_ready() || !(0..=8).contains(&value) {
+        return;
+    }
+    window.set_igpu_memory(value);
+    stage_advanced(window);
+}
+
+fn stage_aspm(window: &AppWindow, disabled: bool) {
+    if !window.get_aspm_control_ready() {
+        return;
+    }
+    window.set_disable_aspm(disabled);
+    stage_advanced(window);
 }
 
 fn begin_mutation(window: &AppWindow) -> Option<ExtraContext> {
@@ -244,6 +289,70 @@ fn begin_mutation(window: &AppWindow) -> Option<ExtraContext> {
     window.set_aspm_control_ready(false);
     window.set_auto_clamshell_control_ready(false);
     Some(context)
+}
+
+fn apply_advanced(window: &AppWindow) {
+    let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) else {
+        return;
+    };
+    if !context.advanced_dirty.load(Ordering::Acquire) {
+        window.set_status("Apply skipped · no staged changes".into());
+        return;
+    }
+    let Some(context) = begin_mutation(window) else {
+        return;
+    };
+    let draft = AdvancedApplyDraft {
+        boot_sound: window.get_boot_sound(),
+        igpu_memory: window.get_igpu_memory().clamp(0, 8) as u8,
+        aspm_disabled: window.get_disable_aspm(),
+    };
+    window.set_advanced_apply_ready(false);
+    window.set_status("Applying staged ASUS parameters through Hardware1…".into());
+    let weak = window.as_weak();
+    let completion = context.mutating.clone();
+    context.runtime.spawn(async move {
+        let result = async {
+            let client = HardwareProductControlClient::connect_system().await?;
+            apply_advanced_client(&client, draft).await
+        }
+        .await;
+        completion.store(false, Ordering::Release);
+        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
+            window.set_applying(false);
+            if let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) {
+                context.advanced_dirty.store(false, Ordering::Release);
+            }
+            let status = match result {
+                Ok(()) => "Staged ASUS parameters applied · read-back confirmed".to_string(),
+                Err(error) => format!("Staged ASUS Apply failed · {}", write_error_label(&error)),
+            };
+            refresh_with_status(&window, Some(status));
+        }) {
+            tracing::warn!(error = ?error, "failed to publish staged ASUS Apply result");
+        }
+    });
+}
+
+async fn apply_advanced_client(
+    client: &HardwareProductControlClient,
+    draft: AdvancedApplyDraft,
+) -> Result<(), ProviderError> {
+    if client.boot_sound_status().await?.is_supported() {
+        client.set_boot_sound(draft.boot_sound).await?;
+    }
+    if client.apu_memory_status().await?.is_supported() {
+        client.set_apu_memory(draft.igpu_memory).await?;
+    }
+    if client.aspm_state().await?.1.is_supported() {
+        let observed = client.set_aspm_disabled(draft.aspm_disabled).await?;
+        if observed != draft.aspm_disabled {
+            return Err(ProviderError::BackendUnavailable(
+                "ASPM read-back did not match staged value".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn request_aura_effect(window: &AppWindow, request: AuraEffectRequest) {
@@ -326,51 +435,6 @@ fn request_aura_effect(window: &AppWindow, request: AuraEffectRequest) {
     });
 }
 
-fn request_apu_memory(window: &AppWindow, value: i32) {
-    if !window.get_igpu_memory_control_ready() || !(0..=8).contains(&value) {
-        tracing::warn!(
-            value,
-            "Extra iGPU memory request ignored: write evidence unavailable or invalid"
-        );
-        return;
-    }
-    let Some(context) = begin_mutation(window) else {
-        return;
-    };
-    window.set_status("Applying iGPU memory through Hardware1… reboot required".into());
-    let weak = window.as_weak();
-    let completion = context.mutating.clone();
-    context.runtime.spawn(async move {
-        let result = async {
-            let client = HardwareProductControlClient::connect_system().await?;
-            client.set_apu_memory(value as u8).await
-        }
-        .await;
-        completion.store(false, Ordering::Release);
-        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
-            window.set_applying(false);
-            match result {
-                Ok((observed, pending)) => {
-                    window.set_igpu_memory_state_ready(true);
-                    window.set_igpu_memory_control_ready(true);
-                    window.set_igpu_memory(observed as i32);
-                    window.set_igpu_memory_pending(pending);
-                    window.set_status(
-                        format!("iGPU memory set to {observed} · reboot required").into(),
-                    );
-                    return;
-                }
-                Err(error) => window.set_status(
-                    format!("iGPU memory write failed · {}", write_error_label(&error)).into(),
-                ),
-            }
-            refresh(&window);
-        }) {
-            tracing::warn!(error = ?error, "failed to publish iGPU memory mutation result");
-        }
-    });
-}
-
 fn request_panel_overdrive(window: &AppWindow, enabled: bool) {
     if !window.get_panel_overdrive_control_ready() {
         tracing::warn!(
@@ -417,47 +481,6 @@ fn request_panel_overdrive(window: &AppWindow, enabled: bool) {
             refresh(&window);
         }) {
             tracing::warn!(error = ?error, "failed to publish Extra panel mutation result");
-        }
-    });
-}
-
-fn request_aspm(window: &AppWindow, disabled: bool) {
-    if !window.get_aspm_control_ready() {
-        return;
-    }
-    let Some(context) = begin_mutation(window) else {
-        return;
-    };
-    window.set_status("Applying PCIe ASPM policy through Hardware1…".into());
-    let weak = window.as_weak();
-    let completion = context.mutating.clone();
-    context.runtime.spawn(async move {
-        let result = async {
-            let client = HardwareProductControlClient::connect_system().await?;
-            client.set_aspm_disabled(disabled).await
-        }
-        .await;
-        completion.store(false, Ordering::Release);
-        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
-            window.set_applying(false);
-            match result {
-                Ok(observed) => {
-                    window.set_disable_aspm(observed);
-                    window.set_status(
-                        format!(
-                            "PCIe ASPM {} · read-back confirmed",
-                            if observed { "disabled" } else { "enabled" }
-                        )
-                        .into(),
-                    );
-                }
-                Err(error) => window.set_status(
-                    format!("ASPM write failed · {}", write_error_label(&error)).into(),
-                ),
-            }
-            refresh(&window);
-        }) {
-            tracing::warn!(error = ?error, "failed to publish ASPM mutation result");
         }
     });
 }
@@ -581,54 +604,11 @@ fn clamshell_is_active() -> bool {
     })
 }
 
-fn request_boot_sound(window: &AppWindow, enabled: bool) {
-    if !window.get_boot_sound_control_ready() {
-        tracing::warn!(
-            requested = enabled,
-            "Extra boot sound request ignored: write evidence unavailable"
-        );
-        return;
-    }
-    let Some(context) = begin_mutation(window) else {
-        return;
-    };
-
-    window.set_status("Applying BIOS/POST sound through Hardware1…".into());
-    let weak = window.as_weak();
-    let completion = context.mutating.clone();
-    context.runtime.spawn(async move {
-        let result = async {
-            let client = HardwareProductControlClient::connect_system().await?;
-            client.set_boot_sound(enabled).await
-        }
-        .await;
-        completion.store(false, Ordering::Release);
-
-        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
-            window.set_applying(false);
-            match result {
-                Ok(observed) => {
-                    window.set_boot_sound(observed);
-                    window.set_status(
-                        format!(
-                            "BIOS/POST sound {} · authoritative read-back confirmed",
-                            if observed { "on" } else { "off" }
-                        )
-                        .into(),
-                    );
-                }
-                Err(error) => window.set_status(
-                    format!("Boot sound write failed · {}", write_error_label(&error)).into(),
-                ),
-            }
-            refresh(&window);
-        }) {
-            tracing::warn!(error = ?error, "failed to publish boot sound mutation result");
-        }
-    });
+pub(crate) fn refresh(window: &AppWindow) {
+    refresh_with_status(window, None);
 }
 
-pub(crate) fn refresh(window: &AppWindow) {
+fn refresh_with_status(window: &AppWindow, final_status: Option<String>) {
     let context = CONTEXT.with(|slot| slot.borrow().clone());
     let Some(context) = context else {
         reset_readiness(window);
@@ -692,6 +672,11 @@ pub(crate) fn refresh(window: &AppWindow) {
             window.set_backend_ready(false);
             window.set_applying(false);
 
+            if let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) {
+                context.advanced_dirty.store(false, Ordering::Release);
+            }
+            window.set_advanced_apply_ready(false);
+
             window.set_aura_state_ready(aura.ready);
             window.set_keyboard_effect(aura.effect);
             window.set_keyboard_speed(aura.speed);
@@ -731,26 +716,24 @@ pub(crate) fn refresh(window: &AppWindow) {
             window.set_disable_aspm(aspm_disabled);
 
             let any_ready = aura.ready || panel.ready || boot_sound.ready || apu.ready || aspm_write != ProductWriteStatus::Unknown;
-             window.set_backend_ready(any_ready);
-            window.set_status(
-                if any_ready {
-                    format!(
-                        "Observed · {} · panel {} · {} · iGPU {}",
-                        aura.status,
-                        panel_write.short_label(),
-                        boot_sound.status,
-                        apu.status,
-                    )
-                } else {
-                    format!(
-                        "Advanced observations unavailable · {} · {} · iGPU {}",
-                        aura.status,
-                        boot_sound.status,
-                        apu.status,
-                    )
-                }
-                .into(),
-            );
+            window.set_backend_ready(any_ready);
+            let observed_status = if any_ready {
+                format!(
+                    "Observed · {} · panel {} · {} · iGPU {}",
+                    aura.status,
+                    panel_write.short_label(),
+                    boot_sound.status,
+                    apu.status,
+                )
+            } else {
+                format!(
+                    "Advanced observations unavailable · {} · {} · iGPU {}",
+                    aura.status,
+                    boot_sound.status,
+                    apu.status,
+                )
+            };
+            window.set_status(final_status.unwrap_or(observed_status).into());
         }) {
             tracing::warn!(error = ?error, "failed to publish Extra observed state to UI");
         }
@@ -967,10 +950,67 @@ fn write_error_label(error: &ProviderError) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use orbis_core::aura::{
         AuraBrightness, AuraDirection, AuraEffect, AuraRgb, AuraState, AuraZone,
     };
+
+    const OBJECT_PATH: &str = "/io/github/orbiscontrol/Hardware";
+
+    #[derive(Clone)]
+    struct FakeAdvancedHardware {
+        state: Arc<Mutex<(bool, u8, bool)>>,
+    }
+
+    #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
+    impl FakeAdvancedHardware {
+        async fn boot_sound_mutation_status(&self) -> u8 {
+            0
+        }
+
+        async fn set_boot_sound(&self, enabled: bool) -> u8 {
+            self.state.lock().unwrap().0 = enabled;
+            enabled as u8
+        }
+
+        async fn apu_memory_mutation_status(&self) -> u8 {
+            0
+        }
+
+        async fn set_apu_memory(&self, value: u8) -> (u8, u8, u8) {
+            self.state.lock().unwrap().1 = value;
+            (value, value, 1)
+        }
+
+        async fn aspm_mutation_status(&self) -> u8 {
+            0
+        }
+
+        async fn aspm_disabled(&self) -> bool {
+            self.state.lock().unwrap().2
+        }
+
+        async fn set_aspm_disabled(&self, disabled: bool) -> bool {
+            self.state.lock().unwrap().2 = disabled;
+            disabled
+        }
+    }
+
+    async fn private_advanced_peer(
+        hardware: FakeAdvancedHardware,
+    ) -> (zbus::Connection, zbus::Connection) {
+        let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        let server = zbus::connection::Builder::unix_stream(server_stream)
+            .server(zbus::Guid::generate())
+            .unwrap()
+            .p2p()
+            .serve_at(OBJECT_PATH, hardware)
+            .unwrap();
+        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        tokio::try_join!(server.build(), client.build()).unwrap()
+    }
 
     #[test]
     fn aura_mapping_never_coerces_unsupported_modes() {
@@ -988,6 +1028,37 @@ mod tests {
         assert!(state.ready);
         assert!(!state.enabled);
         assert!(state.status.contains("off"));
+    }
+
+    #[test]
+    fn advanced_apply_requires_staged_change_and_typed_write_evidence() {
+        assert!(!advanced_apply_ready(false, true, true, true));
+        assert!(advanced_apply_ready(true, true, false, false));
+        assert!(advanced_apply_ready(true, false, false, true));
+        assert!(!advanced_apply_ready(true, false, false, false));
+    }
+
+    #[tokio::test]
+    async fn staged_apply_uses_only_supported_typed_controls() {
+        let hardware = FakeAdvancedHardware {
+            state: Arc::new(Mutex::new((false, 2, false))),
+        };
+        let state = hardware.state.clone();
+        let (_server, connection) = private_advanced_peer(hardware).await;
+        let client = HardwareProductControlClient::new(connection);
+
+        apply_advanced_client(
+            &client,
+            AdvancedApplyDraft {
+                boot_sound: true,
+                igpu_memory: 6,
+                aspm_disabled: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(*state.lock().unwrap(), (true, 6, true));
     }
 
     #[test]
