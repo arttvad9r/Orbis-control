@@ -225,12 +225,12 @@ export component DashboardSection inherits Rectangle {
                     spacing: 18px;
 
                     VerticalLayout {
-                        width: 214px;
-                        spacing: 12px;
+                        width: 190px;
+                        spacing: 8px;
                         SectionTitle { title: "Вентиляторы"; }
 
                         Rectangle {
-                            height: 54px;
+                            height: 44px;
                             border-radius: 10px;
                             background: Palette.surface-muted;
                             HorizontalLayout {
@@ -251,7 +251,7 @@ export component DashboardSection inherits Rectangle {
                             }
                         }
                         Rectangle {
-                            height: 54px;
+                            height: 44px;
                             border-radius: 10px;
                             background: Palette.surface-muted;
                             HorizontalLayout {
@@ -271,8 +271,7 @@ export component DashboardSection inherits Rectangle {
                                 Text { vertical-stretch: 1; text: root.ui-state.gpu-fan-rpm; font-size: 14px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }
                             }
                         }
-                        Rectangle { vertical-stretch: 1; background: transparent; }
-                        ActionButton { label: "Настроить кривые"; clicked => { root.cooling-open-requested(); } }
+
                     }
 
                     Divider { width: 1px; }
@@ -280,11 +279,10 @@ export component DashboardSection inherits Rectangle {
                     VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 10px;
-                        SectionTitle {
-                            title: "Кривая вентилятора";
-                            detail: root.ui-state.fan-curve-state == FanCurveHwState.Ready
-                                ? (root.ui-state.fan-curve-writable ? "Профиль доступен" : "Только чтение")
-                                : "Получение данных";
+                        HorizontalLayout {
+                            height: 28px; spacing: 8px;
+                            Text { horizontal-stretch: 1; text: "Кривая вентилятора"; font-size: 15px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }
+                            ActionButton { width: 124px; label: "Настроить"; clicked => { root.cooling-open-requested(); } }
                         }
                         FanCurveChart {
                             vertical-stretch: 1;
@@ -305,10 +303,10 @@ export component DashboardSection inherits Rectangle {
 
                 SectionCard {
                     horizontal-stretch: 1;
-                    min-height: 136px;
+                    min-height: 112px;
                     VerticalLayout {
                         padding: LayoutMetrics.card-padding;
-                        spacing: 9px;
+                        spacing: 7px;
                         SectionTitle {
                             title: "Ограничение заряда";
                             detail: root.ui-state.charge-limit-state == ChargeLimitState.Ready
@@ -329,17 +327,17 @@ export component DashboardSection inherits Rectangle {
 
                 SectionCard {
                     horizontal-stretch: 1;
-                    min-height: 136px;
+                    min-height: 112px;
                     VerticalLayout {
                         padding: LayoutMetrics.card-padding;
-                        spacing: 9px;
+                        spacing: 7px;
                         SectionTitle {
                             title: "Подсветка клавиатуры";
                             detail: root.keyboard-mutation-error != "" ? root.keyboard-mutation-error : root.keyboard-state-ready ? (root.keyboard-control-ready ? "Доступно" : "Только чтение") : "Определяется";
                         }
                         if (root.keyboard-state-ready) : HorizontalLayout {
-                            height: 40px;
-                            spacing: 8px;
+                            height: 30px;
+                            spacing: 6px;
                             for level in 4: Rectangle {
                                 horizontal-stretch: 1;
                                 border-radius: 10px;

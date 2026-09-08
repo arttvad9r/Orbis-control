@@ -148,6 +148,16 @@ export component FanCurveChart inherits Rectangle {
                 if (root.has-curve) : Rectangle {
                     x: 0px; y: 0px; width: parent.width; height: parent.height;
                     background: transparent; clip: true;
+                    // A thin interpolated trace keeps the actual curve readable.
+                    for i in 104: Rectangle {
+                        property <float> f: (i + 0.5) / 104;
+                        property <float> frac: Math.min(Math.max(root.pwm-at-temp(root.temp-at-fraction(self.f)) / 255, 0), 1);
+                        x: i * (parent.width / 104);
+                        width: parent.width / 104 + 1px;
+                        y: parent.height * (1 - self.frac) - 1px;
+                        height: 3px;
+                        background: root.accent;
+                    }
                     for i in 52: Rectangle {
                         property <float> f: (i + 0.5) / 52;
                         property <float> frac: Math.min(Math.max(root.pwm-at-temp(root.temp-at-fraction(self.f)) / 255, 0), 1);

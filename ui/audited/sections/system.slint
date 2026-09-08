@@ -184,28 +184,28 @@ export component SystemSection inherits Rectangle {
                     RequestToggleRow {
                         label: "Светодиоды состояния";
                          description: root.status-led-state-ready ? "Управление системными индикаторами ноутбука" : "Недоступно: поддержка функции не обнаружена";
-                         checked: root.status-led;
+                         checked: root.status-led-state-ready && root.status-led;
                          disabled: !root.status-led-control-ready || root.applying;
                          toggled(value) => { root.status-led = value; }
                     }
                     RequestToggleRow {
                           label: "Автоматический режим закрытой крышки";
-                          description: root.auto-clamshell-state-ready ? "Поведение устройства при работе с закрытой крышкой" : "Недоступно: компонент сессии не подключён";
-                         checked: root.auto-clamshell;
+                           description: root.auto-clamshell-state-ready ? "Поведение устройства при работе с закрытой крышкой" : "Недоступно: компонент сессии не подключён";
+                         checked: root.auto-clamshell-state-ready && root.auto-clamshell;
                          disabled: !root.auto-clamshell-control-ready || root.applying;
                          toggled(value) => { root.auto-clamshell = value; root.auto-clamshell-requested(value); }
                     }
                     RequestToggleRow {
                          label: "Отключать PCIe ASPM при работе от сети";
                           description: root.aspm-state-ready ? "Профиль энергосбережения PCIe при питании от адаптера" : "Недоступно: поддержка функции не обнаружена";
-                         checked: root.disable-aspm;
+                         checked: root.aspm-state-ready && root.disable-aspm;
                          disabled: !root.aspm-control-ready || root.applying;
                          toggled(value) => { root.disable-aspm = value; root.aspm-requested(value); }
                     }
                     RequestToggleRow {
                          label: "Отключать сеть в современном режиме ожидания";
                           description: root.standby-networking-control-ready ? "Сетевое поведение во время современного режима ожидания" : "Недоступно: поддержка функции не обнаружена";
-                         checked: root.disable-standby-networking;
+                         checked: root.standby-networking-control-ready && root.disable-standby-networking;
                          disabled: !root.standby-networking-control-ready || root.applying;
                         toggled(value) => { root.disable-standby-networking = value; }
                     }

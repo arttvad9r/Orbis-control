@@ -51,7 +51,7 @@ export component CoolingSection inherits Rectangle {
             }
 
             HorizontalLayout {
-                height: 36px;
+                height: 30px;
                 LocalStatus {
                     horizontal-stretch: 1;
                     text: root.status-text();
@@ -72,10 +72,10 @@ export component CoolingSection inherits Rectangle {
             }
 
             SectionCard {
-                min-height: 500px;
+                min-height: 430px;
                 VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 10px;
+                    padding: 12px;
+                    spacing: 7px;
 
                     FanCurveEditor {
                         vertical-stretch: 1;
