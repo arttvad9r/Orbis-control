@@ -79,6 +79,11 @@ struct AdvancedApplyDraft {
     aspm_disabled: bool,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct AdvancedApplyObservation {
+    igpu_memory: Option<(u8, bool)>,
+}
+
 fn advanced_apply_ready(dirty: bool, boot_sound: bool, igpu_memory: bool, aspm: bool) -> bool {
     dirty && (boot_sound || igpu_memory || aspm)
 }
@@ -323,11 +328,21 @@ fn apply_advanced(window: &AppWindow) {
             if let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) {
                 context.advanced_dirty.store(false, Ordering::Release);
             }
-            let status = match result {
-                Ok(()) => "Staged ASUS parameters applied · read-back confirmed".to_string(),
-                Err(error) => format!("Staged ASUS Apply failed · {}", write_error_label(&error)),
+            let (status, pending) = match result {
+                Ok(observation) => (
+                    if observation.igpu_memory.is_some_and(|(_, pending)| pending) {
+                        "Staged ASUS parameters applied · reboot required".to_string()
+                    } else {
+                        "Staged ASUS parameters applied · read-back confirmed".to_string()
+                    },
+                    observation.igpu_memory.map(|(_, pending)| pending),
+                ),
+                Err(error) => (
+                    format!("Staged ASUS Apply failed · {}", write_error_label(&error)),
+                    None,
+                ),
             };
-            refresh_with_status(&window, Some(status));
+            refresh_with_status(&window, Some(status), pending);
         }) {
             tracing::warn!(error = ?error, "failed to publish staged ASUS Apply result");
         }
@@ -337,12 +352,13 @@ fn apply_advanced(window: &AppWindow) {
 async fn apply_advanced_client(
     client: &HardwareProductControlClient,
     draft: AdvancedApplyDraft,
-) -> Result<(), ProviderError> {
+) -> Result<AdvancedApplyObservation, ProviderError> {
+    let mut observation = AdvancedApplyObservation::default();
     if client.boot_sound_status().await?.is_supported() {
         client.set_boot_sound(draft.boot_sound).await?;
     }
     if client.apu_memory_status().await?.is_supported() {
-        client.set_apu_memory(draft.igpu_memory).await?;
+        observation.igpu_memory = Some(client.set_apu_memory(draft.igpu_memory).await?);
     }
     if client.aspm_state().await?.1.is_supported() {
         let observed = client.set_aspm_disabled(draft.aspm_disabled).await?;
@@ -352,7 +368,7 @@ async fn apply_advanced_client(
             ));
         }
     }
-    Ok(())
+    Ok(observation)
 }
 
 fn request_aura_effect(window: &AppWindow, request: AuraEffectRequest) {
@@ -605,10 +621,10 @@ fn clamshell_is_active() -> bool {
 }
 
 pub(crate) fn refresh(window: &AppWindow) {
-    refresh_with_status(window, None);
+    refresh_with_status(window, None, None);
 }
 
-fn refresh_with_status(window: &AppWindow, final_status: Option<String>) {
+fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending: Option<bool>) {
     let context = CONTEXT.with(|slot| slot.borrow().clone());
     let Some(context) = context else {
         reset_readiness(window);
@@ -710,7 +726,7 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>) {
             window.set_igpu_memory_state_ready(apu.ready);
             window.set_igpu_memory_control_ready(apu.ready && apu_write.is_supported());
             window.set_igpu_memory(apu.value);
-            window.set_igpu_memory_pending(false);
+            window.set_igpu_memory_pending(pending.unwrap_or(false));
             window.set_aspm_state_ready(aspm_write != ProductWriteStatus::Unknown);
             window.set_aspm_control_ready(aspm_write.is_supported());
             window.set_disable_aspm(aspm_disabled);
