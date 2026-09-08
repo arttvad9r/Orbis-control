@@ -159,10 +159,11 @@ pub(crate) fn wire_window(window: &AppWindow) {
         }
         .into(),
     );
-    let clamshell_ready = systemd_inhibit_available();
+    let (clamshell_ready, clamshell_active, _) =
+        clamshell_observed(systemd_inhibit_available(), clamshell_is_active());
     window.set_auto_clamshell_state_ready(clamshell_ready);
     window.set_auto_clamshell_control_ready(clamshell_ready);
-    window.set_auto_clamshell(clamshell_is_active());
+    window.set_auto_clamshell(clamshell_active);
 
     {
         let weak = window.as_weak();
@@ -522,9 +523,10 @@ fn request_clamshell(window: &AppWindow, enabled: bool) {
         completion.store(false, Ordering::Release);
         if let Err(error) = weak.upgrade_in_event_loop(move |window| {
             window.set_applying(false);
-            window.set_auto_clamshell_control_ready(true);
             match result {
                 Ok(active) => {
+                    window.set_auto_clamshell_state_ready(true);
+                    window.set_auto_clamshell_control_ready(true);
                     window.set_auto_clamshell(active);
                     window.set_status(
                         format!(
@@ -535,6 +537,8 @@ fn request_clamshell(window: &AppWindow, enabled: bool) {
                     );
                 }
                 Err(error) => {
+                    window.set_auto_clamshell_state_ready(false);
+                    window.set_auto_clamshell_control_ready(false);
                     window.set_auto_clamshell(false);
                     window.set_status(format!("Closed-lid mode failed · {error}").into());
                 }
@@ -620,6 +624,21 @@ fn clamshell_is_active() -> bool {
     })
 }
 
+fn clamshell_observed(available: bool, active: bool) -> (bool, bool, &'static str) {
+    if !available {
+        return (
+            false,
+            false,
+            "Closed-lid mode unavailable · systemd-inhibit missing",
+        );
+    }
+    (
+        true,
+        active,
+        "Closed-lid mode state observed from session inhibitor",
+    )
+}
+
 pub(crate) fn refresh(window: &AppWindow) {
     refresh_with_status(window, None, None);
 }
@@ -688,6 +707,12 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
             window.set_backend_ready(false);
             window.set_applying(false);
 
+            let (clamshell_ready, clamshell_active, clamshell_status) =
+                clamshell_observed(systemd_inhibit_available(), clamshell_is_active());
+            window.set_auto_clamshell_state_ready(clamshell_ready);
+            window.set_auto_clamshell_control_ready(clamshell_ready);
+            window.set_auto_clamshell(clamshell_active);
+
             if let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) {
                 context.advanced_dirty.store(false, Ordering::Release);
             }
@@ -749,7 +774,11 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
                     apu.status,
                 )
             };
-            window.set_status(final_status.unwrap_or(observed_status).into());
+            window.set_status(
+                final_status
+                    .unwrap_or_else(|| format!("{observed_status} · {clamshell_status}"))
+                    .into(),
+            );
         }) {
             tracing::warn!(error = ?error, "failed to publish Extra observed state to UI");
         }
@@ -1154,5 +1183,25 @@ mod tests {
         );
         assert_eq!(args[args.len() - 2], "sleep");
         assert_eq!(args[args.len() - 1], "infinity");
+    }
+
+    #[test]
+    fn clamshell_observation_fails_closed_when_inhibitor_is_unavailable() {
+        assert_eq!(
+            clamshell_observed(false, true),
+            (
+                false,
+                false,
+                "Closed-lid mode unavailable · systemd-inhibit missing"
+            )
+        );
+        assert_eq!(
+            clamshell_observed(true, false),
+            (
+                true,
+                false,
+                "Closed-lid mode state observed from session inhibitor"
+            )
+        );
     }
 }
