@@ -42,6 +42,8 @@ pub const PLATFORM_PROFILE_PATH: &str = "/sys/firmware/acpi/platform_profile";
 pub type AuraEffectMutationWire = (u32, String, (u8, u8, u8), (u8, u8, u8), u32);
 /// Фиксированный production path kernel ABI: доступные профили.
 pub const PLATFORM_PROFILE_CHOICES_PATH: &str = "/sys/firmware/acpi/platform_profile_choices";
+/// Well-known owner which also controls the kernel platform-profile ABI.
+pub const POWER_PROFILES_DAEMON_BUS_NAME: &str = "org.freedesktop.UPower.PowerProfiles";
 
 /// Exact kernel symbol для write-path (reverse read mapping, ADR 0006).
 ///
@@ -94,6 +96,8 @@ pub struct PlatformProfileWriter<S: ProfileIo> {
     io: S,
     profile_path: PathBuf,
     choices_path: PathBuf,
+    owner_conflict: Option<bool>,
+    owner_check_unknown: bool,
 }
 
 impl PlatformProfileWriter<StdProfileIo> {
@@ -126,7 +130,19 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
             io,
             profile_path,
             choices_path,
+            owner_conflict: None,
+            owner_check_unknown: false,
         }
+    }
+
+    pub(crate) fn with_owner_conflict(mut self, conflict: bool) -> Self {
+        self.owner_conflict = Some(conflict);
+        self
+    }
+
+    pub(crate) fn with_unknown_owner(mut self) -> Self {
+        self.owner_check_unknown = true;
+        self
     }
 
     fn read_trimmed(&self, path: &Path, what: &str) -> Result<String, ProviderError> {
@@ -146,6 +162,16 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
         &self,
         profile: PerformanceProfile,
     ) -> Result<ApplyResult, ProviderError> {
+        if self.owner_check_unknown {
+            return Err(ProviderError::BackendUnavailable(
+                "hardwared: platform_profile owner could not be established".into(),
+            ));
+        }
+        if self.owner_conflict == Some(true) {
+            return Err(ProviderError::Conflict(
+                "hardwared: power-profiles-daemon owns platform_profile".into(),
+            ));
+        }
         let symbol = profile_symbol(profile);
 
         let choices_raw = self.read_trimmed(&self.choices_path, "platform_profile_choices")?;
@@ -180,6 +206,12 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
     /// read the mutation path performs — and classifies the result. Never
     /// writes and never mutates hardware.
     pub fn mutation_status(&self) -> PerformanceMutationStatus {
+        if self.owner_check_unknown {
+            return PerformanceMutationStatus::Unknown;
+        }
+        if self.owner_conflict == Some(true) {
+            return PerformanceMutationStatus::Conflicted;
+        }
         match self.read_trimmed(&self.choices_path, "platform_profile_choices") {
             Ok(choices) if choices.split_whitespace().next().is_some() => {
                 PerformanceMutationStatus::Supported
@@ -287,6 +319,8 @@ pub enum PerformanceMutationStatus {
     TemporarilyUnavailable,
     /// The ABI exists but current read authorization denies access.
     PermissionDenied,
+    /// Another daemon currently owns the same kernel ABI.
+    Conflicted,
     /// No provable evidence about mutation availability.
     Unknown,
 }
@@ -309,6 +343,8 @@ pub mod performance_mutation_wire {
     pub const PERMISSION_DENIED: u8 = 3;
     /// No evidence.
     pub const UNKNOWN: u8 = 4;
+    /// The kernel ABI is owned by another active service.
+    pub const CONFLICTED: u8 = 5;
 
     /// Encode typed status into the D-Bus wire value.
     pub fn to_wire(status: PerformanceMutationStatus) -> u8 {
@@ -318,6 +354,7 @@ pub mod performance_mutation_wire {
             PerformanceMutationStatus::TemporarilyUnavailable => TEMPORARILY_UNAVAILABLE,
             PerformanceMutationStatus::PermissionDenied => PERMISSION_DENIED,
             PerformanceMutationStatus::Unknown => UNKNOWN,
+            PerformanceMutationStatus::Conflicted => CONFLICTED,
         }
     }
 
@@ -330,6 +367,7 @@ pub mod performance_mutation_wire {
             TEMPORARILY_UNAVAILABLE => Some(PerformanceMutationStatus::TemporarilyUnavailable),
             PERMISSION_DENIED => Some(PerformanceMutationStatus::PermissionDenied),
             UNKNOWN => Some(PerformanceMutationStatus::Unknown),
+            CONFLICTED => Some(PerformanceMutationStatus::Conflicted),
             _ => None,
         }
     }
@@ -1078,6 +1116,18 @@ impl HardwareService {
         self.aspm_authorizer = authorizer;
         self
     }
+
+    /// Apply startup-only read-only evidence about platform-profile ownership.
+    pub fn with_platform_profile_owner_state(
+        mut self,
+        state: Result<bool, zbus::fdo::Error>,
+    ) -> Self {
+        self.writer = match state {
+            Ok(conflict) => self.writer.with_owner_conflict(conflict),
+            Err(_) => self.writer.with_unknown_owner(),
+        };
+        self
+    }
 }
 
 struct DisabledAuthorizer;
@@ -1808,6 +1858,19 @@ mod tests {
         assert_eq!(w.io.writes(), 1);
         assert_eq!(w.io.profile(), "quiet\n");
         assert_eq!(w.io.reads(), 2);
+    }
+
+    #[test]
+    fn external_owner_conflict_fails_closed_before_sysfs_write() {
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        let w = writer(io).with_owner_conflict(true);
+
+        assert_eq!(w.mutation_status(), PerformanceMutationStatus::Conflicted);
+        let err = w
+            .set_performance_profile(PerformanceProfile::Turbo)
+            .expect_err("external owner must block mutation");
+        assert!(matches!(err, ProviderError::Conflict(_)));
+        assert_eq!(w.io.writes(), 0);
     }
 
     #[test]

@@ -902,6 +902,7 @@ pub fn performance_mutation_status_from_wire(raw: u8) -> orbis_core::capability:
             CapabilityStatus::TemporarilyUnavailable
         }
         Some(PerformanceMutationStatus::PermissionDenied) => CapabilityStatus::PermissionDenied,
+        Some(PerformanceMutationStatus::Conflicted) => CapabilityStatus::Conflicted,
         Some(PerformanceMutationStatus::Unknown) | None => CapabilityStatus::Unknown,
     }
 }

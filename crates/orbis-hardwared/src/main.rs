@@ -24,7 +24,7 @@ use orbis_hardwared::{
     APU_MEMORY_POLKIT_ACTION, ASPM_POLKIT_ACTION, AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION,
     BOOT_SOUND_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION, GPU_POLKIT_ACTION,
     HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
-    PRODUCT_GPU_POLKIT_ACTION, PolkitAuthorizer,
+    POWER_PROFILES_DAEMON_BUS_NAME, PRODUCT_GPU_POLKIT_ACTION, PolkitAuthorizer,
     asus_gpu_mode::{AsusGpuMutationBackend, AsusdGpuMutationClient},
     aura::{AsusdAuraStaticRgbMutationBackend, ZbusAsusdAuraClient},
     battery::{
@@ -48,6 +48,15 @@ use orbis_providers::{error::ProviderError, supergfxd::SupergfxdMode};
 
 const PRODUCT_MUTATION_DISABLED: &str =
     "mutation is disabled until the Orbis product contract and release evidence are proven";
+
+async fn platform_profile_owner_state(
+    connection: &zbus::Connection,
+) -> Result<bool, zbus::fdo::Error> {
+    let proxy = zbus::fdo::DBusProxy::new(connection).await?;
+    let name = zbus::names::BusName::try_from(POWER_PROFILES_DAEMON_BUS_NAME)
+        .expect("fixed power-profiles-daemon bus name is valid");
+    proxy.name_has_owner(name).await
+}
 struct DisabledGpuMutationBackend;
 
 #[async_trait]
@@ -193,6 +202,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     init_tracing();
     let connection = zbus::connection::Builder::system()?.build().await?;
 
+    let platform_profile_owner = platform_profile_owner_state(&connection).await;
+    match platform_profile_owner {
+        Ok(true) => tracing::warn!(
+            "power-profiles-daemon owns platform_profile; Orbis Performance writes disabled"
+        ),
+        Ok(false) => tracing::info!("no external platform_profile owner detected"),
+        Err(ref error) => tracing::warn!(
+            ?error,
+            "platform_profile owner query inconclusive; writes disabled"
+        ),
+    }
+
     // Product-gated paths are probed read-only before their narrow mutation
     // backends are exposed. Aura confirmation remains config-level, not a
     // claim that the write-only hardware LED state was independently read back.
@@ -237,6 +258,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             FAN_POLKIT_ACTION,
         )),
     )
+    .with_platform_profile_owner_state(platform_profile_owner)
     .with_panel(
         panel_backend,
         Box::new(PolkitAuthorizer::with_action(

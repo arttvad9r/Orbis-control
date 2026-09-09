@@ -64,6 +64,7 @@ pub(crate) enum ProductWriteStatus {
     Unsupported,
     TemporarilyUnavailable,
     PermissionDenied,
+    Conflicted,
     Unknown,
 }
 
@@ -78,6 +79,7 @@ impl ProductWriteStatus {
             Self::Unsupported => "write disabled",
             Self::TemporarilyUnavailable => "write unavailable",
             Self::PermissionDenied => "write denied",
+            Self::Conflicted => "write conflicted",
             Self::Unknown => "write unknown",
         }
     }
@@ -397,6 +399,7 @@ fn decode_status(raw: u8, feature: &str) -> Result<ProductWriteStatus, ProviderE
         2 => Ok(ProductWriteStatus::TemporarilyUnavailable),
         3 => Ok(ProductWriteStatus::PermissionDenied),
         4 => Ok(ProductWriteStatus::Unknown),
+        5 => Ok(ProductWriteStatus::Conflicted),
         other => Err(ProviderError::Internal(format!(
             "Hardware1 {feature} mutation status returned unknown wire value {other}"
         ))),
@@ -417,6 +420,9 @@ pub(crate) fn require_supported(
         )),
         ProductWriteStatus::PermissionDenied => Err(ProviderError::PermissionDenied(format!(
             "{feature} mutation permission denied"
+        ))),
+        ProductWriteStatus::Conflicted => Err(ProviderError::Conflict(format!(
+            "{feature} mutation conflicts with another owner"
         ))),
         ProductWriteStatus::Unknown => Err(ProviderError::BackendUnavailable(format!(
             "{feature} mutation readiness is unknown"
@@ -458,7 +464,11 @@ mod tests {
             decode_status(4, "test").unwrap(),
             ProductWriteStatus::Unknown
         );
-        assert!(decode_status(5, "test").is_err());
+        assert_eq!(
+            decode_status(5, "test").unwrap(),
+            ProductWriteStatus::Conflicted
+        );
+        assert!(decode_status(6, "test").is_err());
     }
 
     #[test]
@@ -466,6 +476,7 @@ mod tests {
         assert!(require_supported(ProductWriteStatus::Supported, "test").is_ok());
         assert!(require_supported(ProductWriteStatus::Unsupported, "test").is_err());
         assert!(require_supported(ProductWriteStatus::PermissionDenied, "test").is_err());
+        assert!(require_supported(ProductWriteStatus::Conflicted, "test").is_err());
         assert!(require_supported(ProductWriteStatus::Unknown, "test").is_err());
     }
 
