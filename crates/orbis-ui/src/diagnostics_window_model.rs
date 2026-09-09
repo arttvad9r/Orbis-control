@@ -258,6 +258,8 @@ mod tests {
                 runtime_power: DiagnosticObservation::Value(GpuPowerState::Unknown),
                 nvidia: DiagnosticObservation::Unknown,
             },
+            cpu_package_power_limits:
+                orbis_core::diagnostics::CpuPackagePowerLimitsObservation::Unknown,
             telemetry: TelemetryDiagnostics {
                 latest: None,
                 status: TelemetryCollectionStatus::Unavailable,

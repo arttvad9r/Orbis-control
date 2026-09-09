@@ -9,6 +9,7 @@ use crate::display_output::DisplayOutputSnapshot;
 use crate::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use crate::identity::DeviceIdentity;
 use crate::limits::PowerLimitValue;
+use crate::limits::PowerLimits;
 use crate::newtypes::{MilliWatt, TemperatureC};
 use crate::telemetry::{Telemetry, TelemetryQuality};
 use crate::warning::WarningSeverity;
@@ -341,6 +342,24 @@ pub struct DisplayDiagnostics {
     pub checked_at: Option<SystemTime>,
 }
 
+/// Read-only CPU package power-limit observation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CpuPackagePowerLimitsObservation {
+    /// Current values and metadata were read successfully.
+    Value(PowerLimits),
+    /// The backend was present but the read was unavailable.
+    Unavailable,
+    /// The attributes are absent or the feature is unsupported.
+    Unsupported,
+    /// The read was denied.
+    PermissionDenied,
+    /// The backend returned malformed or inconsistent metadata.
+    Malformed,
+    /// The result could not be classified reliably.
+    Unknown,
+}
+
 /// Typed sections carried by an immutable diagnostics snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticsSnapshotSections {
@@ -360,6 +379,8 @@ pub struct DiagnosticsSnapshotSections {
     pub telemetry: TelemetryDiagnostics,
     /// Read-only display/output observations.
     pub display: DisplayDiagnostics,
+    /// Read-only CPU package power-limit observation.
+    pub cpu_package_power_limits: CpuPackagePowerLimitsObservation,
 }
 
 /// Immutable point-in-time production diagnostics domain snapshot.

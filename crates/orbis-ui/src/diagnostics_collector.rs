@@ -9,9 +9,9 @@
 use std::time::SystemTime;
 
 use orbis_core::diagnostics::{
-    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, DiagnosticsSnapshot,
-    DiagnosticsSnapshotSections, DisplayDiagnostics, GpuDiagnostics, HardwareDiagnostics,
-    ServiceDiagnostics, SystemDiagnostics, TelemetryDiagnostics,
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuPackagePowerLimitsObservation,
+    DiagnosticsSnapshot, DiagnosticsSnapshotSections, DisplayDiagnostics, GpuDiagnostics,
+    HardwareDiagnostics, ServiceDiagnostics, SystemDiagnostics, TelemetryDiagnostics,
 };
 
 /// Freeze one point-in-time diagnostics aggregate from already-typed sources.
@@ -33,6 +33,7 @@ pub fn collect_diagnostics_snapshot(
     services: Vec<ServiceDiagnostics>,
     capabilities: CapabilitySnapshotDiagnostics,
     gpu: GpuDiagnostics,
+    cpu_package_power_limits: CpuPackagePowerLimitsObservation,
     telemetry: TelemetryDiagnostics,
     display: DisplayDiagnostics,
 ) -> DiagnosticsSnapshot {
@@ -45,6 +46,7 @@ pub fn collect_diagnostics_snapshot(
             services,
             capabilities,
             gpu,
+            cpu_package_power_limits,
             telemetry,
             display,
         },
@@ -137,6 +139,7 @@ mod tests {
             services.clone(),
             capabilities(capability_checked_at),
             gpu.clone(),
+            CpuPackagePowerLimitsObservation::Unknown,
             telemetry.clone(),
             display.clone(),
         );
@@ -202,6 +205,7 @@ mod tests {
             services,
             capabilities(checked_at),
             gpu,
+            CpuPackagePowerLimitsObservation::Unknown,
             telemetry,
             display,
         );
@@ -267,6 +271,7 @@ mod tests {
                 runtime_power: DiagnosticObservation::Unknown,
                 nvidia: DiagnosticObservation::Unknown,
             },
+            CpuPackagePowerLimitsObservation::Unknown,
             TelemetryDiagnostics {
                 latest: None,
                 status: TelemetryCollectionStatus::Unknown,

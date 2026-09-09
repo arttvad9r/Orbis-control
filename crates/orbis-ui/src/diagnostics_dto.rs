@@ -8,8 +8,9 @@ use std::time::SystemTime;
 
 use orbis_core::capability::{CapabilityStatus, FeatureId};
 use orbis_core::diagnostics::{
-    DiagnosticsServiceId, DiagnosticsSnapshot, DisplayDiagnostics, DisplayProtocol, GpuDiagnostics,
-    ServiceAvailability, ServiceBusScope, ServiceCriticality, SessionType, TelemetryDiagnostics,
+    CpuPackagePowerLimitsObservation, DiagnosticsServiceId, DiagnosticsSnapshot,
+    DisplayDiagnostics, DisplayProtocol, GpuDiagnostics, ServiceAvailability, ServiceBusScope,
+    ServiceCriticality, SessionType, TelemetryDiagnostics,
 };
 
 /// Compact application/system/hardware values intended for the Diagnostics
@@ -94,6 +95,8 @@ pub struct DiagnosticsUiDto {
     pub services: Vec<ServiceRowDto>,
     /// Independent GPU primitive observations.
     pub gpu: GpuDiagnostics,
+    /// Read-only CPU package power-limit observation.
+    pub cpu_package_power_limits: CpuPackagePowerLimitsObservation,
     /// Telemetry values and collection/freshness metadata.
     pub telemetry: TelemetryDiagnostics,
     /// Read-only display/output observation.
@@ -172,6 +175,7 @@ impl DiagnosticsUiDto {
             capabilities,
             services,
             gpu: sections.gpu.clone(),
+            cpu_package_power_limits: sections.cpu_package_power_limits.clone(),
             telemetry: sections.telemetry.clone(),
             display: sections.display.clone(),
         }
@@ -288,6 +292,7 @@ mod tests {
                 runtime_power: DiagnosticObservation::Value(GpuPowerState::Stale),
                 nvidia: DiagnosticObservation::Unknown,
             },
+            CpuPackagePowerLimitsObservation::Unknown,
             TelemetryDiagnostics {
                 latest: Some(Telemetry::empty()),
                 status: TelemetryCollectionStatus::Degraded,

@@ -10,9 +10,9 @@
 use std::time::SystemTime;
 
 use orbis_core::diagnostics::{
-    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, DiagnosticsSnapshot,
-    DiagnosticsSnapshotSections, DisplayDiagnostics, GpuDiagnostics, HardwareDiagnostics,
-    ServiceDiagnostics, SystemDiagnostics, TelemetryDiagnostics,
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuPackagePowerLimitsObservation,
+    DiagnosticsSnapshot, DiagnosticsSnapshotSections, DisplayDiagnostics, GpuDiagnostics,
+    HardwareDiagnostics, ServiceDiagnostics, SystemDiagnostics, TelemetryDiagnostics,
 };
 
 /// Application-layer boundary that freezes already-collected typed
@@ -46,6 +46,7 @@ impl DiagnosticsCollector {
         services: Vec<ServiceDiagnostics>,
         capabilities: CapabilitySnapshotDiagnostics,
         gpu: GpuDiagnostics,
+        cpu_package_power_limits: CpuPackagePowerLimitsObservation,
         telemetry: TelemetryDiagnostics,
         display: DisplayDiagnostics,
     ) -> DiagnosticsSnapshot {
@@ -58,6 +59,7 @@ impl DiagnosticsCollector {
                 services,
                 capabilities,
                 gpu,
+                cpu_package_power_limits,
                 telemetry,
                 display,
             },
@@ -117,6 +119,7 @@ mod tests {
                 runtime_power: DiagnosticObservation::Unavailable,
                 nvidia: DiagnosticObservation::Unknown,
             },
+            CpuPackagePowerLimitsObservation::Unknown,
             TelemetryDiagnostics {
                 latest: None,
                 status: TelemetryCollectionStatus::Unavailable,
@@ -196,6 +199,7 @@ mod tests {
                 runtime_power: DiagnosticObservation::Unavailable,
                 nvidia: DiagnosticObservation::Unknown,
             },
+            CpuPackagePowerLimitsObservation::Unknown,
             TelemetryDiagnostics {
                 latest: Some(last_good.clone()),
                 status: TelemetryCollectionStatus::Degraded,
