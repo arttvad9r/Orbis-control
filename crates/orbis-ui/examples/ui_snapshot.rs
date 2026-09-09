@@ -147,7 +147,6 @@ fn demo_state(component: &AppWindow) {
     component.set_backend_ready(true);
     component.set_status("Состояние расширенных параметров синхронизировано".into());
     component.set_status_led(true);
-    component.set_auto_clamshell(false);
     component.set_disable_aspm(false);
     component.set_disable_standby_networking(false);
     component.set_igpu_memory(2);

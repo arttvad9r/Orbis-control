@@ -3,7 +3,7 @@
 // availability states instead of looking like unfinished placeholders.
 import { ScrollView } from "std-widgets.slint";
 import { NumberStepper, OptionStepper } from "../../components/steppers.slint";
-import { UiState } from "../model.slint";
+import { UiState, ClamshellState } from "../model.slint";
 import { PageHeader, SectionCard, SectionTitle, InfoRow, LocalStatus, ActionButton, StatusPill, SubsectionLabel, LayoutMetrics } from "../common.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { Palette } from "../../themes/dark.slint";
@@ -26,8 +26,7 @@ export component SystemSection inherits Rectangle {
     in property <bool> igpu-memory-pending: false;
     in property <bool> status-led-state-ready: false;
     in property <bool> status-led-control-ready: false;
-    in property <bool> auto-clamshell-state-ready: false;
-    in property <bool> auto-clamshell-control-ready: false;
+    in property <ClamshellState> auto-clamshell-state: ClamshellState.Loading;
     in property <bool> standby-networking-control-ready: false;
     in property <bool> hibernate-control-ready: false;
     in property <bool> core-count-control-ready: false;
@@ -41,7 +40,6 @@ export component SystemSection inherits Rectangle {
     in-out property <int> m4-action: 0;
     in-out property <int> m5-action: 0;
     in-out property <bool> status-led: false;
-    in-out property <bool> auto-clamshell: false;
     in-out property <bool> disable-aspm: false;
     in-out property <bool> disable-standby-networking: false;
     in-out property <int> igpu-memory: 0;
@@ -190,10 +188,16 @@ export component SystemSection inherits Rectangle {
                     }
                     RequestToggleRow {
                           label: "Автоматический режим закрытой крышки";
-                           description: root.auto-clamshell-state-ready ? "Поведение устройства при работе с закрытой крышкой" : "Недоступно: компонент сессии не подключён";
-                         checked: root.auto-clamshell-state-ready && root.auto-clamshell;
-                         disabled: !root.auto-clamshell-control-ready || root.applying;
-                         toggled(value) => { root.auto-clamshell = value; root.auto-clamshell-requested(value); }
+                            description: root.auto-clamshell-state == ClamshellState.Loading ? "Состояние компонента сессии определяется" :
+                                (root.auto-clamshell-state == ClamshellState.Inactive || root.auto-clamshell-state == ClamshellState.Active) ? "Поведение устройства при работе с закрытой крышкой" :
+                                root.auto-clamshell-state == ClamshellState.Unavailable ? "Недоступно: компонент сессии не поддерживает функцию" :
+                                root.auto-clamshell-state == ClamshellState.PermissionDenied ? "Недоступно: доступ к компоненту сессии запрещён" :
+                                root.auto-clamshell-state == ClamshellState.StartFailed ? "Недоступно: запуск ингибитора не удался" :
+                                root.auto-clamshell-state == ClamshellState.ExitFailed ? "Недоступно: остановка ингибитора не удалась" :
+                                "Недоступно: состояние компонента сессии неизвестно";
+                          checked: root.auto-clamshell-state == ClamshellState.Active;
+                          disabled: (root.auto-clamshell-state != ClamshellState.Inactive && root.auto-clamshell-state != ClamshellState.Active) || root.applying;
+                          toggled(value) => { root.auto-clamshell-requested(value); }
                     }
                     RequestToggleRow {
                          label: "Отключать PCIe ASPM при работе от сети";

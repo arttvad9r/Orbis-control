@@ -13,10 +13,10 @@ use orbis_session_client::{SessionClamshellSource, ZbusSessionClamshellSource};
 use orbis_session_protocol::clamshell;
 use slint::ComponentHandle;
 
-use crate::AppWindow;
 use crate::quick_controls_backend::hardware_controls_backend::{
     HardwareProductControlClient, ProductWriteStatus, require_supported,
 };
+use crate::{AppWindow, ClamshellState};
 
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -162,8 +162,6 @@ fn reset_readiness(window: &AppWindow) {
     window.set_igpu_memory_state_ready(false);
     window.set_igpu_memory_control_ready(false);
     window.set_aspm_control_ready(false);
-    window.set_auto_clamshell_state_ready(false);
-    window.set_auto_clamshell_control_ready(false);
     window.set_standby_networking_control_ready(false);
     window.set_hibernate_control_ready(false);
     window.set_core_count_control_ready(false);
@@ -202,9 +200,7 @@ pub(crate) fn wire_window(window: &AppWindow) {
         }
         .into(),
     );
-    window.set_auto_clamshell_state_ready(false);
-    window.set_auto_clamshell_control_ready(false);
-    window.set_auto_clamshell(false);
+    window.set_auto_clamshell_state(ClamshellState::Loading);
 
     {
         let weak = window.as_weak();
@@ -334,7 +330,6 @@ fn begin_mutation(window: &AppWindow) -> Option<ExtraContext> {
     window.set_boot_sound_control_ready(false);
     window.set_igpu_memory_control_ready(false);
     window.set_aspm_control_ready(false);
-    window.set_auto_clamshell_control_ready(false);
     Some(context)
 }
 
@@ -610,7 +605,10 @@ fn request_panel_overdrive(window: &AppWindow, enabled: bool) {
 }
 
 fn request_clamshell(window: &AppWindow, enabled: bool) {
-    if !window.get_auto_clamshell_control_ready() {
+    if !matches!(
+        window.get_auto_clamshell_state(),
+        ClamshellState::Inactive | ClamshellState::Active
+    ) {
         return;
     }
     let Some(context) = begin_mutation(window) else {
@@ -625,62 +623,37 @@ fn request_clamshell(window: &AppWindow, enabled: bool) {
         completion.store(false, Ordering::Release);
         if let Err(error) = weak.upgrade_in_event_loop(move |window| {
             window.set_applying(false);
-            let (ready, control_ready, active, status) = clamshell_ui_state(result);
-            window.set_auto_clamshell_state_ready(ready);
-            window.set_auto_clamshell_control_ready(control_ready);
-            window.set_auto_clamshell(active);
-            window.set_status(status.into());
+            let state = clamshell_ui_state(result);
+            window.set_auto_clamshell_state(state);
+            window.set_status(clamshell_status(state).into());
         }) {
             tracing::warn!(error = ?error, "failed to publish clamshell result");
         }
     });
 }
 
-fn clamshell_ui_state(result: Result<u8, ProviderError>) -> (bool, bool, bool, String) {
-    let state = match result {
-        Ok(state) => state,
-        Err(error) => {
-            return (
-                false,
-                false,
-                false,
-                format!("Closed-lid mode unknown · {error}"),
-            );
-        }
-    };
+fn clamshell_ui_state(result: Result<u8, ProviderError>) -> ClamshellState {
+    match result {
+        Ok(clamshell::INACTIVE) => ClamshellState::Inactive,
+        Ok(clamshell::ACTIVE) => ClamshellState::Active,
+        Ok(clamshell::UNAVAILABLE) => ClamshellState::Unavailable,
+        Ok(clamshell::PERMISSION_DENIED) => ClamshellState::PermissionDenied,
+        Ok(clamshell::START_FAILED) => ClamshellState::StartFailed,
+        Ok(clamshell::EXIT_FAILED) => ClamshellState::ExitFailed,
+        Ok(_) | Err(_) => ClamshellState::Unknown,
+    }
+}
+
+fn clamshell_status(state: ClamshellState) -> &'static str {
     match state {
-        clamshell::INACTIVE => (
-            true,
-            true,
-            false,
-            "Closed-lid mode off · session inhibitor inactive".into(),
-        ),
-        clamshell::ACTIVE => (
-            true,
-            true,
-            true,
-            "Closed-lid mode on · session inhibitor active".into(),
-        ),
-        clamshell::UNAVAILABLE => (true, false, false, "Closed-lid mode unavailable".into()),
-        clamshell::PERMISSION_DENIED => (
-            true,
-            false,
-            false,
-            "Closed-lid mode unavailable · permission denied".into(),
-        ),
-        clamshell::START_FAILED => (
-            true,
-            false,
-            false,
-            "Closed-lid mode unavailable · inhibitor start failed".into(),
-        ),
-        clamshell::EXIT_FAILED => (
-            true,
-            false,
-            false,
-            "Closed-lid mode unavailable · inhibitor exit failed".into(),
-        ),
-        _ => (true, false, false, "Closed-lid mode unknown".into()),
+        ClamshellState::Loading => "Closed-lid mode is loading",
+        ClamshellState::Inactive => "Closed-lid mode off · session inhibitor inactive",
+        ClamshellState::Active => "Closed-lid mode on · session inhibitor active",
+        ClamshellState::Unavailable => "Closed-lid mode unavailable",
+        ClamshellState::PermissionDenied => "Closed-lid mode unavailable · permission denied",
+        ClamshellState::StartFailed => "Closed-lid mode unavailable · inhibitor start failed",
+        ClamshellState::ExitFailed => "Closed-lid mode unavailable · inhibitor exit failed",
+        ClamshellState::Unknown => "Closed-lid mode unknown",
     }
 }
 
@@ -706,6 +679,7 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
     window.set_backend_ready(false);
     window.set_keyboard_control_ready(false);
     window.set_panel_overdrive_control_ready(false);
+    window.set_auto_clamshell_state(ClamshellState::Loading);
     window.set_status("Refreshing advanced hardware state…".into());
 
     let weak = window.as_weak();
@@ -761,11 +735,8 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
             window.set_backend_ready(false);
             window.set_applying(false);
 
-            let (clamshell_ready, clamshell_control_ready, clamshell_active, clamshell_status) =
-                clamshell_ui_state(clamshell_result);
-            window.set_auto_clamshell_state_ready(clamshell_ready);
-            window.set_auto_clamshell_control_ready(clamshell_control_ready);
-            window.set_auto_clamshell(clamshell_active);
+            let clamshell_state = clamshell_ui_state(clamshell_result);
+            window.set_auto_clamshell_state(clamshell_state);
 
             if let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) {
                 context.advanced_dirty.store(false, Ordering::Release);
@@ -832,7 +803,9 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
             };
             window.set_status(
                 final_status
-                    .unwrap_or_else(|| format!("{observed_status} · {clamshell_status}"))
+                    .unwrap_or_else(|| {
+                        format!("{observed_status} · {}", clamshell_status(clamshell_state))
+                    })
                     .into(),
             );
         }) {
@@ -1086,6 +1059,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use crate::ClamshellState;
     use orbis_core::aura::{
         AuraBrightness, AuraDirection, AuraEffect, AuraRgb, AuraState, AuraZone,
     };
@@ -1401,24 +1375,69 @@ mod tests {
     }
 
     #[test]
-    fn clamshell_states_are_explicit_and_fail_closed() {
-        assert!(clamshell_ui_state(Ok(clamshell::UNAVAILABLE)).0);
-        assert!(!clamshell_ui_state(Ok(clamshell::UNAVAILABLE)).1);
-        assert!(
-            clamshell_ui_state(Ok(clamshell::PERMISSION_DENIED))
-                .3
-                .contains("permission")
+    fn clamshell_wire_values_map_to_explicit_ui_states() {
+        assert_eq!(
+            clamshell_ui_state(Ok(clamshell::UNAVAILABLE)),
+            ClamshellState::Unavailable
         );
-        assert!(
-            clamshell_ui_state(Ok(clamshell::START_FAILED))
-                .3
-                .contains("start failed")
+        assert_eq!(
+            clamshell_ui_state(Ok(clamshell::INACTIVE)),
+            ClamshellState::Inactive
         );
-        assert!(
-            clamshell_ui_state(Ok(clamshell::EXIT_FAILED))
-                .3
-                .contains("exit failed")
+        assert_eq!(
+            clamshell_ui_state(Ok(clamshell::ACTIVE)),
+            ClamshellState::Active
         );
-        assert!(!clamshell_ui_state(Err(ProviderError::Internal("x".into()))).0);
+        assert_eq!(
+            clamshell_ui_state(Ok(clamshell::PERMISSION_DENIED)),
+            ClamshellState::PermissionDenied
+        );
+        assert_eq!(
+            clamshell_ui_state(Ok(clamshell::START_FAILED)),
+            ClamshellState::StartFailed
+        );
+        assert_eq!(
+            clamshell_ui_state(Ok(clamshell::EXIT_FAILED)),
+            ClamshellState::ExitFailed
+        );
+        assert_eq!(
+            clamshell_ui_state(Ok(clamshell::UNKNOWN)),
+            ClamshellState::Unknown
+        );
+        assert_eq!(clamshell_ui_state(Ok(255)), ClamshellState::Unknown);
+    }
+
+    #[test]
+    fn clamshell_provider_errors_are_unknown_and_fail_closed() {
+        assert_eq!(
+            clamshell_ui_state(Err(ProviderError::Internal("permission denied".into()))),
+            ClamshellState::Unknown
+        );
+        let source = include_str!("../../../ui/audited/sections/system.slint");
+        assert!(source.contains("ClamshellState"));
+        assert!(source.contains("auto-clamshell-state == ClamshellState.Loading"));
+        assert!(source.contains("auto-clamshell-state == ClamshellState.Inactive"));
+        assert!(source.contains("auto-clamshell-state == ClamshellState.Active"));
+        assert!(source.contains("auto-clamshell-state == ClamshellState.Unavailable"));
+        assert!(source.contains("auto-clamshell-state == ClamshellState.PermissionDenied"));
+        assert!(source.contains("auto-clamshell-state == ClamshellState.StartFailed"));
+        assert!(source.contains("auto-clamshell-state == ClamshellState.ExitFailed"));
+        assert!(source.contains("disabled: (root.auto-clamshell-state != ClamshellState.Inactive"));
+    }
+
+    #[test]
+    fn clamshell_ui_status_covers_every_explicit_state() {
+        for (state, marker) in [
+            (ClamshellState::Loading, "loading"),
+            (ClamshellState::Inactive, "off"),
+            (ClamshellState::Active, "on"),
+            (ClamshellState::Unavailable, "unavailable"),
+            (ClamshellState::PermissionDenied, "permission denied"),
+            (ClamshellState::StartFailed, "start failed"),
+            (ClamshellState::ExitFailed, "exit failed"),
+            (ClamshellState::Unknown, "unknown"),
+        ] {
+            assert!(clamshell_status(state).contains(marker), "{state:?}");
+        }
     }
 }

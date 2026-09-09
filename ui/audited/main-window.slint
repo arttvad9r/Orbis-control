@@ -1,7 +1,7 @@
 // Orbis Control single-window shell. The shell owns product navigation and
 // stable window geometry; hardware state remains in UiState and backend-owned
 // callbacks keep their existing semantics.
-import { UiState, Section, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState } from "model.slint";
+import { UiState, Section, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState, ClamshellState } from "model.slint";
 import { TitleBar } from "../components/title-bar.slint";
 import { NavItem } from "../components/nav-item.slint";
 import { ThemeBridge, LayoutMetrics } from "common.slint";
@@ -97,8 +97,7 @@ export component AppWindow inherits Window {
     in property <bool> igpu-memory-pending: false;
     in property <bool> status-led-state-ready: false;
     in property <bool> status-led-control-ready: false;
-    in property <bool> auto-clamshell-state-ready: false;
-    in property <bool> auto-clamshell-control-ready: false;
+    in property <ClamshellState> auto-clamshell-state: ClamshellState.Loading;
     in property <bool> standby-networking-control-ready: false;
     in property <bool> hibernate-control-ready: false;
     in property <bool> core-count-control-ready: false;
@@ -134,7 +133,6 @@ export component AppWindow inherits Window {
     in-out property <bool> boot-sound: false;
     in-out property <bool> status-led: false;
     in-out property <bool> panel-overdrive: false;
-    in-out property <bool> auto-clamshell: false;
     in-out property <bool> disable-aspm: false;
     in-out property <bool> disable-standby-networking: false;
     in-out property <int> igpu-memory: 0;
@@ -398,8 +396,7 @@ export component AppWindow inherits Window {
                         igpu-memory-pending <=> root.igpu-memory-pending;
                         status-led-state-ready <=> root.status-led-state-ready;
                         status-led-control-ready <=> root.status-led-control-ready;
-                        auto-clamshell-state-ready <=> root.auto-clamshell-state-ready;
-                        auto-clamshell-control-ready <=> root.auto-clamshell-control-ready;
+                        auto-clamshell-state <=> root.auto-clamshell-state;
                         standby-networking-control-ready <=> root.standby-networking-control-ready;
                         hibernate-control-ready <=> root.hibernate-control-ready;
                         core-count-control-ready <=> root.core-count-control-ready;
@@ -413,7 +410,6 @@ export component AppWindow inherits Window {
                         m4-action <=> root.m4-action;
                         m5-action <=> root.m5-action;
                         status-led <=> root.status-led;
-                        auto-clamshell <=> root.auto-clamshell;
                         disable-aspm <=> root.disable-aspm;
                         disable-standby-networking <=> root.disable-standby-networking;
                         igpu-memory <=> root.igpu-memory;
