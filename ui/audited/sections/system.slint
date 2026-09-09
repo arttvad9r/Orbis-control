@@ -105,6 +105,26 @@ export component SystemSection inherits Rectangle {
         return root.bios-version + " · " + root.bios-date;
     }
 
+    function clamshell-state-label() -> string {
+        if (root.auto-clamshell-state == ClamshellState.Loading) { return "Определяется"; }
+        if (root.auto-clamshell-state == ClamshellState.Inactive) { return "Выключено"; }
+        if (root.auto-clamshell-state == ClamshellState.Active) { return "Включено"; }
+        if (root.auto-clamshell-state == ClamshellState.Unavailable) { return "Недоступно"; }
+        if (root.auto-clamshell-state == ClamshellState.PermissionDenied) { return "Нет разрешения"; }
+        if (root.auto-clamshell-state == ClamshellState.StartFailed) { return "Не включилось"; }
+        if (root.auto-clamshell-state == ClamshellState.ExitFailed) { return "Не выключилось"; }
+        return "Неизвестно";
+    }
+
+    function clamshell-state-accent() -> color {
+        if (root.auto-clamshell-state == ClamshellState.Active) { return Palette.success; }
+        if (root.auto-clamshell-state == ClamshellState.PermissionDenied
+            || root.auto-clamshell-state == ClamshellState.StartFailed
+            || root.auto-clamshell-state == ClamshellState.ExitFailed) { return Palette.error; }
+        if (root.auto-clamshell-state == ClamshellState.Inactive) { return Palette.text-secondary; }
+        return Palette.warning;
+    }
+
     ScrollView {
         VerticalLayout {
             width: root.width - 2 * LayoutMetrics.page-margin;
@@ -186,19 +206,27 @@ export component SystemSection inherits Rectangle {
                           disabled: true; // no typed owner yet
                          toggled(value) => { root.status-led = value; }
                     }
-                    RequestToggleRow {
-                          label: "Автоматический режим закрытой крышки";
-                            description: root.auto-clamshell-state == ClamshellState.Loading ? "Состояние компонента сессии определяется" :
-                                (root.auto-clamshell-state == ClamshellState.Inactive || root.auto-clamshell-state == ClamshellState.Active) ? "Поведение устройства при работе с закрытой крышкой" :
-                                root.auto-clamshell-state == ClamshellState.Unavailable ? "Недоступно: компонент сессии не поддерживает функцию" :
-                                root.auto-clamshell-state == ClamshellState.PermissionDenied ? "Недоступно: доступ к компоненту сессии запрещён" :
-                                root.auto-clamshell-state == ClamshellState.StartFailed ? "Недоступно: запуск ингибитора не удался" :
-                                root.auto-clamshell-state == ClamshellState.ExitFailed ? "Недоступно: остановка ингибитора не удалась" :
-                                "Недоступно: состояние компонента сессии неизвестно";
-                          checked: root.auto-clamshell-state == ClamshellState.Active;
-                          disabled: (root.auto-clamshell-state != ClamshellState.Inactive && root.auto-clamshell-state != ClamshellState.Active) || root.applying;
-                          toggled(value) => { root.auto-clamshell-requested(value); }
-                    }
+                     HorizontalLayout {
+                         spacing: 10px;
+                         RequestToggleRow {
+                             horizontal-stretch: 1;
+                             label: "Автоматический режим при закрытой крышке";
+                             description: root.auto-clamshell-state == ClamshellState.Loading ? "Проверяем поддержку и состояние компонента сессии" :
+                                 (root.auto-clamshell-state == ClamshellState.Inactive || root.auto-clamshell-state == ClamshellState.Active) ? "Управляет запретом сна при закрытой крышке" :
+                                 root.auto-clamshell-state == ClamshellState.Unavailable ? "Компонент сессии не поддерживает эту функцию" :
+                                 root.auto-clamshell-state == ClamshellState.PermissionDenied ? "Компонент сессии отклонил доступ" :
+                                 root.auto-clamshell-state == ClamshellState.StartFailed ? "Не удалось включить режим; изменение недоступно" :
+                                 root.auto-clamshell-state == ClamshellState.ExitFailed ? "Не удалось выключить режим; изменение недоступно" :
+                                 "Состояние компонента сессии не определено";
+                             checked: root.auto-clamshell-state == ClamshellState.Active;
+                             disabled: (root.auto-clamshell-state != ClamshellState.Inactive && root.auto-clamshell-state != ClamshellState.Active) || root.applying;
+                             toggled(value) => { root.auto-clamshell-requested(value); }
+                         }
+                         StatusPill {
+                             text: root.clamshell-state-label();
+                             accent: root.clamshell-state-accent();
+                         }
+                     }
                     RequestToggleRow {
                          label: "Отключать PCIe ASPM при работе от сети";
                           description: root.aspm-state-ready ? "Профиль энергосбережения PCIe при питании от адаптера" : "Недоступно: поддержка функции не обнаружена";
@@ -275,21 +303,21 @@ export component SystemSection inherits Rectangle {
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
 
-                    Rectangle { height: 1px; background: Palette.border-default; }
-                    HorizontalLayout {
-                        height: 40px;
-                        spacing: 8px;
-                        Text {
-                            horizontal-stretch: 1;
-                            text: root.backend-ready ? "Поддержанные параметры применяются сразу после изменения." : "Параметры станут редактируемыми после подтверждения поддержки устройства.";
-                            font-size: 12px;
-                            color: Palette.text-secondary;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                        ActionButton { label: "Обновить"; disabled: !root.backend-ready || root.applying; clicked => { root.reload-requested(); } }
-                        ActionButton { label: root.advanced-apply-ready ? (root.applying ? "Применение…" : "Применить") : "Нет доступных изменений"; accent: root.advanced-apply-ready; disabled: !root.advanced-apply-ready || root.applying; clicked => { root.apply-requested(); } }
-                    }
+                     Rectangle { height: 1px; background: Palette.border-default; }
+                     VerticalLayout {
+                         spacing: 8px;
+                         LocalStatus {
+                             text: root.backend-ready ? "Поддержанные параметры применяются сразу после изменения." : "Параметры станут редактируемыми после подтверждения поддержки устройства.";
+                             accent: root.backend-ready ? Palette.text-secondary : Palette.warning;
+                         }
+                         HorizontalLayout {
+                             height: 40px;
+                             spacing: 8px;
+                             Rectangle { horizontal-stretch: 1; background: transparent; }
+                             ActionButton { label: "Обновить"; disabled: !root.backend-ready || root.applying; clicked => { root.reload-requested(); } }
+                             ActionButton { label: root.advanced-apply-ready ? (root.applying ? "Применение…" : "Применить") : "Нет доступных изменений"; accent: root.advanced-apply-ready; disabled: !root.advanced-apply-ready || root.applying; clicked => { root.apply-requested(); } }
+                         }
+                     }
                 }
             }
 
