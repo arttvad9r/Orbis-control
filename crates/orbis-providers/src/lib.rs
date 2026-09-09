@@ -15,6 +15,8 @@
 #![warn(missing_docs)]
 
 pub mod asus_armoury;
+/// Read-only ASUS Armoury CPU package-limit evidence.
+pub mod asus_armoury_power_limits;
 pub mod asus_boot_sound;
 pub mod asus_diagnostics;
 pub mod asus_gpu_mode;
@@ -46,6 +48,7 @@ pub mod wlr_output_head;
 pub mod mock;
 
 pub use asus_armoury::*;
+pub use asus_armoury_power_limits::*;
 pub use asus_boot_sound::*;
 pub use asus_diagnostics::{
     probe_asus_diagnostics_capabilities, probe_aura, probe_keyboard_backlight,
@@ -55,7 +58,7 @@ pub use aura::*;
 pub use bounded_probes::{
     probe_charge_limit, probe_display_output, probe_fan_curve, probe_gpu_access, probe_gpu_mux,
     probe_gpu_power, probe_mini_led_mode, probe_panel_overdrive, probe_performance,
-    probe_screen_auto_brightness,
+    probe_power_limits, probe_screen_auto_brightness,
 };
 pub use display_diagnostics::display_diagnostics_snapshot;
 pub use error::{OperationId, ProviderError, ValidationResult};
