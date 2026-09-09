@@ -87,6 +87,32 @@ pub fn summary_text(dto: &DiagnosticsUiDto) -> String {
         "runtime_power={}\n",
         observation(&dto.gpu.runtime_power)
     ));
+    match &dto.gpu.nvidia {
+        DiagnosticObservation::Value(value) => {
+            out.push_str(&format!(
+                "nvidia_power_mw={} temperature_c={} write=ReadOnly\n",
+                value
+                    .power
+                    .map_or_else(|| UNKNOWN.into(), |power| power.get().to_string()),
+                value.temperature.map_or_else(
+                    || UNKNOWN.into(),
+                    |temperature| temperature.get().to_string()
+                ),
+            ));
+            if let Some(limit) = &value.power_limit {
+                out.push_str(&format!(
+                    "nvidia_power_limit_w={} default_w={} min_w={} max_w={} write=ReadOnly\n",
+                    limit.value,
+                    limit
+                        .default
+                        .map_or_else(|| UNKNOWN.into(), |value| value.to_string()),
+                    limit.min,
+                    limit.max,
+                ));
+            }
+        }
+        other => out.push_str(&format!("nvidia={} write=ReadOnly\n", observation(other))),
+    }
 
     out.push_str("\n[telemetry]\n");
     out.push_str(&format!("status={:?}\n", dto.telemetry.status));
@@ -152,6 +178,21 @@ pub fn report_json_value(dto: &DiagnosticsUiDto) -> Value {
         }),
         other => json!({ "status": observation(other) }),
     };
+    let nvidia = match &dto.gpu.nvidia {
+        DiagnosticObservation::Value(value) => json!({
+            "status": "Value",
+            "power_mw": value.power.map(|power| power.get()),
+            "temperature_c": value.temperature.map(|temperature| temperature.get()),
+            "power_limit": value.power_limit.as_ref().map(|limit| json!({
+                "current_w": limit.value,
+                "default_w": limit.default,
+                "min_w": limit.min,
+                "max_w": limit.max,
+                "write": "ReadOnly",
+            })),
+        }),
+        other => json!({ "status": observation(other), "write": "ReadOnly" }),
+    };
 
     json!({
         "schema_version": 1,
@@ -181,6 +222,7 @@ pub fn report_json_value(dto: &DiagnosticsUiDto) -> Value {
             "mux": observation(&dto.gpu.mux),
             "access_policy": observation(&dto.gpu.access_policy),
             "runtime_power": observation(&dto.gpu.runtime_power),
+            "nvidia": nvidia,
         },
         "telemetry": {
             "status": format!("{:?}", dto.telemetry.status),
@@ -245,6 +287,7 @@ mod tests {
                 mux: DiagnosticObservation::Unknown,
                 access_policy: DiagnosticObservation::PermissionDenied,
                 runtime_power: DiagnosticObservation::Unavailable,
+                nvidia: DiagnosticObservation::Unknown,
             },
             telemetry: TelemetryDiagnostics {
                 latest: None,

@@ -115,6 +115,7 @@ mod tests {
             mux: DiagnosticObservation::Value(GpuMuxState::Discrete),
             access_policy: DiagnosticObservation::Value(GpuAccessPolicy::Unblocked),
             runtime_power: DiagnosticObservation::Value(GpuPowerState::Suspended),
+            nvidia: DiagnosticObservation::Unknown,
         };
         let telemetry = TelemetryDiagnostics {
             latest: None,
@@ -179,6 +180,7 @@ mod tests {
             mux: DiagnosticObservation::PermissionDenied,
             access_policy: DiagnosticObservation::Unavailable,
             runtime_power: DiagnosticObservation::Value(GpuPowerState::Unknown),
+            nvidia: DiagnosticObservation::Unknown,
         };
         let telemetry = TelemetryDiagnostics {
             latest: None,
@@ -263,6 +265,7 @@ mod tests {
                 mux: DiagnosticObservation::Unknown,
                 access_policy: DiagnosticObservation::Unknown,
                 runtime_power: DiagnosticObservation::Unknown,
+                nvidia: DiagnosticObservation::Unknown,
             },
             TelemetryDiagnostics {
                 latest: None,

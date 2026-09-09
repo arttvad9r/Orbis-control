@@ -286,6 +286,7 @@ mod tests {
                 mux: DiagnosticObservation::Value(GpuMuxState::Unknown),
                 access_policy: DiagnosticObservation::PermissionDenied,
                 runtime_power: DiagnosticObservation::Value(GpuPowerState::Stale),
+                nvidia: DiagnosticObservation::Unknown,
             },
             TelemetryDiagnostics {
                 latest: Some(Telemetry::empty()),

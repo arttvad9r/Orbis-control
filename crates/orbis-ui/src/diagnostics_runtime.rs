@@ -10,7 +10,9 @@ use std::time::{Duration, SystemTime};
 
 use orbis_application::diagnostics::DiagnosticsCollector;
 use orbis_capabilities::CapabilityRegistrySnapshot;
-use orbis_core::diagnostics::{DiagnosticsSnapshot, ServiceCriticality, TelemetryDiagnostics};
+use orbis_core::diagnostics::{
+    DiagnosticObservation, DiagnosticsSnapshot, ServiceCriticality, TelemetryDiagnostics,
+};
 use orbis_providers::bounded_provider_call;
 use orbis_providers::traits::TelemetryProvider;
 use orbis_providers::{
@@ -137,7 +139,20 @@ impl DiagnosticsRuntime {
         let gpu_access = SessionGpuAccessProvider::new(ZbusSessionGpuSource::new(
             self.session_connection.clone(),
         ));
-        let gpu = gpu_diagnostics_snapshot(&gpu_mux, &gpu_access, &gpu_power).await;
+        let mut gpu = gpu_diagnostics_snapshot(&gpu_mux, &gpu_access, &gpu_power).await;
+        gpu.nvidia = match SysfsTelemetryProvider::default().nvidia_diagnostics() {
+            Ok(Some(value)) => DiagnosticObservation::Value(value),
+            Ok(None) => DiagnosticObservation::Unknown,
+            Err(orbis_providers::ProviderError::PermissionDenied(_)) => {
+                DiagnosticObservation::PermissionDenied
+            }
+            Err(
+                orbis_providers::ProviderError::BackendUnavailable(_)
+                | orbis_providers::ProviderError::Unsupported(_)
+                | orbis_providers::ProviderError::Timeout(_),
+            ) => DiagnosticObservation::Unavailable,
+            Err(_) => DiagnosticObservation::Unknown,
+        };
 
         let telemetry_provider = SysfsTelemetryProvider::default();
         let telemetry_result = bounded_provider_call(

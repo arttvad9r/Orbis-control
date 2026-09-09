@@ -8,6 +8,8 @@ use crate::capability::DeviceCapabilities;
 use crate::display_output::DisplayOutputSnapshot;
 use crate::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use crate::identity::DeviceIdentity;
+use crate::limits::PowerLimitValue;
+use crate::newtypes::{MilliWatt, TemperatureC};
 use crate::telemetry::{Telemetry, TelemetryQuality};
 use crate::warning::WarningSeverity;
 
@@ -249,6 +251,19 @@ pub struct GpuDiagnostics {
     pub access_policy: DiagnosticObservation<GpuAccessPolicy>,
     /// Authoritative runtime dGPU power observation.
     pub runtime_power: DiagnosticObservation<GpuPowerState>,
+    /// Read-only NVIDIA power/thermal evidence from the driver hwmon node.
+    pub nvidia: DiagnosticObservation<NvidiaGpuDiagnostics>,
+}
+
+/// NVIDIA observations that do not imply a writable power-limit owner.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NvidiaGpuDiagnostics {
+    /// Current board power draw, when exposed by the driver.
+    pub power: Option<MilliWatt>,
+    /// Current GPU temperature, when exposed by the driver.
+    pub temperature: Option<TemperatureC>,
+    /// Current/default/min/max driver-reported power limit.
+    pub power_limit: Option<PowerLimitValue>,
 }
 
 /// Result of the telemetry collection path.
@@ -421,6 +436,7 @@ mod tests {
             mux: DiagnosticObservation::Value(GpuMuxState::Discrete),
             access_policy: DiagnosticObservation::Value(GpuAccessPolicy::Blocked),
             runtime_power: DiagnosticObservation::Unavailable,
+            nvidia: DiagnosticObservation::Unknown,
         };
 
         assert_eq!(gpu.mux, DiagnosticObservation::Value(GpuMuxState::Discrete));

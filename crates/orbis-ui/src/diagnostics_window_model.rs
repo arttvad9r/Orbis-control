@@ -112,10 +112,11 @@ impl DiagnosticsWindowModel {
         };
 
         let gpu = format!(
-            "MUX: {}\nAccess: {}\nRuntime power: {}",
+            "MUX: {}\nAccess: {}\nRuntime power: {}\nNVIDIA: {}",
             observation_label(&dto.gpu.mux),
             observation_label(&dto.gpu.access_policy),
             observation_label(&dto.gpu.runtime_power),
+            nvidia_label(&dto.gpu.nvidia),
         );
 
         let mut telemetry = format!(
@@ -175,6 +176,32 @@ fn observation_label<T: Debug>(observation: &DiagnosticObservation<T>) -> String
     }
 }
 
+fn nvidia_label(
+    observation: &DiagnosticObservation<orbis_core::diagnostics::NvidiaGpuDiagnostics>,
+) -> String {
+    match observation {
+        DiagnosticObservation::Value(value) => format!(
+            "power={} temp={} limit={}",
+            value
+                .power
+                .map_or_else(|| "Unknown".into(), |v| format!("{} mW", v.get())),
+            value
+                .temperature
+                .map_or_else(|| "Unknown".into(), |v| format!("{} C", v.get())),
+            value.power_limit.map_or_else(
+                || "Unknown".into(),
+                |v| {
+                    format!(
+                        "{} W (default {:?}, {}..{} W)",
+                        v.value, v.default, v.min, v.max
+                    )
+                }
+            ),
+        ),
+        other => observation_label(other),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::SystemTime;
@@ -229,6 +256,7 @@ mod tests {
                 mux: DiagnosticObservation::Value(GpuMuxState::Integrated),
                 access_policy: DiagnosticObservation::PermissionDenied,
                 runtime_power: DiagnosticObservation::Value(GpuPowerState::Unknown),
+                nvidia: DiagnosticObservation::Unknown,
             },
             telemetry: TelemetryDiagnostics {
                 latest: None,
@@ -263,6 +291,31 @@ mod tests {
         assert!(model.services.contains("Unavailable"));
         assert!(model.gpu.contains("PermissionDenied"));
         assert!(model.gpu.contains("Unknown"));
+    }
+
+    #[test]
+    fn nvidia_observation_explicitly_remains_read_only() {
+        let mut value = dto();
+        value.gpu.nvidia =
+            DiagnosticObservation::Value(orbis_core::diagnostics::NvidiaGpuDiagnostics {
+                power: Some(orbis_core::newtypes::MilliWatt::new(42_000).unwrap()),
+                temperature: Some(orbis_core::newtypes::TemperatureC::new(61).unwrap()),
+                power_limit: Some(
+                    orbis_core::limits::PowerLimitValue::new(
+                        80,
+                        35,
+                        115,
+                        1,
+                        Some(80),
+                        orbis_core::limits::Unit::Watts,
+                    )
+                    .unwrap(),
+                ),
+            });
+        let model = DiagnosticsWindowModel::from_dto(&value);
+        assert!(model.gpu.contains("42000 mW"));
+        assert!(model.gpu.contains("61 C"));
+        assert!(model.gpu.contains("35..115 W"));
     }
 
     #[test]

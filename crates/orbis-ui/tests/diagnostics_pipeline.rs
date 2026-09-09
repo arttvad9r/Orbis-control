@@ -39,6 +39,7 @@ fn typed_snapshot_projects_through_privacy_bounded_exports() {
             mux: DiagnosticObservation::Unknown,
             access_policy: DiagnosticObservation::PermissionDenied,
             runtime_power: DiagnosticObservation::Unavailable,
+            nvidia: DiagnosticObservation::Unknown,
         },
         TelemetryDiagnostics {
             latest: None,

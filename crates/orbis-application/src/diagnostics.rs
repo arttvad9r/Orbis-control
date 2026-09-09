@@ -115,6 +115,7 @@ mod tests {
                 mux: DiagnosticObservation::Value(GpuMuxState::Unknown),
                 access_policy: DiagnosticObservation::PermissionDenied,
                 runtime_power: DiagnosticObservation::Unavailable,
+                nvidia: DiagnosticObservation::Unknown,
             },
             TelemetryDiagnostics {
                 latest: None,
@@ -193,6 +194,7 @@ mod tests {
                 mux: DiagnosticObservation::Value(GpuMuxState::Unknown),
                 access_policy: DiagnosticObservation::PermissionDenied,
                 runtime_power: DiagnosticObservation::Unavailable,
+                nvidia: DiagnosticObservation::Unknown,
             },
             TelemetryDiagnostics {
                 latest: Some(last_good.clone()),
