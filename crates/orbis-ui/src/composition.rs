@@ -33,8 +33,8 @@ use orbis_providers::{
     error::ProviderError,
 };
 use orbis_session_client::{
-    SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
-    SessionGpuPowerProvider, SessionHardwareBatteryProvider, SessionHardwarePerformanceProvider,
+    DelegatedPerformanceProvider, SessionChargeLimitProvider, SessionGpuAccessProvider,
+    SessionGpuMuxProvider, SessionGpuPowerProvider, SessionHardwareBatteryProvider,
     ZbusHardwareBatterySource, ZbusHardwarePerformanceSource, ZbusSessionChargeLimitSource,
     ZbusSessionGpuSource, ZbusSessionPerformanceSource,
 };
@@ -1043,10 +1043,7 @@ pub type ProductionRuntime = ApplicationRuntime<
         >,
     >,
     AppService<
-        SessionHardwarePerformanceProvider<
-            ZbusSessionPerformanceSource,
-            ZbusHardwarePerformanceSource,
-        >,
+        DelegatedPerformanceProvider<ZbusSessionPerformanceSource, ZbusHardwarePerformanceSource>,
     >,
 >;
 
@@ -1092,7 +1089,7 @@ where
 pub async fn build_production_runtime(
     session_connection: zbus::Connection,
     system_connection: zbus::Connection,
-) -> anyhow::Result<(ProductionRuntime, bool)> {
+) -> anyhow::Result<(ProductionRuntime, bool, bool)> {
     let hardware_owner = bounded_operation(
         HARDWARE1_STATUS_DEADLINE,
         "hardware1",
@@ -1111,11 +1108,33 @@ pub async fn build_production_runtime(
         orbis_session_client::hardware1_battery_mutation_status(&system_connection),
     )
     .await;
-    let performance_mutation_status = bounded_hardware1_status(
+    let mut performance_mutation_status = bounded_hardware1_status(
         "performance_mutation_status",
         orbis_session_client::hardware1_performance_mutation_status(&system_connection),
     )
     .await;
+
+    let delegated_performance = match bounded_operation(
+        Duration::from_secs(2),
+        "power-profiles-daemon",
+        "establish",
+        orbis_session_client::ZbusPowerProfilesDaemonClient::establish(system_connection.clone()),
+    )
+    .await
+    {
+        Ok(client) => Some(client),
+        Err(error) => {
+            tracing::info!(
+                ?error,
+                "power-profiles-daemon delegation unavailable; using Hardware1 fallback"
+            );
+            None
+        }
+    };
+    let delegated_ready = delegated_performance.is_some();
+    if delegated_ready {
+        performance_mutation_status = CapabilityStatus::Supported;
+    }
 
     let battery_read_provider = SessionChargeLimitProvider::new(ZbusSessionChargeLimitSource::new(
         session_connection.clone(),
@@ -1138,9 +1157,10 @@ pub async fn build_production_runtime(
     );
 
     let battery_arc = Arc::new(battery_provider);
-    let performance_arc = Arc::new(SessionHardwarePerformanceProvider::new(
+    let performance_arc = Arc::new(DelegatedPerformanceProvider::new(
         ZbusSessionPerformanceSource::new(session_connection.clone()),
         ZbusHardwarePerformanceSource::new(system_connection.clone()),
+        delegated_performance,
     ));
     let battery = AppService::new(battery_arc.clone());
     let performance = AppService::new(performance_arc.clone());
@@ -1196,6 +1216,7 @@ pub async fn build_production_runtime(
             Some(system_connection),
         ),
         hardware_owner,
+        delegated_ready,
     ))
 }
 

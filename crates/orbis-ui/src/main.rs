@@ -155,6 +155,13 @@ fn to_slint(state: &controller::UiState) -> UiState {
             controller::PerformanceHwState::Unavailable => PerformanceHwState::Unavailable,
         },
         perf_writable: state.perf_writable,
+        performance_delegated_ready: state.performance_delegated_ready,
+        performance_delegated_pending: state.performance_delegated_pending,
+        performance_delegated_error: state
+            .performance_delegated_error
+            .clone()
+            .unwrap_or_default()
+            .into(),
         perf_unavailable_reason: state
             .perf_unavailable_reason
             .clone()
@@ -266,6 +273,9 @@ fn from_slint(state: &UiState) -> controller::UiState {
             PerformanceHwState::Unavailable => controller::PerformanceHwState::Unavailable,
         },
         perf_writable: state.perf_writable,
+        performance_delegated_ready: state.performance_delegated_ready,
+        performance_delegated_pending: state.performance_delegated_pending,
+        performance_delegated_error: state.performance_delegated_error.to_string().into(),
         gpu_selected: state.gpu_selected,
         available_gpu_mask: state.available_gpu_mask,
         gpu_ultimate_pending: state.gpu_ultimate_pending,
@@ -972,6 +982,7 @@ fn apply_performance_refresh(
     match result {
         Ok(s) => {
             state.perf_state = controller::PerformanceHwState::Ready;
+            state.performance_delegated_pending = false;
             state.perf_selected = perf_selected_index(s.current);
             state.available_perf_mask = performance_available_mask(&s.available);
             tracing::debug!(
@@ -982,6 +993,8 @@ fn apply_performance_refresh(
         }
         Err(e) => {
             state.perf_state = controller::PerformanceHwState::Unavailable;
+            state.performance_delegated_pending = false;
+            state.performance_delegated_error = Some(e.to_string());
             tracing::warn!("performance: refresh недоступен: {e:?}");
         }
     }
@@ -1065,6 +1078,10 @@ fn gpu_access_value_to_int(v: GpuAccessPolicy) -> i32 {
 fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) {
     match event {
         WorkerEvent::Performance(Ok(outcome)) => {
+            if state.performance_delegated_ready {
+                state.performance_delegated_pending = false;
+                state.performance_delegated_error = None;
+            }
             apply_performance_outcome(state, &outcome);
             match &outcome.result {
                 ApplyResult::Applied => tracing::debug!("performance: профиль применён"),
@@ -1072,9 +1089,17 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             }
         }
         WorkerEvent::Performance(Err(CommandError::Command(e))) => {
+            if state.performance_delegated_ready {
+                state.performance_delegated_pending = false;
+                state.performance_delegated_error = Some(e.to_string());
+            }
             tracing::warn!("performance: команда не выполнена: {e:?}")
         }
         WorkerEvent::Performance(Err(CommandError::ReadBack { result, source })) => {
+            if state.performance_delegated_ready {
+                state.performance_delegated_pending = false;
+                state.performance_delegated_error = Some(source.to_string());
+            }
             tracing::warn!(
                 "performance: команда выполнена ({result:?}), но read-back не удался: {source:?}"
             );
@@ -1084,6 +1109,9 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             command,
             observation,
         })) => {
+            if state.performance_delegated_ready {
+                state.performance_delegated_pending = true;
+            }
             // Итог неизвестен: не заявляем ни успеха, ни определённой ошибки;
             // UI сохраняет прежнее состояние до последующего read-back.
             tracing::warn!(
@@ -1236,6 +1264,10 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 Some(tx) => {
                     if let Err(e) = tx.send(command) {
                         tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
+                    } else {
+                        let mut pending = state;
+                        pending.performance_delegated_pending = true;
+                        app.set_ui_state(to_slint(&pending));
                     }
                 }
                 None => {
@@ -1737,10 +1769,11 @@ fn main() -> anyhow::Result<()> {
     // FIFO. The operation stays fail-closed until polkit/backend promotion.
     let product_gpu_source: std::sync::Arc<dyn HardwareProductGpuSource> =
         std::sync::Arc::new(ZbusHardwareProductGpuSource::new(system_connection.clone()));
-    let (application_runtime, _hardware_owner) = runtime.block_on(build_production_runtime(
-        session_connection,
-        system_connection,
-    ))?;
+    let (application_runtime, _hardware_owner, delegated_ready) = runtime.block_on(
+        build_production_runtime(session_connection, system_connection),
+    )?;
+    let mut state = state;
+    state.performance_delegated_ready = delegated_ready;
     let poll_interval = application_runtime.telemetry.poll_interval();
     diagnostics_backend::initialize(
         runtime.handle().clone(),

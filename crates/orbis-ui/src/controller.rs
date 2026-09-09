@@ -199,6 +199,12 @@ pub struct UiState {
     /// Отдельно от `perf_state`: read-only session backend при Ready всё равно
     /// не позволяет запись; mock/offscreen могут сохранять writable behavior.
     pub perf_writable: bool,
+    /// Whether power-profiles-daemon delegation was established read-only.
+    pub performance_delegated_ready: bool,
+    /// Whether a delegated profile mutation is awaiting its read-back.
+    pub performance_delegated_pending: bool,
+    /// Last delegated mutation error, if any.
+    pub performance_delegated_error: Option<String>,
     /// Выбранный GPU-режим: 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized.
     pub gpu_selected: i32,
     /// Битовая маска доступных GPU-режимов (bit0=Eco, bit1=Standard,
@@ -377,6 +383,9 @@ impl UiState {
             available_perf_mask: 0,
             perf_state: PerformanceHwState::Loading,
             perf_writable: false,
+            performance_delegated_ready: false,
+            performance_delegated_pending: false,
+            performance_delegated_error: None,
             gpu_selected: 0,
             available_gpu_mask: 0,
             gpu_ultimate_pending: false,
@@ -510,6 +519,9 @@ impl UiState {
             // отдельно в main().
             perf_state: PerformanceHwState::Ready,
             perf_writable: true,
+            performance_delegated_ready: false,
+            performance_delegated_pending: false,
+            performance_delegated_error: None,
             gpu_selected,
             available_gpu_mask,
             gpu_ultimate_pending: false,

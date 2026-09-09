@@ -17,8 +17,10 @@ export component PerformanceSection inherits Rectangle {
     }
 
     function perf-reason() -> string {
+        if (root.ui-state.performance-delegated-pending) { return "Ожидание подтверждения"; }
+        if (root.ui-state.performance-delegated-error != "") { return root.ui-state.performance-delegated-error; }
         if (root.ui-state.perf-state == PerformanceHwState.Ready) {
-            return root.ui-state.perf-writable ? "Доступно" : "Только чтение";
+            return root.ui-state.perf-writable ? (root.ui-state.performance-delegated-ready ? "Доступно через power-profiles-daemon" : "Доступно") : "Только чтение";
         }
         if (root.ui-state.perf-state == PerformanceHwState.Loading) { return "Получение профиля"; }
         return root.ui-state.perf-unavailable-reason;
