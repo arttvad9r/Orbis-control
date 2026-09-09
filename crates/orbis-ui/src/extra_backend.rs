@@ -91,6 +91,24 @@ fn advanced_apply_ready(dirty: bool, boot_sound: bool, igpu_memory: bool, aspm: 
     dirty && (boot_sound || igpu_memory || aspm)
 }
 
+fn advanced_apply_draft(
+    boot_sound: bool,
+    igpu_memory: i32,
+    aspm_disabled: bool,
+    boot_sound_ready: bool,
+    igpu_memory_ready: bool,
+    aspm_ready: bool,
+) -> AdvancedApplyDraft {
+    AdvancedApplyDraft {
+        boot_sound,
+        boot_sound_ready,
+        igpu_memory: igpu_memory.clamp(0, 8) as u8,
+        igpu_memory_ready,
+        aspm_disabled,
+        aspm_ready,
+    }
+}
+
 pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
     CONTEXT.with(|slot| {
         *slot.borrow_mut() = Some(ExtraContext {
@@ -308,16 +326,16 @@ fn apply_advanced(window: &AppWindow) {
         window.set_status("Apply skipped · no staged changes".into());
         return;
     }
+    let draft = advanced_apply_draft(
+        window.get_boot_sound(),
+        window.get_igpu_memory(),
+        window.get_disable_aspm(),
+        window.get_boot_sound_control_ready(),
+        window.get_igpu_memory_control_ready(),
+        window.get_aspm_control_ready(),
+    );
     let Some(context) = begin_mutation(window) else {
         return;
-    };
-    let draft = AdvancedApplyDraft {
-        boot_sound: window.get_boot_sound(),
-        boot_sound_ready: window.get_boot_sound_control_ready(),
-        igpu_memory: window.get_igpu_memory().clamp(0, 8) as u8,
-        igpu_memory_ready: window.get_igpu_memory_control_ready(),
-        aspm_disabled: window.get_disable_aspm(),
-        aspm_ready: window.get_aspm_control_ready(),
     };
     window.set_advanced_apply_ready(false);
     window.set_status("Applying staged ASUS parameters through Hardware1…".into());
@@ -1091,6 +1109,23 @@ mod tests {
         assert!(advanced_apply_ready(true, true, false, false));
         assert!(advanced_apply_ready(true, false, false, true));
         assert!(!advanced_apply_ready(true, false, false, false));
+    }
+
+    #[test]
+    fn advanced_apply_captures_all_ready_controls_before_mutation_gate() {
+        let draft = advanced_apply_draft(true, 6, true, true, true, true);
+
+        assert_eq!(
+            draft,
+            AdvancedApplyDraft {
+                boot_sound: true,
+                boot_sound_ready: true,
+                igpu_memory: 6,
+                igpu_memory_ready: true,
+                aspm_disabled: true,
+                aspm_ready: true,
+            }
+        );
     }
 
     #[tokio::test]
