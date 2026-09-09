@@ -19,8 +19,8 @@ mod window_position_preferences_bridge;
 
 use crate::AppWindow;
 
-pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
-    extra_backend::initialize(runtime.clone());
+pub(crate) fn initialize(runtime: tokio::runtime::Handle, session_connection: zbus::Connection) {
+    extra_backend::initialize(runtime.clone(), session_connection);
     tray_backend::initialize(runtime);
 }
 

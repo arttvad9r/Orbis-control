@@ -3151,6 +3151,7 @@ dependencies = [
  "orbis-core",
  "orbis-providers",
  "orbis-session-client",
+ "orbis-session-protocol",
  "orbis-sessiond",
  "orbis-test-support",
  "rustix 0.38.44",

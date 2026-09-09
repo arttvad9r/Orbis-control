@@ -1,7 +1,5 @@
 use std::cell::RefCell;
-use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -11,6 +9,8 @@ use orbis_core::firmware::BootSoundState;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{AuraProvider, PanelOverdriveProvider};
 use orbis_providers::{AsusArmouryPanelOverdriveProvider, AsusAuraProvider, AsusBootSoundProvider};
+use orbis_session_client::{SessionClamshellSource, ZbusSessionClamshellSource};
+use orbis_session_protocol::clamshell;
 use slint::ComponentHandle;
 
 use crate::AppWindow;
@@ -26,7 +26,7 @@ struct ExtraContext {
     refreshing: Arc<AtomicBool>,
     mutating: Arc<AtomicBool>,
     advanced_dirty: Arc<AtomicBool>,
-    clamshell: Arc<Mutex<Option<Child>>>,
+    clamshell: Arc<dyn SessionClamshellSource>,
 }
 
 thread_local! {
@@ -133,23 +133,21 @@ fn advanced_apply_draft(
     }
 }
 
-pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
+pub(crate) fn initialize(runtime: tokio::runtime::Handle, session_connection: zbus::Connection) {
     CONTEXT.with(|slot| {
         *slot.borrow_mut() = Some(ExtraContext {
             runtime,
             refreshing: Arc::new(AtomicBool::new(false)),
             mutating: Arc::new(AtomicBool::new(false)),
             advanced_dirty: Arc::new(AtomicBool::new(false)),
-            clamshell: Arc::new(Mutex::new(None)),
+            clamshell: Arc::new(ZbusSessionClamshellSource::new(session_connection)),
         });
     });
 }
 
 pub(crate) fn clear() {
     CONTEXT.with(|slot| {
-        if let Some(context) = slot.borrow_mut().take() {
-            stop_clamshell(&context.clamshell);
-        }
+        slot.borrow_mut().take();
     });
 }
 
@@ -204,11 +202,9 @@ pub(crate) fn wire_window(window: &AppWindow) {
         }
         .into(),
     );
-    let (clamshell_ready, clamshell_active, _) =
-        clamshell_observed(systemd_inhibit_available(), clamshell_is_active());
-    window.set_auto_clamshell_state_ready(clamshell_ready);
-    window.set_auto_clamshell_control_ready(clamshell_ready);
-    window.set_auto_clamshell(clamshell_active);
+    window.set_auto_clamshell_state_ready(false);
+    window.set_auto_clamshell_control_ready(false);
+    window.set_auto_clamshell(false);
 
     {
         let weak = window.as_weak();
@@ -625,129 +621,67 @@ fn request_clamshell(window: &AppWindow, enabled: bool) {
     let completion = context.mutating.clone();
     let clamshell = context.clamshell.clone();
     context.runtime.spawn(async move {
-        let result = if enabled {
-            start_clamshell(&clamshell).map(|()| true)
-        } else {
-            stop_clamshell(&clamshell);
-            Ok(false)
-        };
+        let result = clamshell.set_clamshell(enabled).await;
         completion.store(false, Ordering::Release);
         if let Err(error) = weak.upgrade_in_event_loop(move |window| {
             window.set_applying(false);
-            match result {
-                Ok(active) => {
-                    window.set_auto_clamshell_state_ready(true);
-                    window.set_auto_clamshell_control_ready(true);
-                    window.set_auto_clamshell(active);
-                    window.set_status(
-                        format!(
-                            "Closed-lid mode {} · session inhibitor active",
-                            if active { "on" } else { "off" }
-                        )
-                        .into(),
-                    );
-                }
-                Err(error) => {
-                    window.set_auto_clamshell_state_ready(false);
-                    window.set_auto_clamshell_control_ready(false);
-                    window.set_auto_clamshell(false);
-                    window.set_status(format!("Closed-lid mode failed · {error}").into());
-                }
-            }
+            let (ready, control_ready, active, status) = clamshell_ui_state(result);
+            window.set_auto_clamshell_state_ready(ready);
+            window.set_auto_clamshell_control_ready(control_ready);
+            window.set_auto_clamshell(active);
+            window.set_status(status.into());
         }) {
             tracing::warn!(error = ?error, "failed to publish clamshell result");
         }
     });
 }
 
-fn clamshell_inhibit_command() -> Command {
-    let mut command = Command::new("systemd-inhibit");
-    command.args([
-        "--what=handle-lid-switch",
-        "--mode=block",
-        "--who=Orbis Control",
-        "--why=Closed-lid mode",
-        "sleep",
-        "infinity",
-    ]);
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    command
-}
-
-fn systemd_inhibit_available() -> bool {
-    Command::new("systemd-inhibit")
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-fn start_clamshell(clamshell: &Mutex<Option<Child>>) -> Result<(), String> {
-    let mut state = clamshell
-        .lock()
-        .map_err(|_| "clamshell state lock poisoned".to_string())?;
-    if let Some(child) = state.as_mut() {
-        if child
-            .try_wait()
-            .map_err(|error| format!("checking inhibitor: {error}"))?
-            .is_none()
-        {
-            return Ok(());
+fn clamshell_ui_state(result: Result<u8, ProviderError>) -> (bool, bool, bool, String) {
+    let state = match result {
+        Ok(state) => state,
+        Err(error) => {
+            return (
+                false,
+                false,
+                false,
+                format!("Closed-lid mode unknown · {error}"),
+            );
         }
-        *state = None;
-    }
-    *state = Some(
-        clamshell_inhibit_command()
-            .spawn()
-            .map_err(|error| format!("starting systemd-inhibit: {error}"))?,
-    );
-    Ok(())
-}
-
-fn stop_clamshell(clamshell: &Mutex<Option<Child>>) {
-    let Ok(mut state) = clamshell.lock() else {
-        return;
     };
-    if let Some(mut child) = state.take() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-}
-
-fn clamshell_is_active() -> bool {
-    CONTEXT.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .and_then(|context| context.clamshell.lock().ok())
-            .and_then(|mut state| {
-                let child = state.as_mut()?;
-                if child.try_wait().ok()?.is_some() {
-                    *state = None;
-                    None
-                } else {
-                    Some(true)
-                }
-            })
-            .unwrap_or(false)
-    })
-}
-
-fn clamshell_observed(available: bool, active: bool) -> (bool, bool, &'static str) {
-    if !available {
-        return (
+    match state {
+        clamshell::INACTIVE => (
+            true,
+            true,
+            false,
+            "Closed-lid mode off · session inhibitor inactive".into(),
+        ),
+        clamshell::ACTIVE => (
+            true,
+            true,
+            true,
+            "Closed-lid mode on · session inhibitor active".into(),
+        ),
+        clamshell::UNAVAILABLE => (true, false, false, "Closed-lid mode unavailable".into()),
+        clamshell::PERMISSION_DENIED => (
+            true,
             false,
             false,
-            "Closed-lid mode unavailable · systemd-inhibit missing",
-        );
+            "Closed-lid mode unavailable · permission denied".into(),
+        ),
+        clamshell::START_FAILED => (
+            true,
+            false,
+            false,
+            "Closed-lid mode unavailable · inhibitor start failed".into(),
+        ),
+        clamshell::EXIT_FAILED => (
+            true,
+            false,
+            false,
+            "Closed-lid mode unavailable · inhibitor exit failed".into(),
+        ),
+        _ => (true, false, false, "Closed-lid mode unknown".into()),
     }
-    (
-        true,
-        active,
-        "Closed-lid mode state observed from session inhibitor",
-    )
 }
 
 pub(crate) fn refresh(window: &AppWindow) {
@@ -780,13 +714,22 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
         let panel_provider = AsusArmouryPanelOverdriveProvider::default();
         let boot_sound_provider = AsusBootSoundProvider::default();
 
-        let (aura_result, panel_result, boot_sound_result, apu_result, aspm_result, write_statuses) = tokio::join!(
+        let (
+            aura_result,
+            panel_result,
+            boot_sound_result,
+            apu_result,
+            aspm_result,
+            write_statuses,
+            clamshell_result,
+        ) = tokio::join!(
             bounded_aura_read(),
             bounded_panel_read(&panel_provider),
             bounded_boot_sound_read(&boot_sound_provider),
             bounded_apu_memory_read(),
             bounded_aspm_read(),
             bounded_write_statuses(),
+            context.clamshell.read_clamshell(),
         );
 
         let aura = aura_observed(aura_result);
@@ -818,10 +761,10 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
             window.set_backend_ready(false);
             window.set_applying(false);
 
-            let (clamshell_ready, clamshell_active, clamshell_status) =
-                clamshell_observed(systemd_inhibit_available(), clamshell_is_active());
+            let (clamshell_ready, clamshell_control_ready, clamshell_active, clamshell_status) =
+                clamshell_ui_state(clamshell_result);
             window.set_auto_clamshell_state_ready(clamshell_ready);
-            window.set_auto_clamshell_control_ready(clamshell_ready);
+            window.set_auto_clamshell_control_ready(clamshell_control_ready);
             window.set_auto_clamshell(clamshell_active);
 
             if let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) {
@@ -867,7 +810,11 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
             window.set_aspm_control_ready(aspm_write.is_supported());
             window.set_disable_aspm(aspm_disabled);
 
-            let any_ready = aura.ready || panel.ready || boot_sound.ready || apu.ready || aspm_write != ProductWriteStatus::Unknown;
+            let any_ready = aura.ready
+                || panel.ready
+                || boot_sound.ready
+                || apu.ready
+                || aspm_write != ProductWriteStatus::Unknown;
             window.set_backend_ready(any_ready);
             let observed_status = if any_ready {
                 format!(
@@ -880,9 +827,7 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
             } else {
                 format!(
                     "Advanced observations unavailable · {} · {} · iGPU {}",
-                    aura.status,
-                    boot_sound.status,
-                    apu.status,
+                    aura.status, boot_sound.status, apu.status,
                 )
             };
             window.set_status(
@@ -1456,35 +1401,24 @@ mod tests {
     }
 
     #[test]
-    fn clamshell_uses_a_user_session_inhibitor() {
-        let command = clamshell_inhibit_command();
-        assert_eq!(command.get_program(), "systemd-inhibit");
-        let args: Vec<_> = command.get_args().collect();
+    fn clamshell_states_are_explicit_and_fail_closed() {
+        assert!(clamshell_ui_state(Ok(clamshell::UNAVAILABLE)).0);
+        assert!(!clamshell_ui_state(Ok(clamshell::UNAVAILABLE)).1);
         assert!(
-            args.windows(2)
-                .any(|pair| pair == ["--what=handle-lid-switch", "--mode=block"])
+            clamshell_ui_state(Ok(clamshell::PERMISSION_DENIED))
+                .3
+                .contains("permission")
         );
-        assert_eq!(args[args.len() - 2], "sleep");
-        assert_eq!(args[args.len() - 1], "infinity");
-    }
-
-    #[test]
-    fn clamshell_observation_fails_closed_when_inhibitor_is_unavailable() {
-        assert_eq!(
-            clamshell_observed(false, true),
-            (
-                false,
-                false,
-                "Closed-lid mode unavailable · systemd-inhibit missing"
-            )
+        assert!(
+            clamshell_ui_state(Ok(clamshell::START_FAILED))
+                .3
+                .contains("start failed")
         );
-        assert_eq!(
-            clamshell_observed(true, false),
-            (
-                true,
-                false,
-                "Closed-lid mode state observed from session inhibitor"
-            )
+        assert!(
+            clamshell_ui_state(Ok(clamshell::EXIT_FAILED))
+                .3
+                .contains("exit failed")
         );
+        assert!(!clamshell_ui_state(Err(ProviderError::Internal("x".into()))).0);
     }
 }

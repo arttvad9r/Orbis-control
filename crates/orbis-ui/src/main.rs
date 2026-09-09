@@ -1753,14 +1753,13 @@ fn main() -> anyhow::Result<()> {
     init_tracing();
     let startup_preferences = initialize_runtime_preferences();
     let runtime = tokio::runtime::Runtime::new()?;
-    quick_controls_backend::initialize(runtime.handle().clone());
-
     let session_connection = runtime
         .block_on(zbus::Connection::session())
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к session bus: {e}"))?;
     let system_connection = runtime
         .block_on(zbus::Connection::system())
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
+    quick_controls_backend::initialize(runtime.handle().clone(), session_connection.clone());
     let diagnostics_session_connection = session_connection.clone();
     let diagnostics_system_connection = system_connection.clone();
     let lifecycle_connection = system_connection.clone();

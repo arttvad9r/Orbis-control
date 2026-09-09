@@ -47,8 +47,8 @@ struct KeyboardUiState {
     status: String,
 }
 
-pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
-    secondary_windows_backend::initialize(runtime.clone());
+pub(crate) fn initialize(runtime: tokio::runtime::Handle, session_connection: zbus::Connection) {
+    secondary_windows_backend::initialize(runtime.clone(), session_connection);
     CONTEXT.with(|slot| {
         *slot.borrow_mut() = Some(QuickControlsContext {
             runtime,

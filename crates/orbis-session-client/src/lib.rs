@@ -48,7 +48,7 @@ use orbis_providers::{
 use orbis_session_protocol::{
     BatteryThresholdEvidenceTuple, ChargeLimitInfo, PerformanceInfo, Session1Proxy,
     battery_threshold_confidence, battery_threshold_freshness, battery_threshold_source,
-    battery_threshold_state, gpu_access, gpu_mux, gpu_power, performance,
+    battery_threshold_state, clamshell, gpu_access, gpu_mux, gpu_power, performance,
 };
 use zbus::proxy::CacheProperties;
 
@@ -231,6 +231,68 @@ pub trait SessionChargeLimitSource: Send + Sync {
 /// `read_charge_limit().await`.
 pub struct ZbusSessionChargeLimitSource {
     connection: zbus::Connection,
+}
+
+/// Typed session client for the user-session-owned clamshell inhibitor.
+#[async_trait]
+pub trait SessionClamshellSource: Send + Sync {
+    /// Read the authoritative current lifecycle state.
+    async fn read_clamshell(&self) -> Result<u8, ProviderError>;
+    /// Request lifecycle state and return the resulting state.
+    async fn set_clamshell(&self, enabled: bool) -> Result<u8, ProviderError>;
+}
+
+/// zbus implementation of [`SessionClamshellSource`].
+pub struct ZbusSessionClamshellSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusSessionClamshellSource {
+    /// Create a source without performing I/O.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+fn validate_clamshell_state(state: u8) -> Result<u8, ProviderError> {
+    if state <= clamshell::UNKNOWN {
+        Ok(state)
+    } else {
+        Err(ProviderError::Internal(format!(
+            "session protocol: unknown clamshell state {state}"
+        )))
+    }
+}
+
+#[async_trait]
+impl SessionClamshellSource for ZbusSessionClamshellSource {
+    async fn read_clamshell(&self) -> Result<u8, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        validate_clamshell_state(
+            proxy
+                .clamshell_inhibitor()
+                .await
+                .map_err(zbus_error_to_provider)?,
+        )
+    }
+
+    async fn set_clamshell(&self, enabled: bool) -> Result<u8, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        validate_clamshell_state(
+            proxy
+                .set_clamshell_inhibitor(enabled)
+                .await
+                .map_err(zbus_error_to_provider)?,
+        )
+    }
 }
 
 impl ZbusSessionChargeLimitSource {
