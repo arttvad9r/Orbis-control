@@ -17,16 +17,18 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
-use orbis_core::aura::AuraRgb;
+use orbis_core::aura::{AuraDirection, AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraZone};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::asus_gpu_mode::{AsusGpuMode, ProductGpuOutcome};
 use orbis_providers::error::ProviderError;
 use orbis_providers::supergfxd::{SupergfxdMode, SupergfxdStagedState, SupergfxdUserAction};
 
+pub mod aspm;
 pub mod asus_gpu_mode;
 pub mod aura;
 pub mod battery;
 pub mod fans;
+pub mod firmware;
 pub mod keyboard_backlight;
 pub mod panel;
 pub mod supergfxd;
@@ -35,8 +37,13 @@ use battery::{BatteryMutationBackend, BatteryMutationReadback};
 
 /// Фиксированный production path kernel ABI: current profile.
 pub const PLATFORM_PROFILE_PATH: &str = "/sys/firmware/acpi/platform_profile";
+
+/// Wire tuple returned after config-confirmed Aura effect mutation.
+pub type AuraEffectMutationWire = (u32, String, (u8, u8, u8), (u8, u8, u8), u32);
 /// Фиксированный production path kernel ABI: доступные профили.
 pub const PLATFORM_PROFILE_CHOICES_PATH: &str = "/sys/firmware/acpi/platform_profile_choices";
+/// Well-known owner which also controls the kernel platform-profile ABI.
+pub const POWER_PROFILES_DAEMON_BUS_NAME: &str = "org.freedesktop.UPower.PowerProfiles";
 
 /// Exact kernel symbol для write-path (reverse read mapping, ADR 0006).
 ///
@@ -89,6 +96,8 @@ pub struct PlatformProfileWriter<S: ProfileIo> {
     io: S,
     profile_path: PathBuf,
     choices_path: PathBuf,
+    owner_conflict: Option<bool>,
+    owner_check_unknown: bool,
 }
 
 impl PlatformProfileWriter<StdProfileIo> {
@@ -121,7 +130,19 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
             io,
             profile_path,
             choices_path,
+            owner_conflict: None,
+            owner_check_unknown: false,
         }
+    }
+
+    pub(crate) fn with_owner_conflict(mut self, conflict: bool) -> Self {
+        self.owner_conflict = Some(conflict);
+        self
+    }
+
+    pub(crate) fn with_unknown_owner(mut self) -> Self {
+        self.owner_check_unknown = true;
+        self
     }
 
     fn read_trimmed(&self, path: &Path, what: &str) -> Result<String, ProviderError> {
@@ -141,6 +162,16 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
         &self,
         profile: PerformanceProfile,
     ) -> Result<ApplyResult, ProviderError> {
+        if self.owner_check_unknown {
+            return Err(ProviderError::BackendUnavailable(
+                "hardwared: platform_profile owner could not be established".into(),
+            ));
+        }
+        if self.owner_conflict == Some(true) {
+            return Err(ProviderError::Conflict(
+                "hardwared: power-profiles-daemon owns platform_profile".into(),
+            ));
+        }
         let symbol = profile_symbol(profile);
 
         let choices_raw = self.read_trimmed(&self.choices_path, "platform_profile_choices")?;
@@ -175,6 +206,12 @@ impl<S: ProfileIo> PlatformProfileWriter<S> {
     /// read the mutation path performs — and classifies the result. Never
     /// writes and never mutates hardware.
     pub fn mutation_status(&self) -> PerformanceMutationStatus {
+        if self.owner_check_unknown {
+            return PerformanceMutationStatus::Unknown;
+        }
+        if self.owner_conflict == Some(true) {
+            return PerformanceMutationStatus::Conflicted;
+        }
         match self.read_trimmed(&self.choices_path, "platform_profile_choices") {
             Ok(choices) if choices.split_whitespace().next().is_some() => {
                 PerformanceMutationStatus::Supported
@@ -208,6 +245,8 @@ pub const DBUS_OBJECT_PATH: &str = "/io/github/orbiscontrol/Hardware";
 pub const DBUS_INTERFACE_NAME: &str = "io.github.orbiscontrol.Hardware1";
 /// Polkit action id для Performance mutation.
 pub const POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-performance-profile";
+/// Polkit action id for PCIe ASPM policy mutation.
+pub const ASPM_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-aspm";
 /// Polkit action id for Battery charge-limit mutation.
 pub const BATTERY_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-charge-limit";
 /// Polkit action id for the injectable GPU mutation boundary.
@@ -225,6 +264,10 @@ pub const KEYBOARD_BACKLIGHT_POLKIT_ACTION: &str =
 pub const AURA_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-aura-static-rgb";
 /// Polkit action id for ASUS Armoury product GPU mode queueing.
 pub const PRODUCT_GPU_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-product-gpu-mode";
+/// Polkit action id for ASUS BIOS/POST sound mutation.
+pub const BOOT_SOUND_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-boot-sound";
+/// Polkit action id for ASUS iGPU memory mutation.
+pub const APU_MEMORY_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-apu-memory";
 
 /// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
 pub mod wire {
@@ -276,6 +319,8 @@ pub enum PerformanceMutationStatus {
     TemporarilyUnavailable,
     /// The ABI exists but current read authorization denies access.
     PermissionDenied,
+    /// Another daemon currently owns the same kernel ABI.
+    Conflicted,
     /// No provable evidence about mutation availability.
     Unknown,
 }
@@ -298,6 +343,8 @@ pub mod performance_mutation_wire {
     pub const PERMISSION_DENIED: u8 = 3;
     /// No evidence.
     pub const UNKNOWN: u8 = 4;
+    /// The kernel ABI is owned by another active service.
+    pub const CONFLICTED: u8 = 5;
 
     /// Encode typed status into the D-Bus wire value.
     pub fn to_wire(status: PerformanceMutationStatus) -> u8 {
@@ -307,6 +354,7 @@ pub mod performance_mutation_wire {
             PerformanceMutationStatus::TemporarilyUnavailable => TEMPORARILY_UNAVAILABLE,
             PerformanceMutationStatus::PermissionDenied => PERMISSION_DENIED,
             PerformanceMutationStatus::Unknown => UNKNOWN,
+            PerformanceMutationStatus::Conflicted => CONFLICTED,
         }
     }
 
@@ -319,6 +367,7 @@ pub mod performance_mutation_wire {
             TEMPORARILY_UNAVAILABLE => Some(PerformanceMutationStatus::TemporarilyUnavailable),
             PERMISSION_DENIED => Some(PerformanceMutationStatus::PermissionDenied),
             UNKNOWN => Some(PerformanceMutationStatus::Unknown),
+            CONFLICTED => Some(PerformanceMutationStatus::Conflicted),
             _ => None,
         }
     }
@@ -385,7 +434,7 @@ impl Authorizer for PolkitAuthorizer {
                 &subject,
                 self.action,
                 &std::collections::HashMap::new(),
-                Default::default(),
+                zbus_polkit::policykit1::CheckAuthorizationFlags::AllowUserInteraction.into(),
                 "",
             )
             .await
@@ -439,6 +488,26 @@ where
             "hardwared: операция не подтверждена: {other:?}"
         ))),
     }
+}
+
+pub async fn handle_set_aspm<A, S>(
+    authorizer: &A,
+    writer: &aspm::AspmWriter<S>,
+    disabled: bool,
+    sender: &str,
+) -> zbus::fdo::Result<bool>
+where
+    A: Authorizer + ?Sized,
+    S: aspm::AspmIo,
+{
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+    writer
+        .set_disabled(disabled)
+        .map_err(provider_error_to_dbus)?;
+    Ok(disabled)
 }
 
 /// Обработка Battery mutation до публичного D-Bus boundary.
@@ -654,6 +723,44 @@ pub struct ProductGpuMutationResult {
     pub reboot_required: bool,
 }
 
+/// Read-only current and queued ASUS product GPU state.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, zbus::zvariant::Type,
+)]
+pub struct ProductGpuStatus {
+    pub current_mode: u32,
+    pub queued_mode: u32,
+    pub reboot_required: bool,
+}
+
+pub async fn handle_product_gpu_status(
+    backend: Option<&dyn asus_gpu_mode::AsusProductGpuMutationOperation>,
+) -> zbus::fdo::Result<ProductGpuStatus> {
+    let backend = backend.ok_or_else(|| {
+        zbus::fdo::Error::NotSupported("ASUS product GPU backend unavailable".into())
+    })?;
+    let snapshot = backend.read_mode().await.map_err(provider_error_to_dbus)?;
+    Ok(ProductGpuStatus {
+        current_mode: product_gpu_mode_to_wire(snapshot.current_mode),
+        queued_mode: snapshot
+            .queued_mode
+            .map(product_gpu_mode_to_wire)
+            .unwrap_or(u32::MAX),
+        reboot_required: snapshot.reboot_required(),
+    })
+}
+
+fn product_gpu_mode_to_wire(mode: orbis_providers::asus_gpu_mode::AsusGpuMode) -> u32 {
+    match mode {
+        orbis_providers::asus_gpu_mode::AsusGpuMode::Hybrid => 0,
+        orbis_providers::asus_gpu_mode::AsusGpuMode::Integrated => 1,
+        orbis_providers::asus_gpu_mode::AsusGpuMode::Ultimate => 2,
+        orbis_providers::asus_gpu_mode::AsusGpuMode::Incomplete
+        | orbis_providers::asus_gpu_mode::AsusGpuMode::Unknown { .. }
+        | orbis_providers::asus_gpu_mode::AsusGpuMode::Conflicted { .. } => u32::MAX,
+    }
+}
+
 pub async fn handle_set_product_gpu_mode(
     authorizer: &dyn Authorizer,
     backend: Option<&dyn asus_gpu_mode::AsusProductGpuMutationOperation>,
@@ -717,6 +824,7 @@ pub async fn handle_set_product_gpu_mode(
 /// Service object интерфейса `io.github.orbiscontrol.Hardware1`.
 pub struct HardwareService {
     authorizer: Box<dyn Authorizer>,
+    aspm_authorizer: Box<dyn Authorizer>,
     writer: PlatformProfileWriter<StdProfileIo>,
     battery_authorizer: Box<dyn Authorizer>,
     battery_backend: Option<Box<dyn BatteryMutationBackend>>,
@@ -733,12 +841,17 @@ pub struct HardwareService {
     kb_backend: Option<Box<dyn keyboard_backlight::KeyboardBacklightMutationBackend>>,
     aura_authorizer: Box<dyn Authorizer>,
     aura_backend: Option<Box<dyn aura::AuraStaticRgbMutationBackend>>,
+    boot_sound_authorizer: Box<dyn Authorizer>,
+    boot_sound_backend: Option<Box<dyn firmware::BootSoundMutationOperation>>,
+    apu_memory_authorizer: Box<dyn Authorizer>,
+    apu_memory_backend: Option<Box<dyn firmware::ApuMemoryMutationOperation>>,
 }
 
 impl HardwareService {
     pub fn new(authorizer: Box<dyn Authorizer>) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -755,6 +868,10 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -765,6 +882,7 @@ impl HardwareService {
     ) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -781,6 +899,10 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -793,6 +915,7 @@ impl HardwareService {
     ) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -809,6 +932,10 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -819,6 +946,7 @@ impl HardwareService {
     ) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -835,6 +963,10 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -849,6 +981,7 @@ impl HardwareService {
     ) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -865,6 +998,10 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -876,6 +1013,7 @@ impl HardwareService {
     ) -> Self {
         Self {
             authorizer,
+            aspm_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -892,6 +1030,10 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            boot_sound_authorizer: Box::new(DisabledAuthorizer),
+            boot_sound_backend: None,
+            apu_memory_authorizer: Box::new(DisabledAuthorizer),
+            apu_memory_backend: None,
         }
     }
 
@@ -947,6 +1089,45 @@ impl HardwareService {
         self.product_gpu_authorizer = authorizer;
         self
     }
+
+    /// Attach the typed ASUS POST sound mutation backend.
+    pub fn with_boot_sound(
+        mut self,
+        backend: Box<dyn firmware::BootSoundMutationOperation>,
+        authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.boot_sound_backend = Some(backend);
+        self.boot_sound_authorizer = authorizer;
+        self
+    }
+
+    /// Attach the typed ASUS iGPU memory mutation backend.
+    pub fn with_apu_memory(
+        mut self,
+        backend: Box<dyn firmware::ApuMemoryMutationOperation>,
+        authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.apu_memory_backend = Some(backend);
+        self.apu_memory_authorizer = authorizer;
+        self
+    }
+
+    pub fn with_aspm_authorizer(mut self, authorizer: Box<dyn Authorizer>) -> Self {
+        self.aspm_authorizer = authorizer;
+        self
+    }
+
+    /// Apply startup-only read-only evidence about platform-profile ownership.
+    pub fn with_platform_profile_owner_state(
+        mut self,
+        state: Result<bool, zbus::fdo::Error>,
+    ) -> Self {
+        self.writer = match state {
+            Ok(conflict) => self.writer.with_owner_conflict(conflict),
+            Err(_) => self.writer.with_unknown_owner(),
+        };
+        self
+    }
 }
 
 struct DisabledAuthorizer;
@@ -982,6 +1163,31 @@ impl HardwareService {
     fn performance_mutation_status(&self) -> u8 {
         use performance_mutation_wire;
         performance_mutation_wire::to_wire(self.writer.mutation_status())
+    }
+
+    async fn set_aspm_disabled(
+        &self,
+        disabled: bool,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let writer = aspm::AspmWriter::default();
+        handle_set_aspm(self.aspm_authorizer.as_ref(), &writer, disabled, &sender).await
+    }
+
+    fn aspm_mutation_status(&self) -> u8 {
+        aspm::mutation_wire::to_wire(aspm::AspmWriter::default().mutation_status())
+    }
+
+    fn aspm_disabled(&self) -> zbus::fdo::Result<bool> {
+        match aspm::AspmWriter::default().current_policy() {
+            Ok(aspm::AspmPolicy::Performance) => Ok(true),
+            Ok(_) => Ok(false),
+            Err(error) => Err(provider_error_to_dbus(error)),
+        }
     }
 
     /// Установить Battery configured threshold; возвращает подтверждённый
@@ -1037,6 +1243,10 @@ impl HardwareService {
             &sender,
         )
         .await
+    }
+
+    async fn product_gpu_status(&self) -> zbus::fdo::Result<ProductGpuStatus> {
+        handle_product_gpu_status(self.product_gpu_backend.as_deref()).await
     }
 
     /// Read-only typed evidence about Battery mutation backend availability.
@@ -1190,6 +1400,79 @@ impl HardwareService {
         )
     }
 
+    /// Set ASUS BIOS/POST sound and return the authoritative boolean read-back.
+    async fn set_boot_sound(
+        &self,
+        enabled: bool,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<u8> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.boot_sound_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("boot sound backend unavailable".into())
+        })?;
+        firmware::handle_set_boot_sound(
+            self.boot_sound_authorizer.as_ref(),
+            backend,
+            enabled,
+            &sender,
+        )
+        .await
+    }
+
+    /// Read-only runtime evidence for ASUS BIOS/POST sound mutation.
+    async fn boot_sound_mutation_status(&self) -> u8 {
+        firmware::boot_sound_mutation_wire::to_wire(match self.boot_sound_backend.as_deref() {
+            Some(backend) => backend.mutation_status().await,
+            None => firmware::BootSoundMutationStatus::Unknown,
+        })
+    }
+
+    /// Read the current ASUS iGPU memory enum value without authorization.
+    async fn apu_memory_state(&self) -> zbus::fdo::Result<u8> {
+        let backend = self
+            .apu_memory_backend
+            .as_deref()
+            .ok_or_else(|| zbus::fdo::Error::NotSupported("apu_mem backend unavailable".into()))?;
+        backend
+            .read_apu_memory()
+            .await
+            .map_err(provider_error_to_dbus)
+    }
+
+    /// Set ASUS iGPU memory and report confirmed pending-reboot state.
+    async fn set_apu_memory(
+        &self,
+        value: u8,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<(u8, u8, u8)> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self
+            .apu_memory_backend
+            .as_deref()
+            .ok_or_else(|| zbus::fdo::Error::NotSupported("apu_mem backend unavailable".into()))?;
+        firmware::handle_set_apu_memory(
+            self.apu_memory_authorizer.as_ref(),
+            backend,
+            value,
+            &sender,
+        )
+        .await
+    }
+
+    /// Read-only runtime evidence for ASUS iGPU memory mutation.
+    async fn apu_memory_mutation_status(&self) -> u8 {
+        firmware::apu_memory_mutation_wire::to_wire(match self.apu_memory_backend.as_deref() {
+            Some(backend) => backend.mutation_status().await,
+            None => firmware::ApuMemoryMutationStatus::Unknown,
+        })
+    }
+
     /// Установить keyboard backlight brightness.
     async fn set_keyboard_backlight(
         &self,
@@ -1249,6 +1532,63 @@ impl HardwareService {
         .await
     }
 
+    /// Set Aura mode, speed and both colours through the same typed asusd owner.
+    async fn set_aura_effect(
+        &self,
+        mode: u32,
+        speed: String,
+        colour1: (u8, u8, u8),
+        colour2: (u8, u8, u8),
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<AuraEffectMutationWire> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.aura_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("aura effect backend unavailable".into())
+        })?;
+        let readback = aura::handle_set_aura_effect(
+            self.aura_authorizer.as_ref(),
+            backend,
+            AuraEffect {
+                mode: AuraMode::from_u32(mode),
+                zone: AuraZone::None,
+                colour1: AuraRgb {
+                    r: colour1.0,
+                    g: colour1.1,
+                    b: colour1.2,
+                },
+                colour2: AuraRgb {
+                    r: colour2.0,
+                    g: colour2.1,
+                    b: colour2.2,
+                },
+                speed: speed
+                    .parse::<AuraSpeed>()
+                    .unwrap_or(AuraSpeed::Unknown(speed)),
+                direction: AuraDirection::Right,
+            },
+            &sender,
+        )
+        .await?;
+        Ok((
+            readback.observed.mode.to_u32(),
+            readback.observed.speed.as_str().to_string(),
+            (
+                readback.observed.colour1.r,
+                readback.observed.colour1.g,
+                readback.observed.colour1.b,
+            ),
+            (
+                readback.observed.colour2.r,
+                readback.observed.colour2.g,
+                readback.observed.colour2.b,
+            ),
+            aura::AURA_OUTCOME_CONFIG_CONFIRMED,
+        ))
+    }
+
     /// Read-only typed evidence about Aura Static RGB mutation backend
     /// availability.
     ///
@@ -1275,12 +1615,16 @@ pub trait Hardware1 {
     fn set_performance_profile(&self, profile: u8) -> zbus::Result<u8>;
     /// Read-only typed Performance mutation backend availability (wire enum).
     fn performance_mutation_status(&self) -> zbus::Result<u8>;
+    fn set_aspm_disabled(&self, disabled: bool) -> zbus::Result<bool>;
+    fn aspm_mutation_status(&self) -> zbus::Result<u8>;
+    fn aspm_disabled(&self) -> zbus::Result<bool>;
 
     /// Установить Battery configured threshold; возвращает подтверждённый
     /// configured percent, effective value остаётся отдельным read-model field.
     fn set_charge_limit(&self, percent: u8) -> zbus::Result<u8>;
     fn set_gpu_mode(&self, requested_mode: u32) -> zbus::Result<GpuMutationResult>;
     fn set_product_gpu_mode(&self, requested_mode: u32) -> zbus::Result<ProductGpuMutationResult>;
+    fn product_gpu_status(&self) -> zbus::Result<ProductGpuStatus>;
     /// Read-only typed Battery mutation backend availability (wire enum).
     fn battery_mutation_status(&self) -> zbus::Result<u8>;
 
@@ -1313,6 +1657,14 @@ pub trait Hardware1 {
 
     /// Read-only typed Aura Static RGB mutation backend availability (wire enum).
     fn aura_mutation_status(&self) -> zbus::Result<u8>;
+
+    fn set_aura_effect(
+        &self,
+        mode: u32,
+        speed: String,
+        colour1: (u8, u8, u8),
+        colour2: (u8, u8, u8),
+    ) -> zbus::Result<AuraEffectMutationWire>;
 }
 
 #[cfg(test)]
@@ -1509,6 +1861,19 @@ mod tests {
     }
 
     #[test]
+    fn external_owner_conflict_fails_closed_before_sysfs_write() {
+        let io = ScriptedIo::new("quiet balanced performance", "balanced");
+        let w = writer(io).with_owner_conflict(true);
+
+        assert_eq!(w.mutation_status(), PerformanceMutationStatus::Conflicted);
+        let err = w
+            .set_performance_profile(PerformanceProfile::Turbo)
+            .expect_err("external owner must block mutation");
+        assert!(matches!(err, ProviderError::Conflict(_)));
+        assert_eq!(w.io.writes(), 0);
+    }
+
+    #[test]
     fn missing_choice_is_unsupported_with_zero_writes() {
         let io = ScriptedIo::new("balanced performance", "balanced");
         let w = writer(io);
@@ -1665,6 +2030,12 @@ mod tests {
 
     #[async_trait]
     impl asus_gpu_mode::AsusProductGpuMutationOperation for FakeProductGpuBackend {
+        async fn read_mode(
+            &self,
+        ) -> Result<orbis_providers::asus_gpu_mode::AsusGpuModeSnapshot, ProviderError> {
+            Ok(product_gpu_readback().snapshot)
+        }
+
         async fn set_mode(
             &self,
             _requested: AsusGpuMode,

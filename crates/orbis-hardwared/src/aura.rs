@@ -159,6 +159,14 @@ pub struct AuraStaticRgbMutationReadback {
     pub result: ApplyResult,
 }
 
+/// Fresh result of a full Aura effect mutation and config-level read-back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuraEffectMutationReadback {
+    pub requested: AuraEffect,
+    pub observed: AuraEffect,
+    pub result: ApplyResult,
+}
+
 /// Typed runtime evidence for Aura Static RGB mutation backend availability.
 ///
 /// Preserves the distinction between a proven backend (`Supported`), a
@@ -231,6 +239,12 @@ pub trait AuraStaticRgbMutationBackend: Send + Sync {
         rgb: AuraRgb,
     ) -> Result<AuraStaticRgbMutationReadback, ProviderError>;
 
+    /// Perform one mode/speed/colour mutation with config-level read-back.
+    async fn set_effect(
+        &self,
+        effect: AuraEffect,
+    ) -> Result<AuraEffectMutationReadback, ProviderError>;
+
     /// Report the typed runtime availability of this mutation backend.
     ///
     /// This is read-only evidence used by capability probing; it never
@@ -254,6 +268,42 @@ impl<A> AsusdAuraStaticRgbMutationBackend<A>
 where
     A: AsusdAuraClient,
 {
+    /// Validate supported mode, preserve hardware-owned zone/direction, then
+    /// confirm the complete requested effect through a fresh config read.
+    pub async fn set_effect(
+        &self,
+        requested: AuraEffect,
+    ) -> Result<AuraEffectMutationReadback, ProviderError> {
+        let current = self.asusd.led_mode_data().await?;
+        let supported = self.asusd.supported_basic_modes().await?;
+        if !supported.contains(&requested.mode.to_u32()) {
+            return Err(ProviderError::Unsupported(format!(
+                "asus aura: mode {:?} not supported (supported_basic_modes={supported:?})",
+                requested.mode
+            )));
+        }
+        let effect = AuraEffect {
+            mode: requested.mode,
+            zone: current.zone,
+            colour1: requested.colour1,
+            colour2: requested.colour2,
+            speed: requested.speed,
+            direction: current.direction,
+        };
+        self.asusd.set_led_mode_data(effect.clone()).await?;
+        let observed = self.asusd.led_mode_data().await?;
+        if observed != effect {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "asus aura config read-back mismatch: expected={effect:?}, got={observed:?}"
+            )));
+        }
+        Ok(AuraEffectMutationReadback {
+            requested: effect,
+            observed,
+            result: ApplyResult::Accepted,
+        })
+    }
+
     /// Validate, perform one asusd setter, then perform a fresh config-level
     /// read-back.
     pub async fn set_static_rgb(
@@ -315,6 +365,13 @@ where
         rgb: AuraRgb,
     ) -> Result<AuraStaticRgbMutationReadback, ProviderError> {
         self.set_static_rgb(rgb).await
+    }
+
+    async fn set_effect(
+        &self,
+        effect: AuraEffect,
+    ) -> Result<AuraEffectMutationReadback, ProviderError> {
+        AsusdAuraStaticRgbMutationBackend::set_effect(self, effect).await
     }
 
     fn mutation_status(&self) -> AuraMutationStatus {
@@ -383,6 +440,31 @@ pub async fn handle_set_aura_static_rgb(
         other => Err(zbus::fdo::Error::Failed(format!(
             "hardwared: aura static rgb operation not confirmed: {other:?}"
         ))),
+    }
+}
+
+/// Apply a typed Aura effect through Hardware1 and require config read-back.
+pub async fn handle_set_aura_effect(
+    authorizer: &dyn Authorizer,
+    backend: &dyn AuraStaticRgbMutationBackend,
+    effect: AuraEffect,
+    sender: &str,
+) -> zbus::fdo::Result<AuraEffectMutationReadback> {
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+    let readback = backend
+        .set_effect(effect)
+        .await
+        .map_err(provider_error_to_dbus)?;
+    if readback.result == ApplyResult::Accepted {
+        Ok(readback)
+    } else {
+        Err(zbus::fdo::Error::Failed(format!(
+            "hardwared: aura effect operation not confirmed: {:?}",
+            readback.result
+        )))
     }
 }
 
@@ -503,6 +585,34 @@ mod tests {
             !result.result.is_applied(),
             "Accepted must not claim hardware-applied"
         );
+    }
+
+    #[tokio::test]
+    async fn effect_mutation_preserves_zone_direction_and_confirms_readback() {
+        let asusd = FakeAsusd::new(static_effect(), vec![0, 1]);
+        let requested = AuraEffect {
+            mode: AuraMode::Breathe,
+            zone: AuraZone::None,
+            colour1: AuraRgb { r: 1, g: 2, b: 3 },
+            colour2: AuraRgb { r: 4, g: 5, b: 6 },
+            speed: AuraSpeed::High,
+            direction: AuraDirection::Right,
+        };
+
+        let result = backend(asusd.clone())
+            .set_effect(requested.clone())
+            .await
+            .unwrap();
+
+        let sent = asusd.last_set().expect("setter must be called");
+        assert_eq!(sent.mode, AuraMode::Breathe);
+        assert_eq!(sent.speed, AuraSpeed::High);
+        assert_eq!(sent.colour1, requested.colour1);
+        assert_eq!(sent.colour2, requested.colour2);
+        assert_eq!(sent.zone, AuraZone::None);
+        assert_eq!(sent.direction, AuraDirection::Right);
+        assert_eq!(result.observed, requested);
+        assert_eq!(result.result, ApplyResult::Accepted);
     }
 
     #[tokio::test]

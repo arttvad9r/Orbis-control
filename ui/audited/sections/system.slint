@@ -1,10 +1,10 @@
-// System page — device/firmware identity (privacy-safe DMI), firmware
-// observations, the ASUS draft parameter surface (unchanged request/apply
-// semantics) and diagnostics actions.
+// System page — device identity, firmware, full ASUS advanced surface and
+// diagnostics. Upcoming controls remain present but use product-grade
+// availability states instead of looking like unfinished placeholders.
 import { ScrollView } from "std-widgets.slint";
 import { NumberStepper, OptionStepper } from "../../components/steppers.slint";
-import { UiState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, InfoRow, LocalStatus, ActionButton } from "../common.slint";
+import { UiState, ClamshellState } from "../model.slint";
+import { PageHeader, SectionCard, SectionTitle, InfoRow, LocalStatus, ActionButton, StatusPill, SubsectionLabel, LayoutMetrics } from "../common.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -17,16 +17,29 @@ export component SystemSection inherits Rectangle {
 
     in property <bool> backend-ready: false;
     in property <bool> applying: false;
-    in property <string> status: "Advanced controls backend unavailable";
+    in property <string> status: "Расширенные функции недоступны";
     in property <bool> boot-sound-state-ready: false;
+    in property <bool> boot-sound-control-ready: false;
     in-out property <bool> boot-sound: false;
+    in property <bool> igpu-memory-state-ready: false;
+    in property <bool> igpu-memory-control-ready: false;
+    in property <bool> igpu-memory-pending: false;
+    in property <bool> status-led-state-ready: false;
+    in property <bool> status-led-control-ready: false;
+    in property <ClamshellState> auto-clamshell-state: ClamshellState.Loading;
+    in property <bool> standby-networking-control-ready: false;
+    in property <bool> hibernate-control-ready: false;
+    in property <bool> core-count-control-ready: false;
+    in property <bool> binding-control-ready: false;
+    in property <bool> advanced-apply-ready: false;
+    in property <bool> aspm-state-ready: false;
+    in property <bool> aspm-control-ready: false;
     in-out property <int> m1-action: 0;
     in-out property <int> m2-action: 0;
     in-out property <int> m3-action: 0;
     in-out property <int> m4-action: 0;
     in-out property <int> m5-action: 0;
     in-out property <bool> status-led: false;
-    in-out property <bool> auto-clamshell: false;
     in-out property <bool> disable-aspm: false;
     in-out property <bool> disable-standby-networking: false;
     in-out property <int> igpu-memory: 0;
@@ -34,30 +47,34 @@ export component SystemSection inherits Rectangle {
     in-out property <int> p-cores: 1;
     in-out property <int> e-cores: 0;
     callback reload-requested;
+    callback boot-sound-requested(bool);
+    callback igpu-memory-requested(int);
     callback apply-requested;
+    callback aspm-requested(bool);
+    callback auto-clamshell-requested(bool);
 
     in property <string> diagnostics-summary: "";
     in property <bool> refresh-enabled: false;
     in property <bool> refresh-pending: false;
     in property <bool> export-enabled: false;
-    in property <string> diagnostics-status: "Diagnostics unavailable · lifecycle wiring pending";
+    in property <string> diagnostics-status: "Диагностика недоступна · подключение ещё не готово";
     callback diagnostics-refresh-requested;
     callback diagnostics-export-requested;
 
     property <int> binding-action-count: 10;
 
     function binding-label(index: int) -> string {
-        if (index == 0) { return "Default"; }
-        if (index == 1) { return "None"; }
+        if (index == 0) { return "По умолчанию"; }
+        if (index == 1) { return "Нет действия"; }
         if (index == 2) { return "Mute"; }
-        if (index == 3) { return "Volume Up"; }
-        if (index == 4) { return "Volume Down"; }
-        if (index == 5) { return "Mic"; }
-        if (index == 6) { return "Screen"; }
+        if (index == 3) { return "Громкость +"; }
+        if (index == 4) { return "Громкость −"; }
+        if (index == 5) { return "Микрофон"; }
+        if (index == 6) { return "Экран"; }
         if (index == 7) { return "Aura"; }
-        if (index == 8) { return "Performance"; }
+        if (index == 8) { return "Производительность"; }
         if (index == 9) { return "GPU Mode"; }
-        return "Default";
+        return "По умолчанию";
     }
 
     function igpu-label(index: int) -> string {
@@ -67,6 +84,9 @@ export component SystemSection inherits Rectangle {
         if (index == 3) { return "2 ГБ"; }
         if (index == 4) { return "4 ГБ"; }
         if (index == 5) { return "8 ГБ"; }
+        if (index == 6) { return "16 ГБ"; }
+        if (index == 7) { return "32 ГБ"; }
+        if (index == 8) { return "64 ГБ"; }
         return "Авто";
     }
 
@@ -77,340 +97,266 @@ export component SystemSection inherits Rectangle {
         return next;
     }
 
-    function device-label() -> string {
-        if (root.device-name != "") { return root.device-name; }
-        return "—";
-    }
-
-    function board-label() -> string {
-        if (root.device-board != "") { return root.device-board; }
-        return "—";
-    }
-
+    function device-label() -> string { return root.device-name != "" ? root.device-name : "—"; }
+    function board-label() -> string { return root.device-board != "" ? root.device-board : "—"; }
     function bios-label() -> string {
         if (root.bios-version == "" && root.bios-date == "") { return "—"; }
         if (root.bios-date == "") { return root.bios-version; }
         return root.bios-version + " · " + root.bios-date;
     }
 
+    function clamshell-state-label() -> string {
+        if (root.auto-clamshell-state == ClamshellState.Loading) { return "Определяется"; }
+        if (root.auto-clamshell-state == ClamshellState.Inactive) { return "Выключено"; }
+        if (root.auto-clamshell-state == ClamshellState.Active) { return "Включено"; }
+        if (root.auto-clamshell-state == ClamshellState.Unavailable) { return "Недоступно"; }
+        if (root.auto-clamshell-state == ClamshellState.PermissionDenied) { return "Нет разрешения"; }
+        if (root.auto-clamshell-state == ClamshellState.StartFailed) { return "Не включилось"; }
+        if (root.auto-clamshell-state == ClamshellState.ExitFailed) { return "Не выключилось"; }
+        return "Неизвестно";
+    }
+
+    function clamshell-state-accent() -> color {
+        if (root.auto-clamshell-state == ClamshellState.Active) { return Palette.success; }
+        if (root.auto-clamshell-state == ClamshellState.PermissionDenied
+            || root.auto-clamshell-state == ClamshellState.StartFailed
+            || root.auto-clamshell-state == ClamshellState.ExitFailed) { return Palette.error; }
+        if (root.auto-clamshell-state == ClamshellState.Inactive) { return Palette.text-secondary; }
+        return Palette.warning;
+    }
+
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * LayoutMetrics.page-margin;
+            x: LayoutMetrics.page-margin;
+            spacing: LayoutMetrics.page-gap;
+            padding-top: 14px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Система";
-                description: "Устройство, прошивка, параметры ASUS и диагностика.";
+                description: "Сведения об устройстве, расширенные параметры и диагностика.";
             }
 
-            SectionCard {
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 4px;
-
-                    SectionTitle { title: "Устройство"; }
-
-                    InfoRow { label: "Модель"; value: root.device-label(); }
-                    InfoRow { label: "Плата"; value: root.board-label(); }
-                    InfoRow { label: "BIOS"; value: root.bios-label(); }
-                    InfoRow { label: "Версия Orbis Control"; value: root.ui-state.version; }
-                }
-            }
-
-            SectionCard {
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 8px;
-
-                    SectionTitle {
-                        title: "Прошивка";
-                        detail: root.boot-sound-state-ready ? "" : "недоступно";
-                        detail-color: Palette.text-disabled;
-                    }
-
-                    RequestToggleRow {
-                        label: "Звук при включении";
-                        description: root.boot-sound-state-ready ? "Атрибут прошивки · только чтение" : "Состояние недоступно";
-                        checked: root.boot-sound-state-ready && root.boot-sound;
-                        disabled: true;
+            HorizontalLayout {
+                spacing: 12px;
+                SectionCard {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 4px;
+                        SectionTitle { title: "Устройство"; }
+                        InfoRow { label: "Модель"; value: root.device-label(); }
+                        InfoRow { label: "Плата"; value: root.board-label(); }
+                        InfoRow { label: "BIOS"; value: root.bios-label(); }
+                        InfoRow { label: "Orbis Control"; value: root.ui-state.version; }
                     }
                 }
-            }
 
-            SectionCard {
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 8px;
-
-                    SectionTitle {
-                        title: "Параметры ASUS";
-                        detail: root.backend-ready ? "черновик" : "недоступно";
-                        detail-color: root.backend-ready ? Palette.warning : Palette.text-disabled;
-                    }
-
-                    RequestToggleRow {
-                        label: "Светодиоды состояния";
-                        description: root.backend-ready ? "Черновик · применяется кнопкой «Применить»" : "Ожидание backend";
-                        checked: root.status-led;
-                        disabled: !root.backend-ready || root.applying;
-                        toggled(value) => { root.status-led = value; }
-                    }
-                    RequestToggleRow {
-                        label: "Автоматический режим clamshell";
-                        description: root.backend-ready ? "Черновик · применяется кнопкой «Применить»" : "Ожидание backend";
-                        checked: root.auto-clamshell;
-                        disabled: !root.backend-ready || root.applying;
-                        toggled(value) => { root.auto-clamshell = value; }
-                    }
-                    RequestToggleRow {
-                        label: "Отключать PCIe ASPM от сети";
-                        description: root.backend-ready ? "Черновик · применяется кнопкой «Применить»" : "Ожидание backend";
-                        checked: root.disable-aspm;
-                        disabled: !root.backend-ready || root.applying;
-                        toggled(value) => { root.disable-aspm = value; }
-                    }
-                    RequestToggleRow {
-                        label: "Отключать сеть в Modern Standby";
-                        description: root.backend-ready ? "Черновик · применяется кнопкой «Применить»" : "Ожидание backend";
-                        checked: root.disable-standby-networking;
-                        disabled: !root.backend-ready || root.applying;
-                        toggled(value) => { root.disable-standby-networking = value; }
-                    }
-
-                    HorizontalLayout {
-                        height: 34px;
-                        spacing: 10px;
-                        Text {
-                            width: 150px;
-                            text: "Память iGPU";
-                            font-size: 13px;
-                            font-weight: 500;
-                            color: root.backend-ready ? Palette.text-primary : Palette.text-disabled;
-                            vertical-alignment: center;
-                        }
-                        OptionStepper {
-                            label: root.igpu-label(root.igpu-memory);
-                            disabled: !root.backend-ready || root.applying;
-                            can-previous: root.igpu-memory > 0;
-                            can-next: root.igpu-memory < 5;
-                            previous => { root.igpu-memory = Math.max(0, root.igpu-memory - 1); }
-                            next => { root.igpu-memory = Math.min(5, root.igpu-memory + 1); }
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-                    HorizontalLayout {
-                        height: 34px;
-                        spacing: 10px;
-                        Text {
-                            width: 150px;
-                            text: "Гибернация через";
-                            font-size: 13px;
-                            font-weight: 500;
-                            color: root.backend-ready ? Palette.text-primary : Palette.text-disabled;
-                            vertical-alignment: center;
-                        }
-                        NumberStepper {
-                            value <=> root.hibernate-after;
-                            minimum: 0;
-                            maximum: 1440;
-                            step: 5;
-                            disabled: !root.backend-ready || root.applying;
-                        }
-                        Text {
-                            text: "мин";
-                            font-size: 12.5px;
-                            color: Palette.text-secondary;
-                            vertical-alignment: center;
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-                    HorizontalLayout {
-                        height: 34px;
-                        spacing: 10px;
-                        Text {
-                            width: 150px;
-                            text: "P-ядра";
-                            font-size: 13px;
-                            font-weight: 500;
-                            color: root.backend-ready ? Palette.text-primary : Palette.text-disabled;
-                            vertical-alignment: center;
-                        }
-                        NumberStepper {
-                            value <=> root.p-cores;
-                            minimum: 1;
-                            maximum: 32;
-                            disabled: !root.backend-ready || root.applying;
-                        }
-                        Text {
-                            width: 60px;
-                            text: "E-ядра";
-                            font-size: 13px;
-                            font-weight: 500;
-                            color: root.backend-ready ? Palette.text-primary : Palette.text-disabled;
-                            vertical-alignment: center;
-                        }
-                        NumberStepper {
-                            value <=> root.e-cores;
-                            minimum: 0;
-                            maximum: 32;
-                            disabled: !root.backend-ready || root.applying;
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-
-                    HorizontalLayout {
-                        height: 34px;
-                        spacing: 10px;
-                        Text {
-                            width: 34px;
-                            text: "M1";
-                            font-size: 13px;
-                            font-weight: 500;
-                            color: root.backend-ready ? Palette.text-primary : Palette.text-disabled;
-                            vertical-alignment: center;
-                        }
-                        OptionStepper {
-                            label: root.binding-label(root.m1-action);
-                            disabled: !root.backend-ready || root.applying;
-                            can-previous: root.m1-action > 0;
-                            can-next: root.m1-action < root.binding-action-count - 1;
-                            previous => { root.m1-action = root.clamp-index(root.m1-action, -1); }
-                            next => { root.m1-action = root.clamp-index(root.m1-action, 1); }
-                        }
-                        Text {
-                            width: 34px;
-                            text: "M2";
-                            font-size: 13px;
-                            font-weight: 500;
-                            color: root.backend-ready ? Palette.text-primary : Palette.text-disabled;
-                            vertical-alignment: center;
-                        }
-                        OptionStepper {
-                            label: root.binding-label(root.m2-action);
-                            disabled: !root.backend-ready || root.applying;
-                            can-previous: root.m2-action > 0;
-                            can-next: root.m2-action < root.binding-action-count - 1;
-                            previous => { root.m2-action = root.clamp-index(root.m2-action, -1); }
-                            next => { root.m2-action = root.clamp-index(root.m2-action, 1); }
-                        }
-                    }
-                    HorizontalLayout {
-                        height: 34px;
-                        spacing: 10px;
-                        Text {
-                            width: 34px;
-                            text: "M3";
-                            font-size: 13px;
-                            font-weight: 500;
-                            color: root.backend-ready ? Palette.text-primary : Palette.text-disabled;
-                            vertical-alignment: center;
-                        }
-                        OptionStepper {
-                            label: root.binding-label(root.m3-action);
-                            disabled: !root.backend-ready || root.applying;
-                            can-previous: root.m3-action > 0;
-                            can-next: root.m3-action < root.binding-action-count - 1;
-                            previous => { root.m3-action = root.clamp-index(root.m3-action, -1); }
-                            next => { root.m3-action = root.clamp-index(root.m3-action, 1); }
-                        }
-                        Text {
-                            width: 34px;
-                            text: "M4";
-                            font-size: 13px;
-                            font-weight: 500;
-                            color: root.backend-ready ? Palette.text-primary : Palette.text-disabled;
-                            vertical-alignment: center;
-                        }
-                        OptionStepper {
-                            label: root.binding-label(root.m4-action);
-                            disabled: !root.backend-ready || root.applying;
-                            can-previous: root.m4-action > 0;
-                            can-next: root.m4-action < root.binding-action-count - 1;
-                            previous => { root.m4-action = root.clamp-index(root.m4-action, -1); }
-                            next => { root.m4-action = root.clamp-index(root.m4-action, 1); }
-                        }
-                    }
-                    HorizontalLayout {
-                        height: 34px;
-                        spacing: 10px;
-                        Text {
-                            width: 34px;
-                            text: "M5";
-                            font-size: 13px;
-                            font-weight: 500;
-                            color: root.backend-ready ? Palette.text-primary : Palette.text-disabled;
-                            vertical-alignment: center;
-                        }
-                        OptionStepper {
-                            label: root.binding-label(root.m5-action);
-                            disabled: !root.backend-ready || root.applying;
-                            can-previous: root.m5-action > 0;
-                            can-next: root.m5-action < root.binding-action-count - 1;
-                            previous => { root.m5-action = root.clamp-index(root.m5-action, -1); }
-                            next => { root.m5-action = root.clamp-index(root.m5-action, 1); }
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-
-                    HorizontalLayout {
-                        height: 32px;
+                SectionCard {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
                         spacing: 8px;
-                        Text {
-                            horizontal-stretch: 1;
-                            text: root.backend-ready ? "Измените черновик и нажмите «Применить»" : "Проверенные операции применяются по отдельности после чтения состояния";
-                            font-size: 11.5px;
-                            color: Palette.text-secondary;
-                            vertical-alignment: center;
-                            overflow: elide;
+                        HorizontalLayout {
+                            height: 30px;
+                            SectionTitle { horizontal-stretch: 1; title: "Прошивка"; }
+                            StatusPill {
+                                text: root.boot-sound-state-ready ? "Обнаружено" : "Определяется";
+                                accent: root.boot-sound-state-ready ? Palette.success : Palette.warning;
+                            }
                         }
-                        ActionButton { label: "Обновить"; disabled: !root.backend-ready || root.applying; clicked => { root.reload-requested(); } }
-                        ActionButton { label: root.applying ? "Применение…" : "Применить"; accent: true; disabled: !root.backend-ready || root.applying; clicked => { root.apply-requested(); } }
+                        RequestToggleRow {
+                            label: "Звук при включении";
+                            description: root.boot-sound-state-ready ? "Текущее состояние firmware-параметра" : "Параметр будет показан после обнаружения поддержки";
+                            checked: root.boot-sound-state-ready && root.boot-sound;
+                            disabled: !root.boot-sound-control-ready;
+                            toggled(value) => { root.boot-sound-requested(value); }
+                        }
+                    }
+                }
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 8px;
+
+                    HorizontalLayout {
+                        height: 30px;
+                        SectionTitle { horizontal-stretch: 1; title: "Расширенные параметры ASUS"; }
+                        StatusPill {
+                             text: root.backend-ready ? (root.applying ? "Применение" : "Доступно") : "Есть ограничения";
+                            accent: root.backend-ready ? Palette.success : Palette.warning;
+                        }
                     }
 
                     LocalStatus {
-                        text: root.status;
+                        text: root.backend-ready
+                            ? root.status
+                             : "Недоступные параметры останутся заблокированными до появления поддержки устройства.";
                         accent: root.backend-ready ? Palette.text-secondary : Palette.warning;
                     }
+
+                    SubsectionLabel { text: "ПОВЕДЕНИЕ И ЭНЕРГОСБЕРЕЖЕНИЕ"; }
+                    RequestToggleRow {
+                        label: "Светодиоды состояния";
+                         description: root.status-led-state-ready ? "Управление системными индикаторами ноутбука" : "Недоступно: поддержка функции не обнаружена";
+                         checked: root.status-led-state-ready && root.status-led;
+                          disabled: true; // no typed owner yet
+                         toggled(value) => { root.status-led = value; }
+                    }
+                     HorizontalLayout {
+                         spacing: 10px;
+                         RequestToggleRow {
+                             horizontal-stretch: 1;
+                             label: "Автоматический режим при закрытой крышке";
+                             description: root.auto-clamshell-state == ClamshellState.Loading ? "Проверяем поддержку и состояние компонента сессии" :
+                                 (root.auto-clamshell-state == ClamshellState.Inactive || root.auto-clamshell-state == ClamshellState.Active) ? "Управляет запретом сна при закрытой крышке" :
+                                 root.auto-clamshell-state == ClamshellState.Unavailable ? "Компонент сессии не поддерживает эту функцию" :
+                                 root.auto-clamshell-state == ClamshellState.PermissionDenied ? "Компонент сессии отклонил доступ" :
+                                 root.auto-clamshell-state == ClamshellState.StartFailed ? "Не удалось включить режим; изменение недоступно" :
+                                 root.auto-clamshell-state == ClamshellState.ExitFailed ? "Не удалось выключить режим; изменение недоступно" :
+                                 "Состояние компонента сессии не определено";
+                             checked: root.auto-clamshell-state == ClamshellState.Active;
+                             disabled: (root.auto-clamshell-state != ClamshellState.Inactive && root.auto-clamshell-state != ClamshellState.Active) || root.applying;
+                             toggled(value) => { root.auto-clamshell-requested(value); }
+                         }
+                         StatusPill {
+                             text: root.clamshell-state-label();
+                             accent: root.clamshell-state-accent();
+                         }
+                     }
+                    RequestToggleRow {
+                         label: "Отключать PCIe ASPM при работе от сети";
+                          description: root.aspm-state-ready ? "Профиль энергосбережения PCIe при питании от адаптера" : "Недоступно: поддержка функции не обнаружена";
+                         checked: root.aspm-state-ready && root.disable-aspm;
+                         disabled: !root.aspm-control-ready || root.applying;
+                         toggled(value) => { root.disable-aspm = value; root.aspm-requested(value); }
+                    }
+                    RequestToggleRow {
+                         label: "Отключать сеть в современном режиме ожидания";
+                          description: root.standby-networking-control-ready ? "Сетевое поведение во время современного режима ожидания" : "Недоступно: поддержка функции не обнаружена";
+                         checked: root.standby-networking-control-ready && root.disable-standby-networking;
+                          disabled: true; // no typed owner yet
+                        toggled(value) => { root.disable-standby-networking = value; }
+                    }
+
+                    SubsectionLabel { text: "РЕСУРСЫ И ПИТАНИЕ"; }
+                    HorizontalLayout {
+                        height: 40px;
+                        spacing: 12px;
+                         Text { width: 176px; text: "Память iGPU"; font-size: 13.5px; font-weight: 550; color: root.igpu-memory-state-ready ? Palette.text-primary : Palette.text-secondary; vertical-alignment: center; }
+                         OptionStepper {
+                             label: root.igpu-memory-pending ? root.igpu-label(root.igpu-memory) + " · Перезагрузка" : root.igpu-label(root.igpu-memory);
+                             disabled: !root.igpu-memory-control-ready || root.applying;
+                             can-previous: root.igpu-memory > 0;
+                             can-next: root.igpu-memory < 8;
+                             previous => { root.igpu-memory = Math.max(0, root.igpu-memory - 1); root.igpu-memory-requested(root.igpu-memory); }
+                             next => { root.igpu-memory = Math.min(8, root.igpu-memory + 1); root.igpu-memory-requested(root.igpu-memory); }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+                    HorizontalLayout {
+                        height: 40px;
+                        spacing: 12px;
+                         Text { width: 176px; text: "Гибернация через"; font-size: 13.5px; font-weight: 550; color: root.hibernate-control-ready ? Palette.text-primary : Palette.text-secondary; vertical-alignment: center; }
+                         NumberStepper { value <=> root.hibernate-after; minimum: 0; maximum: 1440; step: 5; disabled: true; /* no typed owner yet */ }
+                        Text { text: "мин"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+                    HorizontalLayout {
+                        height: 40px;
+                        spacing: 12px;
+                         Text { width: 176px; text: "Активные ядра CPU"; font-size: 13.5px; font-weight: 550; color: root.core-count-control-ready ? Palette.text-primary : Palette.text-secondary; vertical-alignment: center; }
+                        Text { text: "P"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
+                          NumberStepper { value <=> root.p-cores; minimum: 1; maximum: 32; disabled: true; /* no typed owner yet */ }
+                        Text { text: "E"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
+                          NumberStepper { value <=> root.e-cores; minimum: 0; maximum: 32; disabled: true; /* no typed owner yet */ }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+
+                    SubsectionLabel { text: "КЛАВИШИ M1–M5"; }
+                    HorizontalLayout {
+                        height: 40px;
+                        spacing: 8px;
+                        Text { width: 28px; text: "M1"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
+                          OptionStepper { label: root.binding-label(root.m1-action); disabled: true; /* no typed owner yet */ can-previous: root.m1-action > 0; can-next: root.m1-action < root.binding-action-count - 1; previous => { root.m1-action = root.clamp-index(root.m1-action, -1); } next => { root.m1-action = root.clamp-index(root.m1-action, 1); } }
+                        Text { width: 28px; text: "M2"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
+                          OptionStepper { label: root.binding-label(root.m2-action); disabled: true; /* no typed owner yet */ can-previous: root.m2-action > 0; can-next: root.m2-action < root.binding-action-count - 1; previous => { root.m2-action = root.clamp-index(root.m2-action, -1); } next => { root.m2-action = root.clamp-index(root.m2-action, 1); } }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+                    HorizontalLayout {
+                        height: 40px;
+                        spacing: 8px;
+                        Text { width: 28px; text: "M3"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
+                          OptionStepper { label: root.binding-label(root.m3-action); disabled: true; /* no typed owner yet */ can-previous: root.m3-action > 0; can-next: root.m3-action < root.binding-action-count - 1; previous => { root.m3-action = root.clamp-index(root.m3-action, -1); } next => { root.m3-action = root.clamp-index(root.m3-action, 1); } }
+                        Text { width: 28px; text: "M4"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
+                          OptionStepper { label: root.binding-label(root.m4-action); disabled: true; /* no typed owner yet */ can-previous: root.m4-action > 0; can-next: root.m4-action < root.binding-action-count - 1; previous => { root.m4-action = root.clamp-index(root.m4-action, -1); } next => { root.m4-action = root.clamp-index(root.m4-action, 1); } }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+                    HorizontalLayout {
+                        height: 40px;
+                        spacing: 8px;
+                        Text { width: 28px; text: "M5"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
+                          OptionStepper { label: root.binding-label(root.m5-action); disabled: true; /* no typed owner yet */ can-previous: root.m5-action > 0; can-next: root.m5-action < root.binding-action-count - 1; previous => { root.m5-action = root.clamp-index(root.m5-action, -1); } next => { root.m5-action = root.clamp-index(root.m5-action, 1); } }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+
+                     Rectangle { height: 1px; background: Palette.border-default; }
+                     VerticalLayout {
+                         spacing: 8px;
+                         LocalStatus {
+                             text: root.backend-ready ? "Поддержанные параметры применяются сразу после изменения." : "Параметры станут редактируемыми после подтверждения поддержки устройства.";
+                             accent: root.backend-ready ? Palette.text-secondary : Palette.warning;
+                         }
+                         HorizontalLayout {
+                             height: 40px;
+                             spacing: 8px;
+                             Rectangle { horizontal-stretch: 1; background: transparent; }
+                             ActionButton { label: "Обновить"; disabled: !root.backend-ready || root.applying; clicked => { root.reload-requested(); } }
+                             ActionButton { label: root.advanced-apply-ready ? (root.applying ? "Применение…" : "Применить") : "Нет доступных изменений"; accent: root.advanced-apply-ready; disabled: !root.advanced-apply-ready || root.applying; clicked => { root.apply-requested(); } }
+                         }
+                     }
                 }
             }
 
             SectionCard {
                 VerticalLayout {
-                    padding: 16px;
-                    spacing: 10px;
-
-                    SectionTitle { title: "Диагностика"; }
-
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 12px;
                     HorizontalLayout {
-                        height: 32px;
-                        spacing: 8px;
-                        ActionButton {
-                            label: root.refresh-pending ? "Обновление…" : "Обновить";
-                            disabled: !root.refresh-enabled || root.refresh-pending;
-                            clicked => { root.diagnostics-refresh-requested(); }
+                        height: 30px;
+                        SectionTitle { horizontal-stretch: 1; title: "Диагностика"; detail: root.refresh-enabled ? "Сводка системы" : "Недоступно"; }
+                        StatusPill {
+                            text: root.refresh-enabled ? "Готово" : "Недоступно";
+                            accent: root.refresh-enabled ? Palette.success : Palette.text-secondary;
                         }
+                    }
+                    HorizontalLayout {
+                        height: 38px;
+                        spacing: 8px;
+                        ActionButton { label: root.refresh-pending ? "Обновление…" : "Обновить"; disabled: !root.refresh-enabled || root.refresh-pending; clicked => { root.diagnostics-refresh-requested(); } }
                         ActionButton {
                             label: "Копировать";
                             disabled: root.diagnostics-summary == "";
-                            clicked => {
-                                copy-ti.select-all();
-                                copy-ti.copy();
-                            }
+                            clicked => { copy-ti.select-all(); copy-ti.copy(); }
                         }
                         ActionButton { label: "Экспорт"; disabled: !root.export-enabled; clicked => { root.diagnostics-export-requested(); } }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
-
-                    LocalStatus {
-                        text: root.diagnostics-status;
-                        accent: Palette.text-secondary;
+                    LocalStatus { text: root.diagnostics-status; accent: Palette.text-secondary; }
+                    Text {
+                        text: root.diagnostics-summary == "" ? "Нажми «Обновить», чтобы получить снимок состояния." : root.diagnostics-summary;
+                        color: Palette.text-secondary;
+                        font-size: 11.5px;
+                        horizontal-stretch: 1;
+                        height: 170px;
+                        vertical-alignment: top;
+                        overflow: elide;
                     }
                 }
             }
-            Rectangle { vertical-stretch: 100; background: transparent; }
         }
     }
 

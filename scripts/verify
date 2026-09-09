@@ -5,6 +5,7 @@ Usage:
   scripts/verify quick
   scripts/verify task
   scripts/verify full
+  scripts/verify package
   scripts/verify crate <crate-name>
 
 The runner executes real Rust/build/package checks and has no Nix dependency.
@@ -42,6 +43,11 @@ def ensure_tools() -> None:
         raise SystemExit(
             "missing required tools: " + ", ".join(missing) + ". Install the Rust toolchain and base development tools."
         )
+
+
+def ensure_package_tools() -> None:
+    if not shutil.which("makepkg"):
+        raise SystemExit("missing required tool: makepkg. Install the Arch base development tools.")
 
 
 def cargo_base(root: Path) -> None:
@@ -85,6 +91,27 @@ def validate_packaging_assets(root: Path) -> None:
     run(["bash", "-n", "scripts/validate-support-matrix.sh"], root)
 
 
+def package_check(root: Path) -> None:
+    ensure_package_tools()
+    package_dir = root / "packaging/arch"
+    run(["makepkg", "--verifysource", "--nocolor"], package_dir)
+    run(
+        [
+            "makepkg",
+            "--cleanbuild",
+            "--nodeps",
+            "--noarchive",
+            "--nosign",
+            "--nocolor",
+        ],
+        package_dir,
+    )
+    if shutil.which("namcap"):
+        run(["namcap", "PKGBUILD"], package_dir)
+    else:
+        print("- namcap not installed; skipped optional PKGBUILD lint", flush=True)
+
+
 def full(root: Path) -> None:
     workspace_task(root)
     run(["cargo", "build", "--workspace", "--release", "--locked"], root)
@@ -109,6 +136,8 @@ def main(argv: list[str]) -> int:
         workspace_task(root)
     elif argv == ["full"]:
         full(root)
+    elif argv == ["package"]:
+        package_check(root)
     elif len(argv) == 2 and argv[0] == "crate":
         crate_task(root, argv[1])
     else:

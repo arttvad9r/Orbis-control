@@ -295,8 +295,8 @@ fn performance_unconfirmed_error_preserves_ui() {
 
 #[test]
 fn gpu_index_mapping() {
-    assert_eq!(gpu_mode_from_index(0), Some(0)); // Hybrid
-    assert_eq!(gpu_mode_from_index(1), Some(1)); // Integrated
+    assert_eq!(gpu_mode_from_index(0), Some(1)); // Eco -> Integrated
+    assert_eq!(gpu_mode_from_index(1), Some(0)); // Standard -> Hybrid
     assert_eq!(gpu_mode_from_index(2), Some(2)); // Ultimate
     // The ASUS product API has no Optimized mode; card 3 issues no request.
     assert_eq!(gpu_mode_from_index(3), None);
@@ -735,20 +735,75 @@ fn charge_limit_none_preserves_ui() {
 #[test]
 fn charge_limit_command_error_does_not_mutate_ui() {
     let mut s = base_state();
-    let before = s.clone();
     apply_charge_limit_result(
         &mut s,
         Err(CommandError::Command(
             orbis_providers::error::ProviderError::Unsupported("x".into()),
         )),
     );
-    assert_eq!(s, before);
+    assert_eq!(s.charge_limit, 80);
+    assert!(!s.charge_limit_pending);
+    assert!(!s.charge_limit_unconfirmed);
+    assert_eq!(
+        s.charge_limit_error.as_deref(),
+        Some("функция не поддерживается: x")
+    );
+}
+
+#[test]
+fn charge_limit_failure_preserves_observed_value_and_exposes_error() {
+    let mut s = base_state();
+    s.charge_limit = 75;
+    let mut expected = s.clone();
+    expected.charge_limit_error = Some("таймаут операции: read-back failed".into());
+    apply_charge_limit_result(
+        &mut s,
+        Err(CommandError::ReadBack {
+            result: ApplyResult::Applied,
+            source: ProviderError::Timeout("read-back failed".into()),
+        }),
+    );
+    assert_eq!(s, expected);
+}
+
+#[test]
+fn unresolved_writes_are_rejected() {
+    let mut s = base_state();
+    s.charge_limit_pending = true;
+    assert!(!charge_mutation_allowed(&s));
+    s.charge_limit_pending = false;
+    s.charge_limit_unconfirmed = true;
+    assert!(!charge_mutation_allowed(&s));
+    s.gpu_mode_pending = true;
+    assert!(!gpu_mode_click_allowed(&s));
+    s.gpu_mode_pending = false;
+    s.gpu_mode_unconfirmed = true;
+    assert!(!gpu_mode_click_allowed(&s));
+    s.fan_curve_pending = true;
+    assert!(!s.fan_curve_can_mutate());
+}
+
+#[test]
+fn charge_limit_unconfirmed_preserves_observed_value_and_requires_refresh() {
+    let mut s = base_state();
+    s.charge_limit = 75;
+    apply_charge_limit_result(
+        &mut s,
+        Err(CommandError::Unconfirmed {
+            intent: "charge limit 60%".into(),
+            command: ProviderError::Timeout("dispatch ambiguous".into()),
+            observation: None,
+        }),
+    );
+    assert_eq!(s.charge_limit, 75);
+    assert!(s.charge_limit_unconfirmed);
+    assert!(!s.charge_limit_pending);
+    assert!(!s.charge_limit_error.is_some());
 }
 
 #[test]
 fn charge_limit_readback_error_does_not_mutate_ui() {
     let mut s = base_state();
-    let before = s.clone();
     apply_charge_limit_result(
         &mut s,
         Err(CommandError::ReadBack {
@@ -756,13 +811,17 @@ fn charge_limit_readback_error_does_not_mutate_ui() {
             source: orbis_providers::error::ProviderError::Timeout("t".into()),
         }),
     );
-    assert_eq!(s, before);
+    assert_eq!(s.charge_limit, 80);
+    assert!(!s.charge_limit_pending);
+    assert!(!s.charge_limit_unconfirmed);
+    assert_eq!(s.charge_limit_error.as_deref(), Some("таймаут операции: t"));
 }
 
 #[test]
 fn charge_limit_unconfirmed_error_preserves_ui() {
     let mut s = base_state();
-    let before = s.clone();
+    let mut expected = s.clone();
+    expected.charge_limit_unconfirmed = true;
     apply_charge_limit_result(
         &mut s,
         Err(CommandError::Unconfirmed {
@@ -771,7 +830,7 @@ fn charge_limit_unconfirmed_error_preserves_ui() {
             observation: None,
         }),
     );
-    assert_eq!(s, before);
+    assert_eq!(s, expected);
 }
 
 // ============================================================================
@@ -813,7 +872,8 @@ fn definitive_factory_reset_error_outcome(
 #[test]
 fn successful_factory_reset_is_accepted_not_applied() {
     let mut s = base_state();
-    let before = s.clone();
+    let mut expected = s.clone();
+    expected.fan_curve_pending = true;
     apply_performance_event(
         &mut s,
         accepted_factory_reset_outcome(AsusdFanProfile::Balanced),
@@ -822,19 +882,67 @@ fn successful_factory_reset_is_accepted_not_applied() {
     // Verify Accepted result is handled correctly
     assert!(!s.fan_curve_error, "Accepted must not set definitive error");
     assert_eq!(
-        s.fan_curve_dirty, before.fan_curve_dirty,
+        s.fan_curve_dirty, expected.fan_curve_dirty,
         "Accepted must not clear dirty flag"
     );
     assert_eq!(
-        s.fan_curve_temps, before.fan_curve_temps,
+        s.fan_curve_temps, expected.fan_curve_temps,
         "Accepted must not change curves optimistically"
     );
     assert_eq!(
-        s.fan_curve_pwms, before.fan_curve_pwms,
+        s.fan_curve_pwms, expected.fan_curve_pwms,
         "Accepted must not change curves optimistically"
     );
-    // UI should not show as Applied (no success banner, no error)
-    assert_eq!(s, before, "Accepted must preserve all UI state exactly");
+    assert_eq!(s, expected, "Accepted must only expose pending state");
+}
+
+#[test]
+fn confirmed_factory_reset_clears_dirty_state() {
+    let mut s = base_state();
+    s.fan_curve_dirty = true;
+    apply_performance_event(
+        &mut s,
+        WorkerEvent::FanCurveDefaults {
+            profile: AsusdFanProfile::Balanced,
+            result: Ok(ApplyResult::Applied),
+        },
+    );
+    assert!(!s.fan_curve_dirty);
+    assert!(!s.fan_curve_error);
+}
+
+#[test]
+fn fan_pending_result_preserves_editor_and_blocks_next_write() {
+    let mut s = base_state();
+    s.fan_curve_dirty = true;
+    let temps = s.fan_curve_temps;
+    apply_performance_event(
+        &mut s,
+        WorkerEvent::FanCurve(Ok(ApplyResult::Pending {
+            requirement: ActionRequirement::Reboot,
+        })),
+    );
+    assert_eq!(s.fan_curve_temps, temps);
+    assert!(s.fan_curve_pending);
+    assert!(!s.fan_curve_error);
+    assert!(!s.fan_curve_can_mutate());
+}
+
+#[test]
+fn fan_unconfirmed_result_preserves_editor_and_is_explicit() {
+    let mut s = base_state();
+    apply_performance_event(
+        &mut s,
+        WorkerEvent::FanCurve(Err(CommandError::Unconfirmed {
+            intent: "fan curve".into(),
+            command: ProviderError::Timeout("dispatch ambiguous".into()),
+            observation: None,
+        })),
+    );
+    assert!(s.fan_curve_unconfirmed);
+    assert!(!s.fan_curve_pending);
+    assert!(!s.fan_curve_error);
+    assert!(!s.fan_curve_can_mutate());
 }
 
 #[test]
@@ -866,7 +974,8 @@ fn accepted_is_not_applied_for_factory_reset() {
 #[test]
 fn timeout_after_possible_dispatch_is_unconfirmed() {
     let mut s = base_state();
-    let before = s.clone();
+    let mut expected = s.clone();
+    expected.fan_curve_unconfirmed = true;
     let outcome = unconfirmed_factory_reset_outcome(
         AsusdFanProfile::Balanced,
         ProviderError::Timeout("dispatch timed out".into()),
@@ -874,7 +983,7 @@ fn timeout_after_possible_dispatch_is_unconfirmed() {
     );
     apply_performance_event(&mut s, outcome);
 
-    assert_eq!(s, before, "Unconfirmed must preserve all UI state");
+    assert_eq!(s, expected, "Unconfirmed must only expose unknown state");
     assert!(
         !s.fan_curve_error,
         "Unconfirmed must not set definitive error"
@@ -884,7 +993,8 @@ fn timeout_after_possible_dispatch_is_unconfirmed() {
 #[test]
 fn dbus_failure_after_possible_dispatch_is_unconfirmed() {
     let mut s = base_state();
-    let before = s.clone();
+    let mut expected = s.clone();
+    expected.fan_curve_unconfirmed = true;
     let outcome = unconfirmed_factory_reset_outcome(
         AsusdFanProfile::Performance,
         ProviderError::Dbus("connection lost".into()),
@@ -892,7 +1002,7 @@ fn dbus_failure_after_possible_dispatch_is_unconfirmed() {
     );
     apply_performance_event(&mut s, outcome);
 
-    assert_eq!(s, before, "Unconfirmed must preserve all UI state");
+    assert_eq!(s, expected, "Unconfirmed must only expose unknown state");
     assert!(
         !s.fan_curve_error,
         "Unconfirmed must not set definitive error"
@@ -904,7 +1014,8 @@ fn timeout_with_successful_observation_remains_unconfirmed() {
     // After a timeout, even if a subsequent read succeeds, the operation remains Unconfirmed.
     // The fresh read cannot prove the timed-out mutation created the observed state.
     let mut s = base_state();
-    let before = s.clone();
+    let mut expected = s.clone();
+    expected.fan_curve_unconfirmed = true;
     let outcome = unconfirmed_factory_reset_outcome(
         AsusdFanProfile::Quiet,
         ProviderError::Timeout("dispatch timed out".into()),
@@ -915,8 +1026,8 @@ fn timeout_with_successful_observation_remains_unconfirmed() {
     apply_performance_event(&mut s, outcome);
 
     assert_eq!(
-        s, before,
-        "Unconfirmed must preserve all UI state even with observation error"
+        s, expected,
+        "Unconfirmed must only expose unknown state even with observation error"
     );
     assert!(
         !s.fan_curve_error,
@@ -927,7 +1038,8 @@ fn timeout_with_successful_observation_remains_unconfirmed() {
 #[test]
 fn timeout_with_failed_observation_preserves_observation_error() {
     let mut s = base_state();
-    let before = s.clone();
+    let mut expected = s.clone();
+    expected.fan_curve_unconfirmed = true;
     let outcome = unconfirmed_factory_reset_outcome(
         AsusdFanProfile::LowPower,
         ProviderError::Timeout("dispatch timed out".into()),
@@ -935,7 +1047,7 @@ fn timeout_with_failed_observation_preserves_observation_error() {
     );
     apply_performance_event(&mut s, outcome);
 
-    assert_eq!(s, before, "Unconfirmed must preserve all UI state");
+    assert_eq!(s, expected, "Unconfirmed must only expose unknown state");
     assert!(
         !s.fan_curve_error,
         "Unconfirmed must not set definitive error"
@@ -948,14 +1060,18 @@ fn pre_dispatch_failure_does_not_trigger_recovery_read() {
     // Definitive pre-dispatch failures (Unsupported, PermissionDenied, etc.)
     // should be treated as ordinary command errors, not Unconfirmed.
     let mut s = base_state();
-    let before = s.clone();
+    let mut expected = s.clone();
+    expected.fan_curve_error = true;
     let outcome = definitive_factory_reset_error_outcome(
         AsusdFanProfile::Balanced,
         ProviderError::Unsupported("factory reset not supported".into()),
     );
     apply_performance_event(&mut s, outcome);
 
-    assert_eq!(s, before, "Definitive error must not mutate UI state");
+    assert_eq!(
+        s, expected,
+        "Definitive error must expose the fan error state"
+    );
     // The error is logged but no recovery read is triggered
 }
 
@@ -1083,7 +1199,8 @@ fn requested_profile_captured_in_worker_command() {
 #[test]
 fn factory_reset_unconfirmed_does_not_set_fan_curve_error() {
     let mut s = base_state();
-    let before = s.clone();
+    let mut expected = s.clone();
+    expected.fan_curve_unconfirmed = true;
     let outcome = unconfirmed_factory_reset_outcome(
         AsusdFanProfile::Balanced,
         ProviderError::Timeout("timeout".into()),
@@ -1091,7 +1208,7 @@ fn factory_reset_unconfirmed_does_not_set_fan_curve_error() {
     );
     apply_performance_event(&mut s, outcome);
 
-    assert_eq!(s, before, "Unconfirmed must preserve all UI state");
+    assert_eq!(s, expected, "Unconfirmed must only expose unknown state");
     assert!(
         !s.fan_curve_error,
         "Unconfirmed must NOT set fan_curve_error (not definitive failure)"
@@ -1105,14 +1222,15 @@ fn factory_reset_unconfirmed_does_not_set_fan_curve_error() {
 #[test]
 fn factory_reset_accepted_not_rendered_as_applied() {
     let mut s = base_state();
-    let before = s.clone();
+    let mut expected = s.clone();
+    expected.fan_curve_pending = true;
     apply_performance_event(
         &mut s,
         accepted_factory_reset_outcome(AsusdFanProfile::Balanced),
     );
 
     // Accepted is not Applied - no success indication
-    assert_eq!(s, before, "Accepted must preserve all UI state");
+    assert_eq!(s, expected, "Accepted must only expose pending state");
     assert!(!s.fan_curve_error, "Accepted must not set error");
     // The key property: is_applied() == false for Accepted
     let event = accepted_factory_reset_outcome(AsusdFanProfile::Balanced);
@@ -1126,6 +1244,19 @@ fn factory_reset_accepted_not_rendered_as_applied() {
             "Accepted must not be considered Applied"
         );
     }
+}
+
+#[test]
+fn factory_reset_failure_still_requests_readback_refresh() {
+    let event = definitive_factory_reset_error_outcome(
+        AsusdFanProfile::Balanced,
+        ProviderError::Dbus("post-reset readback failed".into()),
+    );
+
+    assert_eq!(
+        factory_reset_profile_for_refresh(&event),
+        Some(AsusdFanProfile::Balanced)
+    );
 }
 
 #[test]
@@ -1898,8 +2029,8 @@ fn product_gpu_result(
 
 #[test]
 fn product_gpu_wire_index_maps_only_three_product_modes() {
-    assert_eq!(controller::asus_product_gpu_index(0), Some(0)); // Hybrid == Eco card
-    assert_eq!(controller::asus_product_gpu_index(1), Some(1)); // Integrated == Standard card
+    assert_eq!(controller::asus_product_gpu_index(0), Some(1)); // Hybrid == Standard card
+    assert_eq!(controller::asus_product_gpu_index(1), Some(0)); // Integrated == Eco card
     assert_eq!(controller::asus_product_gpu_index(2), Some(2)); // Ultimate
     // Optimized (3) is never generated: the ASUS Armoury product API has no
     // such mode; unknown sentinels and arbitrary values are rejected too.
@@ -1923,7 +2054,26 @@ fn product_gpu_current_read_back_selects_the_card() {
         )),
     );
 
-    assert_eq!(s.gpu_selected, 0);
+    assert_eq!(s.gpu_selected, 1);
+}
+
+#[test]
+fn product_gpu_status_promotes_all_supported_modes() {
+    let mut s = controller::UiState::production_initial();
+
+    apply_product_gpu_status(
+        &mut s,
+        Ok(orbis_session_client::ProductGpuStatus {
+            current_mode: 0,
+            queued_mode: u32::MAX,
+            reboot_required: false,
+        }),
+    );
+
+    assert_eq!(s.gpu_selected, 1);
+    assert_eq!(s.available_gpu_mask, 0b111);
+    assert!(!s.gpu_ultimate_disabled);
+    assert!(s.gpu_mode_writable);
 }
 
 #[test]
@@ -1969,6 +2119,7 @@ fn product_gpu_unknown_values_keep_previous_ui_evidence() {
     assert_eq!(s.gpu_queued, 2);
     assert!(!s.gpu_reboot_required);
     assert!(!s.gpu_section_error);
+    assert!(s.gpu_mode_unconfirmed);
 }
 
 #[test]
@@ -2065,7 +2216,7 @@ fn main_window_renders_queued_target_and_reboot_state() {
 fn shell_hosts_four_sections_and_frameless_chrome() {
     let shell = include_str!("../../../ui/audited/main-window.slint");
     assert!(shell.contains("no-frame: true"));
-    assert!(shell.contains("preferred-width: 1200px"));
+    assert!(shell.contains("preferred-width: 1240px"));
     assert!(shell.contains("Section.Dashboard"));
     assert!(shell.contains("Section.Performance"));
     assert!(shell.contains("Section.Power"));
@@ -2080,4 +2231,30 @@ fn shell_hosts_four_sections_and_frameless_chrome() {
     assert!(shell.contains("titlebar-drag-started"));
     assert!(!shell.contains("UpdatesWindow"));
     assert!(!shell.contains("AutomationWindow"));
+}
+
+#[test]
+fn backlight_exposes_editable_rgb_channels() {
+    let source = include_str!("../../../ui/audited/sections/backlight.slint");
+
+    assert!(source.contains("import { ValueSlider }"));
+    assert!(source.contains("rgb-red"));
+    assert!(source.contains("rgb-green"));
+    assert!(source.contains("rgb-blue"));
+    assert!(source.matches("changed(v) =>").count() >= 3);
+    assert!(source.contains("root.aura-effect-requested"));
+    assert!(source.contains("aura-secondary-red"));
+    assert!(source.contains("aura-breathe-supported"));
+    for label in [
+        "Rainbow Wave",
+        "Rain",
+        "Highlight",
+        "Laser",
+        "Ripple",
+        "Pulse",
+        "Comet",
+        "Flash",
+    ] {
+        assert!(source.contains(label), "missing Aura mode label: {label}");
+    }
 }

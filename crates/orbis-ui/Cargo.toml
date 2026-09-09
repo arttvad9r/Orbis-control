@@ -17,6 +17,7 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
+futures-util = { workspace = true }
 zbus = { workspace = true }
 rustix = { workspace = true }
 tracing = { workspace = true }
@@ -27,6 +28,7 @@ orbis-config = { workspace = true }
 orbis-capabilities = { workspace = true }
 orbis-application = { path = "../orbis-application", version = "0.1.0" }
 orbis-session-client = { path = "../orbis-session-client", version = "0.1.0" }
+orbis-session-protocol = { path = "../orbis-session-protocol", version = "0.1.0" }
 orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false }
 orbis-sessiond = { workspace = true }
 # Fixture-derived UiState bootstrap is no longer part of the release graph

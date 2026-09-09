@@ -17,8 +17,6 @@
 
 pub mod action;
 pub mod aura;
-pub mod automation;
-pub mod automation_policy;
 pub mod battery;
 pub mod capability;
 pub mod desired_observed;
@@ -66,11 +64,6 @@ pub use action::{ActionRequirement, ApplyResult, PendingAction};
 pub use aura::{
     AuraBrightness, AuraDirection, AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraState, AuraZone,
 };
-pub use automation::{AutomationAction, AutomationRule, AutomationTrigger};
-pub use automation_policy::{
-    PolicyCondition, PolicyContext, PolicyEvent, PolicyRule, PolicySelection, PolicyTrigger,
-    select_policy_preset,
-};
 pub use battery::{
     BatteryThresholdConfidence, BatteryThresholdEvidence, BatteryThresholdEvidenceState,
     BatteryThresholdFreshness, BatteryThresholdObservation, BatteryThresholdSource, ChargeLimit,
@@ -80,7 +73,8 @@ pub use capability::{
 };
 pub use desired_observed::{DesiredObservedState, DesiredValue, ObservedValue, PendingValue};
 pub use diagnostics::{
-    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, DIAGNOSTICS_SNAPSHOT_SCHEMA_VERSION,
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuFrequencyDiagnostics,
+    CpuFrequencyObservation, CpuPackagePowerLimitsObservation, DIAGNOSTICS_SNAPSHOT_SCHEMA_VERSION,
     DiagnosticEntry, DiagnosticObservation, DiagnosticReport, DiagnosticsServiceId,
     DiagnosticsSnapshot, DiagnosticsSnapshotSections, DisplayDiagnostics, DisplayProtocol,
     GpuDiagnostics, HardwareDiagnostics, ServiceAvailability, ServiceBusScope, ServiceCriticality,

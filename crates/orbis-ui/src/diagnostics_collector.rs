@@ -9,9 +9,10 @@
 use std::time::SystemTime;
 
 use orbis_core::diagnostics::{
-    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, DiagnosticsSnapshot,
-    DiagnosticsSnapshotSections, DisplayDiagnostics, GpuDiagnostics, HardwareDiagnostics,
-    ServiceDiagnostics, SystemDiagnostics, TelemetryDiagnostics,
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuFrequencyObservation,
+    CpuPackagePowerLimitsObservation,
+    DiagnosticsSnapshot, DiagnosticsSnapshotSections, DisplayDiagnostics, GpuDiagnostics,
+    HardwareDiagnostics, ServiceDiagnostics, SystemDiagnostics, TelemetryDiagnostics,
 };
 
 /// Freeze one point-in-time diagnostics aggregate from already-typed sources.
@@ -33,6 +34,8 @@ pub fn collect_diagnostics_snapshot(
     services: Vec<ServiceDiagnostics>,
     capabilities: CapabilitySnapshotDiagnostics,
     gpu: GpuDiagnostics,
+    cpu_package_power_limits: CpuPackagePowerLimitsObservation,
+    cpu_frequency: CpuFrequencyObservation,
     telemetry: TelemetryDiagnostics,
     display: DisplayDiagnostics,
 ) -> DiagnosticsSnapshot {
@@ -45,6 +48,8 @@ pub fn collect_diagnostics_snapshot(
             services,
             capabilities,
             gpu,
+            cpu_package_power_limits,
+            cpu_frequency,
             telemetry,
             display,
         },
@@ -115,6 +120,7 @@ mod tests {
             mux: DiagnosticObservation::Value(GpuMuxState::Discrete),
             access_policy: DiagnosticObservation::Value(GpuAccessPolicy::Unblocked),
             runtime_power: DiagnosticObservation::Value(GpuPowerState::Suspended),
+            nvidia: DiagnosticObservation::Unknown,
         };
         let telemetry = TelemetryDiagnostics {
             latest: None,
@@ -136,6 +142,8 @@ mod tests {
             services.clone(),
             capabilities(capability_checked_at),
             gpu.clone(),
+            CpuPackagePowerLimitsObservation::Unknown,
+            CpuFrequencyObservation::Unknown,
             telemetry.clone(),
             display.clone(),
         );
@@ -179,6 +187,7 @@ mod tests {
             mux: DiagnosticObservation::PermissionDenied,
             access_policy: DiagnosticObservation::Unavailable,
             runtime_power: DiagnosticObservation::Value(GpuPowerState::Unknown),
+            nvidia: DiagnosticObservation::Unknown,
         };
         let telemetry = TelemetryDiagnostics {
             latest: None,
@@ -200,6 +209,8 @@ mod tests {
             services,
             capabilities(checked_at),
             gpu,
+            CpuPackagePowerLimitsObservation::Unknown,
+            CpuFrequencyObservation::Unknown,
             telemetry,
             display,
         );
@@ -263,7 +274,10 @@ mod tests {
                 mux: DiagnosticObservation::Unknown,
                 access_policy: DiagnosticObservation::Unknown,
                 runtime_power: DiagnosticObservation::Unknown,
+                nvidia: DiagnosticObservation::Unknown,
             },
+            CpuPackagePowerLimitsObservation::Unknown,
+            CpuFrequencyObservation::Unknown,
             TelemetryDiagnostics {
                 latest: None,
                 status: TelemetryCollectionStatus::Unknown,

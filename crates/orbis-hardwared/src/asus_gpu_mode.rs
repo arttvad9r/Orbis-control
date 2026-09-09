@@ -29,6 +29,8 @@ pub trait AsusGpuAttributePairClient: Send + Sync {
 
 #[async_trait]
 pub trait AsusProductGpuMutationOperation: Send + Sync {
+    async fn read_mode(&self) -> Result<AsusGpuModeSnapshot, ProviderError>;
+
     async fn set_mode(
         &self,
         requested: AsusGpuMode,
@@ -98,6 +100,12 @@ impl<C> AsusProductGpuMutationOperation for AsusGpuMutationBackend<C>
 where
     C: AsusGpuAttributePairClient,
 {
+    async fn read_mode(&self) -> Result<AsusGpuModeSnapshot, ProviderError> {
+        let dgpu = self.client.dgpu_disable().await?;
+        let mux = self.client.gpu_mux_mode().await?;
+        snapshot(&*dgpu, &*mux).await
+    }
+
     async fn set_mode(
         &self,
         requested: AsusGpuMode,

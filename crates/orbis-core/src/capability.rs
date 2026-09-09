@@ -76,8 +76,6 @@ pub enum FeatureId {
     DisplayBacklight,
     /// Глобальные горячие клавиши.
     Hotkeys,
-    /// Автоматизация.
-    Automation,
     /// Оверлей.
     Overlay,
 }
@@ -115,7 +113,6 @@ impl FeatureId {
         FeatureId::DisplayOutput,
         FeatureId::DisplayBacklight,
         FeatureId::Hotkeys,
-        FeatureId::Automation,
         FeatureId::Overlay,
     ];
 
@@ -152,7 +149,6 @@ impl FeatureId {
             FeatureId::DisplayOutput => "display_output",
             FeatureId::DisplayBacklight => "display_backlight",
             FeatureId::Hotkeys => "hotkeys",
-            FeatureId::Automation => "automation",
             FeatureId::Overlay => "overlay",
         }
     }

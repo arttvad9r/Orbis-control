@@ -1,26 +1,149 @@
-// Backlight page — keyboard brightness levels and observed Aura state.
-// Writes stay request-only and gated by Hardware1 write evidence; when the
-// privileged writer is not supported the UI says so instead of pretending.
+// Backlight page — keyboard brightness and Aura state/presets.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow, StatusPill, LayoutMetrics } from "../common.slint";
 import { Icon } from "../../components/icon.slint";
+import { ValueSlider } from "../../components/value-slider.slint";
 import { Palette } from "../../themes/dark.slint";
+
+component ColorPresetButton inherits Rectangle {
+    in property <string> label;
+    in property <color> swatch;
+    in property <bool> disabled: false;
+    callback clicked;
+
+    horizontal-stretch: 1;
+    height: 54px;
+    border-radius: 11px;
+    border-width: 1px;
+    border-color: touch.has-hover && !root.disabled ? Palette.border-strong : Palette.border-default;
+    background: root.disabled ? Palette.surface-disabled : touch.has-hover ? Palette.surface-hover : Palette.surface-raised;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        alignment: center;
+        Rectangle {
+            width: 24px;
+            vertical-stretch: 1;
+            background: transparent;
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                y: (parent.height - self.height) / 2 + 1px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: Palette.border-strong;
+                background: root.swatch;
+            }
+        }
+        Text {
+            text: root.label;
+            font-size: 12.5px;
+            font-weight: 600;
+            color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+            vertical-alignment: center;
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+    }
+
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+component AuraChoice inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    in property <bool> disabled: false;
+    callback clicked;
+
+    horizontal-stretch: 1;
+    height: 38px;
+    border-radius: 9px;
+    border-width: root.selected ? 1.5px : 1px;
+    border-color: root.selected && !root.disabled ? Palette.accent-default : Palette.border-default;
+    background: root.disabled ? Palette.surface-disabled : root.selected ? Palette.accent-soft : Palette.surface-raised;
+    Text {
+        text: root.label;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: root.disabled ? Palette.text-disabled : Palette.text-primary;
+        font-size: 11px;
+        font-weight: 600;
+    }
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.clicked(); }
+    }
+}
 
 export component BacklightSection inherits Rectangle {
     in property <bool> keyboard-state-ready: false;
     in property <bool> keyboard-control-ready: false;
     in property <int> keyboard-brightness: -1;
+    in property <string> keyboard-mutation-error: "";
     callback keyboard-brightness-requested(int);
     in property <bool> aura-state-ready: false;
     in property <bool> aura-control-ready: false;
     in-out property <int> keyboard-effect: -1;
     in-out property <int> keyboard-speed: -1;
+    in-out property <int> rgb-red: 255;
+    in-out property <int> rgb-green: 65;
+    in-out property <int> rgb-blue: 77;
+    in property <bool> aura-static-supported: false;
+    in property <bool> aura-breathe-supported: false;
+    in property <bool> aura-rainbow-supported: false;
+    in property <bool> aura-rainbow-wave-supported: false;
+    in property <bool> aura-star-supported: false;
+    in property <bool> aura-rain-supported: false;
+    in property <bool> aura-highlight-supported: false;
+    in property <bool> aura-laser-supported: false;
+    in property <bool> aura-ripple-supported: false;
+    in property <bool> aura-pulse-supported: false;
+    in property <bool> aura-comet-supported: false;
+    in property <bool> aura-flash-supported: false;
+    in-out property <int> aura-secondary-red: 0;
+    in-out property <int> aura-secondary-green: 0;
+    in-out property <int> aura-secondary-blue: 0;
     callback aura-static-rgb-requested(int, int, int);
+    callback aura-effect-requested(int, int, int, int, int, int, int, int);
+
+    function request-rgb(r: int, g: int, b: int) {
+        root.rgb-red = r;
+        root.rgb-green = g;
+        root.rgb-blue = b;
+        root.aura-static-rgb-requested(r, g, b);
+    }
+
+    function request-effect(mode: int, speed: int) {
+        root.aura-effect-requested(mode, speed, root.rgb-red, root.rgb-green, root.rgb-blue,
+            root.aura-secondary-red, root.aura-secondary-green, root.aura-secondary-blue);
+    }
+
+    function mode-supported(mode: int) -> bool {
+        if (!root.aura-state-ready || !root.aura-control-ready) { return false; }
+        if (mode == 0) { return root.aura-static-supported; }
+        if (mode == 1) { return root.aura-breathe-supported; }
+        if (mode == 2) { return root.aura-rainbow-supported; }
+        if (mode == 3) { return root.aura-rainbow-wave-supported; }
+        if (mode == 4) { return root.aura-star-supported; }
+        if (mode == 5) { return root.aura-rain-supported; }
+        if (mode == 6) { return root.aura-highlight-supported; }
+        if (mode == 7) { return root.aura-laser-supported; }
+        if (mode == 8) { return root.aura-ripple-supported; }
+        if (mode == 10) { return root.aura-pulse-supported; }
+        if (mode == 11) { return root.aura-comet-supported; }
+        if (mode == 12) { return root.aura-flash-supported; }
+        return false;
+    }
 
     function keyboard-status() -> string {
-        if (!root.keyboard-state-ready) { return "Состояние подсветки недоступно"; }
-        if (root.keyboard-control-ready) { return "Запись подтверждается чтением после применения"; }
-        return "Запись отключена · уровень только для чтения";
+        if (root.keyboard-mutation-error != "") { return root.keyboard-mutation-error; }
+        if (!root.keyboard-state-ready) { return "Получение состояния подсветки"; }
+        if (root.keyboard-control-ready) { return "Изменение яркости подтверждается чтением фактического уровня"; }
+        return "Текущий уровень доступен только для чтения";
     }
 
     function aura-effect-label() -> string {
@@ -28,6 +151,15 @@ export component BacklightSection inherits Rectangle {
         if (root.keyboard-effect == 0) { return "Static"; }
         if (root.keyboard-effect == 1) { return "Breathing"; }
         if (root.keyboard-effect == 2) { return "Color Cycle"; }
+        if (root.keyboard-effect == 3) { return "Rainbow Wave"; }
+        if (root.keyboard-effect == 4) { return "Star"; }
+        if (root.keyboard-effect == 5) { return "Rain"; }
+        if (root.keyboard-effect == 6) { return "Highlight"; }
+        if (root.keyboard-effect == 7) { return "Laser"; }
+        if (root.keyboard-effect == 8) { return "Ripple"; }
+        if (root.keyboard-effect == 10) { return "Pulse"; }
+        if (root.keyboard-effect == 11) { return "Comet"; }
+        if (root.keyboard-effect == 12) { return "Flash"; }
         return "—";
     }
 
@@ -41,55 +173,59 @@ export component BacklightSection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * LayoutMetrics.page-margin;
+            x: LayoutMetrics.page-margin;
+            spacing: LayoutMetrics.page-gap;
+            padding-top: 14px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Подсветка";
-                description: "Яркость клавиатуры и наблюдаемые эффекты Aura.";
+                description: "Яркость клавиатуры, состояние Aura и быстрые цветовые пресеты.";
             }
 
             SectionCard {
                 VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 14px;
 
-                    SectionTitle {
-                        title: "Подсветка клавиатуры";
-                        detail: root.keyboard-state-ready ? "" : "недоступно";
-                        detail-color: Palette.text-disabled;
+                    HorizontalLayout {
+                        height: 30px;
+                        SectionTitle { horizontal-stretch: 1; title: "Подсветка клавиатуры"; }
+                        StatusPill {
+                            text: root.keyboard-state-ready ? (root.keyboard-control-ready ? "Доступно" : "Только чтение") : "Определяется";
+                            accent: root.keyboard-mutation-error != "" ? Palette.warning : root.keyboard-control-ready ? Palette.success : root.keyboard-state-ready ? Palette.text-secondary : Palette.warning;
+                        }
                     }
 
                     if (root.keyboard-state-ready) : HorizontalLayout {
-                        height: 40px;
-                        spacing: 8px;
+                        height: 46px;
+                        spacing: 10px;
                         for level in 4: Rectangle {
-                            min-width: 96px;
+                            min-width: 104px;
                             horizontal-stretch: 1;
-                            border-radius: 8px;
+                            border-radius: 11px;
                             border-width: root.keyboard-brightness == level && root.keyboard-control-ready ? 1.5px : 1px;
-                            border-color: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default
-                                : kb-touch.has-hover && root.keyboard-control-ready ? Palette.border-strong
-                                : Palette.border-default;
-                            background: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-soft
-                                : kb-touch.pressed && root.keyboard-control-ready ? Palette.surface-pressed
-                                : kb-touch.has-hover && root.keyboard-control-ready ? Palette.surface-hover
-                                : Palette.surface-default;
+                            border-color: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default : Palette.border-default;
+                            background: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-soft : Palette.surface-raised;
                             HorizontalLayout {
                                 alignment: center;
-                                spacing: 7px;
-                                Icon {
-                                    kind: 5;
-                                    tint: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default : Palette.text-disabled;
+                                spacing: 8px;
+                                Rectangle {
+                                    width: 18px;
+                                    vertical-stretch: 1;
+                                    background: transparent;
+                                    Icon {
+                                        kind: 5;
+                                        tint: root.keyboard-brightness == level && root.keyboard-control-ready ? Palette.accent-default : Palette.text-secondary;
+                                        y: (parent.height - self.height) / 2 + 1px;
+                                    }
                                 }
                                 Text {
-                                    text: level == 0 ? "Выкл" : "Уровень " + level;
+                                    text: level == 0 ? "Выключено" : "Уровень " + level;
                                     font-size: 12.5px;
-                                    font-weight: 500;
-                                    color: root.keyboard-control-ready ? Palette.text-primary : Palette.text-disabled;
+                                    font-weight: 600;
+                                    color: root.keyboard-control-ready ? Palette.text-primary : Palette.text-secondary;
                                     vertical-alignment: center;
                                 }
                             }
@@ -102,50 +238,158 @@ export component BacklightSection inherits Rectangle {
 
                     LocalStatus {
                         text: root.keyboard-status();
-                        accent: root.keyboard-control-ready ? Palette.success : Palette.text-secondary;
+                        accent: root.keyboard-control-ready ? Palette.success : root.keyboard-state-ready ? Palette.text-secondary : Palette.warning;
                     }
                 }
             }
 
             SectionCard {
                 VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 14px;
 
-                    SectionTitle {
-                        title: "Aura";
-                        detail: root.aura-state-ready ? (root.aura-control-ready ? "config read-back" : "наблюдается") : "недоступно";
-                        detail-color: root.aura-control-ready ? Palette.success : root.aura-state-ready ? Palette.text-secondary : Palette.text-disabled;
+                    HorizontalLayout {
+                        height: 30px;
+                        SectionTitle { horizontal-stretch: 1; title: "Aura"; }
+                        StatusPill {
+                            text: root.aura-state-ready ? (root.aura-control-ready ? "Доступно" : "Только чтение") : "Определяется";
+                            accent: root.aura-control-ready ? Palette.success : root.aura-state-ready ? Palette.text-secondary : Palette.warning;
+                        }
                     }
 
-                    InfoRow { label: "Эффект"; value: root.aura-effect-label(); }
-                    InfoRow { label: "Скорость"; value: root.aura-speed-label(); }
-
-                    Text {
-                        text: root.aura-control-ready ? "Static RGB · config-level read-back" : "Static RGB недоступен";
-                        font-size: 11.5px;
-                        color: Palette.text-secondary;
-                        overflow: elide;
+                    HorizontalLayout {
+                        spacing: 18px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 4px;
+                                InfoRow { label: "Эффект"; value: root.aura-effect-label(); }
+                                InfoRow { label: "Скорость"; value: root.aura-speed-label(); }
+                                HorizontalLayout {
+                                    spacing: 5px;
+                                    AuraChoice { label: "Static"; selected: root.keyboard-effect == 0; disabled: !root.mode-supported(0); clicked => { root.request-effect(0, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    AuraChoice { label: "Breathe"; selected: root.keyboard-effect == 1; disabled: !root.mode-supported(1); clicked => { root.request-effect(1, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    AuraChoice { label: "Rainbow"; selected: root.keyboard-effect == 2; disabled: !root.mode-supported(2); clicked => { root.request-effect(2, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    AuraChoice { label: "Star"; selected: root.keyboard-effect == 4; disabled: !root.mode-supported(4); clicked => { root.request-effect(4, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                }
+                                HorizontalLayout {
+                                    spacing: 5px;
+                                    AuraChoice { label: "Rainbow Wave"; selected: root.keyboard-effect == 3; disabled: !root.mode-supported(3); clicked => { root.request-effect(3, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    AuraChoice { label: "Rain"; selected: root.keyboard-effect == 5; disabled: !root.mode-supported(5); clicked => { root.request-effect(5, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    AuraChoice { label: "Highlight"; selected: root.keyboard-effect == 6; disabled: !root.mode-supported(6); clicked => { root.request-effect(6, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    AuraChoice { label: "Laser"; selected: root.keyboard-effect == 7; disabled: !root.mode-supported(7); clicked => { root.request-effect(7, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                }
+                                HorizontalLayout {
+                                    spacing: 5px;
+                                    AuraChoice { label: "Ripple"; selected: root.keyboard-effect == 8; disabled: !root.mode-supported(8); clicked => { root.request-effect(8, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    AuraChoice { label: "Pulse"; selected: root.keyboard-effect == 10; disabled: !root.mode-supported(10); clicked => { root.request-effect(10, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    AuraChoice { label: "Comet"; selected: root.keyboard-effect == 11; disabled: !root.mode-supported(11); clicked => { root.request-effect(11, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    AuraChoice { label: "Flash"; selected: root.keyboard-effect == 12; disabled: !root.mode-supported(12); clicked => { root.request-effect(12, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                }
+                                HorizontalLayout {
+                                    spacing: 5px;
+                                    AuraChoice { label: "Slow"; selected: root.keyboard-speed == 0; disabled: !root.aura-control-ready; clicked => { root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, 0); } }
+                                    AuraChoice { label: "Normal"; selected: root.keyboard-speed == 1; disabled: !root.aura-control-ready; clicked => { root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, 1); } }
+                                    AuraChoice { label: "Fast"; selected: root.keyboard-speed == 2; disabled: !root.aura-control-ready; clicked => { root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, 2); } }
+                                }
+                            }
+                        Rectangle { width: 1px; background: Palette.border-default; }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 8px;
+                            Text {
+                                text: "Быстрый статичный RGB";
+                                font-size: 12.5px;
+                                font-weight: 600;
+                                color: Palette.text-secondary;
+                            }
+                             VerticalLayout {
+                                 spacing: 4px;
+                                 Text {
+                                     text: "Красный";
+                                     font-size: 11px;
+                                     color: Palette.text-secondary;
+                                 }
+                                 ValueSlider {
+                                     value: root.rgb-red;
+                                     min: 0; max: 255; unit: "";
+                                     disabled: !root.aura-control-ready;
+                                     changed(v) => {
+                                         root.rgb-red = v;
+                                         root.request-effect(0, root.keyboard-speed < 0 ? 1 : root.keyboard-speed);
+                                     }
+                                 }
+                                 Text {
+                                     text: "Зелёный";
+                                     font-size: 11px;
+                                     color: Palette.text-secondary;
+                                 }
+                                 ValueSlider {
+                                     value: root.rgb-green;
+                                     min: 0; max: 255; unit: "";
+                                     disabled: !root.aura-control-ready;
+                                     changed(v) => {
+                                         root.rgb-green = v;
+                                         root.request-effect(0, root.keyboard-speed < 0 ? 1 : root.keyboard-speed);
+                                     }
+                                 }
+                                 Text {
+                                     text: "Синий";
+                                     font-size: 11px;
+                                     color: Palette.text-secondary;
+                                 }
+                                 ValueSlider {
+                                     value: root.rgb-blue;
+                                     min: 0; max: 255; unit: "";
+                                     disabled: !root.aura-control-ready;
+                                     changed(v) => {
+                                         root.rgb-blue = v;
+                                         root.request-effect(0, root.keyboard-speed < 0 ? 1 : root.keyboard-speed);
+                                     }
+                                 }
+                              }
+                              Text { text: "Вторичный цвет"; font-size: 11px; color: Palette.text-secondary; }
+                              ValueSlider {
+                                  value: root.aura-secondary-red; min: 0; max: 255; unit: "";
+                                  disabled: !root.aura-control-ready;
+                                  changed(v) => { root.aura-secondary-red = v; root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); }
+                              }
+                              ValueSlider {
+                                  value: root.aura-secondary-green; min: 0; max: 255; unit: "";
+                                  disabled: !root.aura-control-ready;
+                                  changed(v) => { root.aura-secondary-green = v; root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); }
+                              }
+                              ValueSlider {
+                                  value: root.aura-secondary-blue; min: 0; max: 255; unit: "";
+                                  disabled: !root.aura-control-ready;
+                                  changed(v) => { root.aura-secondary-blue = v; root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); }
+                              }
+                              HorizontalLayout {
+                                 spacing: 8px;
+                                 ColorPresetButton {
+                                     label: "Красный"; swatch: #ff414d; disabled: !root.aura-control-ready;
+                                     clicked => { root.rgb-red = 255; root.rgb-green = 65; root.rgb-blue = 77; root.request-effect(0, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); }
+                                 }
+                                 ColorPresetButton {
+                                     label: "Голубой"; swatch: #38c9ff; disabled: !root.aura-control-ready;
+                                     clicked => { root.rgb-red = 56; root.rgb-green = 201; root.rgb-blue = 255; root.request-effect(0, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); }
+                                 }
+                                 ColorPresetButton {
+                                     label: "Белый"; swatch: #f4f7ff; disabled: !root.aura-control-ready;
+                                     clicked => { root.rgb-red = 244; root.rgb-green = 247; root.rgb-blue = 255; root.request-effect(0, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); }
+                                 }
+                            }
+                        }
                     }
 
-                    if (root.aura-control-ready) : HorizontalLayout {
-                        height: 34px;
-                        spacing: 8px;
-                        Rectangle {
-                            width: 34px; height: 34px; border-radius: 17px; background: #ff3030;
-                            TouchArea { clicked => { root.aura-static-rgb-requested(255, 48, 48); } }
-                        }
-                        Rectangle {
-                            width: 34px; height: 34px; border-radius: 17px; background: #00d8ff;
-                            TouchArea { clicked => { root.aura-static-rgb-requested(0, 216, 255); } }
-                        }
-                        Rectangle {
-                            width: 34px; height: 34px; border-radius: 17px; background: #ffffff;
-                            TouchArea { clicked => { root.aura-static-rgb-requested(255, 255, 255); } }
-                        }
+                    LocalStatus {
+                        text: root.aura-control-ready
+                             ? "Статичный RGB применяется с подтверждением конфигурации"
+                            : root.aura-state-ready ? "Aura определяется, управление для этого backend пока не опубликовано" : "Получение состояния Aura";
+                        accent: root.aura-control-ready ? Palette.success : Palette.text-secondary;
                     }
                 }
             }
+
             Rectangle { vertical-stretch: 100; background: transparent; }
         }
     }

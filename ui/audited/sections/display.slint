@@ -1,16 +1,12 @@
-// Display page — observed refresh rate (read-only in production), the display
-// mode request surface and the panel overdrive request toggle.
+// Display page — observed desktop mode plus ASUS panel capabilities.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow, StatusPill, LayoutMetrics } from "../common.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { Palette } from "../../themes/dark.slint";
 
 export component DisplaySection inherits Rectangle {
     in property <bool> display-state-ready: false;
-    in property <bool> display-control-ready: false;
-    in property <int> display-mode: -1;
-    in property <string> display-status: "Unavailable";
-    callback display-mode-requested(int);
+    in property <string> display-status: "Недоступно";
     in property <bool> panel-overdrive-state-ready: false;
     in property <bool> panel-overdrive-control-ready: false;
     in-out property <bool> panel-overdrive: false;
@@ -19,78 +15,88 @@ export component DisplaySection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * LayoutMetrics.page-margin;
+            x: LayoutMetrics.page-margin;
+            spacing: LayoutMetrics.page-gap;
+            padding-top: 14px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Экран";
-                description: "Частота обновления и параметры панели.";
+                description: "Наблюдаемый режим рабочего стола и аппаратные параметры панели ASUS.";
             }
 
             SectionCard {
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
-
-                    SectionTitle {
-                        title: "Частота обновления";
-                        detail: root.display-state-ready ? "" : "недоступно";
-                        detail-color: Palette.text-disabled;
-                    }
-
-                    HorizontalLayout {
-                        height: 40px;
-                        spacing: 8px;
-                        for mode in 3: Rectangle {
-                            min-width: 110px;
-                            horizontal-stretch: 1;
-                            border-radius: 8px;
-                            border-width: root.display-mode == mode && root.display-control-ready ? 1.5px : 1px;
-                            border-color: root.display-mode == mode && root.display-control-ready ? Palette.accent-default
-                                : hz-touch.has-hover && root.display-control-ready ? Palette.border-strong
-                                : Palette.border-default;
-                            background: root.display-mode == mode && root.display-control-ready ? Palette.accent-soft
-                                : hz-touch.pressed && root.display-control-ready ? Palette.surface-pressed
-                                : hz-touch.has-hover && root.display-control-ready ? Palette.surface-hover
-                                : Palette.surface-default;
-                            Text {
-                                text: mode == 0 ? "Авто" : (mode == 1 ? "60 Гц" : "120 Гц");
-                                font-size: 12.5px;
-                                font-weight: 500;
-                                color: root.display-control-ready ? Palette.text-primary : Palette.text-disabled;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                            hz-touch := TouchArea {
-                                enabled: root.display-control-ready;
-                                clicked => { root.display-mode-requested(mode); }
-                            }
+                min-height: 104px;
+                HorizontalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 16px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 4px;
+                        Text { text: "Текущий режим"; font-size: 12px; color: Palette.text-secondary; }
+                        Text {
+                            text: root.display-state-ready ? root.display-status : "Определяется";
+                            font-size: 20px;
+                            font-weight: 700;
+                            color: root.display-state-ready ? Palette.text-primary : Palette.text-disabled;
+                            overflow: elide;
                         }
                     }
-
-                    InfoRow { label: "Наблюдаемый режим"; value: root.display-status; }
+                    Rectangle {
+              width: root.display-state-ready ? 114px : 146px;
+              vertical-stretch: 1;
+              background: transparent;
+              StatusPill {
+                  width: parent.width;
+                  y: (parent.height - self.height) / 2;
+                  text: root.display-state-ready ? "Наблюдается" : "Получение данных";
+                  accent: root.display-state-ready ? Palette.success : Palette.warning;
+              }
+          }
                 }
             }
 
             SectionCard {
                 VerticalLayout {
-                    padding: 16px;
-                    spacing: 8px;
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 12px;
 
                     SectionTitle {
-                        title: "Панель";
-                        detail: root.panel-overdrive-state-ready ? (root.panel-overdrive-control-ready ? "" : "только чтение") : "недоступно";
-                        detail-color: Palette.text-disabled;
+                        title: "Частота обновления";
+                        detail: "Управляется рабочим столом";
+                    }
+                    InfoRow {
+                        label: "Наблюдаемый режим";
+                        value: root.display-state-ready ? root.display-status : "—";
+                    }
+                    LocalStatus {
+                        text: "Orbis показывает фактический режим, а переключение частоты остаётся за compositor/рабочим столом.";
+                        accent: Palette.text-secondary;
+                    }
+                }
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        height: 30px;
+                        SectionTitle { horizontal-stretch: 1; title: "Панель"; }
+                        StatusPill {
+                            text: root.panel-overdrive-state-ready ? (root.panel-overdrive-control-ready ? "Доступно" : "Только чтение") : "Определяется";
+                            accent: root.panel-overdrive-control-ready ? Palette.success : root.panel-overdrive-state-ready ? Palette.text-secondary : Palette.warning;
+                        }
                     }
 
                     RequestToggleRow {
-                        label: "Panel Overdrive";
+                        label: "Ускорение отклика панели (Overdrive)";
                         description: root.panel-overdrive-state-ready
-                            ? (root.panel-overdrive-control-ready ? "Применение подтверждается чтением фактического состояния" : "Наблюдается · только чтение")
-                            : "Состояние недоступно";
+                            ? (root.panel-overdrive-control-ready ? "Уменьшает время отклика панели; результат подтверждается чтением состояния" : "Текущее состояние доступно только для чтения")
+                            : "Поддержка панели определяется по возможностям устройства";
                         checked: root.panel-overdrive;
                         disabled: !root.panel-overdrive-control-ready || root.applying;
                         toggled(value) => { root.panel-overdrive-requested(value); }
@@ -98,10 +104,6 @@ export component DisplaySection inherits Rectangle {
                 }
             }
 
-            LocalStatus {
-                text: "Смена режима отображения без владельца мутации остаётся отключённой.";
-                accent: Palette.text-secondary;
-            }
             Rectangle { vertical-stretch: 100; background: transparent; }
         }
     }

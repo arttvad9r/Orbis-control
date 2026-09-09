@@ -125,14 +125,14 @@ trait AsusdFanCurves {
     fn fan_curve_data(&self, profile: u32) -> zbus::Result<Vec<AsusdCurveWire>>;
 }
 
-/// Парсинг одного `(name, temp8, pwm8, enabled)` элемента из asusd.
+/// Парсинг одного `(name, pwm8, temp8, enabled)` элемента из asusd.
 ///
-/// Формат wire: `(s(yyyyyyyy)(yyyyyyyy)b)` = name + 8 temp + 8 pwm + enabled.
+/// Формат wire: `(s(yyyyyyyy)(yyyyyyyy)b)` = name + 8 pwm + 8 temp + enabled.
 /// zbus раскладывает `(yyyyyyyy)` в `[u8; 8]`.
 fn parse_curve_entry(
     name: &str,
-    temps: &[u8; 8],
     pwms: &[u8; 8],
+    temps: &[u8; 8],
     enabled: bool,
 ) -> Result<AsusdFanCurve, ProviderError> {
     let fan = match name {
@@ -146,7 +146,7 @@ fn parse_curve_entry(
     };
     let mut temps_arr = [TemperatureC::new(0).expect("const"); CURVE_POINT_COUNT];
     let mut pwms_arr = [FanPwm::new(0).expect("const"); CURVE_POINT_COUNT];
-    for (i, (t, p)) in temps.iter().zip(pwms.iter()).enumerate() {
+    for (i, (p, t)) in pwms.iter().zip(temps.iter()).enumerate() {
         temps_arr[i] = TemperatureC::new(i16::from(*t)).map_err(|_| {
             ProviderError::Internal(format!(
                 "asusd FanCurves: температура вне диапазона '{t}' для {name}"
@@ -926,8 +926,8 @@ mod tests {
         // CPU: raw PWM до 94.
         let cpu = parse_curve_entry(
             "CPU",
-            &[45, 49, 54, 68, 74, 79, 84, 89],
             &[5, 22, 38, 45, 56, 63, 81, 94],
+            &[45, 49, 54, 68, 74, 79, 84, 89],
             true,
         )
         .expect("cpu");
@@ -940,8 +940,8 @@ mod tests {
         // GPU: raw PWM 112 > 100 сохраняется.
         let gpu = parse_curve_entry(
             "GPU",
-            &[40, 42, 43, 60, 65, 69, 74, 78],
             &[5, 20, 38, 43, 56, 66, 84, 112],
+            &[40, 42, 43, 60, 65, 69, 74, 78],
             false,
         )
         .expect("gpu");
@@ -960,7 +960,7 @@ mod tests {
     fn parse_curve_entry_rejects_out_of_range_pwm() {
         // FanPwm диапазон 0..255 гарантирован типом u8; проверяем, что
         // значение 255 принимается, а конструктор FanPwm валидирует диапазон.
-        let curve = parse_curve_entry("CPU", &[45; 8], &[5, 22, 38, 45, 56, 63, 81, 255], true)
+        let curve = parse_curve_entry("CPU", &[5, 22, 38, 45, 56, 63, 81, 255], &[45; 8], true)
             .expect("pwm 255 valid");
         assert_eq!(curve.pwms[7].get(), 255);
         // FanPwm::new валидирует диапазон (0..=255).
@@ -970,7 +970,7 @@ mod tests {
     #[test]
     fn parse_curve_entry_rejects_out_of_range_temp() {
         // 200 °C вне диапазона TemperatureC.
-        let err = parse_curve_entry("CPU", &[45, 49, 54, 68, 74, 79, 84, 200], &[5; 8], true)
+        let err = parse_curve_entry("CPU", &[5; 8], &[45, 49, 54, 68, 74, 79, 84, 200], true)
             .expect_err("temp out of range");
         assert!(matches!(err, ProviderError::Internal(_)));
     }
@@ -982,15 +982,15 @@ mod tests {
         // значения, что SysfsFanCurveSource::active_curve.
         let cpu = parse_curve_entry(
             "CPU",
-            &[45, 49, 54, 68, 74, 79, 84, 89],
             &[5, 22, 38, 45, 56, 63, 81, 94],
+            &[45, 49, 54, 68, 74, 79, 84, 89],
             true,
         )
         .expect("cpu");
         let gpu = parse_curve_entry(
             "GPU",
-            &[40, 42, 43, 60, 65, 69, 74, 78],
             &[5, 20, 38, 43, 56, 66, 84, 112],
+            &[40, 42, 43, 60, 65, 69, 74, 78],
             false,
         )
         .expect("gpu");

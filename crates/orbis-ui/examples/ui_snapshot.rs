@@ -56,20 +56,27 @@ impl Platform for SoftwarePlatform {
     }
 }
 
-/// Realistic review state for section screenshots (dev-only; never shipped).
+/// Product-complete review state. It is intentionally richer than production
+/// startup state so visual review judges the finished surface rather than a
+/// collection of unavailable placeholders. This example is never shipped.
 fn demo_state(component: &AppWindow) {
     let mut state = component.get_ui_state();
     state.perf_state = PerformanceHwState::Ready;
     state.perf_writable = true;
     state.perf_selected = 1;
     state.available_perf_mask = 0b0111;
+
     state.gpu_mode_state = GpuModeHwState::Ready;
-    state.gpu_mode_writable = false;
+    state.gpu_mode_writable = true;
     state.gpu_selected = 1;
-    state.available_gpu_mask = 0b0111;
+    state.available_gpu_mask = 0b1111;
+    state.gpu_queued = -1;
+    state.gpu_reboot_required = false;
+
     state.charge_limit_state = ChargeLimitState::Ready;
     state.charge_limit_writable = true;
     state.charge_limit = 80;
+
     state.cpu_temp = "56°C".into();
     state.gpu_temp = "51°C".into();
     state.cpu_fan_rpm = "2300 rpm".into();
@@ -83,11 +90,19 @@ fn demo_state(component: &AppWindow) {
     state.power_ac_mw = "23 W".into();
     state.gpu_power = "8 W".into();
     state.telemetry_fresh = true;
+
+    state.gpu_power_state = GpuHwState::Ready;
+    state.gpu_mux_state = GpuHwState::Ready;
+    state.gpu_access_state = GpuHwState::Ready;
+    state.gpu_power_value = 0;
+    state.gpu_mux_value = 0;
+    state.gpu_access_value = 0;
+
     state.fan_curve_state = FanCurveHwState::Ready;
     state.fan_curve_writable = true;
     state.fan_curve_dirty = false;
     state.fan_curve_enabled_known = true;
-    state.fan_curve_enabled = false;
+    state.fan_curve_enabled = true;
     state.fan_selected = 0;
     state.fan_profile_selected = 0;
     state.fan_temp_0 = 30;
@@ -107,6 +122,60 @@ fn demo_state(component: &AppWindow) {
     state.fan_pwm_6 = 196;
     state.fan_pwm_7 = 255;
     component.set_ui_state(state);
+
+    component.set_device_name("ASUS TUF Gaming A17 FA707NV".into());
+    component.set_device_board("FA707NV".into());
+    component.set_bios_version("FA707NV.318".into());
+    component.set_bios_date("2026-07-14".into());
+
+    component.set_keyboard_state_ready(true);
+    component.set_keyboard_control_ready(true);
+    component.set_keyboard_brightness(2);
+    component.set_aura_state_ready(true);
+    component.set_aura_control_ready(true);
+    component.set_keyboard_effect(0);
+    component.set_keyboard_speed(1);
+
+    component.set_display_state_ready(true);
+    component.set_display_status("1920×1080 · 144 Hz".into());
+    component.set_panel_overdrive_state_ready(true);
+    component.set_panel_overdrive_control_ready(true);
+    component.set_panel_overdrive(true);
+
+    component.set_boot_sound_state_ready(true);
+    component.set_boot_sound(true);
+    component.set_backend_ready(true);
+    component.set_status("Состояние расширенных параметров синхронизировано".into());
+    component.set_status_led(true);
+    component.set_disable_aspm(false);
+    component.set_disable_standby_networking(false);
+    component.set_igpu_memory(2);
+    component.set_hibernate_after(30);
+    component.set_p_cores(8);
+    component.set_e_cores(0);
+    component.set_m1_action(2);
+    component.set_m2_action(3);
+    component.set_m3_action(4);
+    component.set_m4_action(7);
+    component.set_m5_action(8);
+
+    component.set_startup(true);
+    component.set_startup_enabled(true);
+    component.set_startup_status("Автозапуск включён".into());
+    component.set_start_minimized(false);
+    component.set_start_minimized_enabled(true);
+    component.set_remember_position(true);
+    component.set_remember_position_enabled(true);
+    component.set_close_action(1);
+    component.set_close_action_enabled(true);
+    component.set_hide_to_tray_enabled(true);
+    component.set_settings_local_status("Настройки сохранены".into());
+
+    component.set_refresh_enabled(true);
+    component.set_refresh_pending(false);
+    component.set_export_enabled(true);
+    component.set_diagnostics_summary("Orbis diagnostics review state".into());
+    component.set_diagnostics_status("Диагностика актуальна".into());
 }
 
 fn setup(width: u32, height: u32) -> Rc<slint::platform::software_renderer::SoftwareRenderer> {
@@ -161,10 +230,9 @@ fn main() -> anyhow::Result<()> {
         other => anyhow::bail!("unknown theme: {other}"),
     };
 
-    // The shell is fixed-size; the dialog keeps its own compact canvas.
     let (width, height) = match kind.as_str() {
-        "dialog" => (430, 220),
-        _ => (1200, 800),
+        "dialog" => (470, 228),
+        _ => (1240, 820),
     };
 
     let renderer = setup(width, height);
@@ -179,10 +247,6 @@ fn main() -> anyhow::Result<()> {
                 ThemeMode::Dark
             });
             demo_state(&component);
-            // Keyboard backlight observation is ready in the review scenario.
-            component.set_keyboard_state_ready(true);
-            component.set_keyboard_control_ready(false);
-            component.set_keyboard_brightness(2);
             let section = match kind.as_str() {
                 "performance" => Section::Performance,
                 "power" => Section::Power,

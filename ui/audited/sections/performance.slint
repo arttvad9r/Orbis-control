@@ -1,10 +1,9 @@
-// Performance page — proven platform profiles only. The ASUS product has no
-// "manual" profile in the backend, so no such card is offered (capability-
-// aware UI); GPU modes live in the Graphics section.
+// Performance page — platform profiles with explicit current/availability state.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, PerformanceHwState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, ActionButton, StatusPill, LayoutMetrics } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
+import { MetricCard } from "../../components/metric-card.slint";
 import { Palette } from "../../themes/dark.slint";
 
 export component PerformanceSection inherits Rectangle {
@@ -18,41 +17,61 @@ export component PerformanceSection inherits Rectangle {
     }
 
     function perf-reason() -> string {
+        if (root.ui-state.performance-delegated-pending) { return "Ожидание подтверждения"; }
+        if (root.ui-state.performance-delegated-error != "") { return root.ui-state.performance-delegated-error; }
         if (root.ui-state.perf-state == PerformanceHwState.Ready) {
-            return root.ui-state.perf-writable ? "" : "Только чтение";
+            return root.ui-state.perf-writable ? (root.ui-state.performance-delegated-ready ? "Доступно через power-profiles-daemon" : "Доступно") : "Только чтение";
         }
+        if (root.ui-state.perf-state == PerformanceHwState.Loading) { return "Получение профиля"; }
         return root.ui-state.perf-unavailable-reason;
+    }
+
+    function current-profile() -> string {
+        if (root.ui-state.perf-state != PerformanceHwState.Ready) { return "—"; }
+        if (root.ui-state.perf-selected == 0) { return "Тихий"; }
+        if (root.ui-state.perf-selected == 1) { return "Сбалансированный"; }
+        if (root.ui-state.perf-selected == 2) { return "Турбо"; }
+        return "—";
     }
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * LayoutMetrics.page-margin;
+            x: LayoutMetrics.page-margin;
+            spacing: LayoutMetrics.page-gap;
+            padding-top: 14px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Производительность";
-                description: "Профиль платформы управляет частотами и шумом системы.";
+                description: "Профиль платформы управляет балансом производительности, температуры и шума.";
             }
 
             SectionCard {
                 VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 14px;
 
-                    SectionTitle {
-                        title: "Режим производительности";
-                        detail: root.perf-reason();
+                    HorizontalLayout {
+                        height: 30px;
+                        SectionTitle {
+                            horizontal-stretch: 1;
+                            title: "Режим производительности";
+                            detail: root.perf-reason();
+                        }
+                        StatusPill {
+                            width: 156px;
+                            text: root.current-profile();
+                            accent: root.ui-state.perf-state == PerformanceHwState.Ready ? Palette.balanced : Palette.text-secondary;
+                        }
                     }
 
                     HorizontalLayout {
-                        height: 84px;
+                        height: 94px;
                         spacing: 12px;
                         ModeCard {
                             title: "Тихий";
-                            description: "Минимум шума";
+                            description: "Минимум шума и нагрева";
                             icon-kind: 16;
                             accent: Palette.silent;
                             selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0;
@@ -61,7 +80,7 @@ export component PerformanceSection inherits Rectangle {
                         }
                         ModeCard {
                             title: "Сбалансированный";
-                            description: "Повседневные задачи";
+                            description: "Оптимален для повседневной работы";
                             icon-kind: 17;
                             accent: Palette.balanced;
                             selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1;
@@ -78,15 +97,49 @@ export component PerformanceSection inherits Rectangle {
                             clicked => { root.perf-clicked(2); }
                         }
                     }
-
-                    Text {
-                        text: "Изменение применяется через Hardware1 и подтверждается чтением фактического состояния.";
-                        font-size: 11.5px;
-                        color: Palette.text-secondary;
-                        overflow: elide;
-                    }
                 }
             }
+
+            HorizontalLayout {
+                height: 108px;
+                spacing: 14px;
+                MetricCard { label: "CPU"; value: root.ui-state.cpu-temp; detail: "температура процессора"; icon-kind: 10; }
+                MetricCard { label: "GPU"; value: root.ui-state.gpu-temp; detail: "температура графики"; icon-kind: 4; }
+                MetricCard { label: "Вентилятор CPU"; value: root.ui-state.cpu-fan-rpm; detail: "скорость вентилятора"; icon-kind: 3; }
+                MetricCard { label: "ПИТАНИЕ"; value: root.ui-state.power-ac-mw; detail: "потребление от адаптера"; icon-kind: 13; }
+            }
+
+            SectionCard {
+                min-height: 108px;
+                HorizontalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 18px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 4px;
+                        Text { text: "Графический режим"; font-size: 15px; font-weight: 650; color: Palette.text-primary; }
+                        Text {
+                            text: "Режим GPU настраивается отдельно и может требовать перезагрузку.";
+                            font-size: 12.5px;
+                            color: Palette.text-secondary;
+                            wrap: word-wrap;
+                        }
+                    }
+                    Rectangle {
+              width: 126px;
+              vertical-stretch: 1;
+              background: transparent;
+              ActionButton {
+                  width: parent.width;
+                  y: (parent.height - self.height) / 2;
+                  label: "Открыть графику";
+                  clicked => { root.graphics-open-requested(); }
+              }
+          }
+                }
+            }
+
             Rectangle { vertical-stretch: 100; background: transparent; }
         }
     }

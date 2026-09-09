@@ -10,9 +10,10 @@
 use std::time::SystemTime;
 
 use orbis_core::diagnostics::{
-    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, DiagnosticsSnapshot,
-    DiagnosticsSnapshotSections, DisplayDiagnostics, GpuDiagnostics, HardwareDiagnostics,
-    ServiceDiagnostics, SystemDiagnostics, TelemetryDiagnostics,
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuFrequencyObservation,
+    CpuPackagePowerLimitsObservation, DiagnosticsSnapshot, DiagnosticsSnapshotSections,
+    DisplayDiagnostics, GpuDiagnostics, HardwareDiagnostics, ServiceDiagnostics, SystemDiagnostics,
+    TelemetryDiagnostics,
 };
 
 /// Application-layer boundary that freezes already-collected typed
@@ -46,6 +47,8 @@ impl DiagnosticsCollector {
         services: Vec<ServiceDiagnostics>,
         capabilities: CapabilitySnapshotDiagnostics,
         gpu: GpuDiagnostics,
+        cpu_package_power_limits: CpuPackagePowerLimitsObservation,
+        cpu_frequency: CpuFrequencyObservation,
         telemetry: TelemetryDiagnostics,
         display: DisplayDiagnostics,
     ) -> DiagnosticsSnapshot {
@@ -58,6 +61,8 @@ impl DiagnosticsCollector {
                 services,
                 capabilities,
                 gpu,
+                cpu_package_power_limits,
+                cpu_frequency,
                 telemetry,
                 display,
             },
@@ -71,9 +76,9 @@ mod tests {
 
     use orbis_core::capability::DeviceCapabilities;
     use orbis_core::diagnostics::{
-        DIAGNOSTICS_SNAPSHOT_SCHEMA_VERSION, DiagnosticObservation, DiagnosticsServiceId,
-        DisplayProtocol, ServiceAvailability, ServiceBusScope, ServiceCriticality, SessionType,
-        TelemetryCollectionStatus, TelemetryFreshness,
+        CpuFrequencyDiagnostics, DIAGNOSTICS_SNAPSHOT_SCHEMA_VERSION, DiagnosticObservation,
+        DiagnosticsServiceId, DisplayProtocol, ServiceAvailability, ServiceBusScope,
+        ServiceCriticality, SessionType, TelemetryCollectionStatus, TelemetryFreshness,
     };
     use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
     use orbis_core::telemetry::Telemetry;
@@ -115,7 +120,15 @@ mod tests {
                 mux: DiagnosticObservation::Value(GpuMuxState::Unknown),
                 access_policy: DiagnosticObservation::PermissionDenied,
                 runtime_power: DiagnosticObservation::Unavailable,
+                nvidia: DiagnosticObservation::Unknown,
             },
+            CpuPackagePowerLimitsObservation::Unknown,
+            CpuFrequencyObservation::Value(CpuFrequencyDiagnostics {
+                driver: "amd-pstate-epp".into(),
+                available_epp_preferences: vec!["power".into()],
+                current_epp_preference: "power".into(),
+                boost: false,
+            }),
             TelemetryDiagnostics {
                 latest: None,
                 status: TelemetryCollectionStatus::Unavailable,
@@ -149,6 +162,15 @@ mod tests {
         assert_eq!(
             snapshot.sections().capabilities.checked_at,
             expected_checked_at
+        );
+        assert_eq!(
+            snapshot.sections().cpu_frequency,
+            CpuFrequencyObservation::Value(CpuFrequencyDiagnostics {
+                driver: "amd-pstate-epp".into(),
+                available_epp_preferences: vec!["power".into()],
+                current_epp_preference: "power".into(),
+                boost: false,
+            })
         );
         assert_eq!(
             snapshot.sections().services[0].checked_at,
@@ -193,7 +215,10 @@ mod tests {
                 mux: DiagnosticObservation::Value(GpuMuxState::Unknown),
                 access_policy: DiagnosticObservation::PermissionDenied,
                 runtime_power: DiagnosticObservation::Unavailable,
+                nvidia: DiagnosticObservation::Unknown,
             },
+            CpuPackagePowerLimitsObservation::Unknown,
+            CpuFrequencyObservation::Malformed,
             TelemetryDiagnostics {
                 latest: Some(last_good.clone()),
                 status: TelemetryCollectionStatus::Degraded,
@@ -225,6 +250,7 @@ mod tests {
             sections.gpu.runtime_power,
             DiagnosticObservation::Unavailable
         );
+        assert_eq!(sections.cpu_frequency, CpuFrequencyObservation::Malformed);
         assert_eq!(sections.telemetry.latest, Some(last_good));
         assert_eq!(
             sections.telemetry.status,

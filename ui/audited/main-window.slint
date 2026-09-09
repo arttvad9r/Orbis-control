@@ -1,13 +1,10 @@
-// AppWindow — Orbis Control single-window shell (reference design 2026-08-25):
-// frameless 1200×800 window, 44px title bar, 230px sidebar, card-based pages.
-// Sidebar: Главная / Производительность Питание Охлаждение Графика Подсветка
-// Экран Система / Настройки О программе. All hardware state stays in UiState;
-// callbacks keep their worker-owned request semantics.
-import { ScrollView } from "std-widgets.slint";
-import { UiState, Section, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState } from "model.slint";
+// Orbis Control single-window shell. The shell owns product navigation and
+// stable window geometry; hardware state remains in UiState and backend-owned
+// callbacks keep their existing semantics.
+import { UiState, Section, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState, ClamshellState } from "model.slint";
 import { TitleBar } from "../components/title-bar.slint";
 import { NavItem } from "../components/nav-item.slint";
-import { ThemeBridge } from "common.slint";
+import { ThemeBridge, LayoutMetrics } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 import { DashboardSection } from "sections/dashboard.slint";
 import { PerformanceSection } from "sections/performance.slint";
@@ -21,10 +18,10 @@ import { SettingsSection } from "sections/settings.slint";
 import { AboutSection } from "sections/about.slint";
 
 export component AppWindow inherits Window {
-    preferred-width: 1200px;
-    preferred-height: 800px;
-    min-width: 980px;
-    min-height: 680px;
+    preferred-width: 1240px;
+    preferred-height: 820px;
+    min-width: 1024px;
+    min-height: 700px;
     no-frame: true;
     background: transparent;
     title: "Orbis Control";
@@ -32,23 +29,21 @@ export component AppWindow inherits Window {
     in-out property <UiState> ui-state: {
         perf-selected: 1, available-perf-mask: 0, perf-state: PerformanceHwState.Loading, perf-writable: false, perf-unavailable-reason: "",
         gpu-selected: 1, available-gpu-mask: 0, gpu-ultimate-pending: false, gpu-ultimate-disabled: false,
-        gpu-section-error: false, gpu-mode-state: GpuModeHwState.Loading, gpu-mode-writable: false,
+        gpu-section-error: false, gpu-mode-state: GpuModeHwState.Loading, gpu-mode-writable: false, gpu-mode-pending: false, gpu-mode-unconfirmed: false,
         gpu-queued: -1, gpu-reboot-required: false,
-        charge-limit: 80, charge-limit-enabled: false, charge-limit-writable: false, charge-limit-unavailable-reason: "", charge-limit-state: ChargeLimitState.Loading,
+        charge-limit: 80, charge-limit-enabled: false, charge-limit-writable: false, charge-limit-unavailable-reason: "", charge-limit-state: ChargeLimitState.Loading, charge-limit-pending: false, charge-limit-unconfirmed: false, charge-limit-error: "",
         gpu-power-state: GpuHwState.Loading, gpu-mux-state: GpuHwState.Loading, gpu-access-state: GpuHwState.Loading,
         gpu-power-value: 0, gpu-mux-value: 0, gpu-access-value: 0,
         cpu-temp: "—", gpu-temp: "—", cpu-fan-rpm: "—", gpu-fan-rpm: "—",
         battery-percent: "—", power-ac-mw: "—", battery-health: "—", battery-cycles: "—",
         battery-status: "", ac-online: "—", gpu-power: "—", telemetry-fresh: false, version: "0.1.0", mock-profile: "zephyrus-full",
-        fan-curve-state: FanCurveHwState.Loading, fan-curve-writable: false, fan-curve-unavailable-reason: "", fan-curve-error: false, fan-curve-dirty: false,
+        fan-curve-state: FanCurveHwState.Loading, fan-curve-writable: false, fan-curve-unavailable-reason: "", fan-curve-error: false, fan-curve-pending: false, fan-curve-unconfirmed: false, fan-curve-dirty: false,
         fan-curve-enabled-known: false, fan-curve-enabled: false,
         fan-selected: 0, fan-profile-selected: 0,
         fan-temp-0: 0, fan-temp-1: 0, fan-temp-2: 0, fan-temp-3: 0, fan-temp-4: 0, fan-temp-5: 0, fan-temp-6: 0, fan-temp-7: 0,
         fan-pwm-0: 0, fan-pwm-1: 0, fan-pwm-2: 0, fan-pwm-3: 0, fan-pwm-4: 0, fan-pwm-5: 0, fan-pwm-6: 0, fan-pwm-7: 0,
     };
 
-    // Privacy-safe DMI identity (vendor/product/board/BIOS), read once at
-    // startup through the existing read-only provider. Empty = unknown.
     in property <string> device-name: "";
     in property <string> device-board: "";
     in property <string> bios-version: "";
@@ -62,29 +57,25 @@ export component AppWindow inherits Window {
     callback titlebar-drag-started;
     in property <bool> maximized: false;
 
-    // Performance page surface.
     callback perf-clicked(int);
     callback gpu-clicked(int);
     callback charge-changed(float);
     in property <bool> display-state-ready: false;
-    in property <bool> display-control-ready: false;
-    in property <int> display-mode: -1;
-    in property <string> display-status: "Unavailable";
-    callback display-mode-requested(int);
+    in property <string> display-status: "Недоступно";
     in property <bool> keyboard-state-ready: false;
     in property <bool> keyboard-control-ready: false;
     in property <int> keyboard-brightness: -1;
+    in property <string> keyboard-mutation-error: "";
     callback keyboard-brightness-requested(int);
     callback startup-changed(bool);
     in-out property <bool> startup: false;
     in-out property <bool> startup-enabled: false;
-    in property <string> startup-status: "Unavailable";
+    in property <string> startup-status: "Недоступно";
     callback quit-requested;
 
-    // Cooling page surface.
-    in property <bool> mutation-safety-blocked: true;
-    in property <bool> factory-reset-available: false;
-    in property <string> policy-status: "Fan writes are safety-blocked";
+    in property <bool> mutation-safety-blocked: false;
+    in property <bool> factory-reset-available: true;
+    in property <string> policy-status: "Кривая применяется через Hardware1 с read-back";
     callback fan-changed(int);
     callback fan-profile-changed(int);
     callback fan-temp-point-changed(int, int);
@@ -92,15 +83,28 @@ export component AppWindow inherits Window {
     callback fan-apply-clicked(bool);
     callback aura-static-rgb-requested(int, int, int);
 
-    // Hardware observation surface (backlight/display/system pages).
     in property <bool> backend-ready: false;
     in property <bool> applying: false;
-    in property <string> status: "Advanced controls backend unavailable";
+    in property <string> status: "Расширенные функции недоступны";
     in property <bool> aura-state-ready: false;
     in property <bool> aura-control-ready: false;
     in property <bool> panel-overdrive-state-ready: false;
     in property <bool> panel-overdrive-control-ready: false;
     in property <bool> boot-sound-state-ready: false;
+    in property <bool> boot-sound-control-ready: false;
+    in property <bool> igpu-memory-state-ready: false;
+    in property <bool> igpu-memory-control-ready: false;
+    in property <bool> igpu-memory-pending: false;
+    in property <bool> status-led-state-ready: false;
+    in property <bool> status-led-control-ready: false;
+    in property <ClamshellState> auto-clamshell-state: ClamshellState.Loading;
+    in property <bool> standby-networking-control-ready: false;
+    in property <bool> hibernate-control-ready: false;
+    in property <bool> core-count-control-ready: false;
+    in property <bool> binding-control-ready: false;
+    in property <bool> advanced-apply-ready: false;
+    in property <bool> aspm-state-ready: false;
+    in property <bool> aspm-control-ready: false;
     in-out property <int> m1-action: 0;
     in-out property <int> m2-action: 0;
     in-out property <int> m3-action: 0;
@@ -108,10 +112,27 @@ export component AppWindow inherits Window {
     in-out property <int> m5-action: 0;
     in-out property <int> keyboard-effect: -1;
     in-out property <int> keyboard-speed: -1;
+    in-out property <int> rgb-red: 255;
+    in-out property <int> rgb-green: 65;
+    in-out property <int> rgb-blue: 77;
+    in property <bool> aura-static-supported: false;
+    in property <bool> aura-breathe-supported: false;
+    in property <bool> aura-rainbow-supported: false;
+    in property <bool> aura-rainbow-wave-supported: false;
+    in property <bool> aura-star-supported: false;
+    in property <bool> aura-rain-supported: false;
+    in property <bool> aura-highlight-supported: false;
+    in property <bool> aura-laser-supported: false;
+    in property <bool> aura-ripple-supported: false;
+    in property <bool> aura-pulse-supported: false;
+    in property <bool> aura-comet-supported: false;
+    in property <bool> aura-flash-supported: false;
+    in-out property <int> aura-secondary-red: 0;
+    in-out property <int> aura-secondary-green: 0;
+    in-out property <int> aura-secondary-blue: 0;
     in-out property <bool> boot-sound: false;
     in-out property <bool> status-led: false;
     in-out property <bool> panel-overdrive: false;
-    in-out property <bool> auto-clamshell: false;
     in-out property <bool> disable-aspm: false;
     in-out property <bool> disable-standby-networking: false;
     in-out property <int> igpu-memory: 0;
@@ -119,9 +140,14 @@ export component AppWindow inherits Window {
     in-out property <int> p-cores: 1;
     in-out property <int> e-cores: 0;
     callback reload-requested;
+    callback boot-sound-requested(bool);
+    callback igpu-memory-requested(int);
     callback apply-requested;
     callback panel-overdrive-requested(bool);
+    callback aspm-requested(bool);
+    callback auto-clamshell-requested(bool);
     callback theme-changed(bool);
+    callback aura-effect-requested(int, int, int, int, int, int, int, int);
     callback start-minimized-changed(bool);
     callback remember-position-changed(bool);
     callback close-action-changed(int);
@@ -136,10 +162,10 @@ export component AppWindow inherits Window {
     in property <bool> refresh-pending: false;
     in property <string> diagnostics-summary: "";
     in property <bool> export-enabled: false;
-    in property <string> diagnostics-status: "Diagnostics unavailable · lifecycle wiring pending";
+    in property <string> diagnostics-status: "Диагностика недоступна · подключение ещё не готово";
     callback diagnostics-refresh-requested;
     callback diagnostics-export-requested;
-    in-out property <string> settings-local-status: "Theme changes are saved immediately";
+    in-out property <string> settings-local-status: "Изменения темы сохраняются сразу";
 
     callback preview-dialog-clicked(int);
 
@@ -151,13 +177,14 @@ export component AppWindow inherits Window {
     }
 
     root-rect := Rectangle {
-        border-radius: 12px;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: Palette.border-default;
         clip: true;
         background: Palette.window-background;
 
         VerticalLayout {
             TitleBar {
-                height: 44px;
                 maximized: root.maximized;
                 minimize-requested => { root.titlebar-minimize-requested(); }
                 maximize-requested => { root.titlebar-maximize-requested(); }
@@ -168,14 +195,16 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 vertical-stretch: 1;
 
-                // ── Sidebar ─────────────────────────────────────────────
                 Rectangle {
-                    width: 230px;
+                    width: LayoutMetrics.sidebar-width;
                     background: Palette.titlebar-background;
 
                     VerticalLayout {
-                        padding: 12px;
-                        spacing: 2px;
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        spacing: 3px;
 
                         NavItem {
                             label: "Главная";
@@ -184,7 +213,15 @@ export component AppWindow inherits Window {
                             clicked => { root.open-section(Section.Dashboard); }
                         }
 
-                        Rectangle { height: 8px; background: transparent; }
+                        Rectangle { height: 12px; background: transparent; }
+                        Text {
+                            height: 22px;
+                            text: "УПРАВЛЕНИЕ";
+                            font-size: 10px;
+                            font-weight: 650;
+                            color: Palette.text-disabled;
+                            vertical-alignment: center;
+                        }
 
                         NavItem {
                             label: "Производительность";
@@ -230,7 +267,14 @@ export component AppWindow inherits Window {
                         }
 
                         Rectangle { vertical-stretch: 1; background: transparent; }
-
+                        Text {
+                            height: 22px;
+                            text: "ПРИЛОЖЕНИЕ";
+                            font-size: 10px;
+                            font-weight: 650;
+                            color: Palette.text-disabled;
+                            vertical-alignment: center;
+                        }
                         NavItem {
                             label: "Настройки";
                             icon-kind: 8;
@@ -245,7 +289,6 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Right border of the sidebar.
                     Rectangle {
                         x: parent.width - 1px;
                         width: 1px;
@@ -254,7 +297,6 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // ── Content ─────────────────────────────────────────────
                 Rectangle {
                     horizontal-stretch: 1;
                     clip: true;
@@ -267,6 +309,7 @@ export component AppWindow inherits Window {
                         keyboard-state-ready <=> root.keyboard-state-ready;
                         keyboard-control-ready <=> root.keyboard-control-ready;
                         keyboard-brightness <=> root.keyboard-brightness;
+                        keyboard-mutation-error <=> root.keyboard-mutation-error;
                         keyboard-brightness-requested(i) => { root.keyboard-brightness-requested(i); }
                         perf-clicked(i) => { root.perf-clicked(i); }
                         charge-changed(v) => { root.charge-changed(v); }
@@ -300,19 +343,36 @@ export component AppWindow inherits Window {
                         keyboard-state-ready <=> root.keyboard-state-ready;
                         keyboard-control-ready <=> root.keyboard-control-ready;
                         keyboard-brightness <=> root.keyboard-brightness;
+                        keyboard-mutation-error <=> root.keyboard-mutation-error;
                         keyboard-brightness-requested(i) => { root.keyboard-brightness-requested(i); }
                         aura-state-ready <=> root.aura-state-ready;
                         aura-control-ready <=> root.aura-control-ready;
                         keyboard-effect <=> root.keyboard-effect;
                         keyboard-speed <=> root.keyboard-speed;
+                        rgb-red <=> root.rgb-red;
+                        rgb-green <=> root.rgb-green;
+                        rgb-blue <=> root.rgb-blue;
+                        aura-static-supported <=> root.aura-static-supported;
+                        aura-breathe-supported <=> root.aura-breathe-supported;
+                        aura-rainbow-supported <=> root.aura-rainbow-supported;
+                        aura-rainbow-wave-supported <=> root.aura-rainbow-wave-supported;
+                        aura-star-supported <=> root.aura-star-supported;
+                        aura-rain-supported <=> root.aura-rain-supported;
+                        aura-highlight-supported <=> root.aura-highlight-supported;
+                        aura-laser-supported <=> root.aura-laser-supported;
+                        aura-ripple-supported <=> root.aura-ripple-supported;
+                        aura-pulse-supported <=> root.aura-pulse-supported;
+                        aura-comet-supported <=> root.aura-comet-supported;
+                        aura-flash-supported <=> root.aura-flash-supported;
+                        aura-secondary-red <=> root.aura-secondary-red;
+                        aura-secondary-green <=> root.aura-secondary-green;
+                        aura-secondary-blue <=> root.aura-secondary-blue;
+                        aura-effect-requested(a, b, c, d, e, f, g, h) => { root.aura-effect-requested(a, b, c, d, e, f, g, h); }
                         aura-static-rgb-requested(a, b, c) => { root.aura-static-rgb-requested(a, b, c); }
                     }
                     if (root.active-section == Section.Display) : DisplaySection {
                         display-state-ready <=> root.display-state-ready;
-                        display-control-ready <=> root.display-control-ready;
-                        display-mode <=> root.display-mode;
                         display-status <=> root.display-status;
-                        display-mode-requested(i) => { root.display-mode-requested(i); }
                         panel-overdrive-state-ready <=> root.panel-overdrive-state-ready;
                         panel-overdrive-control-ready <=> root.panel-overdrive-control-ready;
                         panel-overdrive <=> root.panel-overdrive;
@@ -329,14 +389,27 @@ export component AppWindow inherits Window {
                         applying <=> root.applying;
                         status <=> root.status;
                         boot-sound-state-ready <=> root.boot-sound-state-ready;
+                        boot-sound-control-ready <=> root.boot-sound-control-ready;
                         boot-sound <=> root.boot-sound;
+                        igpu-memory-state-ready <=> root.igpu-memory-state-ready;
+                        igpu-memory-control-ready <=> root.igpu-memory-control-ready;
+                        igpu-memory-pending <=> root.igpu-memory-pending;
+                        status-led-state-ready <=> root.status-led-state-ready;
+                        status-led-control-ready <=> root.status-led-control-ready;
+                        auto-clamshell-state <=> root.auto-clamshell-state;
+                        standby-networking-control-ready <=> root.standby-networking-control-ready;
+                        hibernate-control-ready <=> root.hibernate-control-ready;
+                        core-count-control-ready <=> root.core-count-control-ready;
+                        binding-control-ready <=> root.binding-control-ready;
+                        advanced-apply-ready <=> root.advanced-apply-ready;
+                        aspm-state-ready <=> root.aspm-state-ready;
+                        aspm-control-ready <=> root.aspm-control-ready;
                         m1-action <=> root.m1-action;
                         m2-action <=> root.m2-action;
                         m3-action <=> root.m3-action;
                         m4-action <=> root.m4-action;
                         m5-action <=> root.m5-action;
                         status-led <=> root.status-led;
-                        auto-clamshell <=> root.auto-clamshell;
                         disable-aspm <=> root.disable-aspm;
                         disable-standby-networking <=> root.disable-standby-networking;
                         igpu-memory <=> root.igpu-memory;
@@ -344,7 +417,11 @@ export component AppWindow inherits Window {
                         p-cores <=> root.p-cores;
                         e-cores <=> root.e-cores;
                         reload-requested => { root.reload-requested(); }
+                        boot-sound-requested(v) => { root.boot-sound-requested(v); }
+                        igpu-memory-requested(v) => { root.igpu-memory-requested(v); }
                         apply-requested => { root.apply-requested(); }
+                        aspm-requested(v) => { root.aspm-requested(v); }
+                        auto-clamshell-requested(v) => { root.auto-clamshell-requested(v); }
                         diagnostics-summary <=> root.diagnostics-summary;
                         refresh-enabled <=> root.refresh-enabled;
                         refresh-pending <=> root.refresh-pending;

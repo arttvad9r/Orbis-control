@@ -199,6 +199,12 @@ pub struct UiState {
     /// Отдельно от `perf_state`: read-only session backend при Ready всё равно
     /// не позволяет запись; mock/offscreen могут сохранять writable behavior.
     pub perf_writable: bool,
+    /// Whether power-profiles-daemon delegation was established read-only.
+    pub performance_delegated_ready: bool,
+    /// Whether a delegated profile mutation is awaiting its read-back.
+    pub performance_delegated_pending: bool,
+    /// Last delegated mutation error, if any.
+    pub performance_delegated_error: Option<String>,
     /// Выбранный GPU-режим: 0=Eco, 1=Standard, 2=Ultimate, 3=Optimized.
     pub gpu_selected: i32,
     /// Битовая маска доступных GPU-режимов (bit0=Eco, bit1=Standard,
@@ -217,6 +223,8 @@ pub struct UiState {
     /// Отдельно от `gpu_mode_state`: production запрещает mutation, пока
     /// доказанный product-mode backend отсутствует.
     pub gpu_mode_writable: bool,
+    pub gpu_mode_pending: bool,
+    pub gpu_mode_unconfirmed: bool,
     /// Authoritative queued ASUS product GPU target card index (-1 = none).
     ///
     /// Заполняется только из authoritative read-back `SetProductGpuMode`;
@@ -236,6 +244,9 @@ pub struct UiState {
     pub charge_limit_writable: bool,
     /// Состояние готовности/доступности Battery Charge Limit.
     pub charge_limit_state: ChargeLimitState,
+    pub charge_limit_pending: bool,
+    pub charge_limit_unconfirmed: bool,
+    pub charge_limit_error: Option<String>,
     /// Read-only GPU hardware capability: dGPU power state.
     pub gpu_power: GpuHwState,
     /// Read-only GPU hardware capability: physical MUX state.
@@ -318,6 +329,8 @@ pub struct UiState {
     pub fan_curve_pwms: [i32; 8],
     /// Ошибка backend в fan-секции (остальное окно остаётся рабочим).
     pub fan_curve_error: bool,
+    pub fan_curve_pending: bool,
+    pub fan_curve_unconfirmed: bool,
     /// Есть ли несохранённые изменения ( dirty flag для UI кнопки Apply).
     pub fan_curve_dirty: bool,
     /// Stored curve enabled-state evidence from the authoritative read.
@@ -341,14 +354,14 @@ fn gpu_index(m: GpuMode) -> i32 {
 
 /// Map an ASUS product GPU wire value to a UI mode-card index.
 ///
-/// Hybrid renders on the Eco card (0), Integrated on Standard (1), Ultimate
+/// Hybrid renders on the Standard card (1), Integrated on Eco (0), Ultimate
 /// stays Ultimate (2). `Optimized` is never produced: the ASUS Armoury
 /// product API has no such mode, so unknown sentinels (`u32::MAX`) and any
 /// other value map to `None` and must not overwrite UI evidence.
 pub fn asus_product_gpu_index(raw: u32) -> Option<i32> {
     match raw {
-        0 => Some(0),
-        1 => Some(1),
+        0 => Some(1),
+        1 => Some(0),
         2 => Some(2),
         _ => None,
     }
@@ -377,6 +390,9 @@ impl UiState {
             available_perf_mask: 0,
             perf_state: PerformanceHwState::Loading,
             perf_writable: false,
+            performance_delegated_ready: false,
+            performance_delegated_pending: false,
+            performance_delegated_error: None,
             gpu_selected: 0,
             available_gpu_mask: 0,
             gpu_ultimate_pending: false,
@@ -384,12 +400,17 @@ impl UiState {
             gpu_section_error: false,
             gpu_mode_state: GpuModeHwState::Unavailable,
             gpu_mode_writable: false,
+            gpu_mode_pending: false,
+            gpu_mode_unconfirmed: false,
             gpu_queued: -1,
             gpu_reboot_required: false,
             charge_limit: 0,
             charge_limit_enabled: false,
             charge_limit_writable: false,
             charge_limit_state: ChargeLimitState::Loading,
+            charge_limit_pending: false,
+            charge_limit_unconfirmed: false,
+            charge_limit_error: None,
             gpu_power: GpuHwState::Loading,
             gpu_mux: GpuHwState::Loading,
             gpu_access: GpuHwState::Loading,
@@ -427,6 +448,8 @@ impl UiState {
             fan_curve_temps: [0; 8],
             fan_curve_pwms: [0; 8],
             fan_curve_error: false,
+            fan_curve_pending: false,
+            fan_curve_unconfirmed: false,
             fan_curve_dirty: false,
             fan_curve_enabled: None,
         }
@@ -510,6 +533,9 @@ impl UiState {
             // отдельно в main().
             perf_state: PerformanceHwState::Ready,
             perf_writable: true,
+            performance_delegated_ready: false,
+            performance_delegated_pending: false,
+            performance_delegated_error: None,
             gpu_selected,
             available_gpu_mask,
             gpu_ultimate_pending: false,
@@ -520,6 +546,8 @@ impl UiState {
             // отдельно в main().
             gpu_mode_state: GpuModeHwState::Ready,
             gpu_mode_writable: true,
+            gpu_mode_pending: false,
+            gpu_mode_unconfirmed: false,
             gpu_queued: -1,
             gpu_reboot_required: false,
             charge_limit,
@@ -529,6 +557,9 @@ impl UiState {
             charge_limit_writable: true,
             // fixture-профиль: первое значение готово сразу (offscreen/tests).
             charge_limit_state: ChargeLimitState::Ready,
+            charge_limit_pending: false,
+            charge_limit_unconfirmed: false,
+            charge_limit_error: None,
             // GPU hardware capabilities: Loading до первого authoritative read;
             // mock profile не предоставляет real hardware states.
             gpu_power: GpuHwState::Loading,
@@ -572,6 +603,8 @@ impl UiState {
             fan_curve_temps: [0; 8],
             fan_curve_pwms: [0; 8],
             fan_curve_error: false,
+            fan_curve_pending: false,
+            fan_curve_unconfirmed: false,
             fan_curve_dirty: false,
             fan_curve_enabled: None,
         }
@@ -822,6 +855,12 @@ impl UiState {
             return false;
         }
         if self.fan_curve_error {
+            return false;
+        }
+        if self.fan_curve_pending || self.fan_curve_unconfirmed {
+            return false;
+        }
+        if self.fan_curve_pending || self.fan_curve_unconfirmed {
             return false;
         }
         if !self.fan_curve_dirty {

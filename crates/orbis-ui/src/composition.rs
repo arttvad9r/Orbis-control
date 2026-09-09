@@ -33,8 +33,8 @@ use orbis_providers::{
     error::ProviderError,
 };
 use orbis_session_client::{
-    SessionChargeLimitProvider, SessionGpuAccessProvider, SessionGpuMuxProvider,
-    SessionGpuPowerProvider, SessionHardwareBatteryProvider, SessionHardwarePerformanceProvider,
+    DelegatedPerformanceProvider, SessionChargeLimitProvider, SessionGpuAccessProvider,
+    SessionGpuMuxProvider, SessionGpuPowerProvider, SessionHardwareBatteryProvider,
     ZbusHardwareBatterySource, ZbusHardwarePerformanceSource, ZbusSessionChargeLimitSource,
     ZbusSessionGpuSource, ZbusSessionPerformanceSource,
 };
@@ -406,14 +406,13 @@ pub trait FanServiceRuntime: Send + Sync {
         profile: AsusdFanProfile,
         fan: FanId,
         curve: FanCurvePoints,
-    ) -> Result<ApplyResult, ProviderError>;
+    ) -> Result<ApplyResult, orbis_application::SetFanCurveError>;
 
     /// Restore platform factory defaults for all fan curves of a profile.
     ///
     /// This is a profile-wide operation. The mutation is sent directly to
-    /// Hardware1 (original caller identity preserved). The result is
-    /// `ApplyResult::Accepted` — the command was accepted but observed state
-    /// cannot be independently verified as platform factory defaults.
+    /// Hardware1 (original caller identity preserved). `Applied` is returned
+    /// only after Hardware1 confirms the reset and reads back a known curve.
     async fn reset_fan_curves_to_defaults(
         &self,
         profile: AsusdFanProfile,
@@ -423,7 +422,7 @@ pub trait FanServiceRuntime: Send + Sync {
     ///
     /// Returns a typed `Capability` for the `FanCurves` feature. The write
     /// status is controlled by `mutation_status` (typed Hardware1 evidence),
-    /// the read status is derived from the `active_curve` read contract.
+    /// while read status comes from the profile-specific `FanCurveData` path.
     async fn probe_fan_capability(
         &self,
         fan: FanId,
@@ -461,7 +460,7 @@ where
         profile: AsusdFanProfile,
         fan: FanId,
         curve: FanCurvePoints,
-    ) -> Result<ApplyResult, ProviderError> {
+    ) -> Result<ApplyResult, orbis_application::SetFanCurveError> {
         AppService::set_fan_curve(self, profile, &fan, &curve).await
     }
 
@@ -882,7 +881,7 @@ where
             }
         })?;
 
-    // Fan curve read capabilities: CPU and GPU active curve reads. Write
+    // Fan curve read capabilities: CPU and GPU profile-specific curve reads. Write
     // capability comes from typed Hardware1 fan mutation evidence
     // (fan_mutation_status). Curve points never enter the registry — only
     // support metadata.
@@ -1044,10 +1043,7 @@ pub type ProductionRuntime = ApplicationRuntime<
         >,
     >,
     AppService<
-        SessionHardwarePerformanceProvider<
-            ZbusSessionPerformanceSource,
-            ZbusHardwarePerformanceSource,
-        >,
+        DelegatedPerformanceProvider<ZbusSessionPerformanceSource, ZbusHardwarePerformanceSource>,
     >,
 >;
 
@@ -1093,7 +1089,7 @@ where
 pub async fn build_production_runtime(
     session_connection: zbus::Connection,
     system_connection: zbus::Connection,
-) -> anyhow::Result<(ProductionRuntime, bool)> {
+) -> anyhow::Result<(ProductionRuntime, bool, bool)> {
     let hardware_owner = bounded_operation(
         HARDWARE1_STATUS_DEADLINE,
         "hardware1",
@@ -1112,11 +1108,33 @@ pub async fn build_production_runtime(
         orbis_session_client::hardware1_battery_mutation_status(&system_connection),
     )
     .await;
-    let performance_mutation_status = bounded_hardware1_status(
+    let mut performance_mutation_status = bounded_hardware1_status(
         "performance_mutation_status",
         orbis_session_client::hardware1_performance_mutation_status(&system_connection),
     )
     .await;
+
+    let delegated_performance = match bounded_operation(
+        Duration::from_secs(2),
+        "power-profiles-daemon",
+        "establish",
+        orbis_session_client::ZbusPowerProfilesDaemonClient::establish(system_connection.clone()),
+    )
+    .await
+    {
+        Ok(client) => Some(client),
+        Err(error) => {
+            tracing::info!(
+                ?error,
+                "power-profiles-daemon delegation unavailable; using Hardware1 fallback"
+            );
+            None
+        }
+    };
+    let delegated_ready = delegated_performance.is_some();
+    if delegated_ready {
+        performance_mutation_status = CapabilityStatus::Supported;
+    }
 
     let battery_read_provider = SessionChargeLimitProvider::new(ZbusSessionChargeLimitSource::new(
         session_connection.clone(),
@@ -1139,9 +1157,10 @@ pub async fn build_production_runtime(
     );
 
     let battery_arc = Arc::new(battery_provider);
-    let performance_arc = Arc::new(SessionHardwarePerformanceProvider::new(
+    let performance_arc = Arc::new(DelegatedPerformanceProvider::new(
         ZbusSessionPerformanceSource::new(session_connection.clone()),
         ZbusHardwarePerformanceSource::new(system_connection.clone()),
+        delegated_performance,
     ));
     let battery = AppService::new(battery_arc.clone());
     let performance = AppService::new(performance_arc.clone());
@@ -1155,7 +1174,7 @@ pub async fn build_production_runtime(
     //   (`ZbusAsusdFanCurveSource::read_curves(profile)`), GUI напрямую asusd
     //   НЕ читает;
     // - активная кривая остаётся через existing sysfs `asus_custom_fan_curve`;
-    // - capability probe остаётся на active sysfs curve;
+    // - capability probe использует profile-specific Session1/asusd read;
     // - mutation (`set_fan_curve`) остаётся напрямую через Hardware1 (original
     //   caller). Write capability определяется наличием production Hardware1
     //   mutation backend (hardware_owner). No writes, no privileged APIs.
@@ -1197,6 +1216,7 @@ pub async fn build_production_runtime(
             Some(system_connection),
         ),
         hardware_owner,
+        delegated_ready,
     ))
 }
 

@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
@@ -35,6 +36,7 @@ use orbis_hardwared::{DBUS_OBJECT_PATH, Hardware1Proxy};
 /// consumers can name the Hardware1 wire contract without depending on the
 /// privileged daemon crate directly.
 pub use orbis_hardwared::ProductGpuMutationResult;
+pub use orbis_hardwared::ProductGpuStatus;
 use orbis_providers::traits::{
     BatteryProvider, FanCurveMutationProvider, FanCurvePoints, FanProvider, GpuAccessProvider,
     GpuMuxProvider, GpuPowerProvider, PerformanceProvider, Provider, ProviderHealth,
@@ -46,9 +48,165 @@ use orbis_providers::{
 use orbis_session_protocol::{
     BatteryThresholdEvidenceTuple, ChargeLimitInfo, PerformanceInfo, Session1Proxy,
     battery_threshold_confidence, battery_threshold_freshness, battery_threshold_source,
-    battery_threshold_state, gpu_access, gpu_mux, gpu_power, performance,
+    battery_threshold_state, clamshell, gpu_access, gpu_mux, gpu_power, performance,
 };
 use zbus::proxy::CacheProperties;
+
+const POWER_PROFILES_BUS_NAME: &str = "org.freedesktop.UPower.PowerProfiles";
+const POWER_PROFILES_OBJECT_PATH: &str = "/org/freedesktop/UPower/PowerProfiles";
+
+#[zbus::proxy(
+    interface = "org.freedesktop.UPower.PowerProfiles",
+    default_service = "org.freedesktop.UPower.PowerProfiles",
+    default_path = "/org/freedesktop/UPower/PowerProfiles"
+)]
+trait PowerProfilesDaemon {
+    #[zbus(property)]
+    fn active_profile(&self) -> zbus::Result<String>;
+
+    #[zbus(property)]
+    fn profiles(&self) -> zbus::Result<Vec<(String, String)>>;
+
+    #[zbus(property)]
+    fn set_active_profile(&self, value: &str) -> zbus::Result<()>;
+}
+
+/// The three profiles Orbis can safely delegate to power-profiles-daemon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PowerProfilesProfile {
+    /// Silent / power saver.
+    Silent,
+    /// Balanced.
+    Balanced,
+    /// Turbo / performance.
+    Turbo,
+}
+
+impl PowerProfilesProfile {
+    /// Decode one daemon profile name without guessing.
+    pub fn from_wire(name: &str) -> Result<PerformanceProfile, ProviderError> {
+        match name {
+            "power-saver" => Ok(PerformanceProfile::Silent),
+            "balanced" => Ok(PerformanceProfile::Balanced),
+            "performance" => Ok(PerformanceProfile::Turbo),
+            other => Err(ProviderError::InvalidRequest(format!(
+                "unknown power profile '{other}'"
+            ))),
+        }
+    }
+
+    fn wire(profile: PerformanceProfile) -> &'static str {
+        match profile {
+            PerformanceProfile::Silent => "power-saver",
+            PerformanceProfile::Balanced => "balanced",
+            PerformanceProfile::Turbo => "performance",
+        }
+    }
+}
+
+/// Typed, caller-owned client for the power-profiles-daemon system service.
+#[async_trait]
+pub trait PowerProfilesDaemonClient: Send + Sync {
+    /// Read the authoritative active profile.
+    async fn read_current(&self) -> Result<PerformanceProfile, ProviderError>;
+    /// Read the authoritative available profile list.
+    async fn read_profiles(&self) -> Result<Vec<PerformanceProfile>, ProviderError>;
+    /// Set only ActiveProfile, then confirm it with a fresh read-back.
+    async fn set_profile(&self, profile: PerformanceProfile) -> Result<ApplyResult, ProviderError>;
+}
+
+/// zbus implementation of [`PowerProfilesDaemonClient`].
+pub struct ZbusPowerProfilesDaemonClient {
+    connection: zbus::Connection,
+}
+
+impl ZbusPowerProfilesDaemonClient {
+    /// Create a client without performing I/O.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+
+    async fn proxy(&self) -> Result<PowerProfilesDaemonProxy<'_>, ProviderError> {
+        PowerProfilesDaemonProxy::builder(&self.connection)
+            .destination(POWER_PROFILES_BUS_NAME)
+            .map_err(zbus_error_to_provider)?
+            .path(POWER_PROFILES_OBJECT_PATH)
+            .map_err(zbus_error_to_provider)?
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)
+    }
+
+    /// Establish delegation using only read-only owner and property probes.
+    pub async fn establish(
+        connection: zbus::Connection,
+    ) -> Result<Arc<dyn PowerProfilesDaemonClient>, ProviderError> {
+        let dbus = zbus::fdo::DBusProxy::new(&connection)
+            .await
+            .map_err(zbus_error_to_provider)?;
+        let owner = zbus::names::BusName::try_from(POWER_PROFILES_BUS_NAME)
+            .map_err(|error| ProviderError::Internal(error.to_string()))?;
+        if !dbus
+            .name_has_owner(owner)
+            .await
+            .map_err(|error| zbus_error_to_provider(zbus::Error::FDO(Box::new(error))))?
+        {
+            return Err(ProviderError::BackendUnavailable(
+                "power-profiles-daemon is not running".into(),
+            ));
+        }
+        let client = Arc::new(Self::new(connection));
+        client.read_current().await?;
+        client.read_profiles().await?;
+        Ok(client)
+    }
+}
+
+#[async_trait]
+impl PowerProfilesDaemonClient for ZbusPowerProfilesDaemonClient {
+    async fn read_current(&self) -> Result<PerformanceProfile, ProviderError> {
+        PowerProfilesProfile::from_wire(
+            &self
+                .proxy()
+                .await?
+                .active_profile()
+                .await
+                .map_err(zbus_error_to_provider)?,
+        )
+    }
+
+    async fn read_profiles(&self) -> Result<Vec<PerformanceProfile>, ProviderError> {
+        self.proxy()
+            .await?
+            .profiles()
+            .await
+            .map_err(zbus_error_to_provider)?
+            .iter()
+            .map(|(name, _driver)| PowerProfilesProfile::from_wire(name))
+            .collect()
+    }
+
+    async fn set_profile(&self, profile: PerformanceProfile) -> Result<ApplyResult, ProviderError> {
+        let available = self.read_profiles().await?;
+        if !available.contains(&profile) {
+            return Err(ProviderError::InvalidRequest(format!(
+                "power-profiles-daemon does not offer profile {profile:?}"
+            )));
+        }
+        self.proxy()
+            .await?
+            .set_active_profile(PowerProfilesProfile::wire(profile))
+            .await
+            .map_err(zbus_error_to_provider)?;
+        if self.read_current().await? != profile {
+            return Err(ProviderError::Conflict(format!(
+                "power-profiles-daemon ActiveProfile read-back mismatch: requested={profile:?}"
+            )));
+        }
+        Ok(ApplyResult::Applied)
+    }
+}
 
 /// Testable источник wire DTO через session protocol.
 #[async_trait]
@@ -73,6 +231,68 @@ pub trait SessionChargeLimitSource: Send + Sync {
 /// `read_charge_limit().await`.
 pub struct ZbusSessionChargeLimitSource {
     connection: zbus::Connection,
+}
+
+/// Typed session client for the user-session-owned clamshell inhibitor.
+#[async_trait]
+pub trait SessionClamshellSource: Send + Sync {
+    /// Read the authoritative current lifecycle state.
+    async fn read_clamshell(&self) -> Result<u8, ProviderError>;
+    /// Request lifecycle state and return the resulting state.
+    async fn set_clamshell(&self, enabled: bool) -> Result<u8, ProviderError>;
+}
+
+/// zbus implementation of [`SessionClamshellSource`].
+pub struct ZbusSessionClamshellSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusSessionClamshellSource {
+    /// Create a source without performing I/O.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+fn validate_clamshell_state(state: u8) -> Result<u8, ProviderError> {
+    if state <= clamshell::UNKNOWN {
+        Ok(state)
+    } else {
+        Err(ProviderError::Internal(format!(
+            "session protocol: unknown clamshell state {state}"
+        )))
+    }
+}
+
+#[async_trait]
+impl SessionClamshellSource for ZbusSessionClamshellSource {
+    async fn read_clamshell(&self) -> Result<u8, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        validate_clamshell_state(
+            proxy
+                .clamshell_inhibitor()
+                .await
+                .map_err(zbus_error_to_provider)?,
+        )
+    }
+
+    async fn set_clamshell(&self, enabled: bool) -> Result<u8, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        validate_clamshell_state(
+            proxy
+                .set_clamshell_inhibitor(enabled)
+                .await
+                .map_err(zbus_error_to_provider)?,
+        )
+    }
 }
 
 impl ZbusSessionChargeLimitSource {
@@ -187,6 +407,22 @@ pub fn battery_threshold_evidence_from_wire(
 /// Remote FDO errors отображаются детерминированно; остальные (Failed,
 /// transport/authentication/disconnect/protocol) — в `ProviderError::Dbus`.
 fn zbus_error_to_provider(error: zbus::Error) -> ProviderError {
+    let detail = error.to_string();
+    if detail.contains("ServiceUnknown")
+        || detail.contains("NameHasNoOwner")
+        || detail.contains("Disconnected")
+    {
+        return ProviderError::BackendUnavailable(detail);
+    }
+    if detail.contains("NoReply") {
+        return ProviderError::Timeout(detail);
+    }
+    if detail.contains("AccessDenied") {
+        return ProviderError::PermissionDenied(detail);
+    }
+    if detail.contains("InvalidArgs") {
+        return ProviderError::InvalidRequest(detail);
+    }
     if let zbus::Error::FDO(boxed) = &error {
         return match &**boxed {
             zbus::fdo::Error::NotSupported(msg) => ProviderError::Unsupported(msg.clone()),
@@ -726,6 +962,9 @@ pub trait HardwarePerformanceSource: Send + Sync {
 /// Testable direct Hardware1 source for ASUS product GPU mutation.
 #[async_trait]
 pub trait HardwareProductGpuSource: Send + Sync {
+    /// Read current and queued ASUS product GPU state without mutation.
+    async fn product_gpu_status(&self) -> Result<orbis_hardwared::ProductGpuStatus, ProviderError>;
+
     /// Queue an exact product GPU wire target and preserve the complete reply.
     async fn set_product_gpu_mode(
         &self,
@@ -898,6 +1137,7 @@ pub fn performance_mutation_status_from_wire(raw: u8) -> orbis_core::capability:
             CapabilityStatus::TemporarilyUnavailable
         }
         Some(PerformanceMutationStatus::PermissionDenied) => CapabilityStatus::PermissionDenied,
+        Some(PerformanceMutationStatus::Conflicted) => CapabilityStatus::Conflicted,
         Some(PerformanceMutationStatus::Unknown) | None => CapabilityStatus::Unknown,
     }
 }
@@ -1051,6 +1291,19 @@ impl ZbusHardwareProductGpuSource {
 
 #[async_trait]
 impl HardwareProductGpuSource for ZbusHardwareProductGpuSource {
+    async fn product_gpu_status(&self) -> Result<orbis_hardwared::ProductGpuStatus, ProviderError> {
+        let proxy = Hardware1Proxy::builder(&self.connection)
+            .path(DBUS_OBJECT_PATH)
+            .expect("valid hardware object path")
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .product_gpu_status()
+            .await
+            .map_err(zbus_error_to_provider)
+    }
+
     async fn set_product_gpu_mode(
         &self,
         requested_mode: u32,
@@ -1159,6 +1412,104 @@ where
 pub struct SessionHardwarePerformanceProvider<S, H> {
     session: S,
     hardware: H,
+}
+
+/// Performance provider with Session1 reads and optional power-profiles-daemon
+/// delegation. When delegation is absent, writes stay on the typed Hardware1
+/// fallback owned by the caller.
+pub struct DelegatedPerformanceProvider<S, H> {
+    session: S,
+    hardware: H,
+    delegated: Option<Arc<dyn PowerProfilesDaemonClient>>,
+}
+
+impl<S, H> DelegatedPerformanceProvider<S, H> {
+    /// Create a provider without performing I/O.
+    pub fn new(
+        session: S,
+        hardware: H,
+        delegated: Option<Arc<dyn PowerProfilesDaemonClient>>,
+    ) -> Self {
+        Self {
+            session,
+            hardware,
+            delegated,
+        }
+    }
+}
+
+impl<S, H> Provider for DelegatedPerformanceProvider<S, H>
+where
+    S: SessionPerformanceSource,
+    H: HardwarePerformanceSource,
+{
+    fn id(&self) -> &'static str {
+        "session-delegated-performance"
+    }
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("session-delegated-performance")
+    }
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("session + delegated Performance backend: функция '{feature}' недоступна")
+    }
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.session-delegated-performance",
+            "Session1 read + power-profiles-daemon or Hardware1 Performance backend",
+        )]
+    }
+}
+
+#[async_trait]
+impl<S, H> PerformanceProvider for DelegatedPerformanceProvider<S, H>
+where
+    S: SessionPerformanceSource,
+    H: HardwarePerformanceSource,
+{
+    async fn profiles(&self) -> Result<Vec<PerformanceProfile>, ProviderError> {
+        let info = self.session.read_performance().await?;
+        performance_mask_from_wire(info.available_mask)
+    }
+
+    async fn current_profile(&self) -> Result<PerformanceProfile, ProviderError> {
+        let info = self.session.read_performance().await?;
+        performance_current_from_wire(info.current)
+    }
+
+    async fn set_profile(&self, profile: PerformanceProfile) -> Result<ApplyResult, ProviderError> {
+        match &self.delegated {
+            Some(client) => client.set_profile(profile).await,
+            None => {
+                let confirmed = self
+                    .hardware
+                    .set_performance(performance_profile_to_wire(profile))
+                    .await?;
+                let confirmed = performance_current_from_wire(confirmed)?;
+                if confirmed != profile {
+                    return Err(ProviderError::Conflict(format!(
+                        "hardware protocol: подтверждён другой profile: requested={profile:?}, confirmed={confirmed:?}"
+                    )));
+                }
+                Ok(ApplyResult::Applied)
+            }
+        }
+    }
+
+    async fn profile_on_ac(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+        Ok(None)
+    }
+    async fn profile_on_battery(&self) -> Result<Option<PerformanceProfile>, ProviderError> {
+        Ok(None)
+    }
+    fn validate_set_profile(&self, _profile: PerformanceProfile) -> ValidationResult {
+        ValidationResult::ok()
+    }
 }
 
 /// Composed Battery provider: authoritative reads через Session1, mutation

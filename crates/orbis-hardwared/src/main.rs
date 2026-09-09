@@ -21,9 +21,10 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use orbis_hardwared::{
-    AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION,
-    GPU_POLKIT_ACTION, HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
-    PRODUCT_GPU_POLKIT_ACTION, PolkitAuthorizer,
+    APU_MEMORY_POLKIT_ACTION, ASPM_POLKIT_ACTION, AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION,
+    BOOT_SOUND_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION, GPU_POLKIT_ACTION,
+    HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
+    POWER_PROFILES_DAEMON_BUS_NAME, PRODUCT_GPU_POLKIT_ACTION, PolkitAuthorizer,
     asus_gpu_mode::{AsusGpuMutationBackend, AsusdGpuMutationClient},
     aura::{AsusdAuraStaticRgbMutationBackend, ZbusAsusdAuraClient},
     battery::{
@@ -32,6 +33,9 @@ use orbis_hardwared::{
         ZbusAsusdBatteryClient, discover_effective_reader,
     },
     fans::{AsusdFanCurveMutationBackend, ZbusAsusdFanCurveClient},
+    firmware::{
+        ApuMemoryMutationBackend, BootSoundMutationBackend, SysfsApuMemoryIo, SysfsBootSoundIo,
+    },
     keyboard_backlight::{SysfsKeyboardBacklightIo, SysfsKeyboardBacklightMutationBackend},
     panel::{
         AsusdPanelOverdriveMutationBackend, PanelOverdriveMutationBackend,
@@ -44,6 +48,15 @@ use orbis_providers::{error::ProviderError, supergfxd::SupergfxdMode};
 
 const PRODUCT_MUTATION_DISABLED: &str =
     "mutation is disabled until the Orbis product contract and release evidence are proven";
+
+async fn platform_profile_owner_state(
+    connection: &zbus::Connection,
+) -> Result<bool, zbus::fdo::Error> {
+    let proxy = zbus::fdo::DBusProxy::new(connection).await?;
+    let name = zbus::names::BusName::try_from(POWER_PROFILES_DAEMON_BUS_NAME)
+        .expect("fixed power-profiles-daemon bus name is valid");
+    proxy.name_has_owner(name).await
+}
 struct DisabledGpuMutationBackend;
 
 #[async_trait]
@@ -189,15 +202,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
     init_tracing();
     let connection = zbus::connection::Builder::system()?.build().await?;
 
-    // Product-gated paths are probed read-only so release diagnostics can
-    // distinguish "implementation structurally available" from "product policy
-    // approved". These results never select a mutation backend in this build.
+    let platform_profile_owner = platform_profile_owner_state(&connection).await;
+    match platform_profile_owner {
+        Ok(true) => tracing::warn!(
+            "power-profiles-daemon owns platform_profile; Orbis Performance writes disabled"
+        ),
+        Ok(false) => tracing::info!("no external platform_profile owner detected"),
+        Err(ref error) => tracing::warn!(
+            ?error,
+            "platform_profile owner query inconclusive; writes disabled"
+        ),
+    }
+
+    // Product-gated paths are probed read-only before their narrow mutation
+    // backends are exposed. Aura confirmation remains config-level, not a
+    // claim that the write-only hardware LED state was independently read back.
     let panel_preflight = product_preflight::preflight_panel_overdrive(&connection).await;
     let aura_preflight = product_preflight::preflight_aura_static_rgb(&connection).await;
     tracing::info!(
         ?panel_preflight,
         ?aura_preflight,
-        "product mutation startup preflight complete; Aura writes remain release-disabled"
+        "product mutation startup preflight complete; Aura writes use config-level confirmation"
     );
 
     let battery_backend = build_battery_backend(&connection).await;
@@ -233,6 +258,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             FAN_POLKIT_ACTION,
         )),
     )
+    .with_platform_profile_owner_state(platform_profile_owner)
     .with_panel(
         panel_backend,
         Box::new(PolkitAuthorizer::with_action(
@@ -266,7 +292,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
             connection.clone(),
             PRODUCT_GPU_POLKIT_ACTION,
         )),
+    )
+    .with_boot_sound(
+        Box::new(BootSoundMutationBackend::new(SysfsBootSoundIo::default())),
+        Box::new(PolkitAuthorizer::with_action(
+            connection.clone(),
+            BOOT_SOUND_POLKIT_ACTION,
+        )),
     );
+    let service = service.with_apu_memory(
+        Box::new(ApuMemoryMutationBackend::new(SysfsApuMemoryIo::default())),
+        Box::new(PolkitAuthorizer::with_action(
+            connection.clone(),
+            APU_MEMORY_POLKIT_ACTION,
+        )),
+    );
+    let service = service.with_aspm_authorizer(Box::new(PolkitAuthorizer::with_action(
+        connection.clone(),
+        ASPM_POLKIT_ACTION,
+    )));
 
     connection
         .object_server()

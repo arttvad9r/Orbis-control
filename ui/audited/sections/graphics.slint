@@ -1,8 +1,8 @@
-// Graphics page — GPU product mode (queued/reboot semantics preserved) and
-// read-only dGPU hardware status (power state, physical MUX, access policy).
+// Graphics page — product GPU mode with explicit current/queued semantics and
+// observed dGPU hardware state.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, GpuHwState, GpuModeHwState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, InfoRow } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, InfoRow, StatusPill, LocalStatus, LayoutMetrics } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -16,11 +16,21 @@ export component GraphicsSection inherits Rectangle {
     }
 
     function mode-reason() -> string {
+        if (root.ui-state.gpu-mode-pending) { return "Ожидание подтверждения"; }
+        if (root.ui-state.gpu-mode-unconfirmed) { return "Результат неизвестен · обновите состояние"; }
         if (root.ui-state.gpu-mode-state == GpuModeHwState.Ready) {
-            return root.ui-state.gpu-mode-writable ? "" : "Только чтение";
+            return root.ui-state.gpu-mode-writable ? "Доступно" : "Только чтение";
         }
-        if (root.ui-state.gpu-mode-state == GpuModeHwState.Loading) { return "Чтение…"; }
+        if (root.ui-state.gpu-mode-state == GpuModeHwState.Loading) { return "Получение состояния"; }
         return "Управление недоступно";
+    }
+
+    function mode-label(index: int) -> string {
+        if (index == 0) { return "Eco"; }
+        if (index == 1) { return "Standard"; }
+        if (index == 2) { return "Ultimate"; }
+        if (index == 3) { return "Optimized"; }
+        return "—";
     }
 
     function power-label() -> string {
@@ -28,8 +38,8 @@ export component GraphicsSection inherits Rectangle {
         if (root.ui-state.gpu-power-state == GpuHwState.Unavailable) { return "Недоступно"; }
         if (root.ui-state.gpu-power-value == 0) { return "Активна"; }
         if (root.ui-state.gpu-power-value == 1) { return "Приостановлена"; }
-        if (root.ui-state.gpu-power-value == 2) { return "Неизвестно"; }
-        return "Выключена";
+        if (root.ui-state.gpu-power-value == 2) { return "Выключена"; }
+        return "Неизвестно";
     }
 
     function mux-label() -> string {
@@ -51,21 +61,74 @@ export component GraphicsSection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * LayoutMetrics.page-margin;
+            x: LayoutMetrics.page-margin;
+            spacing: LayoutMetrics.page-gap;
+            padding-top: 14px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Графика";
-                description: "Режимы гибридной графики и состояние dGPU.";
+                description: "Режим гибридной графики, очередь переключения и состояние дискретного GPU.";
+            }
+
+            HorizontalLayout {
+                height: 74px;
+                spacing: 14px;
+                SectionCard {
+                    horizontal-stretch: 1;
+                    background: Palette.surface-raised;
+                    HorizontalLayout {
+                        padding-left: 16px; padding-right: 16px; spacing: 10px; alignment: center;
+                        VerticalLayout {
+                            alignment: center; spacing: 2px;
+                            Text { text: "Текущий режим"; font-size: 11.5px; color: Palette.text-secondary; }
+                            Text { text: root.mode-label(root.ui-state.gpu-selected); font-size: 17px; font-weight: 700; color: Palette.text-primary; }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        Rectangle {
+                  width: root.ui-state.gpu-mode-writable ? 88px : 112px;
+                  vertical-stretch: 1;
+                  background: transparent;
+                  StatusPill {
+                      width: parent.width;
+                      y: (parent.height - self.height) / 2;
+                      text: root.ui-state.gpu-mode-writable ? "Доступно" : "Только чтение";
+                      accent: root.ui-state.gpu-mode-writable ? Palette.success : Palette.text-secondary;
+                  }
+              }
+                    }
+                }
+                SectionCard {
+                    horizontal-stretch: 1;
+                    background: Palette.surface-raised;
+                    HorizontalLayout {
+                        padding-left: 16px; padding-right: 16px; spacing: 10px; alignment: center;
+                        VerticalLayout {
+                            alignment: center; spacing: 2px;
+                            Text { text: "В очереди"; font-size: 11.5px; color: Palette.text-secondary; }
+                            Text { text: root.mode-label(root.ui-state.gpu-queued); font-size: 17px; font-weight: 700; color: root.ui-state.gpu-queued >= 0 ? Palette.warning : Palette.text-disabled; }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        if (root.ui-state.gpu-reboot-required) : Rectangle {
+                  width: 150px;
+                  vertical-stretch: 1;
+                  background: transparent;
+                  StatusPill {
+                      width: parent.width;
+                      y: (parent.height - self.height) / 2;
+                      text: "Нужен перезапуск";
+                      accent: Palette.warning;
+                  }
+              }
+                    }
+                }
             }
 
             SectionCard {
                 VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 14px;
 
                     SectionTitle {
                         title: "Режим GPU";
@@ -73,16 +136,16 @@ export component GraphicsSection inherits Rectangle {
                     }
 
                     HorizontalLayout {
-                        height: 76px;
+                        height: 88px;
                         spacing: 12px;
                         ModeCard {
                             title: "Eco";
-                            description: "Только iGPU";
+                            description: "Только интегрированная графика";
                             icon-kind: 4;
                             accent: Palette.eco;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0;
                             pending: root.ui-state.gpu-queued == 0;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1);
+                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || !root.bit-set(root.ui-state.available-gpu-mask, 1);
                             clicked => { root.gpu-clicked(0); }
                         }
                         ModeCard {
@@ -92,17 +155,17 @@ export component GraphicsSection inherits Rectangle {
                             accent: Palette.standard;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1;
                             pending: root.ui-state.gpu-queued == 1;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2);
+                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || !root.bit-set(root.ui-state.available-gpu-mask, 2);
                             clicked => { root.gpu-clicked(1); }
                         }
                         ModeCard {
                             title: "Ultimate";
-                            description: "Только dGPU (MUX)";
+                            description: "Прямой вывод через dGPU";
                             icon-kind: 4;
                             accent: Palette.ultimate;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2;
                             pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4);
+                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4);
                             clicked => { root.gpu-clicked(2); }
                         }
                         if (root.bit-set(root.ui-state.available-gpu-mask, 8)) : ModeCard {
@@ -111,36 +174,37 @@ export component GraphicsSection inherits Rectangle {
                             icon-kind: 4;
                             accent: Palette.optimized;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable;
+                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
                             clicked => { root.gpu-clicked(3); }
                         }
                     }
 
-                    if (root.ui-state.gpu-section-error) : Text {
+                     if (root.ui-state.gpu-section-error) : LocalStatus {
                         text: "Изменение режима GPU не было подтверждено";
-                        font-size: 12px;
-                        color: Palette.error;
+                        accent: Palette.error;
+                     }
+                    if (root.ui-state.gpu-mode-unconfirmed) : LocalStatus {
+                        text: "Результат неизвестен · обновите состояние перед новой записью";
+                        accent: Palette.warning;
                     }
-                    if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : Text {
-                        text: "Режим поставлен в очередь · применится при следующем выключении/перезагрузке";
-                        font-size: 12px;
-                        color: Palette.warning;
+                    if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : LocalStatus {
+                        text: "Переключение поставлено в очередь и завершится после перезагрузки или выключения";
+                        accent: Palette.warning;
                     }
                 }
             }
 
             SectionCard {
                 VerticalLayout {
-                    padding: 16px;
+                    padding: LayoutMetrics.card-padding;
                     spacing: 4px;
-
                     SectionTitle { title: "Состояние оборудования"; }
-
                     InfoRow { label: "Питание dGPU"; value: root.power-label(); }
                     InfoRow { label: "Физический MUX"; value: root.mux-label(); }
                     InfoRow { label: "Доступ к dGPU"; value: root.access-label(); }
                 }
             }
+
             Rectangle { vertical-stretch: 100; background: transparent; }
         }
     }

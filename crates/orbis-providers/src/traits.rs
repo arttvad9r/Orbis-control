@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use orbis_capabilities::engine::CapabilityPart;
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::aura::AuraState;
-use orbis_core::automation::AutomationRule;
 use orbis_core::battery::{BatteryThresholdEvidence, ChargeLimit};
+use orbis_core::diagnostics::CpuFrequencyDiagnostics;
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::display::{
     DisplayMode, MiniLedModeState, PanelOverdriveState, ScreenAutoBrightnessState,
@@ -45,6 +45,13 @@ pub trait Provider: Send + Sync {
 
     /// Диагностические записи.
     fn diagnostics(&self) -> Vec<DiagnosticEntry>;
+}
+
+/// Read-only CPU frequency policy evidence.
+#[async_trait]
+pub trait CpuFrequencyProvider: Provider {
+    /// Read driver, EPP preferences/current preference, and boost state.
+    async fn cpu_frequency(&self) -> Result<CpuFrequencyDiagnostics, ProviderError>;
 }
 
 /// Здоровье backend.
@@ -407,34 +414,6 @@ pub trait TelemetryProvider: Provider {
 
     /// Период обновления по умолчанию.
     fn default_poll_interval(&self) -> Duration;
-}
-
-/// Автоматизация (правила, применяемые sessiond).
-#[async_trait]
-pub trait AutomationProvider: Provider {
-    /// Список активных правил.
-    async fn rules(&self) -> Result<Vec<AutomationRule>, ProviderError>;
-
-    /// Применить правило (вернуть целевое действие для выполнения).
-    async fn apply_rule(&self, rule: &AutomationRule) -> Result<(), ProviderError>;
-}
-
-/// Обновления прошивки.
-#[async_trait]
-pub trait FirmwareUpdateProvider: Provider {
-    /// Есть ли обновления (без установки).
-    async fn check_updates(&self) -> Result<Vec<FirmwareUpdate>, ProviderError>;
-}
-
-/// Описание обновления прошивки.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct FirmwareUpdate {
-    /// Источник.
-    pub source: String,
-    /// Версия.
-    pub version: String,
-    /// Требование (reboot и т.п.).
-    pub requirement: ActionRequirement,
 }
 
 /// Список CapabilityPart-ов для построения матрицы (обёртка для mock/test).

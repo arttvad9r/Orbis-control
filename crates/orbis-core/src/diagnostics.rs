@@ -8,6 +8,9 @@ use crate::capability::DeviceCapabilities;
 use crate::display_output::DisplayOutputSnapshot;
 use crate::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use crate::identity::DeviceIdentity;
+use crate::limits::PowerLimitValue;
+use crate::limits::PowerLimits;
+use crate::newtypes::{MilliWatt, TemperatureC};
 use crate::telemetry::{Telemetry, TelemetryQuality};
 use crate::warning::WarningSeverity;
 
@@ -249,6 +252,19 @@ pub struct GpuDiagnostics {
     pub access_policy: DiagnosticObservation<GpuAccessPolicy>,
     /// Authoritative runtime dGPU power observation.
     pub runtime_power: DiagnosticObservation<GpuPowerState>,
+    /// Read-only NVIDIA power/thermal evidence from the driver hwmon node.
+    pub nvidia: DiagnosticObservation<NvidiaGpuDiagnostics>,
+}
+
+/// NVIDIA observations that do not imply a writable power-limit owner.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NvidiaGpuDiagnostics {
+    /// Current board power draw, when exposed by the driver.
+    pub power: Option<MilliWatt>,
+    /// Current GPU temperature, when exposed by the driver.
+    pub temperature: Option<TemperatureC>,
+    /// Current/default/min/max driver-reported power limit.
+    pub power_limit: Option<PowerLimitValue>,
 }
 
 /// Result of the telemetry collection path.
@@ -326,6 +342,55 @@ pub struct DisplayDiagnostics {
     pub checked_at: Option<SystemTime>,
 }
 
+/// Read-only CPU package power-limit observation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CpuPackagePowerLimitsObservation {
+    /// Current values and metadata were read successfully.
+    Value(PowerLimits),
+    /// The backend was present but the read was unavailable.
+    Unavailable,
+    /// The attributes are absent or the feature is unsupported.
+    Unsupported,
+    /// The read was denied.
+    PermissionDenied,
+    /// The backend returned malformed or inconsistent metadata.
+    Malformed,
+    /// The result could not be classified reliably.
+    Unknown,
+}
+
+/// Read-only CPU frequency policy evidence; this does not imply write ownership.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CpuFrequencyDiagnostics {
+    /// Kernel CPU frequency driver name.
+    pub driver: String,
+    /// EPP preferences exposed by the kernel policy.
+    pub available_epp_preferences: Vec<String>,
+    /// Current kernel EPP preference.
+    pub current_epp_preference: String,
+    /// Current kernel boost state.
+    pub boost: bool,
+}
+
+/// Result of observing CPU frequency policy evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CpuFrequencyObservation {
+    /// All requested values were read and validated.
+    Value(CpuFrequencyDiagnostics),
+    /// The source is known but currently unavailable.
+    Unavailable,
+    /// The attributes are absent or unsupported.
+    Unsupported,
+    /// The read was denied.
+    PermissionDenied,
+    /// The source returned malformed values.
+    Malformed,
+    /// The result could not be classified reliably.
+    Unknown,
+}
+
 /// Typed sections carried by an immutable diagnostics snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticsSnapshotSections {
@@ -345,6 +410,10 @@ pub struct DiagnosticsSnapshotSections {
     pub telemetry: TelemetryDiagnostics,
     /// Read-only display/output observations.
     pub display: DisplayDiagnostics,
+    /// Read-only CPU package power-limit observation.
+    pub cpu_package_power_limits: CpuPackagePowerLimitsObservation,
+    /// Read-only CPU frequency policy evidence.
+    pub cpu_frequency: CpuFrequencyObservation,
 }
 
 /// Immutable point-in-time production diagnostics domain snapshot.
@@ -421,6 +490,7 @@ mod tests {
             mux: DiagnosticObservation::Value(GpuMuxState::Discrete),
             access_policy: DiagnosticObservation::Value(GpuAccessPolicy::Blocked),
             runtime_power: DiagnosticObservation::Unavailable,
+            nvidia: DiagnosticObservation::Unknown,
         };
 
         assert_eq!(gpu.mux, DiagnosticObservation::Value(GpuMuxState::Discrete));
@@ -540,5 +610,25 @@ mod tests {
         assert_eq!(display.outputs, DiagnosticObservation::Unavailable);
         assert!(telemetry.latest.is_none());
         assert_eq!(telemetry.freshness, TelemetryFreshness::Unknown);
+    }
+
+    #[test]
+    fn cpu_frequency_observation_keeps_read_only_evidence_typed() {
+        let observation = CpuFrequencyObservation::Value(CpuFrequencyDiagnostics {
+            driver: "amd-pstate-epp".into(),
+            available_epp_preferences: vec!["power".into(), "performance".into()],
+            current_epp_preference: "power".into(),
+            boost: false,
+        });
+
+        assert_eq!(
+            observation,
+            CpuFrequencyObservation::Value(CpuFrequencyDiagnostics {
+                driver: "amd-pstate-epp".into(),
+                available_epp_preferences: vec!["power".into(), "performance".into()],
+                current_epp_preference: "power".into(),
+                boost: false,
+            })
+        );
     }
 }

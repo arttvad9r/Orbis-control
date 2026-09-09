@@ -1,6 +1,5 @@
-// Sidebar navigation item: 44px row, 18px line icon + 13px label.
-// Selected = soft accent fill with accent icon/text (reference design);
-// hover = quiet neutral fill. No gradients, no glow.
+// Sidebar navigation item. Selected state uses both a quiet surface and a slim
+// accent rail so navigation remains obvious without turning the whole row blue.
 import { Icon } from "icon.slint";
 import { Palette } from "../themes/dark.slint";
 
@@ -10,34 +9,48 @@ export component NavItem inherits Rectangle {
     in property <bool> selected: false;
     callback clicked;
 
-    height: 44px;
-    border-radius: 8px;
-    background: root.selected ? Palette.accent-soft
+    height: 42px;
+    border-radius: 10px;
+    background: root.selected ? Palette.surface-selected
         : touch.has-hover ? Palette.surface-hover
         : transparent;
 
+    if (root.selected) : Rectangle {
+        x: 0px;
+        y: 9px;
+        width: 3px;
+        height: parent.height - 18px;
+        border-radius: 1.5px;
+        background: Palette.accent-default;
+    }
+
     HorizontalLayout {
         padding-left: 12px;
-        padding-right: 12px;
+        padding-right: 10px;
         spacing: 11px;
         alignment: center;
 
-        Icon {
-            kind: root.icon-kind;
-            tint: root.selected ? Palette.accent-default : Palette.text-secondary;
+        Rectangle {
+            width: 22px;
+            vertical-stretch: 1;
+            background: transparent;
+            Icon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2 + 1px;
+                kind: root.icon-kind;
+                tint: root.selected ? Palette.accent-default : Palette.text-secondary;
+            }
         }
         Text {
             text: root.label;
-            font-size: 13px;
-            font-weight: root.selected ? 600 : 500;
-            color: root.selected ? Palette.accent-default : Palette.text-primary;
+            font-size: 13.5px;
+            font-weight: root.selected ? 650 : 500;
+            color: root.selected ? Palette.text-primary : Palette.text-secondary;
             vertical-alignment: center;
             overflow: elide;
         }
         Rectangle { horizontal-stretch: 1; background: transparent; }
     }
 
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
+    touch := TouchArea { clicked => { root.clicked(); } }
 }

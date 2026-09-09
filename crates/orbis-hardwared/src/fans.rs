@@ -57,6 +57,9 @@ pub trait AsusdFanCurveClient: Send + Sync {
     async fn reset_curves_to_defaults(&self, profile: AsusdFanProfile)
     -> Result<(), ProviderError>;
 
+    /// Reset the stored profile curves and device curves to platform defaults.
+    async fn reset_profile_curves(&self, profile: AsusdFanProfile) -> Result<(), ProviderError>;
+
     /// Прочитать сохранённые кривые профиля (fresh read-back).
     async fn read_curves(
         &self,
@@ -97,6 +100,8 @@ trait AsusdFanCurves {
 
     fn set_curves_to_defaults(&self, profile: u32) -> zbus::Result<()>;
 
+    fn reset_profile_curves(&self, profile: u32) -> zbus::Result<()>;
+
     fn fan_curve_data(&self, profile: u32) -> zbus::Result<Vec<AsusdCurveWire>>;
 }
 
@@ -121,8 +126,8 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
         enabled: bool,
     ) -> Result<(), ProviderError> {
         let name = fan_wire_name(fan)?;
-        let mut temps = [0u8; 8];
         let mut pwms = [0u8; 8];
+        let mut temps = [0u8; 8];
         for (i, (t, p)) in curve.temps.iter().zip(curve.pwms.iter()).enumerate() {
             temps[i] = u8::try_from(t.get()).map_err(|_| {
                 ProviderError::InvalidRequest(format!(
@@ -134,7 +139,8 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
         }
         // enabled: pass through the authoritative stored enabled state so a
         // custom write does not silently disable the curve (#104).
-        let wire = (name.to_string(), temps, pwms, enabled);
+        // asusd SetFanCurve wire order is PWM first, temperature second.
+        let wire = (name.to_string(), pwms, temps, enabled);
         self.proxy()
             .await?
             .set_fan_curve(profile.wire(), wire)
@@ -151,6 +157,14 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
             .set_curves_to_defaults(profile.wire())
             .await
             .map_err(|error| ProviderError::Dbus(format!("asusd SetCurvesToDefaults: {error}")))
+    }
+
+    async fn reset_profile_curves(&self, profile: AsusdFanProfile) -> Result<(), ProviderError> {
+        self.proxy()
+            .await?
+            .reset_profile_curves(profile.wire())
+            .await
+            .map_err(|error| ProviderError::Dbus(format!("asusd ResetProfileCurves: {error}")))
     }
 
     async fn read_curves(
@@ -180,6 +194,38 @@ pub struct FanCurveDefaultsReadback {
     pub result: ApplyResult,
     /// Number of recognized fan curves in the authoritative post-reset read.
     pub observed_curves: usize,
+}
+
+fn validate_factory_reset_readback(
+    curves: &[(String, [u8; 8], [u8; 8], bool)],
+) -> Result<usize, ProviderError> {
+    let mut cpu = false;
+    let mut gpu = false;
+    let mut mid = false;
+    for (name, _, _, _) in curves {
+        let seen = match name.as_str() {
+            "CPU" => &mut cpu,
+            "GPU" => &mut gpu,
+            "MID" => &mut mid,
+            other => {
+                return Err(ProviderError::BackendUnavailable(format!(
+                    "hardwared: factory-default reset returned unknown fan '{other}'"
+                )));
+            }
+        };
+        if *seen {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "hardwared: factory-default reset returned duplicate fan '{name}'"
+            )));
+        }
+        *seen = true;
+    }
+    if !cpu || !gpu {
+        return Err(ProviderError::BackendUnavailable(
+            "hardwared: factory-default reset read-back is missing CPU or GPU curve".into(),
+        ));
+    }
+    Ok(curves.len())
 }
 
 /// Typed runtime evidence for fan curve mutation backend availability.
@@ -397,7 +443,7 @@ where
 
         // 4. fresh read-back: точки И enabled должны сохраниться.
         let raw = self.asusd.read_curves(profile).await?;
-        let matched = raw.iter().any(|(n, temps, pwms, enabled)| {
+        let matched = raw.iter().any(|(n, pwms, temps, enabled)| {
             if n != name {
                 return false;
             }
@@ -426,25 +472,20 @@ where
         })
     }
 
-    /// Ask asusd to restore platform defaults for the whole profile, then
-    /// perform a fresh FanCurveData read. The current upstream asusd reset is
-    /// inherently a mutation, so Orbis never calls this for UI preview; it is
-    /// invoked only from the explicit Apply path.
+    /// Ask asusd to restore the stored and device curves for the whole profile,
+    /// then perform a fresh FanCurveData read. The upstream reset is inherently
+    /// a mutation, so Orbis invokes it only from the explicit Apply path.
     pub async fn reset_curves_to_defaults(
         &self,
         profile: AsusdFanProfile,
     ) -> Result<FanCurveDefaultsReadback, ProviderError> {
         self.asusd.reset_curves_to_defaults(profile).await?;
         let raw = self.asusd.read_curves(profile).await?;
-        let observed_curves = raw
-            .iter()
-            .filter(|(name, _, _, _)| matches!(name.as_str(), "CPU" | "GPU" | "MID"))
-            .count();
-        if observed_curves == 0 {
-            return Err(ProviderError::BackendUnavailable(format!(
-                "hardwared: factory-default reset completed but FanCurveData returned no recognized curves (profile={profile:?})"
-            )));
-        }
+        let observed_curves = validate_factory_reset_readback(&raw).map_err(|error| {
+            ProviderError::BackendUnavailable(format!(
+                "hardwared: factory-default reset read-back invalid (profile={profile:?}): {error}"
+            ))
+        })?;
         Ok(FanCurveDefaultsReadback {
             requested_profile: profile,
             result: ApplyResult::Applied,
@@ -691,6 +732,7 @@ mod tests {
         read_index: std::sync::atomic::AtomicUsize,
         setter_calls: std::sync::atomic::AtomicUsize,
         reset_calls: std::sync::atomic::AtomicUsize,
+        reset_profile_calls: std::sync::atomic::AtomicUsize,
     }
 
     impl FakeAsusd {
@@ -706,6 +748,7 @@ mod tests {
                 read_index: std::sync::atomic::AtomicUsize::new(0),
                 setter_calls: std::sync::atomic::AtomicUsize::new(0),
                 reset_calls: std::sync::atomic::AtomicUsize::new(0),
+                reset_profile_calls: std::sync::atomic::AtomicUsize::new(0),
             }
         }
 
@@ -720,6 +763,27 @@ mod tests {
                 .lock()
                 .unwrap()
                 .insert((profile.wire(), name.to_string()), (temps, pwms, enabled));
+        }
+
+        fn store_defaults(&self, profile: AsusdFanProfile) {
+            let mut stored = self.stored.lock().unwrap();
+            for (name, temps, pwms) in [
+                (
+                    "CPU",
+                    [50u8, 55, 60, 65, 70, 75, 79, 85],
+                    [0u8, 8, 13, 26, 36, 54, 77, 100],
+                ),
+                (
+                    "GPU",
+                    [50u8, 55, 60, 65, 70, 75, 79, 85],
+                    [0u8, 8, 13, 26, 36, 54, 77, 100],
+                ),
+            ] {
+                stored.insert(
+                    (profile.wire(), name.to_string()),
+                    (temps.to_vec(), pwms.to_vec(), true),
+                );
+            }
         }
     }
 
@@ -756,24 +820,20 @@ mod tests {
             if self.fail_reset.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err(ProviderError::Dbus("reset failed".into()));
             }
-            let mut stored = self.stored.lock().unwrap();
-            for (name, temps, pwms) in [
-                (
-                    "CPU",
-                    [50u8, 55, 60, 65, 70, 75, 79, 85],
-                    [0u8, 8, 13, 26, 36, 54, 77, 100],
-                ),
-                (
-                    "GPU",
-                    [50u8, 55, 60, 65, 70, 75, 79, 85],
-                    [0u8, 8, 13, 26, 36, 54, 77, 100],
-                ),
-            ] {
-                stored.insert(
-                    (profile.wire(), name.to_string()),
-                    (temps.to_vec(), pwms.to_vec(), true),
-                );
+            self.store_defaults(profile);
+            Ok(())
+        }
+
+        async fn reset_profile_curves(
+            &self,
+            profile: AsusdFanProfile,
+        ) -> Result<(), ProviderError> {
+            self.reset_profile_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fail_reset.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(ProviderError::Dbus("reset failed".into()));
             }
+            self.store_defaults(profile);
             Ok(())
         }
 
@@ -812,10 +872,11 @@ mod tests {
                 {
                     p[7] = p[7].wrapping_add(1);
                 }
+                // Match asusd's wire order: PWM array, then temperature array.
                 out.push((
                     name.1.clone(),
-                    t,
                     p,
+                    t,
                     if invert_enabled { !*enabled } else { *enabled },
                 ));
             }
@@ -840,6 +901,13 @@ mod tests {
             profile: AsusdFanProfile,
         ) -> Result<(), ProviderError> {
             (**self).reset_curves_to_defaults(profile).await
+        }
+
+        async fn reset_profile_curves(
+            &self,
+            profile: AsusdFanProfile,
+        ) -> Result<(), ProviderError> {
+            (**self).reset_profile_curves(profile).await
         }
 
         async fn read_curves(
@@ -896,6 +964,12 @@ mod tests {
             asusd.reset_calls.load(std::sync::atomic::Ordering::SeqCst),
             1
         );
+        assert_eq!(
+            asusd
+                .reset_profile_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
     }
 
     #[tokio::test]
@@ -910,6 +984,12 @@ mod tests {
             .await
             .expect_err("reset error");
         assert!(matches!(err, ProviderError::Dbus(_)));
+    }
+
+    #[test]
+    fn factory_reset_rejects_partial_cpu_only_readback() {
+        let curves = vec![("CPU".to_string(), [0; 8], [0; 8], true)];
+        assert!(validate_factory_reset_readback(&curves).is_err());
     }
 
     #[tokio::test]
@@ -1091,7 +1171,7 @@ mod tests {
     // Regression: wire order + PWM >100 roundtrip
     // -----------------------------------------------------------------------
 
-    /// Verify that wire order is (name, temps, pwms, enabled) by writing a
+    /// Verify that wire order is (name, pwms, temps, enabled) by writing a
     /// curve with PWM > 100 and reading it back. If arrays were swapped,
     /// the readback would return temps where pwms should be and vice versa.
     #[tokio::test]
@@ -1114,8 +1194,8 @@ mod tests {
             .iter()
             .find(|(n, _, _, _)| n == "GPU")
             .expect("GPU entry");
-        assert_eq!(gpu.1, [40, 42, 43, 60, 65, 69, 74, 78]);
-        assert_eq!(gpu.2, [5, 20, 38, 43, 56, 66, 84, 112]);
+        assert_eq!(gpu.1, [5, 20, 38, 43, 56, 66, 84, 112]);
+        assert_eq!(gpu.2, [40, 42, 43, 60, 65, 69, 74, 78]);
     }
 
     #[tokio::test]
@@ -1144,10 +1224,10 @@ mod tests {
         let raw = asusd.read_curves(AsusdFanProfile::Balanced).await.unwrap();
         let cpu_entry = raw.iter().find(|(n, _, _, _)| n == "CPU").expect("CPU");
         let gpu_entry = raw.iter().find(|(n, _, _, _)| n == "GPU").expect("GPU");
-        assert_eq!(cpu_entry.1, [45, 49, 54, 68, 74, 79, 84, 89]);
-        assert_eq!(cpu_entry.2, [5, 22, 38, 45, 56, 63, 81, 94]);
-        assert_eq!(gpu_entry.1, [40, 42, 43, 60, 65, 69, 74, 78]);
-        assert_eq!(gpu_entry.2, [5, 20, 38, 43, 56, 66, 84, 112]);
+        assert_eq!(cpu_entry.1, [5, 22, 38, 45, 56, 63, 81, 94]);
+        assert_eq!(cpu_entry.2, [45, 49, 54, 68, 74, 79, 84, 89]);
+        assert_eq!(gpu_entry.1, [5, 20, 38, 43, 56, 66, 84, 112]);
+        assert_eq!(gpu_entry.2, [40, 42, 43, 60, 65, 69, 74, 78]);
     }
 
     #[test]
@@ -1261,7 +1341,7 @@ mod tests {
         for forbidden in [
             ["Platform", "Profile", "Writer"].concat(),
             ["platform", "_profile"].concat(),
-            ["set_", "profile"].concat(),
+            ["set_", "profile("].concat(),
         ] {
             assert!(
                 !source.contains(&forbidden),

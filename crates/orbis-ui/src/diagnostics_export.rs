@@ -6,7 +6,10 @@
 
 use std::fmt::Debug;
 
-use orbis_core::diagnostics::DiagnosticObservation;
+use orbis_core::diagnostics::{
+    CpuFrequencyObservation, CpuPackagePowerLimitsObservation, DiagnosticObservation,
+};
+use orbis_core::limits::PowerLimitField;
 use serde_json::{Value, json};
 
 use crate::diagnostics_dto::{DiagnosticsUiDto, telemetry_field_gap_labels};
@@ -24,6 +27,19 @@ fn observation<T: Debug>(value: &DiagnosticObservation<T>) -> String {
         DiagnosticObservation::PermissionDenied => "PermissionDenied".into(),
         DiagnosticObservation::Unknown => "Unknown".into(),
     }
+}
+
+fn power_limit_field(field: &PowerLimitField) -> String {
+    match field {
+        PowerLimitField::Spl => "spl",
+        PowerLimitField::Sppt => "sppt",
+        PowerLimitField::Fppt => "fppt",
+        PowerLimitField::CpuTempLimit => "cpu_temp_limit",
+        PowerLimitField::GpuDynamicBoost => "gpu_dynamic_boost",
+        PowerLimitField::GpuTempTarget => "gpu_temp_target",
+        PowerLimitField::Other(_) => "other",
+    }
+    .into()
 }
 
 /// Stable, human-readable allowlisted summary suitable for clipboard export.
@@ -87,6 +103,77 @@ pub fn summary_text(dto: &DiagnosticsUiDto) -> String {
         "runtime_power={}\n",
         observation(&dto.gpu.runtime_power)
     ));
+    match &dto.gpu.nvidia {
+        DiagnosticObservation::Value(value) => {
+            out.push_str(&format!(
+                "nvidia_power_mw={} temperature_c={} write=ReadOnly\n",
+                value
+                    .power
+                    .map_or_else(|| UNKNOWN.into(), |power| power.get().to_string()),
+                value.temperature.map_or_else(
+                    || UNKNOWN.into(),
+                    |temperature| temperature.get().to_string()
+                ),
+            ));
+            if let Some(limit) = &value.power_limit {
+                out.push_str(&format!(
+                    "nvidia_power_limit_w={} default_w={} min_w={} max_w={} write=ReadOnly\n",
+                    limit.value,
+                    limit
+                        .default
+                        .map_or_else(|| UNKNOWN.into(), |value| value.to_string()),
+                    limit.min,
+                    limit.max,
+                ));
+            }
+        }
+        other => out.push_str(&format!("nvidia={} write=ReadOnly\n", observation(other))),
+    }
+
+    out.push_str("\n[cpu_package_power_limits]\n");
+    match &dto.cpu_package_power_limits {
+        CpuPackagePowerLimitsObservation::Value(limits) => {
+            for (field, value) in &limits.fields {
+                out.push_str(&format!(
+                    "{} current_w={} min_w={} max_w={} default_w={}\n",
+                    power_limit_field(field),
+                    value.value,
+                    value.min,
+                    value.max,
+                    value
+                        .default
+                        .map_or_else(|| UNKNOWN.into(), |v| v.to_string()),
+                ));
+            }
+        }
+        CpuPackagePowerLimitsObservation::Unavailable => out.push_str("status=Unavailable\n"),
+        CpuPackagePowerLimitsObservation::Unsupported => out.push_str("status=Unsupported\n"),
+        CpuPackagePowerLimitsObservation::PermissionDenied => {
+            out.push_str("status=PermissionDenied\n")
+        }
+        CpuPackagePowerLimitsObservation::Malformed => out.push_str("status=Malformed\n"),
+        CpuPackagePowerLimitsObservation::Unknown => out.push_str("status=Unknown\n"),
+    }
+
+    out.push_str("\n[cpu_frequency]\n");
+    match &dto.cpu_frequency {
+        CpuFrequencyObservation::Value(value) => {
+            out.push_str(&format!(
+                "driver={} epp_preferences={} current_epp={} boost={} write=ReadOnly\n",
+                value.driver,
+                value.available_epp_preferences.join(","),
+                value.current_epp_preference,
+                value.boost,
+            ));
+        }
+        CpuFrequencyObservation::Unavailable => out.push_str("status=Unavailable write=ReadOnly\n"),
+        CpuFrequencyObservation::Unsupported => out.push_str("status=Unsupported write=ReadOnly\n"),
+        CpuFrequencyObservation::PermissionDenied => {
+            out.push_str("status=PermissionDenied write=ReadOnly\n")
+        }
+        CpuFrequencyObservation::Malformed => out.push_str("status=Malformed write=ReadOnly\n"),
+        CpuFrequencyObservation::Unknown => out.push_str("status=Unknown write=ReadOnly\n"),
+    }
 
     out.push_str("\n[telemetry]\n");
     out.push_str(&format!("status={:?}\n", dto.telemetry.status));
@@ -152,6 +239,61 @@ pub fn report_json_value(dto: &DiagnosticsUiDto) -> Value {
         }),
         other => json!({ "status": observation(other) }),
     };
+    let nvidia = match &dto.gpu.nvidia {
+        DiagnosticObservation::Value(value) => json!({
+            "status": "Value",
+            "power_mw": value.power.map(|power| power.get()),
+            "temperature_c": value.temperature.map(|temperature| temperature.get()),
+            "power_limit": value.power_limit.as_ref().map(|limit| json!({
+                "current_w": limit.value,
+                "default_w": limit.default,
+                "min_w": limit.min,
+                "max_w": limit.max,
+                "write": "ReadOnly",
+            })),
+        }),
+        other => json!({ "status": observation(other), "write": "ReadOnly" }),
+    };
+    let cpu_package_power_limits = match &dto.cpu_package_power_limits {
+        CpuPackagePowerLimitsObservation::Value(limits) => json!({
+            "status": "Value",
+            "fields": limits.fields.iter().map(|(field, value)| json!({
+                "field": power_limit_field(field),
+                "current_w": value.value,
+                "min_w": value.min,
+                "max_w": value.max,
+                "default_w": value.default,
+            })).collect::<Vec<_>>(),
+        }),
+        CpuPackagePowerLimitsObservation::Unavailable => json!({ "status": "Unavailable" }),
+        CpuPackagePowerLimitsObservation::Unsupported => json!({ "status": "Unsupported" }),
+        CpuPackagePowerLimitsObservation::PermissionDenied => {
+            json!({ "status": "PermissionDenied" })
+        }
+        CpuPackagePowerLimitsObservation::Malformed => json!({ "status": "Malformed" }),
+        CpuPackagePowerLimitsObservation::Unknown => json!({ "status": "Unknown" }),
+    };
+    let cpu_frequency = match &dto.cpu_frequency {
+        CpuFrequencyObservation::Value(value) => json!({
+            "status": "Value",
+            "driver": value.driver,
+            "available_epp_preferences": value.available_epp_preferences,
+            "current_epp_preference": value.current_epp_preference,
+            "boost": value.boost,
+            "write": "ReadOnly",
+        }),
+        CpuFrequencyObservation::Unavailable => {
+            json!({ "status": "Unavailable", "write": "ReadOnly" })
+        }
+        CpuFrequencyObservation::Unsupported => {
+            json!({ "status": "Unsupported", "write": "ReadOnly" })
+        }
+        CpuFrequencyObservation::PermissionDenied => {
+            json!({ "status": "PermissionDenied", "write": "ReadOnly" })
+        }
+        CpuFrequencyObservation::Malformed => json!({ "status": "Malformed", "write": "ReadOnly" }),
+        CpuFrequencyObservation::Unknown => json!({ "status": "Unknown", "write": "ReadOnly" }),
+    };
 
     json!({
         "schema_version": 1,
@@ -181,7 +323,10 @@ pub fn report_json_value(dto: &DiagnosticsUiDto) -> Value {
             "mux": observation(&dto.gpu.mux),
             "access_policy": observation(&dto.gpu.access_policy),
             "runtime_power": observation(&dto.gpu.runtime_power),
+            "nvidia": nvidia,
         },
+        "cpu_package_power_limits": cpu_package_power_limits,
+        "cpu_frequency": cpu_frequency,
         "telemetry": {
             "status": format!("{:?}", dto.telemetry.status),
             "quality": format!("{:?}", dto.telemetry.quality()),
@@ -245,7 +390,10 @@ mod tests {
                 mux: DiagnosticObservation::Unknown,
                 access_policy: DiagnosticObservation::PermissionDenied,
                 runtime_power: DiagnosticObservation::Unavailable,
+                nvidia: DiagnosticObservation::Unknown,
             },
+            cpu_package_power_limits: CpuPackagePowerLimitsObservation::Unknown,
+            cpu_frequency: CpuFrequencyObservation::Unknown,
             telemetry: TelemetryDiagnostics {
                 latest: None,
                 status: TelemetryCollectionStatus::Unavailable,
@@ -270,6 +418,7 @@ mod tests {
             "[capabilities]",
             "[services]",
             "[gpu]",
+            "[cpu_frequency]",
             "[telemetry]",
             "[display]",
         ] {
@@ -301,6 +450,7 @@ mod tests {
         assert!(text.contains("access_policy=PermissionDenied"));
         assert!(text.contains("runtime_power=Unavailable"));
         assert!(text.contains("freshness=Unknown"));
+        assert!(text.contains("status=Unknown write=ReadOnly"));
     }
 
     #[test]

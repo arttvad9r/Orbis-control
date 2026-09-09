@@ -3,12 +3,13 @@
 //! Нейтральный read-only D-Bus wire-контракт между `orbis-session-client`
 //! (GUI-side D-Bus client) и `orbis-sessiond` (user session daemon).
 //!
-//! - контракт содержит только чтение Battery Charge Limit;
+//! - контракт содержит read-only hardware observations and a narrow
+//!   session-owned clamshell lifecycle API;
 //! - crate не создаёт D-Bus connection, runtime и не обращается к hardware;
 //! - версия интерфейса зафиксирована в имени `Session1`.
 //!
-//! Запрещено добавлять в этот crate mutation API (getter-only контракт)
-//! и зависимости от доменного/runtime слоя.
+//! Запрещены generic mutation/proxy APIs и зависимости от доменного/runtime
+//! слоя. Clamshell requests are limited to the typed session-owned lifecycle.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -21,6 +22,24 @@ pub const OBJECT_PATH: &str = "/io/github/orbiscontrol/Session";
 
 /// Имя интерфейса D-Bus (версия интерфейса закодирована как `1`).
 pub const INTERFACE_NAME: &str = "io.github.orbiscontrol.Session1";
+
+/// Wire status returned by the user-session clamshell inhibitor.
+pub mod clamshell {
+    /// The inhibitor cannot be used on this session.
+    pub const UNAVAILABLE: u8 = 0;
+    /// The inhibitor is available but not running.
+    pub const INACTIVE: u8 = 1;
+    /// The session-owned inhibitor is running.
+    pub const ACTIVE: u8 = 2;
+    /// The session lacked permission to start or stop the inhibitor.
+    pub const PERMISSION_DENIED: u8 = 3;
+    /// Starting the inhibitor failed.
+    pub const START_FAILED: u8 = 4;
+    /// Stopping the inhibitor failed.
+    pub const EXIT_FAILED: u8 = 5;
+    /// The lifecycle outcome cannot be established safely.
+    pub const UNKNOWN: u8 = 6;
+}
 
 /// Wire DTO Battery Charge Limit.
 ///
@@ -246,11 +265,12 @@ pub struct PerformanceInfo {
     pub available_mask: u8,
 }
 
-/// Getter-only zbus proxy контракт интерфейса `Session1`.
+/// zbus proxy contract for the read-only observations and narrow session API.
 ///
 /// Свойства (`ChargeLimit`, `GpuPower`, `GpuMux`, `GpuAccess`, `Performance`)
 /// являются read-only; Performance mutation выполняется через Hardware1 на
-/// system bus, не через Session1/sessiond.
+/// system bus, не через Session1/sessiond. Clamshell lifecycle requests remain
+/// owned by sessiond and only expose the typed inhibitor operation.
 #[zbus::proxy(
     interface = "io.github.orbiscontrol.Session1",
     default_service = "io.github.orbiscontrol.Session",
@@ -282,6 +302,12 @@ pub trait Session1 {
 
     /// Сохранённая fan curve для профиля и вентилятора (read-only method).
     fn fan_curve(&self, profile: u32, fan: u8) -> zbus::Result<FanCurveInfo>;
+
+    /// Authoritative session-owned clamshell inhibitor state.
+    fn clamshell_inhibitor(&self) -> zbus::Result<u8>;
+
+    /// Request a session-owned clamshell inhibitor lifecycle change.
+    fn set_clamshell_inhibitor(&self, enabled: bool) -> zbus::Result<u8>;
 }
 
 /// Wire-значения `GpuPowerState` (domain enum в protocol crate).
@@ -392,6 +418,17 @@ mod tests {
         assert_eq!(BUS_NAME, "io.github.orbiscontrol.Session");
         assert_eq!(OBJECT_PATH, "/io/github/orbiscontrol/Session");
         assert_eq!(INTERFACE_NAME, "io.github.orbiscontrol.Session1");
+    }
+
+    #[test]
+    fn clamshell_states_are_stable_and_fail_closed() {
+        assert_eq!(clamshell::UNAVAILABLE, 0);
+        assert_eq!(clamshell::INACTIVE, 1);
+        assert_eq!(clamshell::ACTIVE, 2);
+        assert_eq!(clamshell::PERMISSION_DENIED, 3);
+        assert_eq!(clamshell::START_FAILED, 4);
+        assert_eq!(clamshell::EXIT_FAILED, 5);
+        assert_eq!(clamshell::UNKNOWN, 6);
     }
 
     #[test]

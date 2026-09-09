@@ -27,9 +27,11 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use orbis_core::diagnostics::DiagnosticEntry;
+use orbis_core::diagnostics::NvidiaGpuDiagnostics;
 use orbis_core::fan::FanId;
 use orbis_core::gpu::GpuPowerState;
 use orbis_core::identity::BackendIdentity;
+use orbis_core::limits::{PowerLimitValue, Unit};
 use orbis_core::newtypes::{MilliWatt, Percent, Rpm, TemperatureC};
 use orbis_core::telemetry::{
     BatteryTelemetry, FanTelemetry, PowerTelemetry, Telemetry, TelemetryField, TelemetryFieldGap,
@@ -54,6 +56,55 @@ impl SysfsTelemetryProvider {
     pub fn new(sysfs_root: PathBuf) -> Self {
         Self { sysfs_root }
     }
+
+    /// Read NVIDIA driver telemetry and power-limit metadata without writes.
+    pub fn nvidia_diagnostics(&self) -> Result<Option<NvidiaGpuDiagnostics>, ProviderError> {
+        let hwmon_dir = self.sysfs_root.join("class").join("hwmon");
+        for dir in read_dir_optional(&hwmon_dir)? {
+            if read_discovery_string(&dir.join("name")).as_deref() != Some("nvidia") {
+                continue;
+            }
+            return Ok(Some(NvidiaGpuDiagnostics {
+                power: read_milli_watt(&dir.join("power1_input"))?,
+                temperature: read_temp_c(&dir.join("temp1_input"))?,
+                power_limit: read_nvidia_power_limit(&dir)?,
+            }));
+        }
+        Ok(None)
+    }
+}
+
+fn read_nvidia_power_limit(dir: &Path) -> Result<Option<PowerLimitValue>, ProviderError> {
+    let Some(current) = read_power_limit_watts(&dir.join("power1_cap"))? else {
+        return Ok(None);
+    };
+    let Some(default) = read_power_limit_watts(&dir.join("power1_cap_default"))? else {
+        return Ok(None);
+    };
+    let Some(min) = read_power_limit_watts(&dir.join("power1_cap_min"))? else {
+        return Ok(None);
+    };
+    let Some(max) = read_power_limit_watts(&dir.join("power1_cap_max"))? else {
+        return Ok(None);
+    };
+    PowerLimitValue::new(current, min, max, 1, Some(default), Unit::Watts)
+        .map(Some)
+        .map_err(|error| ProviderError::Internal(format!("invalid NVIDIA power limit: {error}")))
+}
+
+fn read_power_limit_watts(path: &Path) -> Result<Option<i32>, ProviderError> {
+    let Some(raw) = read_u64(path)? else {
+        return Ok(None);
+    };
+    let watts = raw / 1_000_000;
+    let watts = i32::try_from(watts).map_err(|_| narrowing_error("power limit", raw, path))?;
+    if raw % 1_000_000 != 0 {
+        return Err(ProviderError::Internal(format!(
+            "NVIDIA power limit is not an integral watt value in '{}'",
+            path.display()
+        )));
+    }
+    Ok(Some(watts))
 }
 
 impl Default for SysfsTelemetryProvider {
@@ -599,6 +650,31 @@ mod tests {
         // Telemetry не смешивается с GPU capability state.
         assert_eq!(t.gpu_power_state, GpuPowerState::Unknown);
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn nvidia_hwmon_reads_power_temperature_and_driver_limits() {
+        let root = fixture_root();
+        write_fixture(&root, "class/hwmon/hwmon8/name", "nvidia\n");
+        write_fixture(&root, "class/hwmon/hwmon8/power1_input", "42000000\n");
+        write_fixture(&root, "class/hwmon/hwmon8/temp1_input", "61000\n");
+        write_fixture(&root, "class/hwmon/hwmon8/power1_cap", "80000000\n");
+        write_fixture(&root, "class/hwmon/hwmon8/power1_cap_default", "80000000\n");
+        write_fixture(&root, "class/hwmon/hwmon8/power1_cap_min", "35000000\n");
+        write_fixture(&root, "class/hwmon/hwmon8/power1_cap_max", "115000000\n");
+
+        let value = SysfsTelemetryProvider::new(root.clone())
+            .nvidia_diagnostics()
+            .expect("nvidia read")
+            .expect("nvidia source");
+        assert_eq!(value.power.unwrap().get(), 42_000);
+        assert_eq!(value.temperature.unwrap().get(), 61);
+        let limit = value.power_limit.unwrap();
+        assert_eq!(
+            (limit.value, limit.default, limit.min, limit.max),
+            (80, Some(80), 35, 115)
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

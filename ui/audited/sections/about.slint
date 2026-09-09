@@ -1,6 +1,7 @@
-// About page — application identity, version and an honest scope statement.
+// About page — product identity, scope and version.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, InfoRow, StatusPill, LayoutMetrics } from "../common.slint";
+import { AppMark } from "../../components/app-mark.slint";
 import { Palette } from "../../themes/dark.slint";
 
 export component AboutSection inherits Rectangle {
@@ -8,71 +9,104 @@ export component AboutSection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * LayoutMetrics.page-margin;
+            x: LayoutMetrics.page-margin;
+            spacing: LayoutMetrics.page-gap;
+            padding-top: 14px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "О программе";
+                description: "Orbis Control — единый центр управления поддерживаемыми функциями ноутбуков ASUS в Linux.";
+            }
+
+            SectionCard {
+                min-height: 180px;
+                background: Palette.surface-raised;
+                HorizontalLayout {
+                    padding: 24px;
+                    spacing: 20px;
+                    alignment: center;
+
+                    Rectangle {
+                        width: 72px;
+                        vertical-stretch: 1;
+                        background: transparent;
+                        AppMark {
+                            width: 72px;
+                            height: 72px;
+                            y: (parent.height - self.height) / 2 + 1px;
+                        }
+                    }
+
+                    VerticalLayout {
+                        width: 430px;
+                        alignment: center;
+                        spacing: 5px;
+                        Text {
+                            text: "Orbis Control";
+                            font-size: 24px;
+                            font-weight: 700;
+                            color: Palette.text-primary;
+                        }
+                        Text {
+                            height: 36px;
+                            text: "Нативный Linux control center для ASUS ROG / TUF / Zephyrus";
+                            font-size: 13px;
+                            color: Palette.text-secondary;
+                            wrap: word-wrap;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { height: 4px; background: transparent; }
+                        StatusPill { width: 126px; text: "Версия " + root.version; accent: Palette.accent-default; }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 14px;
+                SectionCard {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 10px;
+                        SectionTitle { title: "Возможности"; }
+                        Text {
+                            text: "Профили производительности, управление батареей, вентиляторами, гибридной графикой, подсветкой, панелью и расширенными функциями ASUS.";
+                            font-size: 13px;
+                            color: Palette.text-primary;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+                SectionCard {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 10px;
+                        SectionTitle { title: "Принцип работы"; }
+                        Text {
+                            text: "Интерфейс строится по фактическим возможностям устройства. Изменения проходят через ограниченный Hardware1 API и, где возможно, подтверждаются чтением реального состояния.";
+                            font-size: 13px;
+                            color: Palette.text-secondary;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
             }
 
             SectionCard {
                 VerticalLayout {
-                    padding: 20px;
-                    spacing: 12px;
-
-                    HorizontalLayout {
-                        spacing: 12px;
-                        Rectangle {
-                            width: 36px;
-                            height: 36px;
-                            border-radius: 10px;
-                            background: Palette.accent-default;
-                            Rectangle {
-                                width: 12px;
-                                height: 12px;
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                border-radius: 3px;
-                                background: Palette.text-on-accent;
-                            }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 2px;
-                            Text {
-                                text: "Orbis Control";
-                                font-size: 18px;
-                                font-weight: 650;
-                                color: Palette.text-primary;
-                            }
-                            Text {
-                                text: "Версия " + root.version;
-                                font-size: 12.5px;
-                                color: Palette.text-secondary;
-                            }
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-
-                    Text {
-                        width: parent.width;
-                        text: "Лёгкое управление ноутбуками ASUS ROG / TUF / Zephyrus для Linux: профили производительности, заряд батареи, вентиляторы и наблюдение за оборудованием.";
-                        font-size: 13px;
-                        color: Palette.text-primary;
-                        wrap: word-wrap;
-                    }
-                    Text {
-                        width: parent.width;
-                        text: "Интерфейс построен на данных о возможностях устройства: поддерживаемые функции показываются, неподдерживаемые — скрываются. Изменения применяются через ограниченный Hardware1-интерфейс с подтверждением фактического состояния.";
-                        font-size: 12.5px;
-                        color: Palette.text-secondary;
-                        wrap: word-wrap;
-                    }
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 4px;
+                    SectionTitle { title: "Приложение"; }
+                    InfoRow { label: "Название"; value: "Orbis Control"; }
+                    InfoRow { label: "Версия"; value: root.version; }
+                    InfoRow { label: "Платформа"; value: "Linux · Arch first"; }
+                    InfoRow { label: "Лицензия"; value: "GPL-3.0-or-later"; }
                 }
             }
+
             Rectangle { vertical-stretch: 100; background: transparent; }
         }
     }

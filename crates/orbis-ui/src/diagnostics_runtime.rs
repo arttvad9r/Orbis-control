@@ -10,14 +10,18 @@ use std::time::{Duration, SystemTime};
 
 use orbis_application::diagnostics::DiagnosticsCollector;
 use orbis_capabilities::CapabilityRegistrySnapshot;
-use orbis_core::diagnostics::{DiagnosticsSnapshot, ServiceCriticality, TelemetryDiagnostics};
+use orbis_core::diagnostics::{
+    CpuFrequencyObservation, CpuPackagePowerLimitsObservation, DiagnosticObservation,
+    DiagnosticsSnapshot, ServiceCriticality, TelemetryDiagnostics,
+};
 use orbis_providers::bounded_provider_call;
-use orbis_providers::traits::TelemetryProvider;
+use orbis_providers::traits::{CpuFrequencyProvider, PowerLimitProvider, TelemetryProvider};
 use orbis_providers::{
-    ASUSD_SERVICE, HardwareIdentityProvider, ORBIS_HARDWARE_SERVICE, ORBIS_SESSION_SERVICE,
-    SUPERGFXD_SERVICE, ServicePresenceProvider, SysfsTelemetryProvider, SystemMetadataProvider,
-    WaylandCompositorOutputSource, WaylandDisplayOutputProvider, display_diagnostics_snapshot,
-    gpu_diagnostics_snapshot, telemetry_diagnostics_after_attempt,
+    ASUSD_SERVICE, AsusArmouryPowerLimitProvider, HardwareIdentityProvider, ORBIS_HARDWARE_SERVICE,
+    ORBIS_SESSION_SERVICE, SUPERGFXD_SERVICE, ServicePresenceProvider, SysfsCpuFrequencyProvider,
+    SysfsTelemetryProvider, SystemMetadataProvider, WaylandCompositorOutputSource,
+    WaylandDisplayOutputProvider, display_diagnostics_snapshot, gpu_diagnostics_snapshot,
+    telemetry_diagnostics_after_attempt,
 };
 use orbis_session_client::{
     SessionGpuAccessProvider, SessionGpuMuxProvider, SessionGpuPowerProvider, ZbusSessionGpuSource,
@@ -137,7 +141,20 @@ impl DiagnosticsRuntime {
         let gpu_access = SessionGpuAccessProvider::new(ZbusSessionGpuSource::new(
             self.session_connection.clone(),
         ));
-        let gpu = gpu_diagnostics_snapshot(&gpu_mux, &gpu_access, &gpu_power).await;
+        let mut gpu = gpu_diagnostics_snapshot(&gpu_mux, &gpu_access, &gpu_power).await;
+        gpu.nvidia = match SysfsTelemetryProvider::default().nvidia_diagnostics() {
+            Ok(Some(value)) => DiagnosticObservation::Value(value),
+            Ok(None) => DiagnosticObservation::Unknown,
+            Err(orbis_providers::ProviderError::PermissionDenied(_)) => {
+                DiagnosticObservation::PermissionDenied
+            }
+            Err(
+                orbis_providers::ProviderError::BackendUnavailable(_)
+                | orbis_providers::ProviderError::Unsupported(_)
+                | orbis_providers::ProviderError::Timeout(_),
+            ) => DiagnosticObservation::Unavailable,
+            Err(_) => DiagnosticObservation::Unknown,
+        };
 
         let telemetry_provider = SysfsTelemetryProvider::default();
         let telemetry_result = bounded_provider_call(
@@ -166,6 +183,54 @@ impl DiagnosticsRuntime {
             WaylandDisplayOutputProvider::new(WaylandCompositorOutputSource::new());
         let display = display_diagnostics_snapshot(&display_provider, Some(generated_at)).await;
 
+        let cpu_frequency_provider = SysfsCpuFrequencyProvider::default();
+        let cpu_frequency = match bounded_provider_call(
+            &cpu_frequency_provider,
+            "diagnostics.cpu_frequency",
+            cpu_frequency_provider.cpu_frequency(),
+        )
+        .await
+        {
+            Ok(value) => CpuFrequencyObservation::Value(value),
+            Err(
+                orbis_providers::ProviderError::BackendUnavailable(_)
+                | orbis_providers::ProviderError::Timeout(_),
+            ) => CpuFrequencyObservation::Unavailable,
+            Err(orbis_providers::ProviderError::Unsupported(_)) => {
+                CpuFrequencyObservation::Unsupported
+            }
+            Err(orbis_providers::ProviderError::PermissionDenied(_)) => {
+                CpuFrequencyObservation::PermissionDenied
+            }
+            Err(orbis_providers::ProviderError::Internal(_)) => CpuFrequencyObservation::Malformed,
+            Err(_) => CpuFrequencyObservation::Unknown,
+        };
+
+        let power_limits_provider = AsusArmouryPowerLimitProvider::default();
+        let cpu_package_power_limits = match bounded_provider_call(
+            &power_limits_provider,
+            "diagnostics.cpu_package_power_limits",
+            power_limits_provider.power_limits(),
+        )
+        .await
+        {
+            Ok(value) => CpuPackagePowerLimitsObservation::Value(value),
+            Err(
+                orbis_providers::ProviderError::BackendUnavailable(_)
+                | orbis_providers::ProviderError::Timeout(_),
+            ) => CpuPackagePowerLimitsObservation::Unavailable,
+            Err(orbis_providers::ProviderError::Unsupported(_)) => {
+                CpuPackagePowerLimitsObservation::Unsupported
+            }
+            Err(orbis_providers::ProviderError::PermissionDenied(_)) => {
+                CpuPackagePowerLimitsObservation::PermissionDenied
+            }
+            Err(orbis_providers::ProviderError::Internal(_)) => {
+                CpuPackagePowerLimitsObservation::Malformed
+            }
+            Err(_) => CpuPackagePowerLimitsObservation::Unknown,
+        };
+
         DiagnosticsCollector::new().collect(
             generated_at,
             application,
@@ -174,6 +239,8 @@ impl DiagnosticsRuntime {
             services,
             capabilities,
             gpu,
+            cpu_package_power_limits,
+            cpu_frequency,
             telemetry,
             display,
         )

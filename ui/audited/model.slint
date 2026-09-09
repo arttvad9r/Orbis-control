@@ -5,6 +5,7 @@ export enum GpuHwState { Loading, Ready, Unavailable }
 export enum PerformanceHwState { Loading, Ready, Unavailable }
 export enum GpuModeHwState { Loading, Ready, Unavailable }
 export enum FanCurveHwState { Loading, Ready, Unavailable }
+export enum ClamshellState { Loading, Inactive, Active, Unavailable, PermissionDenied, StartFailed, ExitFailed, Unknown }
 export enum Section { Dashboard, Performance, Power, Cooling, Graphics, Backlight, Display, System, Settings, About }
 
 export struct UiState {
@@ -13,6 +14,9 @@ export struct UiState {
     available-perf-mask: int,
     perf-state: PerformanceHwState,
     perf-writable: bool,
+    performance-delegated-ready: bool,
+    performance-delegated-pending: bool,
+    performance-delegated-error: string,
     perf-unavailable-reason: string,
     gpu-selected: int,
     available-gpu-mask: int,
@@ -21,6 +25,8 @@ export struct UiState {
     gpu-section-error: bool,
     gpu-mode-state: GpuModeHwState,
     gpu-mode-writable: bool,
+    gpu-mode-pending: bool,
+    gpu-mode-unconfirmed: bool,
     gpu-queued: int,
     gpu-reboot-required: bool,
     charge-limit: int,
@@ -28,6 +34,9 @@ export struct UiState {
     charge-limit-writable: bool,
     charge-limit-unavailable-reason: string,
     charge-limit-state: ChargeLimitState,
+    charge-limit-pending: bool,
+    charge-limit-unconfirmed: bool,
+    charge-limit-error: string,
     gpu-power-state: GpuHwState,
     gpu-mux-state: GpuHwState,
     gpu-access-state: GpuHwState,
@@ -54,6 +63,8 @@ export struct UiState {
     fan-curve-writable: bool,
     fan-curve-unavailable-reason: string,
     fan-curve-error: bool,
+    fan-curve-pending: bool,
+    fan-curve-unconfirmed: bool,
     fan-curve-dirty: bool,
     fan-curve-enabled-known: bool,
     fan-curve-enabled: bool,
