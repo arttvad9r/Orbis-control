@@ -41,6 +41,18 @@ Complete real observation, capability detection, mutation ownership, error/pendi
 - active P/E core controls where the platform exposes a safe owner;
 - M1–M5 key bindings.
 
+Comparative repository research sets these implementation priorities for the remaining power and GPU work:
+
+- expose CPU package power/TDP through ASUS Armoury attributes only when authoritative values become available;
+- define amd-pstate EPP/boost policy behind a real typed owner;
+- expose NVIDIA power/thermal controls only through a safe typed owner with authoritative read-back;
+- implement snapshot-validate-apply-readback-rollback transactions, with pending/logout/reboot semantics and conflict detection for power and GPU managers;
+- provide fake backends and hardware simulators for the full state and failure paths;
+- require a confirmation/rollback lease for risky power or undervolt controls;
+- keep daemon, CLI and UI schemas stable and clients thin.
+
+External projects informed architectural research only. Reuse of code or assets from GPL/MPL or unlicensed projects requires license review first.
+
 The current `extra_backend` still ignores the aggregate Advanced `Apply` action. Replace that no-op with a real product flow. Use narrow typed ownership: Hardware1 for genuinely privileged machine mutations, user/session ownership for user-session settings, and no generic root/sysfs/shell proxy.
 
 As part of this block, perform one **source-driven pass over every enabled user action in the current UI**. An enabled button/toggle/stepper must not terminate in a log warning, placeholder callback, fixture value or silent no-op. Existing completed daily controls should not be redesigned unless this pass finds a real defect.
