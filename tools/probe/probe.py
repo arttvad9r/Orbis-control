@@ -47,6 +47,10 @@ ALLOWED_FILES = [
     "/sys/class/backlight/nvidia_0/type",
     "/sys/class/leds/asus::kbd_backlight/brightness",
     "/sys/class/leds/asus::kbd_backlight/max_brightness",
+    "/sys/devices/system/cpu/cpu0/cpufreq/scaling_driver",
+    "/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_available_preferences",
+    "/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference",
+    "/sys/devices/system/cpu/cpu0/cpufreq/boost",
 ]
 
 ALLOWED_DIRS = [
@@ -175,7 +179,23 @@ def collect_sysfs() -> dict:
     return {
         "files": files,
         "platform": platform_attrs,
+        "cpufreq": collect_cpufreq(),
         "kernel": platform.release(),
+    }
+
+
+def collect_cpufreq() -> dict:
+    """Collect read-only CPU frequency policy evidence for CPU controls."""
+    base = "/sys/devices/system/cpu/cpu0/cpufreq"
+    return {
+        "driver": read_file(f"{base}/scaling_driver"),
+        "energy_performance_available_preferences": read_file(
+            f"{base}/energy_performance_available_preferences"
+        ),
+        "energy_performance_preference": read_file(
+            f"{base}/energy_performance_preference"
+        ),
+        "boost": read_file(f"{base}/boost"),
     }
 
 
