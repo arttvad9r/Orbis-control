@@ -14,7 +14,13 @@ Local commits `b10ab9f`, `b6c19b0`, `6c736a0`, `a5cffa5`, `bb1e178`, `4ba8d00`, 
 
 Published commit `4ca2ff9` adds read-only CPU frequency diagnostics through provider/core/application/runtime/DTO/export, exposing the `amd-pstate-epp` driver, available/current EPP preferences, and boost state with write=`ReadOnly` and explicit unavailable, permission, malformed and unknown states. EPP and boost mutation remain unsupported; this snapshot does not claim 140W validation.
 
-Blocks 1, 3, 4 and 5 remain open: live validation is still incomplete, clean install/upgrade/uninstall evidence is still missing, and merge/tag/release actions have not been performed. This snapshot does not claim full completion.
+Blocks 1, 3 and 5 remain open: live validation is still incomplete and merge/tag/release actions have not been performed. Block 4 package lifecycle validation is complete. This snapshot does not claim full completion.
+
+## Current repository audit — 2026-09-09
+
+The active local candidate is commit `d135205` on `agent/finish-v01`, seven commits ahead of `origin/agent/finish-v01`. The candidate includes the aggregate Advanced Apply flow, truthful partial/unknown/error handling, authoritative refresh guards and the package verification command. `scripts/verify full` passes on the current tree, including workspace tests, clippy with `-D warnings`, release build and packaging asset validation. Generated probe/package artifacts and detached audit worktrees were removed from the checkout; no tracked changes are required for this cleanup.
+
+The candidate package `orbis-control 0.1.0-2` was installed and its package ownership/runtime smoke checks passed. Block 4 is now closed by the clean downgrade/upgrade/uninstall/reinstall cycle; Block 3 still needs an authorized current-Arch hardware round-trip from the active graphical session. No push, merge, tag or release has been performed.
 
 ## How this TODO is used
 
@@ -54,8 +60,9 @@ Comparative repository research sets these implementation priorities for the rem
 - keep daemon, CLI and UI schemas stable and clients thin.
 
 External projects informed architectural research only. Reuse of code or assets from GPL/MPL or unlicensed projects requires license review first.
+The research matrix and adopted decisions are maintained in [`docs/research/comparative-projects.md`](docs/research/comparative-projects.md).
 
-The current `extra_backend` still ignores the aggregate Advanced `Apply` action. Replace that no-op with a real product flow. Use narrow typed ownership: Hardware1 for genuinely privileged machine mutations, user/session ownership for user-session settings, and no generic root/sysfs/shell proxy.
+The aggregate Advanced `Apply` action is implemented in `extra_backend` for the currently supported typed controls, with unresolved-state guards, authoritative refresh and partial/unknown result handling. Continue using narrow typed ownership: Hardware1 for genuinely privileged machine mutations, user/session ownership for user-session settings, and no generic root/sysfs/shell proxy.
 
 As part of this block, perform one **source-driven pass over every enabled user action in the current UI**. An enabled button/toggle/stepper must not terminate in a log warning, placeholder callback, fixture value or silent no-op. Existing completed daily controls should not be redesigned unless this pass finds a real defect.
 
@@ -102,9 +109,9 @@ Record only enough provenance to know which exact revision/package was proven. D
 
 ---
 
-## [ ] 4. Freeze a real Arch release package
+## [x] 4. Freeze a real Arch release package
 
-The current `PKGBUILD` is a development package recipe: its source follows moving `main` and skips source verification. Convert it into a release recipe only after the candidate above is proven.
+The candidate `PKGBUILD` now uses an exact source archive and checksum for the proven package layout. The release recipe remains local to this candidate until the release commit is authorized.
 
 The release package must:
 
@@ -117,7 +124,7 @@ The release package must:
 
 AUR publication, AppImage and other distributions are **not** blockers for the first Arch release unless explicitly added later.
 
-**Exit condition:** a clean Arch system can build/install an immutable release candidate package from its release source and obtain the same proven application layout.
+**Exit condition:** a clean Arch system can build/install an immutable release candidate package from its release source and obtain the same proven application layout. The exact `orbis-control 0.1.0-2` candidate passed build, downgrade/upgrade, clean uninstall and reinstall validation; `pacman -Qkk` reported 28 files and 0 altered files, and both packaged daemons returned active after reinstall.
 
 ---
 

@@ -95,7 +95,7 @@ impl CpuFrequencyProvider for SysfsCpuFrequencyProvider {
         let current_epp_preference = read(&self.path("energy_performance_preference"))?
             .trim()
             .to_owned();
-        let boost_raw = read(&self.path("boost"))?;
+        let boost_raw = read(&self.sysfs_root.join("devices/system/cpu/cpufreq/boost"))?;
         let boost = match boost_raw.trim() {
             "0" => false,
             "1" => true,
@@ -181,10 +181,12 @@ mod tests {
             ("scaling_driver", driver),
             ("energy_performance_available_preferences", available),
             ("energy_performance_preference", current),
-            ("boost", boost),
         ] {
             fs::write(dir.join(name), value).unwrap();
         }
+        let global_cpufreq = root.join("devices/system/cpu/cpufreq");
+        fs::create_dir_all(&global_cpufreq).unwrap();
+        fs::write(global_cpufreq.join("boost"), boost).unwrap();
         root
     }
 }
