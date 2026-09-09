@@ -9,7 +9,8 @@
 use std::time::SystemTime;
 
 use orbis_core::diagnostics::{
-    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuPackagePowerLimitsObservation,
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuFrequencyObservation,
+    CpuPackagePowerLimitsObservation,
     DiagnosticsSnapshot, DiagnosticsSnapshotSections, DisplayDiagnostics, GpuDiagnostics,
     HardwareDiagnostics, ServiceDiagnostics, SystemDiagnostics, TelemetryDiagnostics,
 };
@@ -34,6 +35,7 @@ pub fn collect_diagnostics_snapshot(
     capabilities: CapabilitySnapshotDiagnostics,
     gpu: GpuDiagnostics,
     cpu_package_power_limits: CpuPackagePowerLimitsObservation,
+    cpu_frequency: CpuFrequencyObservation,
     telemetry: TelemetryDiagnostics,
     display: DisplayDiagnostics,
 ) -> DiagnosticsSnapshot {
@@ -47,6 +49,7 @@ pub fn collect_diagnostics_snapshot(
             capabilities,
             gpu,
             cpu_package_power_limits,
+            cpu_frequency,
             telemetry,
             display,
         },
@@ -140,6 +143,7 @@ mod tests {
             capabilities(capability_checked_at),
             gpu.clone(),
             CpuPackagePowerLimitsObservation::Unknown,
+            CpuFrequencyObservation::Unknown,
             telemetry.clone(),
             display.clone(),
         );
@@ -206,6 +210,7 @@ mod tests {
             capabilities(checked_at),
             gpu,
             CpuPackagePowerLimitsObservation::Unknown,
+            CpuFrequencyObservation::Unknown,
             telemetry,
             display,
         );
@@ -272,6 +277,7 @@ mod tests {
                 nvidia: DiagnosticObservation::Unknown,
             },
             CpuPackagePowerLimitsObservation::Unknown,
+            CpuFrequencyObservation::Unknown,
             TelemetryDiagnostics {
                 latest: None,
                 status: TelemetryCollectionStatus::Unknown,

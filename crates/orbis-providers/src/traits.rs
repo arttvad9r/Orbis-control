@@ -8,6 +8,7 @@ use orbis_capabilities::engine::CapabilityPart;
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::aura::AuraState;
 use orbis_core::battery::{BatteryThresholdEvidence, ChargeLimit};
+use orbis_core::diagnostics::CpuFrequencyDiagnostics;
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::display::{
     DisplayMode, MiniLedModeState, PanelOverdriveState, ScreenAutoBrightnessState,
@@ -44,6 +45,13 @@ pub trait Provider: Send + Sync {
 
     /// Диагностические записи.
     fn diagnostics(&self) -> Vec<DiagnosticEntry>;
+}
+
+/// Read-only CPU frequency policy evidence.
+#[async_trait]
+pub trait CpuFrequencyProvider: Provider {
+    /// Read driver, EPP preferences/current preference, and boost state.
+    async fn cpu_frequency(&self) -> Result<CpuFrequencyDiagnostics, ProviderError>;
 }
 
 /// Здоровье backend.

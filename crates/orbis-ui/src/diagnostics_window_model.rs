@@ -260,6 +260,7 @@ mod tests {
             },
             cpu_package_power_limits:
                 orbis_core::diagnostics::CpuPackagePowerLimitsObservation::Unknown,
+            cpu_frequency: orbis_core::diagnostics::CpuFrequencyObservation::Unknown,
             telemetry: TelemetryDiagnostics {
                 latest: None,
                 status: TelemetryCollectionStatus::Unavailable,

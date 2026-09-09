@@ -8,9 +8,9 @@ use std::time::SystemTime;
 
 use orbis_core::capability::{CapabilityStatus, FeatureId};
 use orbis_core::diagnostics::{
-    CpuPackagePowerLimitsObservation, DiagnosticsServiceId, DiagnosticsSnapshot,
-    DisplayDiagnostics, DisplayProtocol, GpuDiagnostics, ServiceAvailability, ServiceBusScope,
-    ServiceCriticality, SessionType, TelemetryDiagnostics,
+    CpuFrequencyObservation, CpuPackagePowerLimitsObservation, DiagnosticsServiceId,
+    DiagnosticsSnapshot, DisplayDiagnostics, DisplayProtocol, GpuDiagnostics, ServiceAvailability,
+    ServiceBusScope, ServiceCriticality, SessionType, TelemetryDiagnostics,
 };
 
 /// Compact application/system/hardware values intended for the Diagnostics
@@ -97,6 +97,8 @@ pub struct DiagnosticsUiDto {
     pub gpu: GpuDiagnostics,
     /// Read-only CPU package power-limit observation.
     pub cpu_package_power_limits: CpuPackagePowerLimitsObservation,
+    /// Read-only CPU frequency policy observation.
+    pub cpu_frequency: CpuFrequencyObservation,
     /// Telemetry values and collection/freshness metadata.
     pub telemetry: TelemetryDiagnostics,
     /// Read-only display/output observation.
@@ -176,6 +178,7 @@ impl DiagnosticsUiDto {
             services,
             gpu: sections.gpu.clone(),
             cpu_package_power_limits: sections.cpu_package_power_limits.clone(),
+            cpu_frequency: sections.cpu_frequency.clone(),
             telemetry: sections.telemetry.clone(),
             display: sections.display.clone(),
         }
@@ -293,6 +296,7 @@ mod tests {
                 nvidia: DiagnosticObservation::Unknown,
             },
             CpuPackagePowerLimitsObservation::Unknown,
+            CpuFrequencyObservation::Unknown,
             TelemetryDiagnostics {
                 latest: Some(Telemetry::empty()),
                 status: TelemetryCollectionStatus::Degraded,

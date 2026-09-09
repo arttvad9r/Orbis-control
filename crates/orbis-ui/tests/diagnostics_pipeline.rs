@@ -3,9 +3,9 @@ use std::time::{Duration, SystemTime};
 use orbis_application::diagnostics::DiagnosticsCollector;
 use orbis_core::capability::DeviceCapabilities;
 use orbis_core::diagnostics::{
-    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuPackagePowerLimitsObservation,
-    DiagnosticObservation, DisplayDiagnostics, DisplayProtocol, GpuDiagnostics,
-    HardwareDiagnostics, SessionType, SystemDiagnostics, TelemetryCollectionStatus,
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuFrequencyObservation,
+    CpuPackagePowerLimitsObservation, DiagnosticObservation, DisplayDiagnostics, DisplayProtocol,
+    GpuDiagnostics, HardwareDiagnostics, SessionType, SystemDiagnostics, TelemetryCollectionStatus,
     TelemetryDiagnostics, TelemetryFreshness,
 };
 use orbis_core::limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
@@ -51,6 +51,7 @@ fn typed_snapshot_projects_through_privacy_bounded_exports() {
             .into_iter()
             .collect(),
         }),
+        CpuFrequencyObservation::Unknown,
         TelemetryDiagnostics {
             latest: None,
             status: TelemetryCollectionStatus::Unavailable,

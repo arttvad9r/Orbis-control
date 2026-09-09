@@ -6,7 +6,9 @@
 
 use std::fmt::Debug;
 
-use orbis_core::diagnostics::{CpuPackagePowerLimitsObservation, DiagnosticObservation};
+use orbis_core::diagnostics::{
+    CpuFrequencyObservation, CpuPackagePowerLimitsObservation, DiagnosticObservation,
+};
 use orbis_core::limits::PowerLimitField;
 use serde_json::{Value, json};
 
@@ -153,6 +155,26 @@ pub fn summary_text(dto: &DiagnosticsUiDto) -> String {
         CpuPackagePowerLimitsObservation::Unknown => out.push_str("status=Unknown\n"),
     }
 
+    out.push_str("\n[cpu_frequency]\n");
+    match &dto.cpu_frequency {
+        CpuFrequencyObservation::Value(value) => {
+            out.push_str(&format!(
+                "driver={} epp_preferences={} current_epp={} boost={} write=ReadOnly\n",
+                value.driver,
+                value.available_epp_preferences.join(","),
+                value.current_epp_preference,
+                value.boost,
+            ));
+        }
+        CpuFrequencyObservation::Unavailable => out.push_str("status=Unavailable write=ReadOnly\n"),
+        CpuFrequencyObservation::Unsupported => out.push_str("status=Unsupported write=ReadOnly\n"),
+        CpuFrequencyObservation::PermissionDenied => {
+            out.push_str("status=PermissionDenied write=ReadOnly\n")
+        }
+        CpuFrequencyObservation::Malformed => out.push_str("status=Malformed write=ReadOnly\n"),
+        CpuFrequencyObservation::Unknown => out.push_str("status=Unknown write=ReadOnly\n"),
+    }
+
     out.push_str("\n[telemetry]\n");
     out.push_str(&format!("status={:?}\n", dto.telemetry.status));
     out.push_str(&format!("quality={:?}\n", dto.telemetry.quality()));
@@ -251,6 +273,27 @@ pub fn report_json_value(dto: &DiagnosticsUiDto) -> Value {
         CpuPackagePowerLimitsObservation::Malformed => json!({ "status": "Malformed" }),
         CpuPackagePowerLimitsObservation::Unknown => json!({ "status": "Unknown" }),
     };
+    let cpu_frequency = match &dto.cpu_frequency {
+        CpuFrequencyObservation::Value(value) => json!({
+            "status": "Value",
+            "driver": value.driver,
+            "available_epp_preferences": value.available_epp_preferences,
+            "current_epp_preference": value.current_epp_preference,
+            "boost": value.boost,
+            "write": "ReadOnly",
+        }),
+        CpuFrequencyObservation::Unavailable => {
+            json!({ "status": "Unavailable", "write": "ReadOnly" })
+        }
+        CpuFrequencyObservation::Unsupported => {
+            json!({ "status": "Unsupported", "write": "ReadOnly" })
+        }
+        CpuFrequencyObservation::PermissionDenied => {
+            json!({ "status": "PermissionDenied", "write": "ReadOnly" })
+        }
+        CpuFrequencyObservation::Malformed => json!({ "status": "Malformed", "write": "ReadOnly" }),
+        CpuFrequencyObservation::Unknown => json!({ "status": "Unknown", "write": "ReadOnly" }),
+    };
 
     json!({
         "schema_version": 1,
@@ -283,6 +326,7 @@ pub fn report_json_value(dto: &DiagnosticsUiDto) -> Value {
             "nvidia": nvidia,
         },
         "cpu_package_power_limits": cpu_package_power_limits,
+        "cpu_frequency": cpu_frequency,
         "telemetry": {
             "status": format!("{:?}", dto.telemetry.status),
             "quality": format!("{:?}", dto.telemetry.quality()),
@@ -349,6 +393,7 @@ mod tests {
                 nvidia: DiagnosticObservation::Unknown,
             },
             cpu_package_power_limits: CpuPackagePowerLimitsObservation::Unknown,
+            cpu_frequency: CpuFrequencyObservation::Unknown,
             telemetry: TelemetryDiagnostics {
                 latest: None,
                 status: TelemetryCollectionStatus::Unavailable,
@@ -373,6 +418,7 @@ mod tests {
             "[capabilities]",
             "[services]",
             "[gpu]",
+            "[cpu_frequency]",
             "[telemetry]",
             "[display]",
         ] {
@@ -404,6 +450,7 @@ mod tests {
         assert!(text.contains("access_policy=PermissionDenied"));
         assert!(text.contains("runtime_power=Unavailable"));
         assert!(text.contains("freshness=Unknown"));
+        assert!(text.contains("status=Unknown write=ReadOnly"));
     }
 
     #[test]

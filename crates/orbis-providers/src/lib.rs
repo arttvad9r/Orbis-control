@@ -22,6 +22,8 @@ pub mod asus_diagnostics;
 pub mod asus_gpu_mode;
 pub mod aura;
 pub mod bounded_probes;
+/// Read-only Linux CPU frequency policy evidence.
+pub mod cpu_frequency;
 pub mod display_diagnostics;
 pub mod error;
 pub mod execution;
@@ -60,6 +62,7 @@ pub use bounded_probes::{
     probe_gpu_power, probe_mini_led_mode, probe_panel_overdrive, probe_performance,
     probe_power_limits, probe_screen_auto_brightness,
 };
+pub use cpu_frequency::SysfsCpuFrequencyProvider;
 pub use display_diagnostics::display_diagnostics_snapshot;
 pub use error::{OperationId, ProviderError, ValidationResult};
 pub use execution::{bounded_operation, bounded_provider_call};

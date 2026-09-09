@@ -73,12 +73,13 @@ pub use capability::{
 };
 pub use desired_observed::{DesiredObservedState, DesiredValue, ObservedValue, PendingValue};
 pub use diagnostics::{
-    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuPackagePowerLimitsObservation,
-    DIAGNOSTICS_SNAPSHOT_SCHEMA_VERSION, DiagnosticEntry, DiagnosticObservation, DiagnosticReport,
-    DiagnosticsServiceId, DiagnosticsSnapshot, DiagnosticsSnapshotSections, DisplayDiagnostics,
-    DisplayProtocol, GpuDiagnostics, HardwareDiagnostics, ServiceAvailability, ServiceBusScope,
-    ServiceCriticality, ServiceDiagnostics, SessionType, SystemDiagnostics,
-    TelemetryCollectionStatus, TelemetryDiagnostics, TelemetryFreshness,
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuFrequencyDiagnostics,
+    CpuFrequencyObservation, CpuPackagePowerLimitsObservation, DIAGNOSTICS_SNAPSHOT_SCHEMA_VERSION,
+    DiagnosticEntry, DiagnosticObservation, DiagnosticReport, DiagnosticsServiceId,
+    DiagnosticsSnapshot, DiagnosticsSnapshotSections, DisplayDiagnostics, DisplayProtocol,
+    GpuDiagnostics, HardwareDiagnostics, ServiceAvailability, ServiceBusScope, ServiceCriticality,
+    ServiceDiagnostics, SessionType, SystemDiagnostics, TelemetryCollectionStatus,
+    TelemetryDiagnostics, TelemetryFreshness,
 };
 pub use display::{
     DisplayMode, HdrState, MiniLedModeKind, MiniLedModeState, MiniLedModeValue,

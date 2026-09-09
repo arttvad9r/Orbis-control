@@ -360,6 +360,37 @@ pub enum CpuPackagePowerLimitsObservation {
     Unknown,
 }
 
+/// Read-only CPU frequency policy evidence; this does not imply write ownership.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CpuFrequencyDiagnostics {
+    /// Kernel CPU frequency driver name.
+    pub driver: String,
+    /// EPP preferences exposed by the kernel policy.
+    pub available_epp_preferences: Vec<String>,
+    /// Current kernel EPP preference.
+    pub current_epp_preference: String,
+    /// Current kernel boost state.
+    pub boost: bool,
+}
+
+/// Result of observing CPU frequency policy evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CpuFrequencyObservation {
+    /// All requested values were read and validated.
+    Value(CpuFrequencyDiagnostics),
+    /// The source is known but currently unavailable.
+    Unavailable,
+    /// The attributes are absent or unsupported.
+    Unsupported,
+    /// The read was denied.
+    PermissionDenied,
+    /// The source returned malformed values.
+    Malformed,
+    /// The result could not be classified reliably.
+    Unknown,
+}
+
 /// Typed sections carried by an immutable diagnostics snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticsSnapshotSections {
@@ -381,6 +412,8 @@ pub struct DiagnosticsSnapshotSections {
     pub display: DisplayDiagnostics,
     /// Read-only CPU package power-limit observation.
     pub cpu_package_power_limits: CpuPackagePowerLimitsObservation,
+    /// Read-only CPU frequency policy evidence.
+    pub cpu_frequency: CpuFrequencyObservation,
 }
 
 /// Immutable point-in-time production diagnostics domain snapshot.
@@ -577,5 +610,25 @@ mod tests {
         assert_eq!(display.outputs, DiagnosticObservation::Unavailable);
         assert!(telemetry.latest.is_none());
         assert_eq!(telemetry.freshness, TelemetryFreshness::Unknown);
+    }
+
+    #[test]
+    fn cpu_frequency_observation_keeps_read_only_evidence_typed() {
+        let observation = CpuFrequencyObservation::Value(CpuFrequencyDiagnostics {
+            driver: "amd-pstate-epp".into(),
+            available_epp_preferences: vec!["power".into(), "performance".into()],
+            current_epp_preference: "power".into(),
+            boost: false,
+        });
+
+        assert_eq!(
+            observation,
+            CpuFrequencyObservation::Value(CpuFrequencyDiagnostics {
+                driver: "amd-pstate-epp".into(),
+                available_epp_preferences: vec!["power".into(), "performance".into()],
+                current_epp_preference: "power".into(),
+                boost: false,
+            })
+        );
     }
 }
