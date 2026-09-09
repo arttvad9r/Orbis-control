@@ -1201,6 +1201,7 @@ mod tests {
     fn unsupported_advanced_controls_are_explicitly_unavailable() {
         let source = include_str!("../../../ui/audited/sections/system.slint");
         assert!(source.contains("Недоступно: поддержка функции не обнаружена"));
+        assert!(source.contains("disabled: true; // no typed owner yet"));
         assert!(source.contains("status-led-control-ready"));
         assert!(source.contains("standby-networking-control-ready"));
         assert!(source.contains("hibernate-control-ready"));

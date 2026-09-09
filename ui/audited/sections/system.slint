@@ -185,7 +185,7 @@ export component SystemSection inherits Rectangle {
                         label: "Светодиоды состояния";
                          description: root.status-led-state-ready ? "Управление системными индикаторами ноутбука" : "Недоступно: поддержка функции не обнаружена";
                          checked: root.status-led-state-ready && root.status-led;
-                         disabled: !root.status-led-control-ready || root.applying;
+                          disabled: true; // no typed owner yet
                          toggled(value) => { root.status-led = value; }
                     }
                     RequestToggleRow {
@@ -206,7 +206,7 @@ export component SystemSection inherits Rectangle {
                          label: "Отключать сеть в современном режиме ожидания";
                           description: root.standby-networking-control-ready ? "Сетевое поведение во время современного режима ожидания" : "Недоступно: поддержка функции не обнаружена";
                          checked: root.standby-networking-control-ready && root.disable-standby-networking;
-                         disabled: !root.standby-networking-control-ready || root.applying;
+                          disabled: true; // no typed owner yet
                         toggled(value) => { root.disable-standby-networking = value; }
                     }
 
@@ -229,7 +229,7 @@ export component SystemSection inherits Rectangle {
                         height: 40px;
                         spacing: 12px;
                          Text { width: 176px; text: "Гибернация через"; font-size: 13.5px; font-weight: 550; color: root.hibernate-control-ready ? Palette.text-primary : Palette.text-secondary; vertical-alignment: center; }
-                         NumberStepper { value <=> root.hibernate-after; minimum: 0; maximum: 1440; step: 5; disabled: !root.hibernate-control-ready || root.applying; }
+                         NumberStepper { value <=> root.hibernate-after; minimum: 0; maximum: 1440; step: 5; disabled: true; /* no typed owner yet */ }
                         Text { text: "мин"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
@@ -238,9 +238,9 @@ export component SystemSection inherits Rectangle {
                         spacing: 12px;
                          Text { width: 176px; text: "Активные ядра CPU"; font-size: 13.5px; font-weight: 550; color: root.core-count-control-ready ? Palette.text-primary : Palette.text-secondary; vertical-alignment: center; }
                         Text { text: "P"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
-                         NumberStepper { value <=> root.p-cores; minimum: 1; maximum: 32; disabled: !root.core-count-control-ready || root.applying; }
+                          NumberStepper { value <=> root.p-cores; minimum: 1; maximum: 32; disabled: true; /* no typed owner yet */ }
                         Text { text: "E"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
-                         NumberStepper { value <=> root.e-cores; minimum: 0; maximum: 32; disabled: !root.core-count-control-ready || root.applying; }
+                          NumberStepper { value <=> root.e-cores; minimum: 0; maximum: 32; disabled: true; /* no typed owner yet */ }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
 
@@ -249,25 +249,25 @@ export component SystemSection inherits Rectangle {
                         height: 40px;
                         spacing: 8px;
                         Text { width: 28px; text: "M1"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
-                         OptionStepper { label: root.binding-label(root.m1-action); disabled: !root.binding-control-ready || root.applying; can-previous: root.m1-action > 0; can-next: root.m1-action < root.binding-action-count - 1; previous => { root.m1-action = root.clamp-index(root.m1-action, -1); } next => { root.m1-action = root.clamp-index(root.m1-action, 1); } }
+                          OptionStepper { label: root.binding-label(root.m1-action); disabled: true; /* no typed owner yet */ can-previous: root.m1-action > 0; can-next: root.m1-action < root.binding-action-count - 1; previous => { root.m1-action = root.clamp-index(root.m1-action, -1); } next => { root.m1-action = root.clamp-index(root.m1-action, 1); } }
                         Text { width: 28px; text: "M2"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
-                         OptionStepper { label: root.binding-label(root.m2-action); disabled: !root.binding-control-ready || root.applying; can-previous: root.m2-action > 0; can-next: root.m2-action < root.binding-action-count - 1; previous => { root.m2-action = root.clamp-index(root.m2-action, -1); } next => { root.m2-action = root.clamp-index(root.m2-action, 1); } }
+                          OptionStepper { label: root.binding-label(root.m2-action); disabled: true; /* no typed owner yet */ can-previous: root.m2-action > 0; can-next: root.m2-action < root.binding-action-count - 1; previous => { root.m2-action = root.clamp-index(root.m2-action, -1); } next => { root.m2-action = root.clamp-index(root.m2-action, 1); } }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
                     HorizontalLayout {
                         height: 40px;
                         spacing: 8px;
                         Text { width: 28px; text: "M3"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
-                         OptionStepper { label: root.binding-label(root.m3-action); disabled: !root.binding-control-ready || root.applying; can-previous: root.m3-action > 0; can-next: root.m3-action < root.binding-action-count - 1; previous => { root.m3-action = root.clamp-index(root.m3-action, -1); } next => { root.m3-action = root.clamp-index(root.m3-action, 1); } }
+                          OptionStepper { label: root.binding-label(root.m3-action); disabled: true; /* no typed owner yet */ can-previous: root.m3-action > 0; can-next: root.m3-action < root.binding-action-count - 1; previous => { root.m3-action = root.clamp-index(root.m3-action, -1); } next => { root.m3-action = root.clamp-index(root.m3-action, 1); } }
                         Text { width: 28px; text: "M4"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
-                         OptionStepper { label: root.binding-label(root.m4-action); disabled: !root.binding-control-ready || root.applying; can-previous: root.m4-action > 0; can-next: root.m4-action < root.binding-action-count - 1; previous => { root.m4-action = root.clamp-index(root.m4-action, -1); } next => { root.m4-action = root.clamp-index(root.m4-action, 1); } }
+                          OptionStepper { label: root.binding-label(root.m4-action); disabled: true; /* no typed owner yet */ can-previous: root.m4-action > 0; can-next: root.m4-action < root.binding-action-count - 1; previous => { root.m4-action = root.clamp-index(root.m4-action, -1); } next => { root.m4-action = root.clamp-index(root.m4-action, 1); } }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
                     HorizontalLayout {
                         height: 40px;
                         spacing: 8px;
                         Text { width: 28px; text: "M5"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
-                         OptionStepper { label: root.binding-label(root.m5-action); disabled: !root.binding-control-ready || root.applying; can-previous: root.m5-action > 0; can-next: root.m5-action < root.binding-action-count - 1; previous => { root.m5-action = root.clamp-index(root.m5-action, -1); } next => { root.m5-action = root.clamp-index(root.m5-action, 1); } }
+                          OptionStepper { label: root.binding-label(root.m5-action); disabled: true; /* no typed owner yet */ can-previous: root.m5-action > 0; can-next: root.m5-action < root.binding-action-count - 1; previous => { root.m5-action = root.clamp-index(root.m5-action, -1); } next => { root.m5-action = root.clamp-index(root.m5-action, 1); } }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
 
