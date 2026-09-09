@@ -87,6 +87,30 @@ struct AdvancedApplyObservation {
     igpu_memory: Option<(u8, bool)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdvancedApplyControl {
+    BootSound,
+    IgpuMemory,
+    Aspm,
+}
+
+#[derive(Debug)]
+struct AdvancedApplyError {
+    completed: Vec<AdvancedApplyControl>,
+    failed: Option<AdvancedApplyControl>,
+    error: ProviderError,
+}
+
+impl AdvancedApplyError {
+    fn new(failed: AdvancedApplyControl, error: ProviderError) -> Self {
+        Self {
+            completed: Vec::new(),
+            failed: Some(failed),
+            error,
+        }
+    }
+}
+
 fn advanced_apply_ready(dirty: bool, boot_sound: bool, igpu_memory: bool, aspm: bool) -> bool {
     dirty && (boot_sound || igpu_memory || aspm)
 }
@@ -343,7 +367,13 @@ fn apply_advanced(window: &AppWindow) {
     let completion = context.mutating.clone();
     context.runtime.spawn(async move {
         let result = async {
-            let client = HardwareProductControlClient::connect_system().await?;
+            let client = HardwareProductControlClient::connect_system()
+                .await
+                .map_err(|error| AdvancedApplyError {
+                    completed: Vec::new(),
+                    failed: None,
+                    error,
+                })?;
             apply_advanced_client(&client, draft).await
         }
         .await;
@@ -362,10 +392,7 @@ fn apply_advanced(window: &AppWindow) {
                     },
                     observation.igpu_memory.map(|(_, pending)| pending),
                 ),
-                Err(error) => (
-                    format!("Staged ASUS Apply failed · {}", write_error_label(&error)),
-                    None,
-                ),
+                Err(error) => (advanced_apply_error_status(&error), None),
             };
             refresh_with_status(&window, Some(status), pending);
         }) {
@@ -377,24 +404,81 @@ fn apply_advanced(window: &AppWindow) {
 async fn apply_advanced_client(
     client: &HardwareProductControlClient,
     draft: AdvancedApplyDraft,
-) -> Result<AdvancedApplyObservation, ProviderError> {
+) -> Result<AdvancedApplyObservation, AdvancedApplyError> {
     let mut observation = AdvancedApplyObservation::default();
+    let mut completed = Vec::new();
     if draft.boot_sound_ready {
-        require_supported(client.boot_sound_status().await?, "boot sound")?;
-        client.set_boot_sound(draft.boot_sound).await?;
+        let status = client
+            .boot_sound_status()
+            .await
+            .map_err(|error| AdvancedApplyError::new(AdvancedApplyControl::BootSound, error))?;
+        require_supported(status, "boot sound")
+            .map_err(|error| AdvancedApplyError::new(AdvancedApplyControl::BootSound, error))?;
+        client
+            .set_boot_sound(draft.boot_sound)
+            .await
+            .map_err(|error| AdvancedApplyError {
+                completed: completed.clone(),
+                failed: Some(AdvancedApplyControl::BootSound),
+                error,
+            })?;
+        completed.push(AdvancedApplyControl::BootSound);
     }
     if draft.igpu_memory_ready {
-        require_supported(client.apu_memory_status().await?, "iGPU memory")?;
-        observation.igpu_memory = Some(client.set_apu_memory(draft.igpu_memory).await?);
+        let status = client
+            .apu_memory_status()
+            .await
+            .map_err(|error| AdvancedApplyError {
+                completed: completed.clone(),
+                failed: Some(AdvancedApplyControl::IgpuMemory),
+                error,
+            })?;
+        require_supported(status, "iGPU memory").map_err(|error| AdvancedApplyError {
+            completed: completed.clone(),
+            failed: Some(AdvancedApplyControl::IgpuMemory),
+            error,
+        })?;
+        observation.igpu_memory = Some(client.set_apu_memory(draft.igpu_memory).await.map_err(
+            |error| AdvancedApplyError {
+                completed: completed.clone(),
+                failed: Some(AdvancedApplyControl::IgpuMemory),
+                error,
+            },
+        )?);
+        completed.push(AdvancedApplyControl::IgpuMemory);
     }
     if draft.aspm_ready {
-        require_supported(client.aspm_state().await?.1, "ASPM")?;
-        let observed = client.set_aspm_disabled(draft.aspm_disabled).await?;
+        let (_, status) = client
+            .aspm_state()
+            .await
+            .map_err(|error| AdvancedApplyError {
+                completed: completed.clone(),
+                failed: Some(AdvancedApplyControl::Aspm),
+                error,
+            })?;
+        require_supported(status, "ASPM").map_err(|error| AdvancedApplyError {
+            completed: completed.clone(),
+            failed: Some(AdvancedApplyControl::Aspm),
+            error,
+        })?;
+        let observed = client
+            .set_aspm_disabled(draft.aspm_disabled)
+            .await
+            .map_err(|error| AdvancedApplyError {
+                completed: completed.clone(),
+                failed: Some(AdvancedApplyControl::Aspm),
+                error,
+            })?;
         if observed != draft.aspm_disabled {
-            return Err(ProviderError::BackendUnavailable(
-                "ASPM read-back did not match staged value".into(),
-            ));
+            return Err(AdvancedApplyError {
+                completed,
+                failed: Some(AdvancedApplyControl::Aspm),
+                error: ProviderError::BackendUnavailable(
+                    "ASPM read-back did not match staged value".into(),
+                ),
+            });
         }
+        completed.push(AdvancedApplyControl::Aspm);
     }
     Ok(observation)
 }
@@ -1020,6 +1104,38 @@ fn write_error_label(error: &ProviderError) -> &'static str {
     }
 }
 
+fn advanced_apply_error_status(error: &AdvancedApplyError) -> String {
+    let reason = write_error_label(&error.error);
+    let Some(failed) = error.failed.map(advanced_apply_control_label) else {
+        return format!("Apply failed · {reason} · hardware state refreshed");
+    };
+    if matches!(error.error, ProviderError::Timeout(_)) {
+        return format!(
+            "Apply outcome unknown · {failed} may have changed · {reason} · hardware state refreshed"
+        );
+    }
+    if error.completed.is_empty() {
+        return format!("Apply failed · {failed} {reason} · hardware state refreshed");
+    }
+    let completed = error
+        .completed
+        .iter()
+        .map(|control| format!("{} applied", advanced_apply_control_label(*control)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "Apply partially completed · {completed}; {failed} failed · {reason} · hardware state refreshed"
+    )
+}
+
+fn advanced_apply_control_label(control: AdvancedApplyControl) -> &'static str {
+    match control {
+        AdvancedApplyControl::BootSound => "boot sound",
+        AdvancedApplyControl::IgpuMemory => "iGPU memory",
+        AdvancedApplyControl::Aspm => "ASPM",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
@@ -1035,6 +1151,7 @@ mod tests {
     struct FakeAdvancedHardware {
         state: Arc<Mutex<(bool, u8, bool)>>,
         boot_status: u8,
+        fail_on: Option<AdvancedApplyControl>,
     }
 
     #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
@@ -1043,18 +1160,24 @@ mod tests {
             self.boot_status
         }
 
-        async fn set_boot_sound(&self, enabled: bool) -> u8 {
+        async fn set_boot_sound(&self, enabled: bool) -> zbus::fdo::Result<u8> {
+            if self.fail_on == Some(AdvancedApplyControl::BootSound) {
+                return Err(zbus::fdo::Error::Failed("boot sound failure".into()));
+            }
             self.state.lock().unwrap().0 = enabled;
-            enabled as u8
+            Ok(enabled as u8)
         }
 
         async fn apu_memory_mutation_status(&self) -> u8 {
             0
         }
 
-        async fn set_apu_memory(&self, value: u8) -> (u8, u8, u8) {
+        async fn set_apu_memory(&self, value: u8) -> zbus::fdo::Result<(u8, u8, u8)> {
+            if self.fail_on == Some(AdvancedApplyControl::IgpuMemory) {
+                return Err(zbus::fdo::Error::Failed("iGPU memory failure".into()));
+            }
             self.state.lock().unwrap().1 = value;
-            (value, value, 1)
+            Ok((value, value, 1))
         }
 
         async fn aspm_mutation_status(&self) -> u8 {
@@ -1065,9 +1188,12 @@ mod tests {
             self.state.lock().unwrap().2
         }
 
-        async fn set_aspm_disabled(&self, disabled: bool) -> bool {
+        async fn set_aspm_disabled(&self, disabled: bool) -> zbus::fdo::Result<bool> {
+            if self.fail_on == Some(AdvancedApplyControl::Aspm) {
+                return Err(zbus::fdo::Error::Failed("ASPM failure".into()));
+            }
             self.state.lock().unwrap().2 = disabled;
-            disabled
+            Ok(disabled)
         }
     }
 
@@ -1133,6 +1259,7 @@ mod tests {
         let hardware = FakeAdvancedHardware {
             state: Arc::new(Mutex::new((false, 2, false))),
             boot_status: 0,
+            fail_on: None,
         };
         let state = hardware.state.clone();
         let (_server, connection) = private_advanced_peer(hardware).await;
@@ -1160,6 +1287,7 @@ mod tests {
         let hardware = FakeAdvancedHardware {
             state: Arc::new(Mutex::new((false, 2, false))),
             boot_status: 1,
+            fail_on: None,
         };
         let (_server, connection) = private_advanced_peer(hardware).await;
         let client = HardwareProductControlClient::new(connection);
@@ -1180,6 +1308,83 @@ mod tests {
         assert!(
             result.is_err(),
             "lost write support must not be reported as success"
+        );
+        assert!(matches!(
+            result.unwrap_err().failed,
+            Some(AdvancedApplyControl::BootSound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn staged_apply_later_operation_failure_reports_prior_success() {
+        let hardware = FakeAdvancedHardware {
+            state: Arc::new(Mutex::new((false, 2, false))),
+            boot_status: 0,
+            fail_on: Some(AdvancedApplyControl::IgpuMemory),
+        };
+        let state = hardware.state.clone();
+        let (_server, connection) = private_advanced_peer(hardware).await;
+        let client = HardwareProductControlClient::new(connection);
+
+        let error = apply_advanced_client(
+            &client,
+            AdvancedApplyDraft {
+                boot_sound: true,
+                boot_sound_ready: true,
+                igpu_memory: 6,
+                igpu_memory_ready: true,
+                aspm_disabled: false,
+                aspm_ready: false,
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(*state.lock().unwrap(), (true, 2, false));
+        assert_eq!(
+            advanced_apply_error_status(&error),
+            "Apply partially completed · boot sound applied; iGPU memory failed · write failed · hardware state refreshed"
+        );
+    }
+
+    #[test]
+    fn staged_apply_first_failure_is_not_presented_as_partial_success() {
+        let error = AdvancedApplyError::new(
+            AdvancedApplyControl::BootSound,
+            ProviderError::Unsupported("boot sound".into()),
+        );
+
+        assert_eq!(
+            advanced_apply_error_status(&error),
+            "Apply failed · boot sound write disabled · hardware state refreshed"
+        );
+    }
+
+    #[test]
+    fn staged_apply_later_failure_preserves_completed_control_and_no_rollback_claim() {
+        let error = AdvancedApplyError {
+            completed: vec![AdvancedApplyControl::BootSound],
+            failed: Some(AdvancedApplyControl::IgpuMemory),
+            error: ProviderError::BackendUnavailable("lost connection".into()),
+        };
+
+        assert_eq!(
+            advanced_apply_error_status(&error),
+            "Apply partially completed · boot sound applied; iGPU memory failed · write unavailable · hardware state refreshed"
+        );
+        assert!(!advanced_apply_error_status(&error).contains("rolled back"));
+    }
+
+    #[test]
+    fn staged_apply_timeout_is_reported_as_unknown_for_failed_control() {
+        let error = AdvancedApplyError::new(
+            AdvancedApplyControl::Aspm,
+            ProviderError::Timeout("ASPM timed out".into()),
+        );
+
+        assert_eq!(
+            advanced_apply_error_status(&error),
+            "Apply outcome unknown · ASPM may have changed · write timed out · hardware state refreshed"
         );
     }
 
