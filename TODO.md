@@ -8,6 +8,12 @@ The product UI and its canonical 10-screen review set are complete enough to dev
 
 That baseline is not the same as a finished product: several intentional controls are still UI contracts waiting for real backend ownership, and the current release candidate has not yet been proven end to end on the target Arch installation.
 
+## Verified progress snapshot
+
+Local commits `b10ab9f`, `b6c19b0`, `6c736a0`, `a5cffa5`, `bb1e178`, `4ba8d00` and `a984ab9` verify the Advanced Apply typed slice and fail-closed unsupported controls. The target Arch package was installed and runtime ownership moved to package-owned `/usr/bin` paths; `pacman -Qkk` reported 0 altered files after the hardwared repair; D-Bus, polkit and `orbisctl` status were verified. `PKGBUILD` is pinned to published commit `4ba8d006` with a source checksum and a clean `makepkg` build. No hardware writes were performed in the latest work.
+
+Blocks 1, 3, 4 and 5 remain open: live validation is still incomplete, clean install/upgrade/uninstall evidence is still missing, and merge/tag/release actions have not been performed. This snapshot does not claim full completion.
+
 ## How this TODO is used
 
 - Only the **five top-level blocks** below are tracked as completion items. Do not turn their sub-bullets into a second micro-backlog.
