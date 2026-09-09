@@ -403,7 +403,10 @@ fn decode_status(raw: u8, feature: &str) -> Result<ProductWriteStatus, ProviderE
     }
 }
 
-fn require_supported(status: ProductWriteStatus, feature: &str) -> Result<(), ProviderError> {
+pub(crate) fn require_supported(
+    status: ProductWriteStatus,
+    feature: &str,
+) -> Result<(), ProviderError> {
     match status {
         ProductWriteStatus::Supported => Ok(()),
         ProductWriteStatus::Unsupported => Err(ProviderError::Unsupported(format!(

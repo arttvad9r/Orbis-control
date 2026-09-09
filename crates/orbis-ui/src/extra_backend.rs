@@ -15,7 +15,7 @@ use slint::ComponentHandle;
 
 use crate::AppWindow;
 use crate::quick_controls_backend::hardware_controls_backend::{
-    HardwareProductControlClient, ProductWriteStatus,
+    HardwareProductControlClient, ProductWriteStatus, require_supported,
 };
 
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
@@ -75,8 +75,11 @@ struct ApuMemoryObserved {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct AdvancedApplyDraft {
     boot_sound: bool,
+    boot_sound_ready: bool,
     igpu_memory: u8,
+    igpu_memory_ready: bool,
     aspm_disabled: bool,
+    aspm_ready: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -310,8 +313,11 @@ fn apply_advanced(window: &AppWindow) {
     };
     let draft = AdvancedApplyDraft {
         boot_sound: window.get_boot_sound(),
+        boot_sound_ready: window.get_boot_sound_control_ready(),
         igpu_memory: window.get_igpu_memory().clamp(0, 8) as u8,
+        igpu_memory_ready: window.get_igpu_memory_control_ready(),
         aspm_disabled: window.get_disable_aspm(),
+        aspm_ready: window.get_aspm_control_ready(),
     };
     window.set_advanced_apply_ready(false);
     window.set_status("Applying staged ASUS parameters through Hardware1…".into());
@@ -355,13 +361,16 @@ async fn apply_advanced_client(
     draft: AdvancedApplyDraft,
 ) -> Result<AdvancedApplyObservation, ProviderError> {
     let mut observation = AdvancedApplyObservation::default();
-    if client.boot_sound_status().await?.is_supported() {
+    if draft.boot_sound_ready {
+        require_supported(client.boot_sound_status().await?, "boot sound")?;
         client.set_boot_sound(draft.boot_sound).await?;
     }
-    if client.apu_memory_status().await?.is_supported() {
+    if draft.igpu_memory_ready {
+        require_supported(client.apu_memory_status().await?, "iGPU memory")?;
         observation.igpu_memory = Some(client.set_apu_memory(draft.igpu_memory).await?);
     }
-    if client.aspm_state().await?.1.is_supported() {
+    if draft.aspm_ready {
+        require_supported(client.aspm_state().await?.1, "ASPM")?;
         let observed = client.set_aspm_disabled(draft.aspm_disabled).await?;
         if observed != draft.aspm_disabled {
             return Err(ProviderError::BackendUnavailable(
@@ -1007,12 +1016,13 @@ mod tests {
     #[derive(Clone)]
     struct FakeAdvancedHardware {
         state: Arc<Mutex<(bool, u8, bool)>>,
+        boot_status: u8,
     }
 
     #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
     impl FakeAdvancedHardware {
         async fn boot_sound_mutation_status(&self) -> u8 {
-            0
+            self.boot_status
         }
 
         async fn set_boot_sound(&self, enabled: bool) -> u8 {
@@ -1087,6 +1097,7 @@ mod tests {
     async fn staged_apply_uses_only_supported_typed_controls() {
         let hardware = FakeAdvancedHardware {
             state: Arc::new(Mutex::new((false, 2, false))),
+            boot_status: 0,
         };
         let state = hardware.state.clone();
         let (_server, connection) = private_advanced_peer(hardware).await;
@@ -1096,14 +1107,45 @@ mod tests {
             &client,
             AdvancedApplyDraft {
                 boot_sound: true,
+                boot_sound_ready: true,
                 igpu_memory: 6,
+                igpu_memory_ready: true,
                 aspm_disabled: true,
+                aspm_ready: true,
             },
         )
         .await
         .unwrap();
 
         assert_eq!(*state.lock().unwrap(), (true, 6, true));
+    }
+
+    #[tokio::test]
+    async fn staged_apply_reports_controls_that_lost_write_support() {
+        let hardware = FakeAdvancedHardware {
+            state: Arc::new(Mutex::new((false, 2, false))),
+            boot_status: 1,
+        };
+        let (_server, connection) = private_advanced_peer(hardware).await;
+        let client = HardwareProductControlClient::new(connection);
+
+        let result = apply_advanced_client(
+            &client,
+            AdvancedApplyDraft {
+                boot_sound: true,
+                boot_sound_ready: true,
+                igpu_memory: 2,
+                igpu_memory_ready: false,
+                aspm_disabled: false,
+                aspm_ready: false,
+            },
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "lost write support must not be reported as success"
+        );
     }
 
     #[test]
