@@ -52,9 +52,12 @@ export component PowerSection inherits Rectangle {
                     padding: LayoutMetrics.card-padding;
                     spacing: 14px;
 
-                    SectionTitle {
-                        title: "Ограничение заряда батареи";
-                        detail: root.ui-state.charge-limit-state == ChargeLimitState.Ready
+                     SectionTitle {
+                         title: "Ограничение заряда батареи";
+                         detail: root.ui-state.charge-limit-pending ? "Ожидание подтверждения"
+                             : root.ui-state.charge-limit-unconfirmed ? "Результат неизвестен · обновите состояние"
+                             : root.ui-state.charge-limit-error != "" ? root.ui-state.charge-limit-error
+                             : root.ui-state.charge-limit-state == ChargeLimitState.Ready
                             ? (root.ui-state.charge-limit-writable ? "Доступно" : "Только чтение")
                             : "Получение состояния";
                     }
@@ -64,9 +67,15 @@ export component PowerSection inherits Rectangle {
                         max: 100;
                         step: 1;
                         value: root.ui-state.charge-limit;
-                        disabled: !root.ui-state.charge-limit-writable;
+                         disabled: !root.ui-state.charge-limit-writable || root.ui-state.charge-limit-pending || root.ui-state.charge-limit-unconfirmed || root.ui-state.charge-limit-error != "";
                         changed(v) => { root.charge-changed(v); }
-                    }
+                     }
+                     if (root.ui-state.charge-limit-pending || root.ui-state.charge-limit-unconfirmed || root.ui-state.charge-limit-error != "") : LocalStatus {
+                         text: root.ui-state.charge-limit-pending ? "Изменение поставлено в очередь"
+                             : root.ui-state.charge-limit-unconfirmed ? "Результат неизвестен · обновите состояние перед новой записью"
+                             : root.ui-state.charge-limit-error;
+                         accent: root.ui-state.charge-limit-error != "" ? Palette.error : Palette.warning;
+                     }
                     if (root.ui-state.charge-limit-state != ChargeLimitState.Ready) : LocalStatus {
                         text: root.ui-state.charge-limit-state == ChargeLimitState.Loading
                             ? "Чтение текущего порога заряда"

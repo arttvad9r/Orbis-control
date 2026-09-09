@@ -178,6 +178,8 @@ fn to_slint(state: &controller::UiState) -> UiState {
             controller::GpuModeHwState::Unavailable => GpuModeHwState::Unavailable,
         },
         gpu_mode_writable: state.gpu_mode_writable,
+        gpu_mode_pending: state.gpu_mode_pending,
+        gpu_mode_unconfirmed: state.gpu_mode_unconfirmed,
         gpu_queued: state.gpu_queued,
         gpu_reboot_required: state.gpu_reboot_required,
         charge_limit: state.charge_limit,
@@ -193,6 +195,9 @@ fn to_slint(state: &controller::UiState) -> UiState {
             controller::ChargeLimitState::Ready => ChargeLimitState::Ready,
             controller::ChargeLimitState::Unavailable => ChargeLimitState::Unavailable,
         },
+        charge_limit_pending: state.charge_limit_pending,
+        charge_limit_unconfirmed: state.charge_limit_unconfirmed,
+        charge_limit_error: state.charge_limit_error.clone().unwrap_or_default().into(),
         gpu_power_state: match state.gpu_power {
             controller::GpuHwState::Loading => GpuHwState::Loading,
             controller::GpuHwState::Ready => GpuHwState::Ready,
@@ -238,6 +243,8 @@ fn to_slint(state: &controller::UiState) -> UiState {
             .unwrap_or_default()
             .into(),
         fan_curve_error: state.fan_curve_error,
+        fan_curve_pending: state.fan_curve_pending,
+        fan_curve_unconfirmed: state.fan_curve_unconfirmed,
         fan_curve_dirty: state.fan_curve_dirty,
         fan_curve_enabled_known: state.fan_curve_enabled.is_some(),
         fan_curve_enabled: state.fan_curve_enabled.unwrap_or(false),
@@ -287,6 +294,8 @@ fn from_slint(state: &UiState) -> controller::UiState {
             GpuModeHwState::Unavailable => controller::GpuModeHwState::Unavailable,
         },
         gpu_mode_writable: state.gpu_mode_writable,
+        gpu_mode_pending: state.gpu_mode_pending,
+        gpu_mode_unconfirmed: state.gpu_mode_unconfirmed,
         gpu_queued: state.gpu_queued,
         gpu_reboot_required: state.gpu_reboot_required,
         charge_limit: state.charge_limit,
@@ -297,6 +306,10 @@ fn from_slint(state: &UiState) -> controller::UiState {
             ChargeLimitState::Ready => controller::ChargeLimitState::Ready,
             ChargeLimitState::Unavailable => controller::ChargeLimitState::Unavailable,
         },
+        charge_limit_pending: state.charge_limit_pending,
+        charge_limit_unconfirmed: state.charge_limit_unconfirmed,
+        charge_limit_error: (!state.charge_limit_error.is_empty())
+            .then(|| state.charge_limit_error.to_string()),
         gpu_power: match state.gpu_power_state {
             GpuHwState::Loading => controller::GpuHwState::Loading,
             GpuHwState::Ready => controller::GpuHwState::Ready,
@@ -346,6 +359,8 @@ fn from_slint(state: &UiState) -> controller::UiState {
         fan_curve_writable: state.fan_curve_writable,
         fan_curve_unavailable_reason: None,
         fan_curve_error: state.fan_curve_error,
+        fan_curve_pending: state.fan_curve_pending,
+        fan_curve_unconfirmed: state.fan_curve_unconfirmed,
         fan_curve_dirty: state.fan_curve_dirty,
         fan_curve_enabled: if state.fan_curve_enabled_known {
             Some(state.fan_curve_enabled)
@@ -681,11 +696,18 @@ fn performance_command_for_click(state: &controller::UiState, index: i32) -> Opt
 }
 
 fn charge_mutation_allowed(state: &controller::UiState) -> bool {
-    state.charge_limit_writable && state.charge_limit_state == controller::ChargeLimitState::Ready
+    state.charge_limit_writable
+        && state.charge_limit_state == controller::ChargeLimitState::Ready
+        && !state.charge_limit_pending
+        && !state.charge_limit_unconfirmed
+        && state.charge_limit_error.is_none()
 }
 
 fn gpu_mode_click_allowed(state: &controller::UiState) -> bool {
-    state.gpu_mode_writable && state.gpu_mode_state == controller::GpuModeHwState::Ready
+    state.gpu_mode_writable
+        && state.gpu_mode_state == controller::GpuModeHwState::Ready
+        && !state.gpu_mode_pending
+        && !state.gpu_mode_unconfirmed
 }
 
 #[cfg(test)]
@@ -821,18 +843,17 @@ fn apply_product_gpu_result(
 
     match result {
         Ok(reply) => {
-            // Apply only authoritative current/queued read-back values; a
-            // successful queued result never claims an applied mode and
-            // unknown wire sentinels keep previous UI evidence.
-            if let Some(index) = controller::asus_product_gpu_index(reply.current_mode) {
-                state.gpu_selected = index;
-            }
-            if let Some(index) = controller::asus_product_gpu_index(reply.queued_mode) {
-                state.gpu_queued = index;
-            }
-            state.gpu_reboot_required = reply.reboot_required;
+            state.gpu_mode_pending = false;
+            state.gpu_mode_unconfirmed = false;
             match reply.outcome {
                 OUTCOME_ALREADY_ACTIVE | OUTCOME_REBOOT_REQUIRED => {
+                    if let Some(index) = controller::asus_product_gpu_index(reply.current_mode) {
+                        state.gpu_selected = index;
+                    }
+                    if let Some(index) = controller::asus_product_gpu_index(reply.queued_mode) {
+                        state.gpu_queued = index;
+                    }
+                    state.gpu_reboot_required = reply.reboot_required;
                     state.gpu_mode_writable = true;
                     state.gpu_section_error = false;
                     tracing::debug!(
@@ -849,6 +870,7 @@ fn apply_product_gpu_result(
                     tracing::warn!("product gpu: read-back inconsistent: {reply:?}");
                 }
                 _ => {
+                    state.gpu_mode_unconfirmed = true;
                     // Unknown outcome is not a definitive failure and not a
                     // success: UI keeps previous section state.
                     tracing::warn!(
@@ -858,6 +880,8 @@ fn apply_product_gpu_result(
             }
         }
         Err(e) => {
+            state.gpu_mode_pending = false;
+            state.gpu_mode_unconfirmed = false;
             state.gpu_mode_writable = false;
             state.gpu_section_error = true;
             tracing::warn!("product gpu: команда не выполнена: {e:?}");
@@ -871,6 +895,9 @@ fn apply_product_gpu_status(
 ) {
     match result {
         Ok(status) => {
+            state.gpu_mode_pending = false;
+            state.gpu_mode_unconfirmed = false;
+            state.gpu_section_error = false;
             let Some(current) = controller::asus_product_gpu_index(status.current_mode) else {
                 state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
                 state.gpu_mode_writable = false;
@@ -887,6 +914,7 @@ fn apply_product_gpu_status(
             state.gpu_section_error = false;
         }
         Err(error) => {
+            state.gpu_mode_pending = false;
             state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
             state.gpu_mode_writable = false;
             tracing::warn!("product gpu status unavailable: {error:?}");
@@ -898,6 +926,17 @@ fn apply_charge_limit_outcome(
     state: &mut controller::UiState,
     outcome: &ChargeLimitCommandOutcome,
 ) {
+    if !matches!(outcome.result, ApplyResult::Applied) {
+        state.charge_limit_pending = matches!(
+            outcome.result,
+            ApplyResult::Pending { .. } | ApplyResult::Accepted
+        );
+        state.charge_limit_unconfirmed = false;
+        return;
+    }
+    state.charge_limit_pending = false;
+    state.charge_limit_unconfirmed = false;
+    state.charge_limit_error = None;
     match outcome.state.configured_percent {
         Some(percent) => {
             state.charge_limit = i32::from(percent.get());
@@ -918,8 +957,16 @@ fn apply_charge_limit_result(
 ) {
     match result {
         Ok(outcome) => apply_charge_limit_outcome(state, &outcome),
-        Err(CommandError::Command(e)) => tracing::warn!("battery: команда не выполнена: {e:?}"),
+        Err(CommandError::Command(e)) => {
+            state.charge_limit_pending = false;
+            state.charge_limit_unconfirmed = false;
+            state.charge_limit_error = Some(e.to_string());
+            tracing::warn!("battery: команда не выполнена: {e:?}");
+        }
         Err(CommandError::ReadBack { result, source }) => {
+            state.charge_limit_pending = false;
+            state.charge_limit_unconfirmed = false;
+            state.charge_limit_error = Some(source.to_string());
             tracing::warn!(
                 "battery: команда выполнена ({result:?}), но read-back не удался: {source:?}"
             );
@@ -929,6 +976,9 @@ fn apply_charge_limit_result(
             command,
             observation,
         }) => {
+            state.charge_limit_pending = false;
+            state.charge_limit_unconfirmed = true;
+            state.charge_limit_error = None;
             // Итог неизвестен: UI сохраняет прежнее состояние и помечает
             // отсутствие подтверждения; Авторитетный read-back позже обновит.
             tracing::warn!(
@@ -945,6 +995,9 @@ fn apply_charge_limit_refresh(
     match result {
         Ok(limit) => match limit.configured_percent {
             Some(percent) => {
+                state.charge_limit_pending = false;
+                state.charge_limit_unconfirmed = false;
+                state.charge_limit_error = None;
                 state.charge_limit = i32::from(percent.get());
                 state.charge_limit_enabled = limit.enabled;
                 state.charge_limit_state = controller::ChargeLimitState::Ready;
@@ -968,6 +1021,9 @@ fn apply_charge_limit_refresh(
             }
         },
         Err(e) => {
+            state.charge_limit_pending = false;
+            state.charge_limit_unconfirmed = false;
+            state.charge_limit_error = Some(e.to_string());
             state.charge_limit_state = controller::ChargeLimitState::Unavailable;
             state.charge_limit_writable = false;
             tracing::warn!("battery: refresh недоступен: {e:?}");
@@ -1146,22 +1202,52 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             ApplyResult::Applied => {
                 tracing::debug!("fan curve: mutation applied (read-back confirmed)");
                 state.fan_curve_error = false;
+                state.fan_curve_pending = false;
+                state.fan_curve_unconfirmed = false;
                 state.fan_curve_dirty = false;
+            }
+            ApplyResult::Pending { .. } => {
+                state.fan_curve_pending = true;
+                state.fan_curve_unconfirmed = false;
+                state.fan_curve_error = false;
+            }
+            ApplyResult::Accepted => {
+                state.fan_curve_pending = true;
+                state.fan_curve_unconfirmed = false;
+                state.fan_curve_error = false;
             }
             other => {
                 tracing::warn!("fan curve: mutation result not Applied: {other:?}");
+                state.fan_curve_pending = false;
+                state.fan_curve_unconfirmed = false;
                 state.fan_curve_error = true;
             }
         },
         WorkerEvent::FanCurve(Err(e)) => {
             tracing::warn!("fan curve mutation failed: {e:?}");
-            state.fan_curve_error = true;
+            state.fan_curve_pending = false;
+            match e {
+                CommandError::Unconfirmed { .. } => {
+                    state.fan_curve_unconfirmed = true;
+                    state.fan_curve_error = false;
+                }
+                _ => {
+                    state.fan_curve_unconfirmed = false;
+                    state.fan_curve_error = true;
+                }
+            }
         }
         WorkerEvent::FanCurveRefresh { profile, result } => match result {
-            Ok(curve) => state.load_fan_curve(&curve, profile),
+            Ok(curve) => {
+                state.fan_curve_pending = false;
+                if !state.fan_curve_unconfirmed {
+                    state.load_fan_curve(&curve, profile);
+                }
+            }
             Err(e) => {
                 tracing::warn!("fan curve refresh failed: {e:?}");
                 state.fan_curve_state = controller::FanCurveHwState::Unavailable;
+                state.fan_curve_pending = false;
                 state.fan_curve_error = true;
             }
         },
@@ -1171,6 +1257,8 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
                     "fan factory reset confirmed for profile={profile:?}; authoritative curves were read back"
                 );
                 state.fan_curve_error = false;
+                state.fan_curve_pending = false;
+                state.fan_curve_unconfirmed = false;
                 state.fan_curve_dirty = false;
             }
             Ok(ApplyResult::Accepted) => {
@@ -1181,6 +1269,8 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
                 // Do not set fan_curve_error (not a definitive failure).
                 // Do not clear fan_curve_dirty (user may want to apply custom curve after reset).
                 // Refresh is enqueued in handle_worker_event.
+                state.fan_curve_pending = true;
+                state.fan_curve_unconfirmed = false;
             }
             Ok(other) => {
                 tracing::warn!("fan factory reset returned unexpected result: {other:?}");
@@ -1191,6 +1281,8 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
                 command,
                 observation,
             }) => {
+                state.fan_curve_pending = false;
+                state.fan_curve_unconfirmed = true;
                 // Unconfirmed: mutation may have dispatched but outcome unknown.
                 // Do NOT set fan_curve_error (not a definitive failure).
                 // Preserve UI state, log context for diagnostics.
@@ -1199,8 +1291,9 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
                 );
             }
             Err(e) => {
-                // Definitive error (Unsupported, PermissionDenied, etc.)
-                // Do NOT set fan_curve_error - preserve UI state like other mutations.
+                state.fan_curve_pending = false;
+                state.fan_curve_unconfirmed = false;
+                state.fan_curve_error = true;
                 tracing::warn!("fan factory reset failed definitively: {e:?}");
             }
         },
@@ -1219,8 +1312,13 @@ fn handle_worker_event(
     event: WorkerEvent,
     worker_tx: &UnboundedSender<WorkerCommand>,
 ) {
-    // Check if this is a factory reset accepted event and extract profile for refresh.
+    // Check if this is a factory reset event and extract profile for refresh.
     let refresh_fan_curve = factory_reset_profile_for_refresh(&event);
+    let refresh_product_gpu = matches!(
+        &event,
+        WorkerEvent::ProductGpu(Ok(reply)) if reply.outcome != 0 && reply.outcome != 1
+    ) || matches!(&event, WorkerEvent::ProductGpu(Err(_)));
+    let refresh_charge_limit = matches!(&event, WorkerEvent::ChargeLimit(Err(_)));
 
     let refresh_quick_controls = matches!(&event, WorkerEvent::TelemetryRefresh(_));
     if let WorkerEvent::RegistryChange(Ok((_generation, snapshot))) = &event {
@@ -1234,13 +1332,25 @@ fn handle_worker_event(
     }
     // After factory reset, enqueue a refresh for the selected fan to load observed state.
     if let Some(profile) = refresh_fan_curve {
-        if let Some(fan_id) = controller::UiState::fan_id_from_index(s.fan_selected) {
-            if let Err(e) = worker_tx.send(WorkerCommand::RefreshFanCurve {
-                profile,
-                fan: fan_id,
-            }) {
-                tracing::warn!("fan factory reset refresh enqueue failed: {e:?}");
+        if !s.fan_curve_unconfirmed {
+            if let Some(fan_id) = controller::UiState::fan_id_from_index(s.fan_selected) {
+                if let Err(e) = worker_tx.send(WorkerCommand::RefreshFanCurve {
+                    profile,
+                    fan: fan_id,
+                }) {
+                    tracing::warn!("fan factory reset refresh enqueue failed: {e:?}");
+                }
             }
+        }
+    }
+    if refresh_product_gpu {
+        if let Err(e) = worker_tx.send(WorkerCommand::RefreshProductGpuStatus) {
+            tracing::warn!("product GPU resolution refresh enqueue failed: {e:?}");
+        }
+    }
+    if refresh_charge_limit {
+        if let Err(e) = worker_tx.send(WorkerCommand::RefreshChargeLimit) {
+            tracing::warn!("charge-limit resolution refresh enqueue failed: {e:?}");
         }
     }
 }
@@ -1296,6 +1406,10 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 Some(tx) => {
                     if let Err(e) = tx.send(WorkerCommand::SetProductGpuMode { raw }) {
                         tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
+                    } else if let Some(app) = app_weak.upgrade() {
+                        let mut pending = from_slint(&app.get_ui_state());
+                        pending.gpu_mode_pending = true;
+                        app.set_ui_state(to_slint(&pending));
                     }
                 }
                 None => {
@@ -1324,6 +1438,10 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                     tracing::debug!(requested_percent = percent, "battery GUI commit");
                     if let Err(e) = tx.send(WorkerCommand::SetChargeLimit { percent }) {
                         tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
+                    } else if let Some(app) = app_weak.upgrade() {
+                        let mut pending = from_slint(&app.get_ui_state());
+                        pending.charge_limit_pending = true;
+                        app.set_ui_state(to_slint(&pending));
                     }
                 }
                 None => {
@@ -1441,6 +1559,8 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 if s.fan_curve_state != controller::FanCurveHwState::Ready
                     || !s.fan_curve_writable
                     || s.fan_curve_error
+                    || s.fan_curve_pending
+                    || s.fan_curve_unconfirmed
                 {
                     tracing::warn!("fan factory reset rejected: unavailable/read-only/error");
                     return;
@@ -1459,6 +1579,10 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 if let Some(tx) = &worker_tx {
                     if let Err(e) = tx.send(WorkerCommand::ResetFanCurvesToDefaults { profile }) {
                         tracing::warn!("worker closed, fan factory reset not sent: {e:?}");
+                    } else {
+                        let mut pending = s;
+                        pending.fan_curve_pending = true;
+                        app.set_ui_state(to_slint(&pending));
                     }
                 } else {
                     tracing::warn!("fan factory reset unavailable outside interactive mode");
@@ -1497,6 +1621,10 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                         curve,
                     }) {
                         tracing::warn!("worker закрыт, fan mutation не отправлена: {e:?}");
+                    } else {
+                        let mut pending = s;
+                        pending.fan_curve_pending = true;
+                        app.set_ui_state(to_slint(&pending));
                     }
                 }
                 None => tracing::warn!("fan-apply вне интерактивного режима"),

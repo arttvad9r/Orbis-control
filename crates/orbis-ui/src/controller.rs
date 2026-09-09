@@ -223,6 +223,8 @@ pub struct UiState {
     /// Отдельно от `gpu_mode_state`: production запрещает mutation, пока
     /// доказанный product-mode backend отсутствует.
     pub gpu_mode_writable: bool,
+    pub gpu_mode_pending: bool,
+    pub gpu_mode_unconfirmed: bool,
     /// Authoritative queued ASUS product GPU target card index (-1 = none).
     ///
     /// Заполняется только из authoritative read-back `SetProductGpuMode`;
@@ -242,6 +244,9 @@ pub struct UiState {
     pub charge_limit_writable: bool,
     /// Состояние готовности/доступности Battery Charge Limit.
     pub charge_limit_state: ChargeLimitState,
+    pub charge_limit_pending: bool,
+    pub charge_limit_unconfirmed: bool,
+    pub charge_limit_error: Option<String>,
     /// Read-only GPU hardware capability: dGPU power state.
     pub gpu_power: GpuHwState,
     /// Read-only GPU hardware capability: physical MUX state.
@@ -324,6 +329,8 @@ pub struct UiState {
     pub fan_curve_pwms: [i32; 8],
     /// Ошибка backend в fan-секции (остальное окно остаётся рабочим).
     pub fan_curve_error: bool,
+    pub fan_curve_pending: bool,
+    pub fan_curve_unconfirmed: bool,
     /// Есть ли несохранённые изменения ( dirty flag для UI кнопки Apply).
     pub fan_curve_dirty: bool,
     /// Stored curve enabled-state evidence from the authoritative read.
@@ -393,12 +400,17 @@ impl UiState {
             gpu_section_error: false,
             gpu_mode_state: GpuModeHwState::Unavailable,
             gpu_mode_writable: false,
+            gpu_mode_pending: false,
+            gpu_mode_unconfirmed: false,
             gpu_queued: -1,
             gpu_reboot_required: false,
             charge_limit: 0,
             charge_limit_enabled: false,
             charge_limit_writable: false,
             charge_limit_state: ChargeLimitState::Loading,
+            charge_limit_pending: false,
+            charge_limit_unconfirmed: false,
+            charge_limit_error: None,
             gpu_power: GpuHwState::Loading,
             gpu_mux: GpuHwState::Loading,
             gpu_access: GpuHwState::Loading,
@@ -436,6 +448,8 @@ impl UiState {
             fan_curve_temps: [0; 8],
             fan_curve_pwms: [0; 8],
             fan_curve_error: false,
+            fan_curve_pending: false,
+            fan_curve_unconfirmed: false,
             fan_curve_dirty: false,
             fan_curve_enabled: None,
         }
@@ -532,6 +546,8 @@ impl UiState {
             // отдельно в main().
             gpu_mode_state: GpuModeHwState::Ready,
             gpu_mode_writable: true,
+            gpu_mode_pending: false,
+            gpu_mode_unconfirmed: false,
             gpu_queued: -1,
             gpu_reboot_required: false,
             charge_limit,
@@ -541,6 +557,9 @@ impl UiState {
             charge_limit_writable: true,
             // fixture-профиль: первое значение готово сразу (offscreen/tests).
             charge_limit_state: ChargeLimitState::Ready,
+            charge_limit_pending: false,
+            charge_limit_unconfirmed: false,
+            charge_limit_error: None,
             // GPU hardware capabilities: Loading до первого authoritative read;
             // mock profile не предоставляет real hardware states.
             gpu_power: GpuHwState::Loading,
@@ -584,6 +603,8 @@ impl UiState {
             fan_curve_temps: [0; 8],
             fan_curve_pwms: [0; 8],
             fan_curve_error: false,
+            fan_curve_pending: false,
+            fan_curve_unconfirmed: false,
             fan_curve_dirty: false,
             fan_curve_enabled: None,
         }
@@ -834,6 +855,12 @@ impl UiState {
             return false;
         }
         if self.fan_curve_error {
+            return false;
+        }
+        if self.fan_curve_pending || self.fan_curve_unconfirmed {
+            return false;
+        }
+        if self.fan_curve_pending || self.fan_curve_unconfirmed {
             return false;
         }
         if !self.fan_curve_dirty {

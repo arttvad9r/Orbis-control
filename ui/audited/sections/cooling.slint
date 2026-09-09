@@ -21,6 +21,8 @@ export component CoolingSection inherits Rectangle {
 
     function status-text() -> string {
         if (root.ui-state.fan-curve-error) { return "Операция с кривой завершилась ошибкой"; }
+        if (root.ui-state.fan-curve-pending) { return "Изменение поставлено в очередь"; }
+        if (root.ui-state.fan-curve-unconfirmed) { return "Результат неизвестен · обновите состояние перед новой записью"; }
         if (root.mutation-safety-blocked) { return root.policy-status; }
         if (root.factory-reset-pending) { return "Выбраны заводские значения · подтвердите применение"; }
         if (!root.ui-state.fan-curve-writable) { return "Кривая доступна только для чтения"; }
@@ -33,7 +35,7 @@ export component CoolingSection inherits Rectangle {
 
     function status-color() -> color {
         if (root.ui-state.fan-curve-error) { return Palette.error; }
-        if (root.mutation-safety-blocked || root.factory-reset-pending || root.ui-state.fan-curve-dirty || !root.ui-state.fan-curve-enabled-known) { return Palette.warning; }
+        if (root.mutation-safety-blocked || root.factory-reset-pending || root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed || root.ui-state.fan-curve-dirty || !root.ui-state.fan-curve-enabled-known) { return Palette.warning; }
         return root.ui-state.fan-curve-enabled ? Palette.success : Palette.text-secondary;
     }
 
@@ -80,7 +82,7 @@ export component CoolingSection inherits Rectangle {
                     FanCurveEditor {
                         vertical-stretch: 1;
                         state: root.ui-state.fan-curve-state;
-                        writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked;
+                         writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked && !root.ui-state.fan-curve-pending && !root.ui-state.fan-curve-unconfirmed;
                         error-state: root.ui-state.fan-curve-error;
                         dirty: root.ui-state.fan-curve-dirty;
                         fan-selected: root.ui-state.fan-selected;
@@ -118,7 +120,7 @@ export component CoolingSection inherits Rectangle {
                       width: parent.width;
                       y: (parent.height - self.height) / 2;
                       label: "Заводские значения";
-                      disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error;
+                       disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed;
                       clicked => { root.factory-reset-pending = true; }
                   }
               }
@@ -131,7 +133,7 @@ export component CoolingSection inherits Rectangle {
                       y: (parent.height - self.height) / 2;
                       label: root.factory-reset-pending ? "Применить заводские" : "Применить изменения";
                       accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
-                      disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
+                       disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
                       clicked => {
                           let reset = root.factory-reset-pending;
                           root.fan-apply-clicked(reset);

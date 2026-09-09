@@ -16,6 +16,8 @@ export component GraphicsSection inherits Rectangle {
     }
 
     function mode-reason() -> string {
+        if (root.ui-state.gpu-mode-pending) { return "Ожидание подтверждения"; }
+        if (root.ui-state.gpu-mode-unconfirmed) { return "Результат неизвестен · обновите состояние"; }
         if (root.ui-state.gpu-mode-state == GpuModeHwState.Ready) {
             return root.ui-state.gpu-mode-writable ? "Доступно" : "Только чтение";
         }
@@ -143,7 +145,7 @@ export component GraphicsSection inherits Rectangle {
                             accent: Palette.eco;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0;
                             pending: root.ui-state.gpu-queued == 0;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 1);
+                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || !root.bit-set(root.ui-state.available-gpu-mask, 1);
                             clicked => { root.gpu-clicked(0); }
                         }
                         ModeCard {
@@ -153,7 +155,7 @@ export component GraphicsSection inherits Rectangle {
                             accent: Palette.standard;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1;
                             pending: root.ui-state.gpu-queued == 1;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || !root.bit-set(root.ui-state.available-gpu-mask, 2);
+                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || !root.bit-set(root.ui-state.available-gpu-mask, 2);
                             clicked => { root.gpu-clicked(1); }
                         }
                         ModeCard {
@@ -163,7 +165,7 @@ export component GraphicsSection inherits Rectangle {
                             accent: Palette.ultimate;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2;
                             pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4);
+                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4);
                             clicked => { root.gpu-clicked(2); }
                         }
                         if (root.bit-set(root.ui-state.available-gpu-mask, 8)) : ModeCard {
@@ -172,14 +174,18 @@ export component GraphicsSection inherits Rectangle {
                             icon-kind: 4;
                             accent: Palette.optimized;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable;
+                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
                             clicked => { root.gpu-clicked(3); }
                         }
                     }
 
-                    if (root.ui-state.gpu-section-error) : LocalStatus {
+                     if (root.ui-state.gpu-section-error) : LocalStatus {
                         text: "Изменение режима GPU не было подтверждено";
                         accent: Palette.error;
+                     }
+                    if (root.ui-state.gpu-mode-unconfirmed) : LocalStatus {
+                        text: "Результат неизвестен · обновите состояние перед новой записью";
+                        accent: Palette.warning;
                     }
                     if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : LocalStatus {
                         text: "Переключение поставлено в очередь и завершится после перезагрузки или выключения";

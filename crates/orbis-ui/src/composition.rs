@@ -406,7 +406,7 @@ pub trait FanServiceRuntime: Send + Sync {
         profile: AsusdFanProfile,
         fan: FanId,
         curve: FanCurvePoints,
-    ) -> Result<ApplyResult, ProviderError>;
+    ) -> Result<ApplyResult, orbis_application::SetFanCurveError>;
 
     /// Restore platform factory defaults for all fan curves of a profile.
     ///
@@ -460,7 +460,7 @@ where
         profile: AsusdFanProfile,
         fan: FanId,
         curve: FanCurvePoints,
-    ) -> Result<ApplyResult, ProviderError> {
+    ) -> Result<ApplyResult, orbis_application::SetFanCurveError> {
         AppService::set_fan_curve(self, profile, &fan, &curve).await
     }
 

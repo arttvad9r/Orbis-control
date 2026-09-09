@@ -9,7 +9,8 @@ use crate::composition::{
 };
 use orbis_application::{
     ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome, PerformanceState,
-    SetChargeLimitError, SetFanDefaultsError, SetGpuModeError, SetPerformanceError,
+    SetChargeLimitError, SetFanCurveError, SetFanDefaultsError, SetGpuModeError,
+    SetPerformanceError,
 };
 use orbis_core::action::ApplyResult;
 use orbis_core::fan::{FanCurve, FanId};
@@ -81,7 +82,7 @@ pub enum WorkerEvent {
         >,
     ),
     TelemetryRefresh(Result<orbis_core::telemetry::Telemetry, ProviderError>),
-    FanCurve(Result<ApplyResult, ProviderError>),
+    FanCurve(Result<ApplyResult, SetFanCurveError>),
     FanCurveRefresh {
         profile: AsusdFanProfile,
         result: Result<FanCurve, ProviderError>,

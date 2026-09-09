@@ -1,6 +1,6 @@
 use std::cell::RefCell;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use orbis_core::aura::{AuraMode, AuraRgb, AuraSpeed};
@@ -26,6 +26,8 @@ struct ExtraContext {
     refreshing: Arc<AtomicBool>,
     mutating: Arc<AtomicBool>,
     advanced_dirty: Arc<AtomicBool>,
+    advanced_unresolved: Arc<AtomicBool>,
+    advanced_draft: Arc<Mutex<Option<AdvancedApplyDraft>>>,
     clamshell: Arc<dyn SessionClamshellSource>,
 }
 
@@ -115,6 +117,14 @@ fn advanced_apply_ready(dirty: bool, boot_sound: bool, igpu_memory: bool, aspm: 
     dirty && (boot_sound || igpu_memory || aspm)
 }
 
+fn advanced_apply_requires_reconciliation(error: &AdvancedApplyError) -> bool {
+    matches!(error.error, ProviderError::Timeout(_))
+}
+
+fn advanced_control_writable(unresolved: bool, ready: bool, supported: bool) -> bool {
+    !unresolved && ready && supported
+}
+
 fn advanced_apply_draft(
     boot_sound: bool,
     igpu_memory: i32,
@@ -133,6 +143,33 @@ fn advanced_apply_draft(
     }
 }
 
+fn advanced_refresh_reconciliation(
+    unresolved: bool,
+    dirty: bool,
+    draft: Option<AdvancedApplyDraft>,
+    boot_sound: Option<bool>,
+    igpu_memory: Option<u8>,
+    aspm_disabled: Option<bool>,
+) -> (bool, bool) {
+    if !unresolved {
+        return (false, false);
+    }
+    let Some(draft) = draft else {
+        return (true, dirty);
+    };
+    let reconciled = (!draft.boot_sound_ready || boot_sound == Some(draft.boot_sound))
+        && (!draft.igpu_memory_ready || igpu_memory == Some(draft.igpu_memory))
+        && (!draft.aspm_ready || aspm_disabled == Some(draft.aspm_disabled));
+    let observations_complete = (!draft.boot_sound_ready || boot_sound.is_some())
+        && (!draft.igpu_memory_ready || igpu_memory.is_some())
+        && (!draft.aspm_ready || aspm_disabled.is_some());
+    if observations_complete {
+        (false, if reconciled { false } else { dirty })
+    } else {
+        (true, dirty)
+    }
+}
+
 pub(crate) fn initialize(runtime: tokio::runtime::Handle, session_connection: zbus::Connection) {
     CONTEXT.with(|slot| {
         *slot.borrow_mut() = Some(ExtraContext {
@@ -140,6 +177,8 @@ pub(crate) fn initialize(runtime: tokio::runtime::Handle, session_connection: zb
             refreshing: Arc::new(AtomicBool::new(false)),
             mutating: Arc::new(AtomicBool::new(false)),
             advanced_dirty: Arc::new(AtomicBool::new(false)),
+            advanced_unresolved: Arc::new(AtomicBool::new(false)),
+            advanced_draft: Arc::new(Mutex::new(None)),
             clamshell: Arc::new(ZbusSessionClamshellSource::new(session_connection)),
         });
     });
@@ -356,6 +395,8 @@ fn apply_advanced(window: &AppWindow) {
     window.set_status("Applying staged ASUS parameters through Hardware1…".into());
     let weak = window.as_weak();
     let completion = context.mutating.clone();
+    let unresolved_state = context.advanced_unresolved.clone();
+    let pending_draft = context.advanced_draft.clone();
     context.runtime.spawn(async move {
         let result = async {
             let client = HardwareProductControlClient::connect_system()
@@ -371,8 +412,23 @@ fn apply_advanced(window: &AppWindow) {
         completion.store(false, Ordering::Release);
         if let Err(error) = weak.upgrade_in_event_loop(move |window| {
             window.set_applying(false);
-            if let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) {
-                context.advanced_dirty.store(false, Ordering::Release);
+            let unresolved = result
+                .as_ref()
+                .err()
+                .is_some_and(advanced_apply_requires_reconciliation);
+            unresolved_state.store(unresolved, Ordering::Release);
+            if unresolved {
+                *pending_draft.lock().unwrap() = Some(draft);
+            } else {
+                *pending_draft.lock().unwrap() = None;
+                if let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) {
+                    context.advanced_dirty.store(
+                        result
+                            .as_ref()
+                            .is_err_and(|error| !error.completed.is_empty()),
+                        Ordering::Release,
+                    );
+                }
             }
             let (status, pending) = match result {
                 Ok(observation) => (
@@ -385,7 +441,7 @@ fn apply_advanced(window: &AppWindow) {
                 ),
                 Err(error) => (advanced_apply_error_status(&error), None),
             };
-            refresh_with_status(&window, Some(status), pending);
+            refresh_with_status(&window, Some(status), pending, !unresolved);
         }) {
             tracing::warn!(error = ?error, "failed to publish staged ASUS Apply result");
         }
@@ -658,10 +714,15 @@ fn clamshell_status(state: ClamshellState) -> &'static str {
 }
 
 pub(crate) fn refresh(window: &AppWindow) {
-    refresh_with_status(window, None, None);
+    refresh_with_status(window, None, None, true);
 }
 
-fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending: Option<bool>) {
+fn refresh_with_status(
+    window: &AppWindow,
+    final_status: Option<String>,
+    pending: Option<bool>,
+    reconcile_advanced: bool,
+) {
     let context = CONTEXT.with(|slot| slot.borrow().clone());
     let Some(context) = context else {
         reset_readiness(window);
@@ -710,6 +771,7 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
         let panel = panel_observed(panel_result);
         let boot_sound = boot_sound_observed(boot_sound_result);
         let apu = apu_observed(apu_result);
+        let aspm_observed = aspm_result.as_ref().ok().map(|(value, _)| *value);
         let (aspm_disabled, aspm_write) = match aspm_result {
             Ok(value) => value,
             Err(error) => {
@@ -739,9 +801,58 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
             window.set_auto_clamshell_state(clamshell_state);
 
             if let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) {
-                context.advanced_dirty.store(false, Ordering::Release);
+                let boot_observed = boot_sound.ready.then_some(boot_sound.enabled);
+                let igpu_observed = apu.ready.then_some(apu.value.clamp(0, 8) as u8);
+                let aspm_observed = if aspm_write != ProductWriteStatus::Unknown {
+                    aspm_observed
+                } else {
+                    None
+                };
+                let unresolved = context.advanced_unresolved.load(Ordering::Acquire);
+                let dirty = context.advanced_dirty.load(Ordering::Acquire);
+                let (unresolved, dirty) = if reconcile_advanced {
+                    advanced_refresh_reconciliation(
+                        unresolved,
+                        dirty,
+                        *context.advanced_draft.lock().unwrap(),
+                        boot_observed,
+                        igpu_observed,
+                        aspm_observed,
+                    )
+                } else {
+                    (unresolved, dirty)
+                };
+                context
+                    .advanced_unresolved
+                    .store(unresolved, Ordering::Release);
+                context.advanced_dirty.store(dirty, Ordering::Release);
+                if !unresolved {
+                    *context.advanced_draft.lock().unwrap() = None;
+                }
+                let boot_writable = advanced_control_writable(
+                    unresolved,
+                    boot_sound.ready,
+                    boot_sound_write.is_supported(),
+                );
+                let igpu_writable =
+                    advanced_control_writable(unresolved, apu.ready, apu_write.is_supported());
+                let aspm_writable = advanced_control_writable(
+                    unresolved,
+                    aspm_write != ProductWriteStatus::Unknown,
+                    aspm_write.is_supported(),
+                );
+                window.set_boot_sound_control_ready(boot_writable);
+                window.set_igpu_memory_control_ready(igpu_writable);
+                window.set_aspm_control_ready(aspm_writable);
+                window.set_advanced_apply_ready(advanced_apply_ready(
+                    dirty,
+                    boot_writable,
+                    igpu_writable,
+                    aspm_writable,
+                ));
+            } else {
+                window.set_advanced_apply_ready(false);
             }
-            window.set_advanced_apply_ready(false);
 
             window.set_aura_state_ready(aura.ready);
             window.set_keyboard_effect(aura.effect);
@@ -770,15 +881,11 @@ fn refresh_with_status(window: &AppWindow, final_status: Option<String>, pending
             window.set_panel_overdrive(panel.enabled);
 
             window.set_boot_sound_state_ready(boot_sound.ready);
-            window
-                .set_boot_sound_control_ready(boot_sound.ready && boot_sound_write.is_supported());
             window.set_boot_sound(boot_sound.enabled);
             window.set_igpu_memory_state_ready(apu.ready);
-            window.set_igpu_memory_control_ready(apu.ready && apu_write.is_supported());
             window.set_igpu_memory(apu.value);
             window.set_igpu_memory_pending(pending.unwrap_or(false));
             window.set_aspm_state_ready(aspm_write != ProductWriteStatus::Unknown);
-            window.set_aspm_control_ready(aspm_write.is_supported());
             window.set_disable_aspm(aspm_disabled);
 
             let any_ready = aura.ready
@@ -1028,8 +1135,21 @@ fn advanced_apply_error_status(error: &AdvancedApplyError) -> String {
         return format!("Apply failed · {reason} · hardware state refreshed");
     };
     if matches!(error.error, ProviderError::Timeout(_)) {
+        let completed = if error.completed.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "{}; ",
+                error
+                    .completed
+                    .iter()
+                    .map(|control| format!("{} applied", advanced_apply_control_label(*control)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
         return format!(
-            "Apply outcome unknown · {failed} may have changed · {reason} · hardware state refreshed"
+            "Apply outcome unknown · {completed}{failed} may have changed · {reason} · hardware state refreshed"
         );
     }
     if error.completed.is_empty() {
@@ -1304,6 +1424,54 @@ mod tests {
         assert_eq!(
             advanced_apply_error_status(&error),
             "Apply outcome unknown · ASPM may have changed · write timed out · hardware state refreshed"
+        );
+    }
+
+    #[test]
+    fn ambiguous_apply_keeps_partial_completion_evidence_and_blocks_writes() {
+        let error = AdvancedApplyError {
+            completed: vec![AdvancedApplyControl::BootSound],
+            failed: Some(AdvancedApplyControl::IgpuMemory),
+            error: ProviderError::Timeout("dispatch ambiguous".into()),
+        };
+
+        assert_eq!(
+            advanced_apply_error_status(&error),
+            "Apply outcome unknown · boot sound applied; iGPU memory may have changed · write timed out · hardware state refreshed"
+        );
+        assert!(advanced_apply_requires_reconciliation(&error));
+        assert!(!advanced_control_writable(true, true, true));
+    }
+
+    #[test]
+    fn ambiguous_refresh_only_clears_dirty_after_authoritative_reconciliation() {
+        let draft = advanced_apply_draft(true, 6, true, true, true, true);
+
+        assert_eq!(
+            advanced_refresh_reconciliation(
+                true,
+                true,
+                Some(draft),
+                Some(true),
+                Some(6),
+                Some(true)
+            ),
+            (false, false)
+        );
+        assert_eq!(
+            advanced_refresh_reconciliation(true, true, Some(draft), Some(true), None, Some(true)),
+            (true, true)
+        );
+        assert_eq!(
+            advanced_refresh_reconciliation(
+                true,
+                true,
+                Some(draft),
+                Some(true),
+                Some(4),
+                Some(true)
+            ),
+            (false, true)
         );
     }
 
