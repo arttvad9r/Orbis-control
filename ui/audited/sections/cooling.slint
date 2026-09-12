@@ -1,5 +1,4 @@
-// Cooling page — fan curves (write path stays safety-gated), current RPM and
-// the honest mutation-safety status.
+// Cooling page — capability-gated fan curves, current RPM and honest state.
 import { ScrollView } from "std-widgets.slint";
 import { UiState } from "../model.slint";
 import { PageHeader, SectionCard, LocalStatus, ActionButton } from "../common.slint";
@@ -9,13 +8,14 @@ import { Palette } from "../../themes/dark.slint";
 export component CoolingSection inherits Rectangle {
     in property <UiState> ui-state;
 
-    // Backend/policy presentation contract. Today production keeps mutation
-    // blocked; later backend wiring only needs to publish these facts.
-    in property <bool> mutation-safety-blocked: true;
     in property <bool> factory-reset-available: false;
-    in property <string> policy-status: "Запись кривых вентиляторов заблокирована по безопасности";
+    in property <string> policy-status: "Запись кривых недоступна";
 
     property <bool> factory-reset-pending: false;
+    // Pending navigation is kept local until the user explicitly discards the
+    // draft. Rust callbacks are emitted only after confirmation.
+    property <int> pending-navigation-kind: 0; // 1 = fan, 2 = profile
+    property <int> pending-navigation-index: -1;
 
     callback fan-changed(int);
     callback fan-profile-changed(int);
@@ -23,11 +23,37 @@ export component CoolingSection inherits Rectangle {
     callback fan-pwm-point-changed(int, int);
     callback fan-apply-clicked(bool);
 
+    function request-fan-change(index: int) {
+        if (root.ui-state.fan-curve-dirty) {
+            root.pending-navigation-kind = 1;
+            root.pending-navigation-index = index;
+        } else {
+            root.fan-changed(index);
+        }
+    }
+
+    function request-profile-change(index: int) {
+        if (root.ui-state.fan-curve-dirty) {
+            root.pending-navigation-kind = 2;
+            root.pending-navigation-index = index;
+        } else {
+            root.fan-profile-changed(index);
+        }
+    }
+
+    function discard-and-navigate() {
+        let kind = root.pending-navigation-kind;
+        let index = root.pending-navigation-index;
+        root.pending-navigation-kind = 0;
+        root.pending-navigation-index = -1;
+        if (kind == 1) { root.fan-changed(index); }
+        if (kind == 2) { root.fan-profile-changed(index); }
+    }
+
     function status-text() -> string {
         if (root.ui-state.fan-curve-error) { return "Операция с кривой завершилась ошибкой"; }
-        if (root.mutation-safety-blocked) { return root.policy-status; }
         if (root.factory-reset-pending) { return "Заводские значения выбраны · ещё не применены"; }
-        if (!root.ui-state.fan-curve-writable) { return "Только чтение"; }
+        if (!root.ui-state.fan-curve-writable) { return root.policy-status == "" ? "Только чтение" : root.policy-status; }
         if (root.ui-state.fan-curve-dirty) { return "Кривая изменена · ещё не применена"; }
         if (root.ui-state.fan-curve-enabled-known) {
             return root.ui-state.fan-curve-enabled
@@ -39,7 +65,7 @@ export component CoolingSection inherits Rectangle {
 
     function status-color() -> color {
         if (root.ui-state.fan-curve-error) { return Palette.error; }
-        if (root.mutation-safety-blocked || root.factory-reset-pending || root.ui-state.fan-curve-dirty || !root.ui-state.fan-curve-enabled-known) { return Palette.warning; }
+        if (root.factory-reset-pending || root.ui-state.fan-curve-dirty || !root.ui-state.fan-curve-enabled-known) { return Palette.warning; }
         return root.ui-state.fan-curve-enabled ? Palette.success : Palette.text-secondary;
     }
 
@@ -63,7 +89,7 @@ export component CoolingSection inherits Rectangle {
 
                     FanCurveEditor {
                         state: root.ui-state.fan-curve-state;
-                        writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked;
+                        writable: root.ui-state.fan-curve-writable;
                         error-state: root.ui-state.fan-curve-error;
                         dirty: root.ui-state.fan-curve-dirty;
                         fan-selected: root.ui-state.fan-selected;
@@ -72,8 +98,8 @@ export component CoolingSection inherits Rectangle {
                         temp-4: root.ui-state.fan-temp-4; temp-5: root.ui-state.fan-temp-5; temp-6: root.ui-state.fan-temp-6; temp-7: root.ui-state.fan-temp-7;
                         pwm-0: root.ui-state.fan-pwm-0; pwm-1: root.ui-state.fan-pwm-1; pwm-2: root.ui-state.fan-pwm-2; pwm-3: root.ui-state.fan-pwm-3;
                         pwm-4: root.ui-state.fan-pwm-4; pwm-5: root.ui-state.fan-pwm-5; pwm-6: root.ui-state.fan-pwm-6; pwm-7: root.ui-state.fan-pwm-7;
-                        fan-changed(i) => { root.factory-reset-pending = false; root.fan-changed(i); }
-                        profile-changed(i) => { root.factory-reset-pending = false; root.fan-profile-changed(i); }
+                        fan-changed(i) => { root.factory-reset-pending = false; root.request-fan-change(i); }
+                        profile-changed(i) => { root.factory-reset-pending = false; root.request-profile-change(i); }
                         temp-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-temp-point-changed(i, v); }
                         pwm-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-pwm-point-changed(i, v); }
                     }
@@ -90,13 +116,13 @@ export component CoolingSection inherits Rectangle {
 
                         ActionButton {
                             label: "Заводские значения";
-                            disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error;
+                            disabled: !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error;
                             clicked => { root.factory-reset-pending = true; }
                         }
                         ActionButton {
                             label: root.factory-reset-pending ? "Применить заводские" : "Применить кривую";
                             accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
-                            disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
+                            disabled: !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
                             clicked => {
                                 let reset = root.factory-reset-pending;
                                 root.fan-apply-clicked(reset);
@@ -107,6 +133,50 @@ export component CoolingSection inherits Rectangle {
                 }
             }
             Rectangle { vertical-stretch: 100; background: transparent; }
+        }
+    }
+
+    if (root.pending-navigation-kind != 0) : Rectangle {
+        x: 42px;
+        y: 150px;
+        width: root.width - 84px;
+        height: 150px;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: Palette.border-strong;
+        background: Palette.surface-default;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 10px;
+            Text {
+                text: "Есть несохранённые изменения";
+                font-size: 15px;
+                font-weight: 600;
+                color: Palette.text-primary;
+            }
+            Text {
+                text: "Остаться в редакторе или отбросить черновик перед переходом?";
+                font-size: 12.5px;
+                color: Palette.text-secondary;
+                overflow: elide;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                ActionButton {
+                    label: "Остаться";
+                    clicked => {
+                        root.pending-navigation-kind = 0;
+                        root.pending-navigation-index = -1;
+                    }
+                }
+                ActionButton {
+                    label: "Отбросить и перейти";
+                    accent: true;
+                    clicked => { root.discard-and-navigate(); }
+                }
+            }
         }
     }
 }

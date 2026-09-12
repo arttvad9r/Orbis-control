@@ -81,10 +81,10 @@ export component AppWindow inherits Window {
     in property <string> startup-status: "Unavailable";
     callback quit-requested;
 
-    // Cooling page surface.
-    in property <bool> mutation-safety-blocked: true;
+    // Cooling page surface. Fan mutation is gated by runtime FanCurves
+    // write capability carried by UiState.
     in property <bool> factory-reset-available: false;
-    in property <string> policy-status: "Fan writes are safety-blocked";
+    in property <string> policy-status: "Запись кривых недоступна";
     callback fan-changed(int);
     callback fan-profile-changed(int);
     callback fan-temp-point-changed(int, int);
@@ -283,7 +283,6 @@ export component AppWindow inherits Window {
                     }
                     if (root.active-section == Section.Cooling) : CoolingSection {
                         ui-state <=> root.ui-state;
-                        mutation-safety-blocked <=> root.mutation-safety-blocked;
                         factory-reset-available <=> root.factory-reset-available;
                         policy-status <=> root.policy-status;
                         fan-changed(i) => { root.fan-changed(i); }

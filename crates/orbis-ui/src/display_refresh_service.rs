@@ -60,7 +60,7 @@ pub enum DisplayRefreshCommandError {
         /// Mutation result returned by the owner.
         result: ApplyResult,
         /// Fresh observed state that failed validation.
-        state: DisplayRefreshAppliedState,
+        state: Box<DisplayRefreshAppliedState>,
         /// Typed validation reason.
         source: ProviderError,
     },
@@ -134,7 +134,7 @@ where
     if let Err(source) = validate_display_refresh_readback(request, &before, &state) {
         return Err(DisplayRefreshCommandError::ReadBackMismatch {
             result,
-            state,
+            state: Box::new(state),
             source,
         });
     }

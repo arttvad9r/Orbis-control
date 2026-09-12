@@ -94,6 +94,20 @@ fn scenario_state(name: &str) -> anyhow::Result<controller::UiState> {
         }
         "disabled" => s.gpu_ultimate_disabled = true,
         "error" => s.gpu_section_error = true,
+        "dirty" => {
+            s.fan_selected = 1;
+            s.fan_curve_state = controller::FanCurveHwState::Ready;
+            s.fan_curve_writable = true;
+            s.fan_curve_temps = [35, 45, 55, 65, 72, 80, 88, 96];
+            s.fan_curve_pwms = [0, 20, 45, 70, 100, 135, 190, 255];
+            s.fan_curve_dirty = true;
+        }
+        "fan-error" => {
+            s.fan_selected = 1;
+            s.fan_curve_state = controller::FanCurveHwState::Ready;
+            s.fan_curve_writable = true;
+            s.fan_curve_error = true;
+        }
         other => eprintln!("orbis-control: неизвестное состояние '{other}', использую default"),
     }
     Ok(s)
@@ -336,6 +350,8 @@ fn build_app(
     let app = AppWindow::new()?;
     app.global::<ThemeState>().set_mode(current_theme_mode());
     app.set_ui_state(to_slint(state));
+    // Reset requires separate runtime capability evidence; fan write access alone is insufficient.
+    app.set_factory_reset_available(false);
     apply_device_identity(&app);
     wire_callbacks(&app, worker_tx);
     quick_controls_backend::wire_window(&app);
@@ -1060,9 +1076,17 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             tracing::warn!("fan curve mutation failed: {e:?}");
             state.fan_curve_error = true;
         }
-        WorkerEvent::FanCurveRefresh { profile, result } => match result {
-            Ok(curve) => state.load_fan_curve(&curve, profile),
+        WorkerEvent::FanCurveRefresh {
+            profile,
+            result,
+            writable,
+        } => match result {
+            Ok(curve) => {
+                state.load_fan_curve(&curve, profile);
+                state.fan_curve_writable = writable;
+            }
             Err(e) => {
+                state.fan_curve_writable = false;
                 tracing::warn!("fan curve refresh failed: {e:?}");
                 state.fan_curve_state = controller::FanCurveHwState::Unavailable;
                 state.fan_curve_error = true;
@@ -1103,6 +1127,19 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
     }
 }
 
+fn fan_reset_available(snapshot: &orbis_capabilities::CapabilityRegistrySnapshot) -> bool {
+    use orbis_core::capability::{CapabilityStatus, FeatureId};
+    snapshot
+        .capability(FeatureId::FanCurves)
+        .map(|cap| {
+            matches!(
+                cap.operations.write.status,
+                CapabilityStatus::Supported | CapabilityStatus::SupportedWithRequirement
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn handle_worker_event(
     app: &AppWindow,
     event: WorkerEvent,
@@ -1122,6 +1159,9 @@ fn handle_worker_event(
         diagnostics_backend::replace_capabilities(snapshot.clone());
     }
     let mut s = from_slint(&app.get_ui_state());
+    if let WorkerEvent::RegistryChange(Ok((_generation, snapshot))) = &event {
+        app.set_factory_reset_available(fan_reset_available(snapshot));
+    }
     apply_performance_event(&mut s, event);
     app.set_ui_state(to_slint(&s));
     if refresh_quick_controls {
@@ -1246,6 +1286,9 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 return;
             };
             s.fan_selected = i;
+            s.fan_curve_state = controller::FanCurveHwState::Loading;
+            s.fan_curve_writable = false;
+            s.fan_curve_error = false;
             app.set_ui_state(to_slint(&s));
             match &worker_tx {
                 Some(tx) => {
@@ -1277,6 +1320,9 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 return;
             };
             s.fan_profile_selected = i;
+            s.fan_curve_state = controller::FanCurveHwState::Loading;
+            s.fan_curve_writable = false;
+            s.fan_curve_error = false;
             app.set_ui_state(to_slint(&s));
             match &worker_tx {
                 Some(tx) => {

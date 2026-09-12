@@ -834,7 +834,7 @@ impl UiState {
         use orbis_core::fan::{FanCurve, FanCurvePoint};
         let curve = FanCurve {
             profile: PerformanceProfile::Silent, // profile doesn't affect validate
-            fan: FanId::Cpu,
+            fan: Self::fan_id_from_index(self.fan_selected).unwrap_or(FanId::Cpu),
             enabled: None,
             points: points
                 .temps

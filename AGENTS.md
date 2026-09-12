@@ -22,19 +22,22 @@ Do not end a session merely because one intermediate task passed. End at a meani
 
 ## Canonical completion plan
 
-For general project-completion work, [`FINISH_PLAN.md`](FINISH_PLAN.md) is the **single canonical execution queue**.
+For the current Orbis Control product iteration, `SPEC.md`, `ACCEPTANCE.md`,
+`IMPLEMENTATION_PLAN.md`, and `DECISIONS.md` are the single active execution
+contract. They take priority over historical completion documents, including
+`FINISH_PLAN.md`, for overlapping scope.
 
 When the user says `continue`, `finish`, `make it work`, or gives an equivalent broad instruction:
 
-1. read `FINISH_PLAN.md` before choosing work;
-2. start at the earliest unchecked phase that can be advanced in the current environment;
-3. verify items that may already be complete in current source, mark them complete, and continue rather than stopping with a status report;
+1. read `IMPLEMENTATION_PLAN.md` before choosing work;
+2. start at the earliest stage that can be advanced in the current environment;
+3. verify items that may already be complete in current source, and continue rather than stopping with a status report;
 4. work through coherent vertical slices until reaching a meaningful checkpoint or a real blocker;
 5. update plan checkboxes only after the stated behavior has actually been verified.
 
-Do not create a parallel roadmap, remediation plan, status matrix, or alternative backlog for the same completion goal. `TODO.md` is only a pointer to `FINISH_PLAN.md`.
+Do not create a parallel roadmap, remediation plan, status matrix, or alternative backlog for the same completion goal. Treat `FINISH_PLAN.md` as historical reference only for this iteration.
 
-A specific user request always overrides queue order for that requested task. After completing the explicit task, return to the canonical finish plan when the user's broader goal is still to finish the project.
+A specific user request always overrides queue order for that requested task. After completing the explicit task, return to the active implementation plan when the user's broader goal is still to finish the project.
 
 ## When to stop
 

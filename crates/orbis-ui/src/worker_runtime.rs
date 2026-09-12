@@ -105,6 +105,7 @@ pub enum WorkerEvent {
     FanCurveRefresh {
         profile: AsusdFanProfile,
         result: Result<FanCurve, ProviderError>,
+        writable: bool,
     },
     FanCurveDefaults {
         profile: AsusdFanProfile,
@@ -794,6 +795,11 @@ async fn run_worker_inner<G, B, R, F>(
             WorkerCommand::RefreshFanCurve { profile, fan } => WorkerEvent::FanCurveRefresh {
                 profile,
                 result: bounded_fan_curve(runtime.fan.as_ref(), profile, &fan).await,
+                writable: matches!(
+                    runtime.fan_mutation_status(),
+                    orbis_core::capability::CapabilityStatus::Supported
+                        | orbis_core::capability::CapabilityStatus::SupportedWithRequirement
+                ),
             },
             WorkerCommand::ResetFanCurvesToDefaults { profile } => WorkerEvent::FanCurveDefaults {
                 profile,

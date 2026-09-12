@@ -25,7 +25,7 @@ use zbus::Connection;
 /// Количество точек кривой, фиксированное kernel ABI `asus_custom_fan_curve`.
 pub const CURVE_POINT_COUNT: usize = 8;
 
-/// Wire-элемент asusd `FanCurveData`: name + 8 temp + 8 pwm + enabled.
+/// Wire-элемент asusd `FanCurveData`: asusd emits PWM first, then temperature.
 type AsusdCurveWire = (String, [u8; 8], [u8; 8], bool);
 
 /// Одна кривая вентилятора (typed, для mutation).
@@ -134,7 +134,8 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
         }
         // enabled: pass through the authoritative stored enabled state so a
         // custom write does not silently disable the curve (#104).
-        let wire = (name.to_string(), temps, pwms, enabled);
+        // asusd's tuple order is (fan, PWM[8], temperature[8], enabled).
+        let wire = (name.to_string(), pwms, temps, enabled);
         self.proxy()
             .await?
             .set_fan_curve(profile.wire(), wire)
@@ -157,11 +158,18 @@ impl AsusdFanCurveClient for ZbusAsusdFanCurveClient {
         &self,
         profile: AsusdFanProfile,
     ) -> Result<Vec<(String, [u8; 8], [u8; 8], bool)>, ProviderError> {
-        self.proxy()
+        let raw = self
+            .proxy()
             .await?
             .fan_curve_data(profile.wire())
             .await
-            .map_err(|error| ProviderError::Dbus(format!("asusd FanCurveData read: {error}")))
+            .map_err(|error| ProviderError::Dbus(format!("asusd FanCurveData read: {error}")))?;
+        // Normalize asusd's (PWM, temperature) tuple into the project's
+        // (temperature, PWM) contract.
+        Ok(raw
+            .into_iter()
+            .map(|(name, pwms, temps, enabled)| (name, temps, pwms, enabled))
+            .collect())
     }
 }
 
