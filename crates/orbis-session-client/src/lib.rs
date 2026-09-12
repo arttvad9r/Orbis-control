@@ -27,6 +27,7 @@ use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::{FanPwm, Percent, TemperatureC};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
+use orbis_core::{PowerLimitField, PowerLimitObservation, Unit};
 use orbis_hardwared::battery::validate_charge_limit;
 use orbis_hardwared::fans::{FanCurveWire, fan_profile_from_wire};
 use orbis_hardwared::{DBUS_OBJECT_PATH, Hardware1Proxy};
@@ -44,7 +45,7 @@ use orbis_providers::{
     error::{ProviderError, ValidationResult},
 };
 use orbis_session_protocol::{
-    BatteryThresholdEvidenceTuple, ChargeLimitInfo, PerformanceInfo, Session1Proxy,
+    BatteryThresholdEvidenceTuple, ChargeLimitInfo, PerformanceInfo, PowerLimitInfo, Session1Proxy,
     battery_threshold_confidence, battery_threshold_freshness, battery_threshold_source,
     battery_threshold_state, gpu_access, gpu_mux, gpu_power, performance,
 };
@@ -969,6 +970,88 @@ pub async fn hardware1_fan_mutation_status(
     match proxy.fan_mutation_status().await {
         Ok(raw) => fan_mutation_status_from_wire(raw),
         Err(_) => orbis_core::capability::CapabilityStatus::Unknown,
+    }
+}
+
+/// Decode one Session1 power observation without inventing metadata.
+pub fn power_limit_from_wire(
+    value: PowerLimitInfo,
+) -> Result<PowerLimitObservation, ProviderError> {
+    let field = match value.field {
+        0 => PowerLimitField::Spl,
+        1 => PowerLimitField::Sppt,
+        2 => PowerLimitField::Fppt,
+        3 => PowerLimitField::CpuTempLimit,
+        4 => PowerLimitField::GpuDynamicBoost,
+        5 => PowerLimitField::GpuTempTarget,
+        other => {
+            return Err(ProviderError::Internal(format!(
+                "session: unknown power field wire value {other}"
+            )));
+        }
+    };
+    let unit = match value.unit {
+        0 => Unit::Watts,
+        1 => Unit::DegreesC,
+        2 => Unit::Percent,
+        3 => Unit::Count,
+        255 => Unit::Unknown,
+        other => {
+            return Err(ProviderError::Internal(format!(
+                "session: unknown power unit wire value {other}"
+            )));
+        }
+    };
+    if value.min_present && value.max_present && value.min > value.max {
+        return Err(ProviderError::Internal(
+            "session: power metadata min > max".into(),
+        ));
+    }
+    Ok(PowerLimitObservation {
+        field,
+        value: value.value,
+        unit,
+        min: value.min_present.then_some(value.min),
+        max: value.max_present.then_some(value.max),
+        step: value.step_present.then_some(value.step),
+        default: value.default_present.then_some(value.default),
+    })
+}
+
+/// Read-only source for the Session1 power-limit snapshot.
+#[async_trait]
+pub trait SessionPowerLimitSource: Send + Sync {
+    /// Read a fresh snapshot; no cache and no mutation.
+    async fn read_power_limits(&self) -> Result<Vec<PowerLimitObservation>, ProviderError>;
+}
+
+/// Real zbus source for Session1 power-limit observations.
+pub struct ZbusSessionPowerLimitSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusSessionPowerLimitSource {
+    /// Create a source over an existing connection without performing I/O.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl SessionPowerLimitSource for ZbusSessionPowerLimitSource {
+    async fn read_power_limits(&self) -> Result<Vec<PowerLimitObservation>, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .power_limits()
+            .await
+            .map_err(zbus_error_to_provider)?
+            .into_iter()
+            .map(power_limit_from_wire)
+            .collect()
     }
 }
 

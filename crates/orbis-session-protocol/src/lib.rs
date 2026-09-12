@@ -246,6 +246,45 @@ pub struct PerformanceInfo {
     pub available_mask: u8,
 }
 
+/// Wire DTO for one read-only power/thermal observation.
+///
+/// Presence flags keep unknown metadata distinct from numeric zero values.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    zbus::zvariant::Type,
+    zbus::zvariant::OwnedValue,
+)]
+pub struct PowerLimitInfo {
+    /// Stable `PowerLimitField` discriminant.
+    pub field: u8,
+    /// Authoritative current value.
+    pub value: i32,
+    /// Stable `Unit` discriminant.
+    pub unit: u8,
+    /// Whether minimum is known.
+    pub min_present: bool,
+    /// Minimum, meaningful only when present.
+    pub min: i32,
+    /// Whether maximum is known.
+    pub max_present: bool,
+    /// Maximum, meaningful only when present.
+    pub max: i32,
+    /// Whether step is known.
+    pub step_present: bool,
+    /// Step, meaningful only when present.
+    pub step: i32,
+    /// Whether default is known.
+    pub default_present: bool,
+    /// Default, meaningful only when present.
+    pub default: i32,
+}
+
 /// Getter-only zbus proxy контракт интерфейса `Session1`.
 ///
 /// Свойства (`ChargeLimit`, `GpuPower`, `GpuMux`, `GpuAccess`, `Performance`)
@@ -279,6 +318,9 @@ pub trait Session1 {
     /// Текущий Performance Mode (current + available, read-only property).
     #[zbus(property)]
     fn performance(&self) -> zbus::Result<PerformanceInfo>;
+
+    /// Read-only power/thermal observations with optional metadata.
+    fn power_limits(&self) -> zbus::Result<Vec<PowerLimitInfo>>;
 
     /// Сохранённая fan curve для профиля и вентилятора (read-only method).
     fn fan_curve(&self, profile: u32, fan: u8) -> zbus::Result<FanCurveInfo>;

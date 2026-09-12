@@ -17,6 +17,7 @@ use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::newtypes::{FanPwm, TemperatureC};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
+use orbis_hardwared::{Hardware1Proxy, PowerLimitInfo as HardwarePowerLimitInfo};
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
     BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
@@ -127,6 +128,25 @@ impl SessionService {
     }
 
     /// Прочитать authoritative Performance Mode state (domain current + available).
+    /// Fresh read-only power/thermal observations from Hardware1.
+    pub async fn read_power_limits(
+        &self,
+    ) -> Result<Vec<orbis_session_protocol::PowerLimitInfo>, ProviderError> {
+        let connection = zbus::Connection::system()
+            .await
+            .map_err(|e| ProviderError::Dbus(format!("session: system bus connect: {e}")))?;
+        let proxy = Hardware1Proxy::builder(&connection)
+            .build()
+            .await
+            .map_err(|e| ProviderError::Dbus(format!("session: Hardware1 proxy: {e}")))?;
+        proxy
+            .power_limits()
+            .await
+            .map(|values| values.into_iter().map(power_limit_to_wire).collect())
+            .map_err(|e| ProviderError::Dbus(format!("session: Hardware1 power limits: {e}")))
+    }
+
+    /// Прочитать authoritative Performance profile и список доступных профилей.
     pub async fn read_performance(
         &self,
     ) -> Result<(PerformanceProfile, Vec<PerformanceProfile>), ProviderError> {
@@ -425,6 +445,22 @@ fn fan_id_from_wire(raw: u8) -> Result<FanId, ProviderError> {
     }
 }
 
+fn power_limit_to_wire(value: HardwarePowerLimitInfo) -> orbis_session_protocol::PowerLimitInfo {
+    orbis_session_protocol::PowerLimitInfo {
+        field: value.field,
+        value: value.value,
+        unit: value.unit,
+        min_present: value.min_present,
+        min: value.min,
+        max_present: value.max_present,
+        max: value.max,
+        step_present: value.step_present,
+        step: value.step,
+        default_present: value.default_present,
+        default: value.default,
+    }
+}
+
 /// Серверный интерфейс `io.github.orbiscontrol.Session1` (getter-only).
 #[zbus::interface(name = "io.github.orbiscontrol.Session1")]
 impl SessionService {
@@ -489,6 +525,13 @@ impl SessionService {
             performance_current_to_wire(current),
             performance_mask_to_wire(&available),
         ))
+    }
+
+    /// Fresh read-only power/thermal observations with explicit metadata presence.
+    async fn power_limits(&self) -> zbus::fdo::Result<Vec<orbis_session_protocol::PowerLimitInfo>> {
+        self.read_power_limits()
+            .await
+            .map_err(provider_error_to_dbus)
     }
 
     /// Сохранённая fan curve для профиля и вентилятора

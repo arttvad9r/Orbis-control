@@ -179,6 +179,12 @@ fn to_slint(state: &controller::UiState) -> UiState {
         gpu_power_value: state.gpu_power_value,
         gpu_mux_value: state.gpu_mux_value,
         gpu_access_value: state.gpu_access_value,
+        power_limits_status: state.power_limits_status.clone().into(),
+        power_limit_spl: state.power_limit_spl.clone().into(),
+        power_limit_sppt: state.power_limit_sppt.clone().into(),
+        power_limit_fppt: state.power_limit_fppt.clone().into(),
+        power_limit_gpu_boost: state.power_limit_gpu_boost.clone().into(),
+        power_limit_gpu_temp_target: state.power_limit_gpu_temp_target.clone().into(),
         cpu_temp: state.cpu_temp.clone().into(),
         gpu_temp: state.gpu_temp.clone().into(),
         cpu_fan_rpm: state.cpu_fan_rpm.clone().into(),
@@ -280,6 +286,12 @@ fn from_slint(state: &UiState) -> controller::UiState {
         gpu_power_value: state.gpu_power_value,
         gpu_mux_value: state.gpu_mux_value,
         gpu_access_value: state.gpu_access_value,
+        power_limits_status: state.power_limits_status.to_string(),
+        power_limit_spl: state.power_limit_spl.to_string(),
+        power_limit_sppt: state.power_limit_sppt.to_string(),
+        power_limit_fppt: state.power_limit_fppt.to_string(),
+        power_limit_gpu_boost: state.power_limit_gpu_boost.to_string(),
+        power_limit_gpu_temp_target: state.power_limit_gpu_temp_target.to_string(),
         cpu_temp: state.cpu_temp.to_string(),
         gpu_temp: state.gpu_temp.to_string(),
         cpu_fan_rpm: state.cpu_fan_rpm.to_string(),
@@ -1046,6 +1058,7 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         WorkerEvent::GpuMuxRefresh(result) => apply_gpu_mux_refresh(state, result),
         WorkerEvent::GpuAccessRefresh(result) => apply_gpu_access_refresh(state, result),
         WorkerEvent::PerformanceRefresh(result) => apply_performance_refresh(state, result),
+        WorkerEvent::PowerLimitsRefresh(result) => apply_power_limits_refresh(state, result),
         WorkerEvent::RegistryChange(Ok((generation, snapshot))) => {
             tracing::debug!("capability registry refreshed: generation={}", generation);
             state.update_capabilities_at(generation, &snapshot);
@@ -1138,6 +1151,48 @@ fn fan_reset_available(snapshot: &orbis_capabilities::CapabilityRegistrySnapshot
             )
         })
         .unwrap_or(false)
+}
+
+fn apply_power_limits_refresh(
+    state: &mut controller::UiState,
+    result: Result<Vec<orbis_core::PowerLimitObservation>, ProviderError>,
+) {
+    match result {
+        Ok(values) => {
+            state.power_limits_status = if values.iter().any(|v| v.has_editable_metadata()) {
+                "Некоторые параметры имеют metadata".into()
+            } else if values.is_empty() {
+                "Поддерживаемые параметры не обнаружены".into()
+            } else {
+                "Только чтение · metadata недоступна".into()
+            };
+            for value in values {
+                let display = match value.unit {
+                    orbis_core::Unit::Watts => format!("{} Вт", value.value),
+                    orbis_core::Unit::DegreesC => format!("{} °C", value.value),
+                    orbis_core::Unit::Percent => format!("{} %", value.value),
+                    orbis_core::Unit::Count => value.value.to_string(),
+                    orbis_core::Unit::Unknown => value.value.to_string(),
+                };
+                match value.field {
+                    orbis_core::PowerLimitField::Spl => state.power_limit_spl = display,
+                    orbis_core::PowerLimitField::Sppt => state.power_limit_sppt = display,
+                    orbis_core::PowerLimitField::Fppt => state.power_limit_fppt = display,
+                    orbis_core::PowerLimitField::GpuDynamicBoost => {
+                        state.power_limit_gpu_boost = display
+                    }
+                    orbis_core::PowerLimitField::GpuTempTarget => {
+                        state.power_limit_gpu_temp_target = display
+                    }
+                    orbis_core::PowerLimitField::CpuTempLimit
+                    | orbis_core::PowerLimitField::Other(_) => {}
+                }
+            }
+        }
+        Err(error) => {
+            state.power_limits_status = format!("Недоступно: {error}");
+        }
+    }
 }
 
 fn handle_worker_event(

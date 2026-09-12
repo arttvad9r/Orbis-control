@@ -44,6 +44,7 @@ pub mod newtypes;
 pub mod pending_transitions;
 pub mod platform_profile;
 pub mod power;
+pub mod power_observation;
 pub mod preset;
 pub mod preset_bundle;
 pub mod profile;
@@ -127,6 +128,7 @@ pub use platform_profile::{
     PlatformProfileTelemetry, PlatformProfileTelemetryQuality, PlatformProfileTransaction,
 };
 pub use power::PowerSource;
+pub use power_observation::PowerLimitObservation;
 pub use preset::{PowerPresetPolicy, Preset, PresetIntent};
 pub use preset_bundle::{PRESET_BUNDLE_SCHEMA_VERSION, PresetBundle, PresetBundleError};
 pub use profile::{AsusdFanProfile, PerformanceProfile, PlatformProfile};

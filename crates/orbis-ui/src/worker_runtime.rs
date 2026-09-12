@@ -65,6 +65,7 @@ pub enum WorkerCommand {
     RefreshChargeLimit,
     RefreshGpuCapabilities,
     RefreshPerformance,
+    RefreshPowerLimits,
     RefreshCapabilities,
     RefreshTelemetry,
     SetFanCurve {
@@ -94,6 +95,7 @@ pub enum WorkerEvent {
     GpuMuxRefresh(Result<GpuMuxState, ProviderError>),
     GpuAccessRefresh(Result<GpuAccessPolicy, ProviderError>),
     PerformanceRefresh(Result<PerformanceState, ProviderError>),
+    PowerLimitsRefresh(Result<Vec<orbis_core::PowerLimitObservation>, ProviderError>),
     RegistryChange(
         Result<
             (u64, Arc<orbis_capabilities::CapabilityRegistrySnapshot>),
@@ -483,6 +485,9 @@ async fn reconcile_after_resume<G, B, R, F>(
     let performance = bounded_performance_state(&runtime.performance).await;
     reconcile_automation_from_performance_result(automation, &performance);
     emit(WorkerEvent::PerformanceRefresh(performance));
+    emit(WorkerEvent::PowerLimitsRefresh(
+        runtime.read_power_limits().await,
+    ));
     emit(WorkerEvent::ChargeLimitRefresh(
         bounded_charge_limit(&runtime.battery).await,
     ));
@@ -781,6 +786,9 @@ async fn run_worker_inner<G, B, R, F>(
                 emit(WorkerEvent::GpuMuxRefresh(mux));
                 emit(WorkerEvent::GpuAccessRefresh(access));
                 continue;
+            }
+            WorkerCommand::RefreshPowerLimits => {
+                WorkerEvent::PowerLimitsRefresh(runtime.read_power_limits().await)
             }
             WorkerCommand::RefreshPerformance => {
                 let result = bounded_performance_state(&runtime.performance).await;

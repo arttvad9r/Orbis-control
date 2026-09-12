@@ -3486,6 +3486,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "orbis-core",
+ "orbis-hardwared",
  "orbis-providers",
  "orbis-session-protocol",
  "tempfile",

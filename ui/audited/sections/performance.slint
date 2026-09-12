@@ -87,6 +87,34 @@ export component PerformanceSection inherits Rectangle {
                     }
                 }
             }
+            SectionCard {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+                    SectionTitle {
+                        title: "Лимиты мощности и температуры";
+                        detail: root.ui-state.power-limits-status == "" ? "Ожидание данных" : root.ui-state.power-limits-status;
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "SPL " + (root.ui-state.power-limit-spl == "" ? "—" : root.ui-state.power-limit-spl); color: Palette.text-primary; font-size: 12px; horizontal-stretch: 1; }
+                        Text { text: "SPPT " + (root.ui-state.power-limit-sppt == "" ? "—" : root.ui-state.power-limit-sppt); color: Palette.text-primary; font-size: 12px; horizontal-stretch: 1; }
+                        Text { text: "FPPT " + (root.ui-state.power-limit-fppt == "" ? "—" : root.ui-state.power-limit-fppt); color: Palette.text-primary; font-size: 12px; horizontal-stretch: 1; }
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "GPU Boost " + (root.ui-state.power-limit-gpu-boost == "" ? "—" : root.ui-state.power-limit-gpu-boost); color: Palette.text-primary; font-size: 12px; horizontal-stretch: 1; }
+                        Text { text: "GPU Target " + (root.ui-state.power-limit-gpu-temp-target == "" ? "—" : root.ui-state.power-limit-gpu-temp-target); color: Palette.text-primary; font-size: 12px; horizontal-stretch: 1; }
+                    }
+                    Text {
+                        text: "Редактирование отключено: backend не предоставил полный диапазон min/max/step.";
+                        color: Palette.text-secondary;
+                        font-size: 11px;
+                        overflow: elide;
+                    }
+                }
+            }
+
             Rectangle { vertical-stretch: 100; background: transparent; }
         }
     }

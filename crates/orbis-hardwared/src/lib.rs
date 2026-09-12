@@ -29,6 +29,7 @@ pub mod battery;
 pub mod fans;
 pub mod keyboard_backlight;
 pub mod panel;
+pub mod power_limits;
 pub mod supergfxd;
 
 use battery::{BatteryMutationBackend, BatteryMutationReadback};
@@ -984,6 +985,14 @@ impl HardwareService {
         performance_mutation_wire::to_wire(self.writer.mutation_status())
     }
 
+    /// Read-only power/thermal observations from the live ASUS sysfs backend.
+    /// Missing endpoints are omitted; metadata remains explicitly unknown.
+    fn power_limits(&self) -> zbus::fdo::Result<Vec<PowerLimitInfo>> {
+        power_limits::read_power_limit_observations()
+            .map(|values| values.into_iter().map(power_observation_to_wire).collect())
+            .map_err(provider_error_to_dbus)
+    }
+
     /// Установить Battery configured threshold; возвращает подтверждённый
     /// configured percent, effective value остаётся отдельным read-model field.
     async fn set_charge_limit(
@@ -1266,6 +1275,75 @@ impl HardwareService {
     }
 }
 
+/// Hardware1 wire DTO for one read-only power/thermal observation.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    zbus::zvariant::Type,
+    zbus::zvariant::OwnedValue,
+)]
+pub struct PowerLimitInfo {
+    /// Stable field discriminant.
+    pub field: u8,
+    /// Current value.
+    pub value: i32,
+    /// Stable unit discriminant.
+    pub unit: u8,
+    /// Whether minimum is known.
+    pub min_present: bool,
+    /// Minimum value.
+    pub min: i32,
+    /// Whether maximum is known.
+    pub max_present: bool,
+    /// Maximum value.
+    pub max: i32,
+    /// Whether step is known.
+    pub step_present: bool,
+    /// Step value.
+    pub step: i32,
+    /// Whether default is known.
+    pub default_present: bool,
+    /// Default value.
+    pub default: i32,
+}
+
+fn power_observation_to_wire(value: orbis_core::PowerLimitObservation) -> PowerLimitInfo {
+    let field = match value.field {
+        orbis_core::PowerLimitField::Spl => 0,
+        orbis_core::PowerLimitField::Sppt => 1,
+        orbis_core::PowerLimitField::Fppt => 2,
+        orbis_core::PowerLimitField::CpuTempLimit => 3,
+        orbis_core::PowerLimitField::GpuDynamicBoost => 4,
+        orbis_core::PowerLimitField::GpuTempTarget => 5,
+        orbis_core::PowerLimitField::Other(_) => 255,
+    };
+    let unit = match value.unit {
+        orbis_core::Unit::Watts => 0,
+        orbis_core::Unit::DegreesC => 1,
+        orbis_core::Unit::Percent => 2,
+        orbis_core::Unit::Count => 3,
+        orbis_core::Unit::Unknown => 255,
+    };
+    PowerLimitInfo {
+        field,
+        value: value.value,
+        unit,
+        min_present: value.min.is_some(),
+        min: value.min.unwrap_or_default(),
+        max_present: value.max.is_some(),
+        max: value.max.unwrap_or_default(),
+        step_present: value.step.is_some(),
+        step: value.step.unwrap_or_default(),
+        default_present: value.default.is_some(),
+        default: value.default.unwrap_or_default(),
+    }
+}
+
 #[zbus::proxy(
     interface = "io.github.orbiscontrol.Hardware1",
     default_service = "io.github.orbiscontrol.Hardware",
@@ -1275,6 +1353,9 @@ pub trait Hardware1 {
     fn set_performance_profile(&self, profile: u8) -> zbus::Result<u8>;
     /// Read-only typed Performance mutation backend availability (wire enum).
     fn performance_mutation_status(&self) -> zbus::Result<u8>;
+
+    /// Read-only power/thermal observations; absent fields are omitted.
+    fn power_limits(&self) -> zbus::Result<Vec<PowerLimitInfo>>;
 
     /// Установить Battery configured threshold; возвращает подтверждённый
     /// configured percent, effective value остаётся отдельным read-model field.

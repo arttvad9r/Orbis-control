@@ -20,6 +20,7 @@ zbus = { workspace = true }
 orbis-core = { workspace = true }
 orbis-providers = { workspace = true }
 orbis-session-protocol = { path = "../orbis-session-protocol", version = "0.1.0" }
+orbis-hardwared = { path = "../orbis-hardwared", version = "0.1.0" }
 
 [features]
 # Mock is opt-in for dedicated tests/development only. Production bootstrap

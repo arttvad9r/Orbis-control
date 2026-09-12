@@ -697,6 +697,19 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
         self.performance_mutation_status
     }
 
+    /// Read a fresh Session1 power-limit observation snapshot.
+    pub async fn read_power_limits(
+        &self,
+    ) -> Result<Vec<orbis_core::PowerLimitObservation>, orbis_providers::error::ProviderError> {
+        let connection = self.mutation_status_connection.as_ref().ok_or_else(|| {
+            orbis_providers::error::ProviderError::Unsupported(
+                "power limits: system D-Bus connection unavailable".into(),
+            )
+        })?;
+        let source = orbis_session_client::ZbusSessionPowerLimitSource::new(connection.clone());
+        orbis_session_client::SessionPowerLimitSource::read_power_limits(&source).await
+    }
+
     /// Re-query all three Hardware1 mutation statuses from D-Bus.
     ///
     /// Read-only D-Bus queries; no mutations, no authorization, no setter
