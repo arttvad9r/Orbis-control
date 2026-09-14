@@ -22,11 +22,11 @@ Do not end a session merely because one intermediate task passed. End at a meani
 
 ## Canonical completion plan
 
-For general project-completion work, [`FINISH_PLAN.md`](FINISH_PLAN.md) is the **single canonical execution queue**.
+For general project-completion work, [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) is the **single canonical execution queue**.
 
 When the user says `continue`, `finish`, `make it work`, or gives an equivalent broad instruction:
 
-1. read `FINISH_PLAN.md` before choosing work;
+1. read `IMPLEMENTATION_PLAN.md` before choosing work;
 2. start at the earliest unchecked phase that can be advanced in the current environment;
 3. verify items that may already be complete in current source, mark them complete, and continue rather than stopping with a status report;
 4. work through coherent vertical slices until reaching a meaningful checkpoint or a real blocker;
@@ -84,7 +84,7 @@ For current behavior, use this order:
 
 1. production source code;
 2. executable tests and build configuration;
-3. `FINISH_PLAN.md` for the ordered completion queue;
+3. `IMPLEMENTATION_PLAN.md` for the ordered completion queue;
 4. current GitHub issues when they describe still-relevant defects or acceptance criteria;
 5. `README.md` and stable architecture/ADR documentation for intentional public invariants;
 6. other documents only as background.
