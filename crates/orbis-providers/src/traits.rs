@@ -169,6 +169,36 @@ pub trait PowerLimitProvider: Provider {
     /// Доступные поля и их метаданные.
     async fn power_limits(&self) -> Result<PowerLimits, ProviderError>;
 
+    /// Freeze the authoritative metadata used by one apply attempt.
+    async fn power_limit_snapshot(
+        &self,
+    ) -> Result<orbis_core::limits::PowerLimitSnapshot, ProviderError> {
+        Ok(orbis_core::limits::PowerLimitSnapshot::new(
+            self.power_limits().await?,
+        ))
+    }
+
+    /// Apply against exactly the supplied immutable authoritative snapshot.
+    async fn set_power_limit_from_snapshot(
+        &self,
+        snapshot: &orbis_core::limits::PowerLimitSnapshot,
+        field: PowerLimitField,
+        value: i32,
+    ) -> Result<ApplyResult, ProviderError> {
+        let metadata = snapshot.limits.get(&field).ok_or_else(|| {
+            ProviderError::Unsupported(format!("power-limit field {field:?} unavailable"))
+        })?;
+        if value < metadata.min
+            || value > metadata.max
+            || (value - metadata.min) % metadata.step != 0
+        {
+            return Err(ProviderError::InvalidRequest(format!(
+                "value {value} violates authoritative metadata for {field:?}"
+            )));
+        }
+        self.set_power_limit(field, value).await
+    }
+
     /// Установить значение поля.
     async fn set_power_limit(
         &self,

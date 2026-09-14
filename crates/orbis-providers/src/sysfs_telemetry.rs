@@ -32,7 +32,8 @@ use orbis_core::gpu::GpuPowerState;
 use orbis_core::identity::BackendIdentity;
 use orbis_core::newtypes::{MilliWatt, Percent, Rpm, TemperatureC};
 use orbis_core::telemetry::{
-    BatteryTelemetry, FanTelemetry, PowerTelemetry, Telemetry, TelemetryField, TelemetryFieldGap,
+    BatteryTelemetry, FanTelemetry, GpuIdentity, GpuRole, GpuTelemetry, PowerTelemetry, Telemetry,
+    TelemetryField, TelemetryFieldGap,
 };
 
 use crate::error::ProviderError;
@@ -106,6 +107,7 @@ impl TelemetryProvider for SysfsTelemetryProvider {
         let mut cpu_temp = None;
         let mut gpu_temp = None;
         let mut gpu_power = None;
+        let mut gpu_identity = None;
         let mut fans = Vec::new();
         let mut field_gaps = Vec::new();
 
@@ -119,6 +121,7 @@ impl TelemetryProvider for SysfsTelemetryProvider {
                     Err(error) => record_gap(&mut field_gaps, TelemetryField::CpuTemp, &error),
                 },
                 "amdgpu" => {
+                    gpu_identity = read_gpu_identity(dir);
                     match read_amdgpu_edge_temp(dir) {
                         Ok(value) => gpu_temp = value,
                         Err(error) => record_gap(&mut field_gaps, TelemetryField::GpuTemp, &error),
@@ -178,7 +181,7 @@ impl TelemetryProvider for SysfsTelemetryProvider {
         Ok(Telemetry {
             cpu_temp,
             gpu_temp,
-            fans,
+            fans: fans.clone(),
             power: PowerTelemetry {
                 ac: None,
                 battery: None,
@@ -190,6 +193,18 @@ impl TelemetryProvider for SysfsTelemetryProvider {
             // Telemetry не смешивается с GpuPower/GpuMux/GpuAccess capability
             // state: capability живёт в отдельном GpuPowerProvider.
             gpu_power_state: GpuPowerState::Unknown,
+            gpus: if gpu_temp.is_some() || gpu_power.is_some() {
+                vec![GpuTelemetry {
+                    identity: gpu_identity,
+                    role: GpuRole::Integrated,
+                    source: "sysfs-amdgpu".into(),
+                    temperature: gpu_temp,
+                    power: gpu_power,
+                    fan: fans.iter().find(|fan| fan.fan == FanId::Gpu).cloned(),
+                }]
+            } else {
+                Vec::new()
+            },
             field_gaps,
             ts: SystemTime::now(),
         })
@@ -318,6 +333,25 @@ fn read_percent(path: &Path) -> Result<Option<Percent>, ProviderError> {
             path.display()
         ))
     })
+}
+
+/// Read a best-effort physical GPU identity from the hwmon device link.
+/// Missing PCI metadata is retained as an unknown identity, never guessed.
+fn read_gpu_identity(dir: &Path) -> Option<GpuIdentity> {
+    let device = dir.join("device");
+    let pci_id = std::fs::read_link(&device)
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .filter(|value| value.contains(':') && value.contains('.'));
+    let vendor = read_string(&device.join("vendor")).ok().flatten();
+    if pci_id.is_some() || vendor.is_some() {
+        Some(GpuIdentity { vendor, pci_id })
+    } else {
+        None
+    }
 }
 
 /// Прочитать температуру dGPU: ищем `temp*_label == "edge"`.

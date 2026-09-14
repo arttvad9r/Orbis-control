@@ -14,6 +14,122 @@ fn base_state() -> controller::UiState {
 }
 
 #[test]
+fn power_limit_fixture_preserves_independent_backend_metadata() {
+    let state = base_state();
+    let spl = state
+        .power_limits
+        .get(&orbis_core::limits::PowerLimitField::Spl)
+        .unwrap();
+    let sppt = state
+        .power_limits
+        .get(&orbis_core::limits::PowerLimitField::Sppt)
+        .unwrap();
+    let fppt = state
+        .power_limits
+        .get(&orbis_core::limits::PowerLimitField::Fppt)
+        .unwrap();
+    assert_eq!(
+        (spl.value, spl.min, spl.max, spl.step, spl.unit),
+        (45, 20, 80, 5, orbis_core::limits::Unit::Watts)
+    );
+    assert_eq!(
+        (sppt.value, sppt.min, sppt.max, sppt.step),
+        (60, 20, 100, 5)
+    );
+    assert_eq!(
+        (fppt.value, fppt.min, fppt.max, fppt.step),
+        (70, 20, 110, 5)
+    );
+    assert!(
+        state
+            .power_limits
+            .get(&orbis_core::limits::PowerLimitField::CpuTempLimit)
+            .is_none()
+    );
+}
+
+#[test]
+fn power_limit_slider_change_is_dirty_draft_only_and_range_rejected() {
+    let mut state = base_state();
+    let field = orbis_core::limits::PowerLimitField::Spl;
+    assert!(update_power_limit_draft(&mut state, field.clone(), 50));
+    assert_eq!(state.power_limit_drafts.get(&field), Some(&50));
+    assert!(!update_power_limit_draft(&mut state, field.clone(), 90));
+    assert_eq!(state.power_limit_drafts.get(&field), Some(&50));
+    assert!(state.power_limit_pending.is_empty());
+}
+
+#[test]
+fn power_limit_draft_rejected_when_backend_is_read_only() {
+    let mut state = base_state();
+    state.power_limits_writable = false;
+    let before = state.power_limit_drafts.clone();
+    assert!(!update_power_limit_draft(
+        &mut state,
+        orbis_core::limits::PowerLimitField::Spl,
+        50,
+    ));
+    assert_eq!(state.power_limit_drafts, before);
+}
+
+#[test]
+fn power_limit_draft_reverts_to_observed_without_mutation_marker() {
+    let mut state = base_state();
+    let field = orbis_core::limits::PowerLimitField::Spl;
+    assert!(update_power_limit_draft(&mut state, field.clone(), 50));
+    assert!(update_power_limit_draft(&mut state, field.clone(), 45));
+    assert!(!state.power_limit_drafts.contains_key(&field));
+    assert!(state.power_limit_pending.is_empty());
+}
+
+#[test]
+fn production_initial_power_limits_are_unknown_not_fake_defaults() {
+    assert!(
+        controller::UiState::production_initial()
+            .power_limits
+            .fields
+            .is_empty()
+    );
+}
+
+#[test]
+fn advanced_power_limits_render_authoritative_metadata_and_pending_bits() {
+    let mut state = base_state();
+    state.power_limits.fields.insert(
+        orbis_core::limits::PowerLimitField::GpuDynamicBoost,
+        orbis_core::limits::PowerLimitValue::new(
+            15,
+            0,
+            25,
+            5,
+            Some(10),
+            orbis_core::limits::Unit::Watts,
+        )
+        .unwrap(),
+    );
+    state.power_limits.fields.insert(
+        orbis_core::limits::PowerLimitField::GpuTempTarget,
+        orbis_core::limits::PowerLimitValue::new(
+            75,
+            60,
+            87,
+            1,
+            Some(80),
+            orbis_core::limits::Unit::DegreesC,
+        )
+        .unwrap(),
+    );
+    state
+        .power_limit_pending
+        .insert(orbis_core::limits::PowerLimitField::GpuDynamicBoost);
+    let rendered = to_slint(&state);
+    assert_eq!(rendered.gpu_dynamic_boost_min, 0);
+    assert_eq!(rendered.gpu_dynamic_boost_max, 25);
+    assert_eq!(rendered.gpu_temp_target_step, 1);
+    assert_eq!(rendered.power_limit_pending_mask & 16, 16);
+}
+
+#[test]
 fn interactive_initial_state_has_no_fixture_values_or_write_access() {
     let state = controller::UiState::production_initial();
 
@@ -678,6 +794,30 @@ fn telemetry_refresh_updates_ui_and_error_keeps_previous_state() {
         ac_online: Some(false),
         battery: None,
         gpu_power_state: orbis_core::gpu::GpuPowerState::Unknown,
+        gpus: vec![
+            orbis_core::telemetry::GpuTelemetry {
+                identity: Some(orbis_core::telemetry::GpuIdentity {
+                    vendor: Some("1002".into()),
+                    pci_id: Some("0000:06:00.0".into()),
+                }),
+                role: orbis_core::telemetry::GpuRole::Integrated,
+                source: "fixture-amdgpu".into(),
+                temperature: Some(orbis_core::newtypes::TemperatureC::new(45).unwrap()),
+                power: Some(orbis_core::newtypes::MilliWatt::new(8141).unwrap()),
+                fan: None,
+            },
+            orbis_core::telemetry::GpuTelemetry {
+                identity: Some(orbis_core::telemetry::GpuIdentity {
+                    vendor: Some("10de".into()),
+                    pci_id: Some("0000:01:00.0".into()),
+                }),
+                role: orbis_core::telemetry::GpuRole::Discrete,
+                source: "fixture-lact".into(),
+                temperature: Some(orbis_core::newtypes::TemperatureC::new(43).unwrap()),
+                power: Some(orbis_core::newtypes::MilliWatt::new(13_073).unwrap()),
+                fan: None,
+            },
+        ],
         field_gaps: Vec::new(),
         ts: std::time::SystemTime::UNIX_EPOCH,
     };
@@ -689,6 +829,8 @@ fn telemetry_refresh_updates_ui_and_error_keeps_previous_state() {
     assert_eq!(s.battery_percent, "—");
     assert_eq!(s.ac_online, "On battery");
     assert_eq!(s.gpu_power_display, "13 W");
+    assert_eq!(s.igpu_temp, "45°C");
+    assert_eq!(s.igpu_power_display, "8 W");
 
     apply_performance_event(
         &mut s,
@@ -808,6 +950,23 @@ fn definitive_factory_reset_error_outcome(
         profile,
         result: Err(CommandError::Command(error)),
     }
+}
+
+#[test]
+fn applied_factory_reset_clears_dirty_until_authoritative_refresh() {
+    let mut s = base_state();
+    s.fan_curve_state = controller::FanCurveHwState::Ready;
+    s.fan_curve_writable = true;
+    s.fan_curve_dirty = true;
+    apply_performance_event(
+        &mut s,
+        WorkerEvent::FanCurveDefaults {
+            profile: AsusdFanProfile::Balanced,
+            result: Ok(ApplyResult::Applied),
+        },
+    );
+    assert!(!s.fan_curve_dirty);
+    assert!(!s.fan_curve_error);
 }
 
 #[test]
@@ -1384,6 +1543,71 @@ fn fan_curve_initial_state_is_loading_and_not_writable() {
 }
 
 #[test]
+fn ac_023_dirty_fan_selection_requires_explicit_stay_or_discard() {
+    use orbis_core::fan::{FanCurve, FanCurvePoint};
+
+    let mut state = base_state();
+    state.fan_curve_state = controller::FanCurveHwState::Ready;
+    state.fan_curve_writable = true;
+    let observed_temps = state.fan_curve_temps;
+    let observed_pwms = state.fan_curve_pwms;
+    state.fan_curve_temps[0] += 1;
+    state.fan_curve_dirty = true;
+    let dirty_draft = state.fan_curve_temps;
+    let original_selection = (state.fan_selected, state.fan_profile_selected);
+
+    assert_eq!(
+        controller::UiState::fan_selection_transition(true, 1, 2),
+        controller::FanSelectionTransition::Confirm { fan: 1, profile: 2 }
+    );
+    assert_eq!(
+        (state.fan_selected, state.fan_profile_selected),
+        original_selection
+    );
+    assert_eq!(state.fan_curve_temps, dirty_draft);
+    assert_eq!(
+        controller::UiState::fan_selection_transition(false, 1, 2),
+        controller::FanSelectionTransition::Refresh { fan: 1, profile: 2 }
+    );
+
+    // Stay closes only the prompt: editor, draft and selection remain intact.
+    assert!(state.fan_curve_dirty);
+    assert_eq!(state.fan_curve_temps, dirty_draft);
+    assert_eq!(
+        (state.fan_selected, state.fan_profile_selected),
+        original_selection
+    );
+
+    controller::UiState::discard_fan_selection(&mut state, 1, 2);
+    assert_eq!((state.fan_selected, state.fan_profile_selected), (1, 2));
+    assert!(!state.fan_curve_dirty);
+
+    // Discard is read-only; the authoritative refresh restores observed points.
+    let points: Vec<FanCurvePoint> = observed_temps
+        .iter()
+        .zip(observed_pwms.iter())
+        .map(|(&temp, &pwm)| {
+            FanCurvePoint::new(
+                TemperatureC::new(temp as i16).unwrap(),
+                FanPwm::new(pwm as u8).unwrap(),
+            )
+        })
+        .collect();
+    state.load_fan_curve(
+        &FanCurve {
+            profile: PerformanceProfile::Balanced,
+            fan: FanId::Gpu,
+            enabled: None,
+            points,
+        },
+        AsusdFanProfile::Quiet,
+    );
+    assert_eq!(state.fan_curve_temps, observed_temps);
+    assert_eq!(state.fan_curve_pwms, observed_pwms);
+    assert_eq!((state.fan_selected, state.fan_profile_selected), (1, 2));
+}
+
+#[test]
 fn fan_curve_load_fan_curve_sets_ready_and_populates_points() {
     use orbis_core::fan::{FanCurve, FanCurvePoint};
     use orbis_core::newtypes::{FanPwm, TemperatureC};
@@ -1566,6 +1790,7 @@ fn fan_curve_can_mutate_requires_writable_dirty_and_valid() {
 #[test]
 fn fan_curve_can_mutate_valid_curve_returns_true() {
     let mut s = base_state();
+    s.fan_curve_state = controller::FanCurveHwState::Ready;
     s.fan_curve_writable = true;
     s.fan_curve_dirty = true;
     s.fan_curve_error = false;
@@ -1661,6 +1886,7 @@ fn fan_curve_fan_id_mapping() {
 #[test]
 fn fan_curve_pwm_above_100_is_valid() {
     let mut s = base_state();
+    s.fan_curve_state = controller::FanCurveHwState::Ready;
     s.fan_curve_writable = true;
     s.fan_curve_dirty = true;
     s.fan_curve_temps = [50, 55, 60, 65, 70, 75, 79, 85];
@@ -1931,6 +2157,10 @@ fn product_gpu_queued_target_is_carried_and_reboot_required() {
     let mut s = base_state();
     s.gpu_queued = -1;
     s.gpu_reboot_required = false;
+    s.gpu_mux_value = 1;
+    s.gpu_access_value = 0;
+    s.gpu_power_value = 1;
+    let physical_before = (s.gpu_mux_value, s.gpu_access_value, s.gpu_power_value);
 
     apply_product_gpu_result(
         &mut s,
@@ -1944,6 +2174,45 @@ fn product_gpu_queued_target_is_carried_and_reboot_required() {
 
     assert_eq!(s.gpu_queued, 2);
     assert!(s.gpu_reboot_required);
+    assert_eq!(
+        (s.gpu_mux_value, s.gpu_access_value, s.gpu_power_value),
+        physical_before
+    );
+}
+
+#[test]
+fn product_gpu_current_mode_without_queue_is_a_local_noop() {
+    let mut s = base_state();
+    s.gpu_mode_state = controller::GpuModeHwState::Ready;
+    s.gpu_mode_writable = true;
+    s.gpu_selected = 1;
+    s.gpu_queued = -1;
+    s.gpu_reboot_required = false;
+
+    assert!(gpu_mode_click_is_noop(&s, 1));
+    assert!(!gpu_mode_click_is_noop(&s, 2));
+}
+
+#[test]
+fn product_gpu_observed_mode_can_clear_a_deferred_queue() {
+    let mut s = base_state();
+    s.gpu_selected = 1;
+    s.gpu_queued = 2;
+    s.gpu_reboot_required = true;
+
+    apply_product_gpu_result(
+        &mut s,
+        Ok(product_gpu_result(
+            1,
+            u32::MAX,
+            PRODUCT_GPU_OUTCOME_ALREADY_ACTIVE,
+            false,
+        )),
+    );
+
+    assert_eq!(s.gpu_selected, 1);
+    assert_eq!(s.gpu_queued, -1);
+    assert!(!s.gpu_reboot_required);
 }
 
 #[test]
@@ -1998,7 +2267,7 @@ fn product_gpu_definitive_outcomes_drive_section_error_honestly() {
         &mut s,
         Ok(product_gpu_result(
             1,
-            2,
+            u32::MAX,
             PRODUCT_GPU_OUTCOME_ALREADY_ACTIVE,
             false,
         )),
@@ -2016,6 +2285,27 @@ fn product_gpu_definitive_outcomes_drive_section_error_honestly() {
         )),
     );
     assert!(s.gpu_section_error);
+}
+
+#[test]
+fn product_gpu_outcome_mismatch_is_not_presented_as_success() {
+    let mut s = base_state();
+    s.gpu_section_error = false;
+
+    // AlreadyActive must carry the requested current mode and no queue.
+    apply_product_gpu_result(
+        &mut s,
+        Ok(product_gpu_result(
+            0,
+            u32::MAX,
+            PRODUCT_GPU_OUTCOME_ALREADY_ACTIVE,
+            false,
+        )),
+    );
+
+    assert_eq!(s.gpu_selected, 0);
+    assert!(s.gpu_section_error);
+    assert!(!s.gpu_mode_writable);
 }
 
 #[test]
@@ -2059,6 +2349,28 @@ fn main_window_renders_queued_target_and_reboot_state() {
         !optimized_line.contains("pending:"),
         "Optimized must never render a product-queue pending state"
     );
+}
+
+#[test]
+fn sidebar_nav_items_have_focus_and_keyboard_activation_route() {
+    let nav = include_str!("../../../ui/components/nav-item.slint");
+    let shell = include_str!("../../../ui/audited/main-window.slint");
+
+    assert!(nav.contains("forward-focus: focus-scope;"));
+    assert!(nav.contains("key-pressed(event)"));
+    assert!(nav.contains("event.text == \" \""));
+    assert!(nav.contains("event.text == \"\\n\""));
+    assert!(nav.contains("return accept;"));
+    assert!(nav.contains("accessible-role: button;"));
+
+    for (label, section) in [
+        ("Производительность", "Section.Performance"),
+        ("Охлаждение", "Section.Cooling"),
+        ("Графика", "Section.Graphics"),
+    ] {
+        assert!(shell.contains(&format!("label: \"{label}\"")));
+        assert!(shell.contains(&format!("root.open-section({section})")));
+    }
 }
 
 #[test]

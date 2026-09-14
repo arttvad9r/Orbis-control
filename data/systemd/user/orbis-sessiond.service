@@ -6,7 +6,7 @@ After=graphical-session-pre.target
 [Service]
 Type=dbus
 BusName=io.github.orbiscontrol.Session
-ExecStart=/usr/local/bin/orbis-sessiond
+ExecStart=/usr/bin/orbis-sessiond
 Restart=on-failure
 RestartSec=2s
 

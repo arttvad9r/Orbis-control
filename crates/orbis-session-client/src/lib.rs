@@ -25,6 +25,7 @@ use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
+use orbis_core::limits::{PowerLimitField, PowerLimitSnapshot, PowerLimitValue, PowerLimits, Unit};
 use orbis_core::newtypes::{FanPwm, Percent, TemperatureC};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_hardwared::battery::validate_charge_limit;
@@ -37,7 +38,8 @@ use orbis_hardwared::{DBUS_OBJECT_PATH, Hardware1Proxy};
 pub use orbis_hardwared::ProductGpuMutationResult;
 use orbis_providers::traits::{
     BatteryProvider, FanCurveMutationProvider, FanCurvePoints, FanProvider, GpuAccessProvider,
-    GpuMuxProvider, GpuPowerProvider, PerformanceProvider, Provider, ProviderHealth,
+    GpuMuxProvider, GpuPowerProvider, PerformanceProvider, PowerLimitProvider, Provider,
+    ProviderHealth,
 };
 use orbis_providers::{
     FanCurveDefaultsMutationProvider,
@@ -46,7 +48,7 @@ use orbis_providers::{
 use orbis_session_protocol::{
     BatteryThresholdEvidenceTuple, ChargeLimitInfo, PerformanceInfo, Session1Proxy,
     battery_threshold_confidence, battery_threshold_freshness, battery_threshold_source,
-    battery_threshold_state, gpu_access, gpu_mux, gpu_power, performance,
+    battery_threshold_state, gpu_access, gpu_mux, gpu_power, performance, power_limit_field,
 };
 use zbus::proxy::CacheProperties;
 
@@ -187,11 +189,60 @@ pub fn battery_threshold_evidence_from_wire(
 /// Remote FDO errors отображаются детерминированно; остальные (Failed,
 /// transport/authentication/disconnect/protocol) — в `ProviderError::Dbus`.
 fn zbus_error_to_provider(error: zbus::Error) -> ProviderError {
+    if let zbus::Error::MethodError(name, message, _) = &error {
+        let message = message.as_deref().unwrap_or_default();
+        return match name.as_str() {
+            "org.freedesktop.DBus.Error.NotSupported" => {
+                ProviderError::Unsupported(message.to_string())
+            }
+            "org.freedesktop.DBus.Error.AccessDenied" => {
+                ProviderError::PermissionDenied(message.to_string())
+            }
+            "org.freedesktop.DBus.Error.InvalidArgs" => {
+                ProviderError::InvalidRequest(message.to_string())
+            }
+            "org.freedesktop.DBus.Error.Failed"
+                if message
+                    .starts_with(orbis_session_protocol::SESSION_BACKEND_UNAVAILABLE_PREFIX) =>
+            {
+                ProviderError::BackendUnavailable(
+                    message
+                        .trim_start_matches(
+                            orbis_session_protocol::SESSION_BACKEND_UNAVAILABLE_PREFIX,
+                        )
+                        .to_string(),
+                )
+            }
+            _ => ProviderError::Dbus(error.to_string()),
+        };
+    }
     if let zbus::Error::FDO(boxed) = &error {
         return match &**boxed {
             zbus::fdo::Error::NotSupported(msg) => ProviderError::Unsupported(msg.clone()),
             zbus::fdo::Error::AccessDenied(msg) => ProviderError::PermissionDenied(msg.clone()),
             zbus::fdo::Error::InvalidArgs(msg) => ProviderError::InvalidRequest(msg.clone()),
+            zbus::fdo::Error::Failed(message)
+                if message
+                    .starts_with(orbis_session_protocol::SESSION_BACKEND_UNAVAILABLE_PREFIX) =>
+            {
+                ProviderError::BackendUnavailable(
+                    message
+                        .trim_start_matches(
+                            orbis_session_protocol::SESSION_BACKEND_UNAVAILABLE_PREFIX,
+                        )
+                        .to_string(),
+                )
+            }
+            zbus::fdo::Error::Failed(message)
+                if message.starts_with(orbis_hardwared::power_limits::TIMEOUT_PREFIX) =>
+            {
+                ProviderError::Timeout(message.clone())
+            }
+            zbus::fdo::Error::Failed(message)
+                if message.starts_with(orbis_hardwared::power_limits::CONFLICT_PREFIX) =>
+            {
+                ProviderError::Conflict(message.clone())
+            }
             zbus::fdo::Error::Failed(message)
                 if message
                     .starts_with(orbis_session_protocol::BATTERY_THRESHOLD_CONFLICT_PREFIX) =>
@@ -208,6 +259,150 @@ fn zbus_error_to_provider(error: zbus::Error) -> ProviderError {
         };
     }
     ProviderError::Dbus(error.to_string())
+}
+
+/// Convert one untrusted Session1 power-limit entry into domain types.
+fn power_limit_from_wire(
+    entry: orbis_session_protocol::PowerLimitInfoTuple,
+) -> Result<(PowerLimitField, PowerLimitValue), ProviderError> {
+    let (kind, name, value, min, max, step, has_default, default, unit) = entry;
+    let field = match kind {
+        power_limit_field::SPL => PowerLimitField::Spl,
+        power_limit_field::SPPT => PowerLimitField::Sppt,
+        power_limit_field::FPPT => PowerLimitField::Fppt,
+        power_limit_field::CPU_TEMP_LIMIT => PowerLimitField::CpuTempLimit,
+        power_limit_field::GPU_DYNAMIC_BOOST => PowerLimitField::GpuDynamicBoost,
+        power_limit_field::GPU_TEMP_TARGET => PowerLimitField::GpuTempTarget,
+        power_limit_field::OTHER => PowerLimitField::Other(name),
+        other => {
+            return Err(ProviderError::Internal(format!(
+                "session protocol: unknown power-limit field {other}"
+            )));
+        }
+    };
+    let unit = match unit {
+        0 => Unit::Watts,
+        1 => Unit::DegreesC,
+        2 => Unit::Percent,
+        3 => Unit::Count,
+        255 => Unit::Unknown,
+        other => {
+            return Err(ProviderError::Internal(format!(
+                "session protocol: unknown power-limit unit {other}"
+            )));
+        }
+    };
+    let value = PowerLimitValue::new(value, min, max, step, has_default.then_some(default), unit)
+        .map_err(|error| {
+        ProviderError::Internal(format!(
+            "session protocol: invalid power-limit metadata: {error}"
+        ))
+    })?;
+    Ok((field, value))
+}
+
+/// Source for the authoritative Session1 power-limit snapshot.
+#[async_trait]
+pub trait SessionPowerLimitSource: Send + Sync {
+    /// Read a fresh wire snapshot.
+    async fn read_power_limits(
+        &self,
+    ) -> Result<orbis_session_protocol::PowerLimitsTuple, ProviderError>;
+}
+
+/// Real zbus source for Session1 power-limit snapshots.
+pub struct ZbusSessionPowerLimitSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusSessionPowerLimitSource {
+    /// Create over an existing session connection.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl SessionPowerLimitSource for ZbusSessionPowerLimitSource {
+    async fn read_power_limits(
+        &self,
+    ) -> Result<orbis_session_protocol::PowerLimitsTuple, ProviderError> {
+        let proxy = Session1Proxy::builder(&self.connection)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy.power_limits().await.map_err(zbus_error_to_provider)
+    }
+}
+
+/// Read-only provider exposing the sessiond snapshot to the application.
+pub struct SessionPowerLimitProvider<S> {
+    source: S,
+}
+
+impl<S> SessionPowerLimitProvider<S> {
+    /// Create without I/O.
+    pub fn new(source: S) -> Self {
+        Self { source }
+    }
+}
+
+impl<S: SessionPowerLimitSource> Provider for SessionPowerLimitProvider<S> {
+    fn id(&self) -> &'static str {
+        "session-power-limits"
+    }
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("orbis-sessiond/Session1")
+    }
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("Session1 power-limit field '{feature}' unavailable")
+    }
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.session-power-limits",
+            "authoritative read-only Session1 power-limit snapshot",
+        )]
+    }
+}
+
+#[async_trait]
+impl<S: SessionPowerLimitSource> PowerLimitProvider for SessionPowerLimitProvider<S> {
+    async fn power_limits(&self) -> Result<PowerLimits, ProviderError> {
+        let mut fields = std::collections::BTreeMap::new();
+        for entry in self.source.read_power_limits().await? {
+            let (field, value) = power_limit_from_wire(entry)?;
+            if fields.insert(field.clone(), value).is_some() {
+                return Err(ProviderError::Internal(format!(
+                    "session protocol: duplicate power-limit field {field:?}"
+                )));
+            }
+        }
+        Ok(PowerLimits { fields })
+    }
+    async fn set_power_limit(
+        &self,
+        _field: PowerLimitField,
+        _value: i32,
+    ) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "Session1 power-limit provider is read-only".into(),
+        ))
+    }
+    async fn restore_defaults(&self) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "Session1 power-limit provider is read-only".into(),
+        ))
+    }
+    fn validate_power_limit(&self, _field: &PowerLimitField, _value: i32) -> ValidationResult {
+        ValidationResult::invalid("Session1 power-limit provider is read-only")
+    }
 }
 
 /// Wire→domain boundary между недоверенным D-Bus payload и доменной моделью.
@@ -1161,6 +1356,162 @@ pub struct SessionHardwarePerformanceProvider<S, H> {
     hardware: H,
 }
 
+/// Direct Hardware1 source for typed power/thermal-limit mutation.
+#[async_trait]
+pub trait HardwarePowerLimitSource: Send + Sync {
+    /// Set one field and return authoritative Hardware1 read-back.
+    async fn set_power_limit(&self, field: u8, value: i32) -> Result<i32, ProviderError>;
+}
+
+/// Real direct system-bus source for Hardware1 power-limit mutation.
+pub struct ZbusHardwarePowerLimitSource {
+    connection: zbus::Connection,
+}
+
+impl ZbusHardwarePowerLimitSource {
+    /// Construct over a caller-owned system-bus connection without I/O.
+    pub fn new(connection: zbus::Connection) -> Self {
+        Self { connection }
+    }
+}
+
+#[async_trait]
+impl HardwarePowerLimitSource for ZbusHardwarePowerLimitSource {
+    async fn set_power_limit(&self, field: u8, value: i32) -> Result<i32, ProviderError> {
+        let proxy = Hardware1Proxy::builder(&self.connection)
+            .path(DBUS_OBJECT_PATH)
+            .expect("valid hardware object path")
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .set_power_limit(field, value)
+            .await
+            .map_err(zbus_error_to_provider)
+    }
+}
+
+/// Composed power-limit provider: read/metadata через Session1, mutation через Hardware1.
+///
+/// The session read is authoritative for the UI draft and is re-read by the
+/// caller after a successful mutation; no optimistic value is stored here.
+pub struct SessionHardwarePowerLimitProvider<S, H> {
+    session: S,
+    hardware: H,
+}
+
+impl<S, H> SessionHardwarePowerLimitProvider<S, H> {
+    /// Construct without I/O; reads and writes begin on provider operations.
+    pub fn new(session: S, hardware: H) -> Self {
+        Self { session, hardware }
+    }
+}
+
+impl<S, H> Provider for SessionHardwarePowerLimitProvider<S, H>
+where
+    S: PowerLimitProvider,
+    H: HardwarePowerLimitSource,
+{
+    fn id(&self) -> &'static str {
+        "session-hardware-power-limits"
+    }
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("session + Hardware1 power limits")
+    }
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("Session1 + Hardware1 power-limit field '{feature}' unavailable")
+    }
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::new(
+            "provider.session-hardware-power-limits",
+            "Session1 read + direct Hardware1 SPL/SPPT/FPPT mutation",
+        )]
+    }
+}
+
+#[async_trait]
+impl<S, H> PowerLimitProvider for SessionHardwarePowerLimitProvider<S, H>
+where
+    S: PowerLimitProvider,
+    H: HardwarePowerLimitSource,
+{
+    async fn power_limits(&self) -> Result<PowerLimits, ProviderError> {
+        self.session.power_limits().await
+    }
+
+    async fn power_limit_snapshot(&self) -> Result<PowerLimitSnapshot, ProviderError> {
+        Ok(PowerLimitSnapshot::new(self.session.power_limits().await?))
+    }
+
+    async fn set_power_limit_from_snapshot(
+        &self,
+        snapshot: &PowerLimitSnapshot,
+        field: PowerLimitField,
+        value: i32,
+    ) -> Result<ApplyResult, ProviderError> {
+        let metadata = snapshot.limits.get(&field).ok_or_else(|| {
+            ProviderError::Unsupported(format!("power-limit field {field:?} unavailable"))
+        })?;
+        if value < metadata.min
+            || value > metadata.max
+            || (value - metadata.min) % metadata.step != 0
+        {
+            return Err(ProviderError::InvalidRequest(format!(
+                "value {value} violates authoritative metadata for {field:?}: {}..{} step {}",
+                metadata.min, metadata.max, metadata.step
+            )));
+        }
+        let raw = orbis_hardwared::power_limits::field_to_wire(&field)?;
+        let observed = self.hardware.set_power_limit(raw, value).await?;
+        if observed != value {
+            return Err(ProviderError::Conflict(format!(
+                "power-limit read-back mismatch: requested={value}, observed={observed}"
+            )));
+        }
+        Ok(ApplyResult::Applied)
+    }
+
+    async fn set_power_limit(
+        &self,
+        field: PowerLimitField,
+        value: i32,
+    ) -> Result<ApplyResult, ProviderError> {
+        let snapshot = self.power_limit_snapshot().await?;
+        self.set_power_limit_from_snapshot(&snapshot, field, value)
+            .await
+    }
+
+    async fn restore_defaults(&self) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "SPL/SPPT/FPPT restore defaults is not part of this narrow typed operation".into(),
+        ))
+    }
+
+    fn validate_power_limit(&self, field: &PowerLimitField, value: i32) -> ValidationResult {
+        // This synchronous API cannot fetch fresh metadata; callers must use the
+        // async mutation method, which validates against a fresh Session1 snapshot.
+        match field {
+            PowerLimitField::Spl
+            | PowerLimitField::Sppt
+            | PowerLimitField::Fppt
+            | PowerLimitField::CpuTempLimit
+            | PowerLimitField::GpuDynamicBoost
+            | PowerLimitField::GpuTempTarget => ValidationResult::invalid(format!(
+                "fresh authoritative metadata required before applying {field:?}={value}"
+            )),
+            _ => ValidationResult::invalid(format!(
+                "field {field:?} is not writable through Hardware1"
+            )),
+        }
+    }
+}
+
 /// Composed Battery provider: authoritative reads через Session1, mutation
 /// напрямую через Hardware1 из application/GUI process.
 pub struct SessionHardwareBatteryProvider<S, H> {
@@ -2075,6 +2426,16 @@ mod tests {
             zbus::fdo::Error::InvalidArgs("no".into()),
         )));
         assert!(matches!(invalid, ProviderError::InvalidRequest(_)));
+
+        let unavailable = zbus_error_to_provider(zbus::Error::FDO(Box::new(
+            zbus::fdo::Error::Failed(format!(
+                "{}missing asusd",
+                orbis_session_protocol::SESSION_BACKEND_UNAVAILABLE_PREFIX
+            )),
+        )));
+        assert!(
+            matches!(unavailable, ProviderError::BackendUnavailable(message) if message == "missing asusd")
+        );
 
         let failed = zbus_error_to_provider(zbus::Error::FDO(Box::new(zbus::fdo::Error::Failed(
             "boom".into(),

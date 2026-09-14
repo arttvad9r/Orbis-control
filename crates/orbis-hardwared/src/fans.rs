@@ -307,6 +307,30 @@ pub trait FanCurveMutationOperation: Send + Sync {
     ) -> Result<FanCurveDefaultsReadback, ProviderError>;
 }
 
+/// Decode and validate one authoritative vendor curve returned after reset.
+fn parse_reset_curve(
+    name: &str,
+    temps: &[u8; 8],
+    pwms: &[u8; 8],
+    _enabled: bool,
+) -> Result<FanId, ProviderError> {
+    let fan = match name {
+        "CPU" => FanId::Cpu,
+        "GPU" => FanId::Gpu,
+        other => {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "hardwared: factory-default reset returned unknown fan {other:?}"
+            )));
+        }
+    };
+    let curve = FanCurvePoints {
+        temps: temps.map(|value| TemperatureC::new(i16::from(value)).expect("u8 temperature")),
+        pwms: pwms.map(|value| FanPwm::new(value).expect("u8 pwm")),
+    };
+    validate_fan_curve(&curve)?;
+    Ok(fan)
+}
+
 /// Validate the public fan curve input without contacting any backend.
 ///
 /// - ровно 8 точек (гарантировано типом массива);
@@ -436,15 +460,22 @@ where
     ) -> Result<FanCurveDefaultsReadback, ProviderError> {
         self.asusd.reset_curves_to_defaults(profile).await?;
         let raw = self.asusd.read_curves(profile).await?;
-        let observed_curves = raw
-            .iter()
-            .filter(|(name, _, _, _)| matches!(name.as_str(), "CPU" | "GPU" | "MID"))
-            .count();
-        if observed_curves == 0 {
+        let mut observed = std::collections::HashSet::new();
+        for (name, temps, pwms, enabled) in &raw {
+            let fan = parse_reset_curve(name, temps, pwms, *enabled)?;
+            if !observed.insert(fan) {
+                return Err(ProviderError::BackendUnavailable(format!(
+                    "hardwared: factory-default reset returned duplicate curve for {name} (profile={profile:?})"
+                )));
+            }
+        }
+        let required = [FanId::Cpu, FanId::Gpu];
+        if required.iter().any(|fan| !observed.contains(fan)) {
             return Err(ProviderError::BackendUnavailable(format!(
-                "hardwared: factory-default reset completed but FanCurveData returned no recognized curves (profile={profile:?})"
+                "hardwared: factory-default reset read-back missing CPU or GPU curve (profile={profile:?})"
             )));
         }
+        let observed_curves = required.len();
         Ok(FanCurveDefaultsReadback {
             requested_profile: profile,
             result: ApplyResult::Applied,

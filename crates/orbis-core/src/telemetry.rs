@@ -14,6 +14,67 @@ use crate::newtypes::{EnergyMWh, MilliWatt, Percent, Rpm, TemperatureC};
 use crate::profile::PerformanceProfile;
 use crate::warning::Warning;
 
+/// Identity of the physical GPU that produced a telemetry observation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpuIdentity {
+    /// PCI vendor identifier, when available (for example `0x10de`).
+    pub vendor: Option<String>,
+    /// Stable PCI address, when available (for example `0000:01:00.0`).
+    pub pci_id: Option<String>,
+}
+
+impl GpuIdentity {
+    /// Only a complete PCI identity can prove that two observations are the same GPU.
+    ///
+    /// Vendor spellings differ by source (`0x10de` from the sysfs `vendor` file
+    /// vs `10DE` from the lactd PCI uevent), so comparison strips an optional
+    /// `0x` prefix and ignores ASCII case. PCI addresses are hex, so the same
+    /// case-insensitive comparison is used there as well.
+    pub fn matches(&self, other: &Self) -> bool {
+        fn canonical(value: Option<&str>) -> Option<String> {
+            value.map(|value| {
+                value
+                    .strip_prefix("0x")
+                    .or_else(|| value.strip_prefix("0X"))
+                    .unwrap_or(value)
+                    .to_ascii_lowercase()
+            })
+        }
+        self.pci_id.is_some()
+            && canonical(self.pci_id.as_deref()) == canonical(other.pci_id.as_deref())
+            && canonical(self.vendor.as_deref()) == canonical(other.vendor.as_deref())
+    }
+}
+
+/// Physical GPU role used for deliberate UI selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GpuRole {
+    /// Integrated graphics device.
+    Integrated,
+    /// Discrete graphics device.
+    Discrete,
+    /// The role could not be established.
+    Unknown,
+}
+
+/// Telemetry belonging to one physical GPU.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpuTelemetry {
+    /// Physical identity, when a provider can establish one.
+    pub identity: Option<GpuIdentity>,
+    /// Physical role used for deliberate display selection.
+    pub role: GpuRole,
+    /// Provider/source label.
+    pub source: String,
+    /// GPU temperature.
+    pub temperature: Option<TemperatureC>,
+    /// GPU power draw.
+    pub power: Option<MilliWatt>,
+    /// Fan observation belonging to this GPU.
+    pub fan: Option<FanTelemetry>,
+}
+
 /// Телеметрия одного вентилятора.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FanTelemetry {
@@ -131,6 +192,9 @@ pub struct Telemetry {
     pub battery: Option<BatteryTelemetry>,
     /// Фактический power state dGPU.
     pub gpu_power_state: GpuPowerState,
+    /// Per-device GPU observations. Missing identity is never assumed to match.
+    #[serde(default)]
+    pub gpus: Vec<GpuTelemetry>,
     /// Field-local evidence for discovered sources whose read failed.
     ///
     /// Empty when every discovered source was read successfully or missing;
@@ -171,6 +235,7 @@ impl Telemetry {
             ac_online: None,
             battery: None,
             gpu_power_state: GpuPowerState::Unknown,
+            gpus: Vec::new(),
             field_gaps: Vec::new(),
             ts: SystemTime::now(),
         }
@@ -193,6 +258,10 @@ impl Telemetry {
             || self.power.gpu.is_some();
         let has_any = self.cpu_temp.is_some()
             || self.gpu_temp.is_some()
+            || self
+                .gpus
+                .iter()
+                .any(|gpu| gpu.temperature.is_some() || gpu.power.is_some() || gpu.fan.is_some())
             || !self.fans.is_empty()
             || has_power
             || self.ac_online.is_some()
@@ -295,6 +364,48 @@ mod tests {
         let t = Telemetry::empty();
         assert!(t.fans.is_empty());
         assert!(t.cpu_temp.is_none());
+    }
+
+    #[test]
+    fn gpu_identity_matches_across_source_conventions() {
+        let sysfs = GpuIdentity {
+            vendor: Some("0x10de".into()),
+            pci_id: Some("0000:01:00.0".into()),
+        };
+        let lact = GpuIdentity {
+            vendor: Some("10DE".into()),
+            pci_id: Some("0000:01:00.0".into()),
+        };
+        assert!(sysfs.matches(&lact));
+        assert!(lact.matches(&sysfs));
+        assert!(sysfs.matches(&sysfs));
+    }
+
+    #[test]
+    fn gpu_identity_requires_complete_and_equal_identity() {
+        let base = GpuIdentity {
+            vendor: Some("0x10de".into()),
+            pci_id: Some("0000:01:00.0".into()),
+        };
+        // Different slot = different physical GPU.
+        assert!(!base.matches(&GpuIdentity {
+            vendor: Some("0x10de".into()),
+            pci_id: Some("0000:06:00.0".into()),
+        }));
+        // Different vendor = different GPU even with the same slot spelling.
+        assert!(!base.matches(&GpuIdentity {
+            vendor: Some("0x1002".into()),
+            pci_id: Some("0000:01:00.0".into()),
+        }));
+        // Missing slot or missing vendor never proves identity.
+        assert!(!base.matches(&GpuIdentity {
+            vendor: Some("10de".into()),
+            pci_id: None,
+        }));
+        assert!(!base.matches(&GpuIdentity {
+            vendor: None,
+            pci_id: Some("0000:01:00.0".into()),
+        }));
     }
 
     #[test]
@@ -407,6 +518,7 @@ mod tests {
                 state: "Full".into(),
             }),
             gpu_power_state: GpuPowerState::Unknown,
+            gpus: Vec::new(),
             field_gaps: Vec::new(),
             ts: SystemTime::UNIX_EPOCH,
         };
@@ -576,6 +688,7 @@ mod tests {
                 state: "Discharging".into(),
             }),
             gpu_power_state: GpuPowerState::Unknown,
+            gpus: Vec::new(),
             field_gaps: Vec::new(),
             ts: SystemTime::UNIX_EPOCH,
         };

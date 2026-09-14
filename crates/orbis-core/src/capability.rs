@@ -52,6 +52,8 @@ pub enum FeatureId {
     NvDynamicBoost,
     /// GPU temperature target.
     NvTempTarget,
+    /// CPU temperature limit.
+    CpuTempLimit,
     /// CPU boost (cpufv).
     CpuBoost,
     /// Вентиляторы (телеметрия).
@@ -103,6 +105,7 @@ impl FeatureId {
         FeatureId::PptFppt,
         FeatureId::NvDynamicBoost,
         FeatureId::NvTempTarget,
+        FeatureId::CpuTempLimit,
         FeatureId::CpuBoost,
         FeatureId::Fans,
         FeatureId::FanCurves,
@@ -140,6 +143,7 @@ impl FeatureId {
             FeatureId::PptFppt => "ppt_fppt",
             FeatureId::NvDynamicBoost => "nv_dynamic_boost",
             FeatureId::NvTempTarget => "nv_temp_target",
+            FeatureId::CpuTempLimit => "cpu_temp_limit",
             FeatureId::CpuBoost => "cpu_boost",
             FeatureId::Fans => "fans",
             FeatureId::FanCurves => "fan_curves",

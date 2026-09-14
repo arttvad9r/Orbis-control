@@ -115,7 +115,7 @@ pub use identity::{BackendIdentity, DeviceIdentity};
 pub use keyboard_backlight::{KeyboardBacklightState, KeyboardBrightnessLevel};
 pub use lifecycle::{LifecycleEvent, ResumeGateOutcome, ResumeTelemetryGate};
 pub use lighting::LightingMode;
-pub use limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
+pub use limits::{PowerLimitField, PowerLimitSnapshot, PowerLimitValue, PowerLimits, Unit};
 pub use mutation_audit::{
     LastMutationAudit, MutationAuditEntry, MutationAuditOutcome, outcome_from_apply_result,
     outcome_from_phase,
@@ -145,7 +145,8 @@ pub use system_telemetry::{
     MemoryPressureTelemetry, PsiPressureLine, SystemMemoryTelemetry, ZramTelemetry, ZswapTelemetry,
 };
 pub use telemetry::{
-    BatteryTelemetry, FanTelemetry, HardwareSnapshot, PowerTelemetry, Telemetry, TelemetryQuality,
+    BatteryTelemetry, FanTelemetry, GpuIdentity, GpuRole, GpuTelemetry, HardwareSnapshot,
+    PowerTelemetry, Telemetry, TelemetryQuality,
 };
 pub use telemetry_export::{MetricExportRow, MetricFreshness, metric_rows_to_csv};
 pub use telemetry_history::{BoundedHistory, HistoryError, HistorySample};

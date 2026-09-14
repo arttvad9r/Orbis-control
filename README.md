@@ -60,7 +60,7 @@ Install the current checkout as a local Arch system integration build:
 bash packaging/install-arch.sh
 ```
 
-This installs the four production binaries under `/usr/local/bin`, the system/user systemd units, D-Bus policy, polkit actions and desktop/AppStream metadata. It is a local developer installer, not a pacman-owned release package.
+This installs the four production binaries under `/usr/bin`, the system/user systemd units, D-Bus policy, polkit actions and desktop/AppStream metadata. It uses the same package-owned executable prefix as the Arch release layout.
 
 To update only the privileged helper during development:
 

@@ -10,9 +10,11 @@ description = "Orbis Control: typed production provider interfaces and implement
 
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["net", "io-util"] }
+tracing = { workspace = true }
 zbus = { workspace = true, features = ["p2p"] }
 # Mature typed Wayland client binding (уже в дереве зависимостей через
 # slint/winit). Используется только для read-only чтения wl_output; никакого
@@ -20,6 +22,9 @@ zbus = { workspace = true, features = ["p2p"] }
 wayland-client = "0.31"
 orbis-core = { workspace = true }
 orbis-capabilities = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [features]
 # Mock остаётся отдельным test/development capability. Default feature

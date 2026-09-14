@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Orbis Control">
+  <rect width="64" height="64" rx="14" fill="#171a24"/>
+  <circle cx="32" cy="32" r="19" fill="none" stroke="#79b8ff" stroke-width="6"/>
+  <path d="M32 13a19 19 0 0 1 17 10" fill="none" stroke="#c78cff" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="5" fill="#f4f7ff"/>
+</svg>

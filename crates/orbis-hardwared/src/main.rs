@@ -232,41 +232,43 @@ async fn main() -> Result<(), Box<dyn Error>> {
             connection.clone(),
             FAN_POLKIT_ACTION,
         )),
-    )
-    .with_panel(
-        panel_backend,
-        Box::new(PolkitAuthorizer::with_action(
-            connection.clone(),
-            PANEL_POLKIT_ACTION,
-        )),
-    )
-    .with_keyboard_backlight(
-        Box::new(SysfsKeyboardBacklightMutationBackend::new(
-            SysfsKeyboardBacklightIo::default(),
-        )),
-        Box::new(PolkitAuthorizer::with_action(
-            connection.clone(),
-            KEYBOARD_BACKLIGHT_POLKIT_ACTION,
-        )),
-    )
-    .with_aura_static_rgb(
-        Box::new(AsusdAuraStaticRgbMutationBackend::new(
-            ZbusAsusdAuraClient::new(connection.clone()),
-        )),
-        Box::new(PolkitAuthorizer::with_action(
-            connection.clone(),
-            AURA_POLKIT_ACTION,
-        )),
-    )
-    .with_product_gpu_backend(
-        Box::new(AsusGpuMutationBackend::new(AsusdGpuMutationClient::new(
-            connection.clone(),
-        ))),
-        Box::new(PolkitAuthorizer::with_action(
-            connection.clone(),
-            PRODUCT_GPU_POLKIT_ACTION,
-        )),
     );
+
+    let service = service
+        .with_panel(
+            panel_backend,
+            Box::new(PolkitAuthorizer::with_action(
+                connection.clone(),
+                PANEL_POLKIT_ACTION,
+            )),
+        )
+        .with_keyboard_backlight(
+            Box::new(SysfsKeyboardBacklightMutationBackend::new(
+                SysfsKeyboardBacklightIo::default(),
+            )),
+            Box::new(PolkitAuthorizer::with_action(
+                connection.clone(),
+                KEYBOARD_BACKLIGHT_POLKIT_ACTION,
+            )),
+        )
+        .with_aura_static_rgb(
+            Box::new(AsusdAuraStaticRgbMutationBackend::new(
+                ZbusAsusdAuraClient::new(connection.clone()),
+            )),
+            Box::new(PolkitAuthorizer::with_action(
+                connection.clone(),
+                AURA_POLKIT_ACTION,
+            )),
+        )
+        .with_product_gpu_backend(
+            Box::new(AsusGpuMutationBackend::new(AsusdGpuMutationClient::new(
+                connection.clone(),
+            ))),
+            Box::new(PolkitAuthorizer::with_action(
+                connection.clone(),
+                PRODUCT_GPU_POLKIT_ACTION,
+            )),
+        );
 
     connection
         .object_server()

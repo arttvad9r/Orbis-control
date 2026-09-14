@@ -1,4 +1,4 @@
-# orbis-hardwared.service — standalone system service for local Arch/Linux installs.
+# orbis-hardwared.service — package-owned Arch/Linux system service.
 #
 # Installed by packaging/deploy-dev-hardwared.sh as a regular file in
 # /etc/systemd/system/. Privileged mutation stays behind the typed Hardware1
@@ -12,7 +12,7 @@ Requires=dbus.service
 [Service]
 Type=dbus
 BusName=io.github.orbiscontrol.Hardware
-ExecStart=/usr/local/bin/orbis-hardwared
+ExecStart=/usr/bin/orbis-hardwared
 Restart=on-failure
 RestartSec=2s
 
@@ -31,6 +31,11 @@ CapabilityBoundingSet=
 # /sys stays read-only except the exact capability-owned write paths.
 ReadOnlyPaths=/sys
 ReadWritePaths=-/sys/firmware/acpi/platform_profile
+ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl1_spl/current_value
+ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl2_sppt/current_value
+ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl3_fppt/current_value
+ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/nv_dynamic_boost/current_value
+ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/nv_temp_target/current_value
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/brightness
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/max_brightness
 

@@ -14,10 +14,11 @@ use orbis_core::diagnostics::{DiagnosticsSnapshot, ServiceCriticality, Telemetry
 use orbis_providers::bounded_provider_call;
 use orbis_providers::traits::TelemetryProvider;
 use orbis_providers::{
-    ASUSD_SERVICE, HardwareIdentityProvider, ORBIS_HARDWARE_SERVICE, ORBIS_SESSION_SERVICE,
-    SUPERGFXD_SERVICE, ServicePresenceProvider, SysfsTelemetryProvider, SystemMetadataProvider,
-    WaylandCompositorOutputSource, WaylandDisplayOutputProvider, display_diagnostics_snapshot,
-    gpu_diagnostics_snapshot, telemetry_diagnostics_after_attempt,
+    ASUSD_SERVICE, HardwareIdentityProvider, LactTelemetryProvider, ORBIS_HARDWARE_SERVICE,
+    ORBIS_SESSION_SERVICE, SUPERGFXD_SERVICE, ServicePresenceProvider, SysfsTelemetryProvider,
+    SystemMetadataProvider, WaylandCompositorOutputSource, WaylandDisplayOutputProvider,
+    display_diagnostics_snapshot, gpu_diagnostics_snapshot, merge_telemetry,
+    telemetry_diagnostics_after_attempt,
 };
 use orbis_session_client::{
     SessionGpuAccessProvider, SessionGpuMuxProvider, SessionGpuPowerProvider, ZbusSessionGpuSource,
@@ -139,13 +140,21 @@ impl DiagnosticsRuntime {
         ));
         let gpu = gpu_diagnostics_snapshot(&gpu_mux, &gpu_access, &gpu_power).await;
 
-        let telemetry_provider = SysfsTelemetryProvider::default();
-        let telemetry_result = bounded_provider_call(
-            &telemetry_provider,
+        let sysfs_provider = SysfsTelemetryProvider::default();
+        let sysfs_result = bounded_provider_call(
+            &sysfs_provider,
             "telemetry.snapshot",
-            telemetry_provider.snapshot(),
+            sysfs_provider.snapshot(),
         )
         .await;
+        let lact_provider = LactTelemetryProvider::default();
+        let lact_result = bounded_provider_call(
+            &lact_provider,
+            "lact.telemetry.snapshot",
+            lact_provider.snapshot(),
+        )
+        .await;
+        let telemetry_result = merge_telemetry(sysfs_result, lact_result);
         let previous_telemetry = self
             .previous_telemetry
             .lock()

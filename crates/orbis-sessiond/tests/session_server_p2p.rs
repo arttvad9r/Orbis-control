@@ -6,7 +6,7 @@
 //! вызывает `.name()`/`.serve_at()` напрямую и не создаёт SessionService
 //! вручную.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -17,9 +17,10 @@ use orbis_core::battery::ChargeLimit;
 use orbis_core::battery::ChargeLimitBounds;
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::identity::BackendIdentity;
+use orbis_core::limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
 use orbis_core::newtypes::Percent;
 use orbis_providers::error::{ProviderError, ValidationResult};
-use orbis_providers::traits::{BatteryProvider, Provider, ProviderHealth};
+use orbis_providers::traits::{BatteryProvider, PowerLimitProvider, Provider, ProviderHealth};
 use orbis_session_protocol::Session1Proxy;
 use orbis_sessiond::server::build_session_server;
 use zbus::connection::Builder;
@@ -116,6 +117,85 @@ impl BatteryProvider for ScriptedBatteryProvider {
     }
 }
 
+/// Test-only read provider proving that the typed PowerLimits method is part
+/// of the production server registration, not merely the generated client.
+struct ScriptedPowerLimitsProvider {
+    reads: AtomicUsize,
+    read_error: Option<PowerLimitReadError>,
+    writes: AtomicUsize,
+}
+
+#[derive(Clone, Copy)]
+enum PowerLimitReadError {
+    CurrentValueUnreadable,
+    BackendUnavailable,
+}
+
+impl Provider for ScriptedPowerLimitsProvider {
+    fn id(&self) -> &'static str {
+        "scripted-power-limits"
+    }
+
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("scripted-power-limits")
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_millis(1)
+    }
+
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("scripted power limits: {feature} unavailable")
+    }
+
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        Vec::new()
+    }
+}
+
+#[async_trait]
+impl PowerLimitProvider for ScriptedPowerLimitsProvider {
+    async fn power_limits(&self) -> Result<PowerLimits, ProviderError> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        if let Some(error) = self.read_error {
+            return Err(match error {
+                PowerLimitReadError::CurrentValueUnreadable => ProviderError::Unsupported(
+                    "asusd Armoury ppt_pl1_spl.CurrentValue: org.freedesktop.DBus.Error.Failed: Could not read current value".into(),
+                ),
+                PowerLimitReadError::BackendUnavailable => ProviderError::BackendUnavailable(
+                    "org.freedesktop.DBus.Error.ServiceUnknown: xyz.ljones.Asusd".into(),
+                ),
+            });
+        }
+        let value = PowerLimitValue::new(45, 20, 80, 5, Some(45), Unit::Watts)
+            .expect("valid power-limit metadata");
+        Ok(PowerLimits {
+            fields: BTreeMap::from([(PowerLimitField::Spl, value)]),
+        })
+    }
+
+    async fn set_power_limit(
+        &self,
+        _field: PowerLimitField,
+        _value: i32,
+    ) -> Result<ApplyResult, ProviderError> {
+        self.writes.fetch_add(1, Ordering::SeqCst);
+        Err(ProviderError::Unsupported("read-only test provider".into()))
+    }
+
+    async fn restore_defaults(&self) -> Result<ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported("read-only test provider".into()))
+    }
+
+    fn validate_power_limit(&self, _field: &PowerLimitField, _value: i32) -> ValidationResult {
+        ValidationResult::invalid("read-only test provider")
+    }
+}
+
 /// Test-only domain fixture через существующий конструктор.
 fn limit(enabled: bool, percent: Option<u8>, min: u8, max: u8, step: u8) -> ChargeLimit {
     ChargeLimit::new(
@@ -141,15 +221,143 @@ fn limit(enabled: bool, percent: Option<u8>, min: u8, max: u8, step: u8) -> Char
 async fn connect_via_helper(
     provider: Arc<dyn BatteryProvider>,
 ) -> Result<(zbus::Connection, zbus::Connection), Box<dyn std::error::Error + Send + Sync>> {
+    connect_via_helper_with_power(provider, None).await
+}
+
+async fn connect_via_helper_with_power(
+    provider: Arc<dyn BatteryProvider>,
+    power_limits: Option<Arc<dyn PowerLimitProvider>>,
+) -> Result<(zbus::Connection, zbus::Connection), Box<dyn std::error::Error + Send + Sync>> {
     let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair()?;
     let guid = zbus::Guid::generate();
     let server_builder = Builder::unix_stream(server_stream).server(guid)?.p2p();
     let client_builder = Builder::unix_stream(client_stream).p2p();
     let (server_conn, client_conn) = tokio::try_join!(
-        build_session_server(server_builder, provider, Default::default(), None, None),
+        build_session_server(
+            server_builder,
+            provider,
+            Default::default(),
+            None,
+            None,
+            power_limits
+        ),
         client_builder.build()
     )?;
     Ok((server_conn, client_conn))
+}
+
+#[tokio::test]
+async fn server_helper_registers_typed_power_limits_method() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let power = Arc::new(ScriptedPowerLimitsProvider {
+            reads: AtomicUsize::new(0),
+            read_error: None,
+            writes: AtomicUsize::new(0),
+        });
+        let battery = Arc::new(ScriptedBatteryProvider::new(vec![ServerRead::Limit(
+            limit(true, Some(80), 40, 100, 5),
+        )]));
+        let (_server_conn, client_conn) =
+            connect_via_helper_with_power(battery, Some(power.clone()))
+                .await
+                .expect("p2p connect");
+        let proxy = Session1Proxy::builder(&client_conn)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .expect("proxy");
+
+        let limits = proxy.power_limits().await.expect("PowerLimits method");
+        assert_eq!(limits.len(), 1);
+        assert_eq!(limits[0].0, orbis_session_protocol::power_limit_field::SPL);
+        assert_eq!(limits[0].2, 45);
+        assert_eq!(limits[0].3, 20);
+        assert_eq!(limits[0].4, 80);
+        assert_eq!(limits[0].5, 5);
+        assert!(limits[0].6);
+        assert_eq!(limits[0].7, 45);
+        assert_eq!(limits[0].8, 0);
+        assert_eq!(power.reads.load(Ordering::SeqCst), 1);
+    })
+    .await
+    .expect("p2p test timeout");
+}
+
+#[tokio::test]
+async fn power_limits_maps_unreadable_current_value_to_not_supported_without_write() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let power = Arc::new(ScriptedPowerLimitsProvider {
+            reads: AtomicUsize::new(0),
+            read_error: Some(PowerLimitReadError::CurrentValueUnreadable),
+            writes: AtomicUsize::new(0),
+        });
+        let battery = Arc::new(ScriptedBatteryProvider::new(vec![ServerRead::Limit(
+            limit(true, Some(80), 40, 100, 5),
+        )]));
+        let (_server_conn, client_conn) =
+            connect_via_helper_with_power(battery, Some(power.clone()))
+                .await
+                .expect("p2p connect");
+        let proxy = Session1Proxy::builder(&client_conn)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .expect("proxy");
+
+        let error = proxy
+            .power_limits()
+            .await
+            .expect_err("unreadable current value");
+        match error {
+            zbus::Error::MethodError(name, Some(message), _) => {
+                assert_eq!(name.as_str(), "org.freedesktop.DBus.Error.NotSupported");
+                assert!(message.contains("Could not read current value"));
+            }
+            other => panic!("expected typed NotSupported, got {other:?}"),
+        }
+        assert_eq!(power.reads.load(Ordering::SeqCst), 1);
+        assert_eq!(power.writes.load(Ordering::SeqCst), 0);
+    })
+    .await
+    .expect("p2p test timeout");
+}
+
+#[tokio::test]
+async fn power_limits_keeps_missing_service_distinct_as_typed_unavailable() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let power = Arc::new(ScriptedPowerLimitsProvider {
+            reads: AtomicUsize::new(0),
+            read_error: Some(PowerLimitReadError::BackendUnavailable),
+            writes: AtomicUsize::new(0),
+        });
+        let battery = Arc::new(ScriptedBatteryProvider::new(vec![ServerRead::Limit(
+            limit(true, Some(80), 40, 100, 5),
+        )]));
+        let (_server_conn, client_conn) =
+            connect_via_helper_with_power(battery, Some(power.clone()))
+                .await
+                .expect("p2p connect");
+        let proxy = Session1Proxy::builder(&client_conn)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .expect("proxy");
+
+        let error = proxy.power_limits().await.expect_err("missing service");
+        match error {
+            zbus::Error::MethodError(name, Some(message), _) => {
+                assert_eq!(name.as_str(), "org.freedesktop.DBus.Error.Failed");
+                assert!(
+                    message.starts_with(orbis_session_protocol::SESSION_BACKEND_UNAVAILABLE_PREFIX)
+                );
+            }
+            other => panic!("expected typed unavailable Failed, got {other:?}"),
+        }
+        assert_eq!(power.reads.load(Ordering::SeqCst), 1);
+        assert_eq!(power.writes.load(Ordering::SeqCst), 0);
+    })
+    .await
+    .expect("p2p test timeout");
 }
 
 #[tokio::test]

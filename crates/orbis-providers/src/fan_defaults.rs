@@ -88,9 +88,11 @@ impl FanCurveDefaultsMutationProvider for Hardware1FanDefaultsProvider {
                 profile.wire()
             )));
         }
-        // Factory reset cannot prove observed state equals platform defaults;
-        // the mutation was accepted but authoritative confirmation of defaults is unavailable.
-        Ok(ApplyResult::Accepted)
+        // Hardware1 has already performed the profile-wide reset and verified a
+        // fresh vendor-curve read-back before returning this reply. The reply
+        // therefore confirms the mutation; it does not claim byte identity with
+        // an unobservable firmware-default fixture.
+        Ok(ApplyResult::Applied)
     }
 }
 

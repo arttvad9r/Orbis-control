@@ -1,6 +1,7 @@
 //! Power limits (SPL/SPPT/FPPT, GPU boost, температуры).
 
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
@@ -118,6 +119,27 @@ impl PowerLimits {
     /// Получить поле по имени.
     pub fn get(&self, field: &PowerLimitField) -> Option<&PowerLimitValue> {
         self.fields.get(field)
+    }
+}
+
+/// Immutable authoritative metadata used by one power-limit apply attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PowerLimitSnapshot {
+    /// Stable identity of this immutable metadata snapshot.
+    pub identity: u64,
+    /// The complete authoritative metadata used by the apply attempt.
+    pub limits: PowerLimits,
+}
+
+impl PowerLimitSnapshot {
+    /// Freeze metadata and derive its typed identity without I/O.
+    pub fn new(limits: PowerLimits) -> Self {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        format!("{limits:?}").hash(&mut hasher);
+        Self {
+            identity: hasher.finish(),
+            limits,
+        }
     }
 }
 

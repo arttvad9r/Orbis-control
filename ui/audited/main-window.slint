@@ -31,13 +31,19 @@ export component AppWindow inherits Window {
 
     in-out property <UiState> ui-state: {
         perf-selected: 1, available-perf-mask: 0, perf-state: PerformanceHwState.Loading, perf-writable: false, perf-unavailable-reason: "",
+        power-limits-ready: false, power-limits-reason: "Лимиты мощности недоступны", power-limit-dirty-mask: 0, power-limit-snapshot-identity: "",
+        spl-value: 0, spl-min: 0, spl-max: 0, spl-step: 1, spl-unit: "", spl-default: "", spl-draft: 0,
+        sppt-value: 0, sppt-min: 0, sppt-max: 0, sppt-step: 1, sppt-unit: "", sppt-default: "", sppt-draft: 0,
+        fppt-value: 0, fppt-min: 0, fppt-max: 0, fppt-step: 1, fppt-unit: "", fppt-default: "", fppt-draft: 0,
+        gpu-dynamic-boost-value: 0, gpu-dynamic-boost-min: 0, gpu-dynamic-boost-max: 0, gpu-dynamic-boost-step: 1, gpu-dynamic-boost-unit: "", gpu-dynamic-boost-default: "", gpu-dynamic-boost-draft: 0,
+        gpu-temp-target-value: 0, gpu-temp-target-min: 0, gpu-temp-target-max: 0, gpu-temp-target-step: 1, gpu-temp-target-unit: "", gpu-temp-target-default: "", gpu-temp-target-draft: 0,
         gpu-selected: 1, available-gpu-mask: 0, gpu-ultimate-pending: false, gpu-ultimate-disabled: false,
         gpu-section-error: false, gpu-mode-state: GpuModeHwState.Loading, gpu-mode-writable: false,
         gpu-queued: -1, gpu-reboot-required: false,
         charge-limit: 80, charge-limit-enabled: false, charge-limit-writable: false, charge-limit-unavailable-reason: "", charge-limit-state: ChargeLimitState.Loading,
         gpu-power-state: GpuHwState.Loading, gpu-mux-state: GpuHwState.Loading, gpu-access-state: GpuHwState.Loading,
         gpu-power-value: 0, gpu-mux-value: 0, gpu-access-value: 0,
-        cpu-temp: "—", gpu-temp: "—", cpu-fan-rpm: "—", gpu-fan-rpm: "—",
+        cpu-temp: "—", gpu-temp: "—", igpu-temp: "—", igpu-power: "—", cpu-fan-rpm: "—", gpu-fan-rpm: "—",
         battery-percent: "—", power-ac-mw: "—", battery-health: "—", battery-cycles: "—",
         battery-status: "", ac-online: "—", gpu-power: "—", telemetry-fresh: false, version: "0.1.0", mock-profile: "zephyrus-full",
         fan-curve-state: FanCurveHwState.Loading, fan-curve-writable: false, fan-curve-unavailable-reason: "", fan-curve-error: false, fan-curve-dirty: false,
@@ -64,6 +70,8 @@ export component AppWindow inherits Window {
 
     // Performance page surface.
     callback perf-clicked(int);
+    callback power-limit-changed(int, int);
+    callback power-limit-apply-clicked;
     callback gpu-clicked(int);
     callback charge-changed(float);
     in property <bool> display-state-ready: false;
@@ -82,11 +90,14 @@ export component AppWindow inherits Window {
     callback quit-requested;
 
     // Cooling page surface.
-    in property <bool> mutation-safety-blocked: true;
+    // Mutation is gated by the runtime capability registry and controller
+    // state. A static safety block here would hide a proven typed backend.
+    in property <bool> mutation-safety-blocked: false;
     in property <bool> factory-reset-available: false;
-    in property <string> policy-status: "Fan writes are safety-blocked";
+    in property <string> policy-status: "Состояние backend ещё не получено";
     callback fan-changed(int);
     callback fan-profile-changed(int);
+    callback fan-selection-discarded(int, int);
     callback fan-temp-point-changed(int, int);
     callback fan-pwm-point-changed(int, int);
     callback fan-apply-clicked(bool);
@@ -275,6 +286,8 @@ export component AppWindow inherits Window {
                     if (root.active-section == Section.Performance) : PerformanceSection {
                         ui-state <=> root.ui-state;
                         perf-clicked(i) => { root.perf-clicked(i); }
+                        power-limit-changed(field, value) => { root.power-limit-changed(field, value); }
+                        power-limit-apply-clicked => { root.power-limit-apply-clicked(); }
                         graphics-open-requested => { root.open-section(Section.Graphics); }
                     }
                     if (root.active-section == Section.Power) : PowerSection {
@@ -288,6 +301,7 @@ export component AppWindow inherits Window {
                         policy-status <=> root.policy-status;
                         fan-changed(i) => { root.fan-changed(i); }
                         fan-profile-changed(i) => { root.fan-profile-changed(i); }
+                        fan-selection-discarded(f, p) => { root.fan-selection-discarded(f, p); }
                         fan-temp-point-changed(i, v) => { root.fan-temp-point-changed(i, v); }
                         fan-pwm-point-changed(i, v) => { root.fan-pwm-point-changed(i, v); }
                         fan-apply-clicked(reset) => { root.fan-apply-clicked(reset); }

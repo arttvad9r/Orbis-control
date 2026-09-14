@@ -9,6 +9,7 @@ use crate::armoury::{ArmouryGpuProvider, SysfsArmouryGpuSource};
 use crate::composition::build_upower_session_server;
 use crate::fans::{AsusdFanCurveSource, ZbusAsusdFanCurveSource};
 use crate::performance::{KernelPerformanceProvider, SysfsKernelPlatformProfileSource};
+use crate::power_limits::{AsusDualPowerLimitProvider, KernelAsusPowerLimitProvider};
 use crate::server::GpuCapabilities;
 use crate::supergfxd::{SupergfxdGpuPowerProvider, ZbusSupergfxdGpuPowerSource};
 
@@ -46,6 +47,7 @@ pub async fn connect_upower_session_server(
         battery_object_path,
         battery_native_path,
         GpuCapabilities::default(),
+        None,
         None,
         None,
     )
@@ -90,6 +92,7 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
         power: Some(gpu_power),
         mux: Some(gpu_mux),
         access: Some(gpu_access),
+        power_limits: None,
     };
 
     // Read-only Performance Mode provider: symbolic kernel platform_profile ABI.
@@ -101,6 +104,11 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
     // ту же system connection. Fan curve reads идут через sessiond, НЕ из GUI.
     let fan_curves: Arc<dyn AsusdFanCurveSource> =
         Arc::new(ZbusAsusdFanCurveSource::new(upower_connection.clone()));
+    let power_limits: Arc<dyn orbis_providers::traits::PowerLimitProvider> =
+        Arc::new(AsusDualPowerLimitProvider::new(
+            Arc::new(KernelAsusPowerLimitProvider::new()),
+            Arc::new(orbis_providers::AsusNbWmiPowerLimitProvider::new()),
+        ));
 
     Ok(crate::composition::build_lazy_upower_session_server(
         session_builder,
@@ -108,6 +116,7 @@ pub async fn connect_discovered_upower_session_server() -> Result<zbus::Connecti
         gpu,
         Some(performance),
         Some(fan_curves),
+        Some(power_limits),
     )
     .await?)
 }

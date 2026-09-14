@@ -17,7 +17,8 @@ use orbis_capabilities::{CapabilityRegistryBuilder, CapabilityRegistrySnapshot, 
 use orbis_core::action::ApplyResult;
 use orbis_core::battery::ChargeLimit;
 use orbis_core::capability::{
-    Capability, CapabilityConstraints, CapabilityOperations, CapabilityStatus, OperationCapability,
+    Capability, CapabilityConstraints, CapabilityOperations, CapabilityReason, CapabilityStatus,
+    FeatureId, IntegerConstraints, OperationCapability, PowerLimitConstraint,
 };
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
@@ -554,6 +555,8 @@ pub struct ApplicationRuntime<G, B, R> {
     /// `Arc<dyn>` позволяет worker-у клонировать handle для фонового polling
     /// (spawn snapshot task) без блокировки обработки команд.
     pub telemetry: Arc<dyn TelemetryServiceRuntime>,
+    /// Optional authoritative read-only power-limit provider.
+    pub power_limits: Option<Arc<dyn orbis_providers::traits::PowerLimitProvider>>,
     /// Read-only capability registry snapshot.
     pub(crate) capabilities: Arc<CapabilityRegistrySnapshot>,
     /// Typed Hardware1 fan curve mutation backend evidence (startup-time).
@@ -612,12 +615,22 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             performance,
             fan: Arc::new(fan),
             telemetry: Arc::new(telemetry),
+            power_limits: None,
             capabilities: Arc::new(snapshot),
             fan_mutation_status,
             battery_mutation_status,
             performance_mutation_status,
             mutation_status_connection,
         }
+    }
+
+    /// Attach the production Session1 power-limit provider without performing I/O.
+    pub fn with_power_limits(
+        mut self,
+        provider: Arc<dyn orbis_providers::traits::PowerLimitProvider>,
+    ) -> Self {
+        self.power_limits = Some(provider);
+        self
     }
 
     /// Replace the authoritative capability registry snapshot in-place.
@@ -674,6 +687,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             performance,
             fan: Arc::new(fan),
             telemetry: Arc::new(telemetry),
+            power_limits: None,
             capabilities: Arc::new(snapshot),
             fan_mutation_status,
             battery_mutation_status,
@@ -724,9 +738,18 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
         )
         .await;
     }
+
+    /// Return the current power-limit write evidence.
+    ///
+    /// No supported typed writer is selected on the current platform. In
+    /// particular, Hardware1 name ownership is not power-limit evidence.
+    pub async fn requery_power_limit_write_status(
+        &self,
+    ) -> orbis_core::capability::CapabilityStatus {
+        orbis_core::capability::CapabilityStatus::Unsupported
+    }
 }
 
-/// Errors that prevent a registry refresh cycle from producing a new snapshot.
 ///
 /// Ordinary provider evidence (`Unsupported`, `BackendMissing`,
 /// `TemporarilyUnavailable`, `PermissionDenied`, `Unknown`) is not a
@@ -1169,6 +1192,14 @@ pub async fn build_production_runtime(
         orbis_session_client::ZbusHardwareFanCurveSource::new(system_connection.clone()),
     );
     let fan_service = AppService::new(Arc::new(fan_provider));
+    let power_limits = Arc::new(
+        orbis_session_client::SessionHardwarePowerLimitProvider::new(
+            orbis_session_client::SessionPowerLimitProvider::new(
+                orbis_session_client::ZbusSessionPowerLimitSource::new(session_connection.clone()),
+            ),
+            orbis_session_client::ZbusHardwarePowerLimitSource::new(system_connection.clone()),
+        ),
+    );
 
     let snapshot = build_initial_registry_snapshot(
         &*battery_arc,
@@ -1182,6 +1213,12 @@ pub async fn build_production_runtime(
         performance_mutation_status,
     )
     .await?;
+    // A live Hardware1 owner is not evidence for power-limit ownership.  The
+    // only candidate found on this host (kernel Armoury) returns ENODEV, and
+    // no typed power-limit writer is enabled until a backend passes discovery.
+    let write_status = CapabilityStatus::Unsupported;
+    let snapshot =
+        augment_power_limit_capabilities(power_limits.as_ref(), snapshot, write_status).await;
 
     Ok((
         ApplicationRuntime::new_with_snapshot(
@@ -1195,9 +1232,154 @@ pub async fn build_production_runtime(
             battery_mutation_status,
             performance_mutation_status,
             Some(system_connection),
-        ),
+        )
+        .with_power_limits(power_limits),
         hardware_owner,
     ))
+}
+
+/// Add independent read-only power-limit evidence to a capability snapshot.
+pub async fn augment_power_limit_capabilities(
+    provider: &dyn orbis_providers::traits::PowerLimitProvider,
+    snapshot: CapabilityRegistrySnapshot,
+    write_status: CapabilityStatus,
+) -> CapabilityRegistrySnapshot {
+    let limits = provider.power_limit_snapshot().await;
+    let specs = [
+        (
+            FeatureId::PptPl1Spl,
+            orbis_core::limits::PowerLimitField::Spl,
+        ),
+        (
+            FeatureId::PptPl2Sppt,
+            orbis_core::limits::PowerLimitField::Sppt,
+        ),
+        (
+            FeatureId::PptFppt,
+            orbis_core::limits::PowerLimitField::Fppt,
+        ),
+        (
+            FeatureId::NvDynamicBoost,
+            orbis_core::limits::PowerLimitField::GpuDynamicBoost,
+        ),
+        (
+            FeatureId::NvTempTarget,
+            orbis_core::limits::PowerLimitField::GpuTempTarget,
+        ),
+        (
+            FeatureId::CpuTempLimit,
+            orbis_core::limits::PowerLimitField::CpuTempLimit,
+        ),
+    ];
+    let entries = specs.into_iter().map(|(feature, field)| {
+        let (status, constraints, reason) =
+            match limits.as_ref().ok().and_then(|v| v.limits.get(&field)) {
+                Some(value) => (
+                    CapabilityStatus::Supported,
+                    CapabilityConstraints::PowerLimits(vec![PowerLimitConstraint {
+                        field,
+                        range: IntegerConstraints {
+                            min: Some(value.min),
+                            max: Some(value.max),
+                            step: Some(value.step),
+                            default: value.default,
+                        },
+                        unit: value.unit,
+                    }]),
+                    None,
+                ),
+                None => match &limits {
+                    Ok(_) => (
+                        CapabilityStatus::Unsupported,
+                        CapabilityConstraints::Unknown,
+                        Some(power_limit_reason(
+                            CapabilityStatus::Unsupported,
+                            "authoritative backend snapshot does not expose this field",
+                        )),
+                    ),
+                    Err(error) => {
+                        let status = power_limit_error_status(error);
+                        (
+                            status,
+                            CapabilityConstraints::Unknown,
+                            Some(power_limit_reason(status, &error.to_string())),
+                        )
+                    }
+                },
+            };
+        let read = match reason.clone() {
+            Some(reason) => OperationCapability::with_reason(status, reason),
+            None => OperationCapability::new(status),
+        };
+        let operations = CapabilityOperations {
+            read,
+            write: OperationCapability::new(write_status),
+        };
+        // The aggregate status must describe all operations, not only the
+        // read result: a readable backend failure can still have an
+        // independently proven Hardware1 write path.
+        let aggregate_status = if matches!(
+            write_status,
+            CapabilityStatus::Supported | CapabilityStatus::SupportedWithRequirement
+        ) {
+            CapabilityStatus::Supported
+        } else {
+            status
+        };
+        (
+            feature,
+            match reason {
+                Some(reason) => Capability::with_reason(aggregate_status, reason),
+                None => Capability::new(aggregate_status),
+            }
+            .with_operations(operations)
+            .with_constraints(constraints),
+        )
+    });
+    snapshot
+        .with_additional_capabilities(entries)
+        .unwrap_or(snapshot)
+}
+
+fn power_limit_error_status(error: &ProviderError) -> CapabilityStatus {
+    match error {
+        ProviderError::Unsupported(_) => CapabilityStatus::Unsupported,
+        ProviderError::BackendUnavailable(_) => CapabilityStatus::BackendMissing,
+        ProviderError::Timeout(_) => CapabilityStatus::TemporarilyUnavailable,
+        ProviderError::PermissionDenied(_) => CapabilityStatus::PermissionDenied,
+        ProviderError::Dbus(detail) => hardware1_dbus_error_status(detail),
+        ProviderError::Conflict(_) => CapabilityStatus::Conflicted,
+        _ => CapabilityStatus::Unknown,
+    }
+}
+
+fn power_limit_reason(status: CapabilityStatus, detail: &str) -> CapabilityReason {
+    CapabilityReason {
+        reason: detail.to_string(),
+        suggestion: match status {
+            CapabilityStatus::Unsupported => "backend capability is absent".into(),
+            CapabilityStatus::BackendMissing | CapabilityStatus::TemporarilyUnavailable => {
+                "retry after the backend becomes available".into()
+            }
+            CapabilityStatus::PermissionDenied => "check authorization".into(),
+            _ => "refresh capabilities".into(),
+        },
+        backend: None,
+        endpoint: None,
+        requirement: None,
+        risk: orbis_core::capability::RiskLevel::Safe,
+        checked_at: Some(SystemTime::now()),
+    }
+}
+
+fn hardware1_dbus_error_status(detail: &str) -> CapabilityStatus {
+    if detail.contains("ServiceUnknown") || detail.contains("NameHasNoOwner") {
+        CapabilityStatus::BackendMissing
+    } else if detail.contains("Timeout") {
+        CapabilityStatus::TemporarilyUnavailable
+    } else {
+        CapabilityStatus::Unknown
+    }
 }
 
 async fn hardware1_write_available(connection: &zbus::Connection) -> bool {
@@ -1261,6 +1443,7 @@ mod tests {
         build_initial_registry_snapshot, probe_capability_registry, refresh_capability_registry,
     };
     use orbis_application::{AppService, CommandError};
+    use orbis_capabilities::CapabilityRegistryBuilder;
     use orbis_core::FeatureId;
     use orbis_core::capability::{
         Capability, CapabilityOperations, CapabilityStatus, OperationCapability,
@@ -1268,11 +1451,12 @@ mod tests {
     use orbis_core::gpu::GpuMode;
     use orbis_providers::error::ProviderError;
     use orbis_providers::mock::{MockErrorMode, MockProvider};
+    use orbis_providers::traits::PowerLimitProvider;
     use orbis_test_support::devices::build_state_arc;
     use std::cell::Cell;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     #[tokio::test(start_paused = true)]
     async fn hung_hardware1_status_requery_resolves_unknown_within_deadline() {
@@ -2806,6 +2990,118 @@ mod tests {
             runtime.fan_mutation_status(),
             CapabilityStatus::Unknown,
             "fan evidence comes from its own status query"
+        );
+    }
+
+    #[tokio::test]
+    async fn power_limit_read_errors_preserve_typed_status_and_never_advertise_write() {
+        for (mode, expected) in [
+            (MockErrorMode::BackendDown, CapabilityStatus::BackendMissing),
+            (
+                MockErrorMode::Timeout,
+                CapabilityStatus::TemporarilyUnavailable,
+            ),
+            (
+                MockErrorMode::PermissionDenied,
+                CapabilityStatus::PermissionDenied,
+            ),
+            (MockErrorMode::Unsupported, CapabilityStatus::Unsupported),
+        ] {
+            let provider = Arc::new(MockProvider::new(
+                build_state_arc("zephyrus-full").expect("profile exists"),
+            ));
+            provider.state().write().await.error_mode = mode;
+            let snapshot = CapabilityRegistryBuilder::new(1, SystemTime::now())
+                .build()
+                .expect("empty snapshot");
+            let snapshot = super::augment_power_limit_capabilities(
+                provider.as_ref(),
+                snapshot,
+                CapabilityStatus::Supported,
+            )
+            .await;
+            let capability = snapshot
+                .capability(FeatureId::PptPl1Spl)
+                .expect("SPL capability present");
+            assert_eq!(capability.operations.read.status, expected);
+            assert_eq!(
+                capability.operations.write.status,
+                CapabilityStatus::Supported
+            );
+            assert!(capability.reason.is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn power_limit_read_only_and_unsupported_are_distinct() {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let snapshot = CapabilityRegistryBuilder::new(1, SystemTime::now())
+            .build()
+            .expect("empty snapshot");
+        let snapshot = super::augment_power_limit_capabilities(
+            provider.as_ref(),
+            snapshot,
+            CapabilityStatus::ReadOnly,
+        )
+        .await;
+        let supported = snapshot
+            .capability(FeatureId::PptPl1Spl)
+            .expect("SPL capability present");
+        assert_eq!(
+            supported.operations.read.status,
+            CapabilityStatus::Supported
+        );
+        assert_eq!(
+            supported.operations.write.status,
+            CapabilityStatus::ReadOnly
+        );
+
+        provider.state().write().await.error_mode = MockErrorMode::Unsupported;
+        let snapshot = CapabilityRegistryBuilder::new(2, SystemTime::now())
+            .build()
+            .expect("empty snapshot");
+        let snapshot = super::augment_power_limit_capabilities(
+            provider.as_ref(),
+            snapshot,
+            CapabilityStatus::Supported,
+        )
+        .await;
+        let absent = snapshot
+            .capability(FeatureId::PptPl1Spl)
+            .expect("SPL capability present");
+        assert_eq!(absent.operations.read.status, CapabilityStatus::Unsupported);
+        assert_eq!(absent.operations.write.status, CapabilityStatus::Supported);
+    }
+
+    #[tokio::test]
+    async fn power_limit_snapshot_identity_remains_authoritative_across_augmentation() {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        let snapshot = CapabilityRegistryBuilder::new(7, SystemTime::now())
+            .build()
+            .expect("empty snapshot");
+        let identity = provider
+            .power_limit_snapshot()
+            .await
+            .expect("snapshot")
+            .identity;
+        let augmented = super::augment_power_limit_capabilities(
+            provider.as_ref(),
+            snapshot,
+            CapabilityStatus::Supported,
+        )
+        .await;
+        assert_eq!(augmented.generation(), 7);
+        assert_eq!(
+            identity,
+            provider
+                .power_limit_snapshot()
+                .await
+                .expect("snapshot")
+                .identity
         );
     }
 }

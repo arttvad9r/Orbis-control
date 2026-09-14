@@ -1,6 +1,6 @@
 //! Offscreen section snapshots for the single-window UI (ui-review companion).
 //!
-//! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme]`
+//! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme] [width] [height] [state]`
 //! Sections: dashboard | performance | power | cooling | graphics | backlight
 //! | display | system | settings | about | dialog.
 
@@ -109,6 +109,53 @@ fn demo_state(component: &AppWindow) {
     component.set_ui_state(state);
 }
 
+fn apply_scenario(component: &AppWindow, name: &str) -> anyhow::Result<()> {
+    let mut state = component.get_ui_state();
+    match name {
+        "normal" => {}
+        "dirty" => {
+            state.fan_curve_state = FanCurveHwState::Ready;
+            state.fan_curve_writable = true;
+            state.fan_curve_dirty = true;
+        }
+        "pending" => {
+            state.gpu_queued = 2;
+            state.gpu_reboot_required = true;
+            state.gpu_selected = 1;
+            state.gpu_ultimate_pending = true;
+        }
+        "error" => {
+            state.gpu_section_error = true;
+            state.fan_curve_state = FanCurveHwState::Ready;
+            state.fan_curve_writable = true;
+            state.fan_curve_error = true;
+        }
+        "unsupported" => {
+            state.perf_state = PerformanceHwState::Unavailable;
+            state.perf_writable = false;
+            state.perf_unavailable_reason = "Backend недоступен".into();
+            state.gpu_mode_state = GpuModeHwState::Unavailable;
+            state.gpu_mode_writable = false;
+            state.fan_curve_state = FanCurveHwState::Unavailable;
+            state.fan_curve_writable = false;
+            state.fan_curve_unavailable_reason = "Backend недоступен".into();
+            state.charge_limit_state = ChargeLimitState::Unavailable;
+            state.charge_limit_writable = false;
+        }
+        "readonly" => {
+            state.perf_writable = false;
+            state.gpu_mode_writable = false;
+            state.fan_curve_state = FanCurveHwState::Ready;
+            state.fan_curve_writable = false;
+            state.fan_curve_enabled_known = true;
+            state.charge_limit_writable = false;
+        }
+        other => anyhow::bail!("unknown state: {other}"),
+    }
+    component.set_ui_state(state);
+    Ok(())
+}
+
 fn setup(width: u32, height: u32) -> Rc<slint::platform::software_renderer::SoftwareRenderer> {
     let renderer = Rc::new(slint::platform::software_renderer::SoftwareRenderer::new());
     let adapter = Rc::new(SoftwareWindowAdapter {
@@ -155,6 +202,17 @@ fn main() -> anyhow::Result<()> {
     let kind = args.next().unwrap_or_else(|| "dashboard".to_string());
     let path = args.next().unwrap_or_else(|| format!("{kind}.png"));
     let theme = args.next().unwrap_or_else(|| "dark".to_string());
+    let width = args
+        .next()
+        .map(|v| v.parse())
+        .transpose()?
+        .unwrap_or(1200u32);
+    let height = args
+        .next()
+        .map(|v| v.parse())
+        .transpose()?
+        .unwrap_or(800u32);
+    let state = args.next().unwrap_or_else(|| "normal".to_string());
     let light = match theme.as_str() {
         "dark" => false,
         "light" => true,
@@ -164,7 +222,7 @@ fn main() -> anyhow::Result<()> {
     // The shell is fixed-size; the dialog keeps its own compact canvas.
     let (width, height) = match kind.as_str() {
         "dialog" => (430, 220),
-        _ => (1200, 800),
+        _ => (width, height),
     };
 
     let renderer = setup(width, height);
@@ -179,6 +237,7 @@ fn main() -> anyhow::Result<()> {
                 ThemeMode::Dark
             });
             demo_state(&component);
+            apply_scenario(&component, &state)?;
             // Keyboard backlight observation is ready in the review scenario.
             component.set_keyboard_state_ready(true);
             component.set_keyboard_control_ready(false);

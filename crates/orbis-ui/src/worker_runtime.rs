@@ -62,11 +62,19 @@ pub enum WorkerCommand {
     SetChargeLimit {
         percent: u8,
     },
+    /// Apply one typed SPL/SPPT/FPPT value through Hardware1.
+    SetPowerLimit {
+        field: orbis_core::limits::PowerLimitField,
+        value: i32,
+        snapshot_identity: u64,
+    },
     RefreshChargeLimit,
     RefreshGpuCapabilities,
     RefreshPerformance,
     RefreshCapabilities,
     RefreshTelemetry,
+    /// Authoritative read-only power/thermal limit snapshot.
+    RefreshPowerLimits,
     SetFanCurve {
         profile: AsusdFanProfile,
         fan: FanId,
@@ -89,6 +97,11 @@ pub enum WorkerEvent {
     /// Authoritative result of the ASUS product GPU queue operation.
     ProductGpu(Result<ProductGpuMutationResult, ProviderError>),
     ChargeLimit(Result<ChargeLimitCommandOutcome, SetChargeLimitError>),
+    /// Result of a typed power-limit mutation, labelled with its field.
+    PowerLimit {
+        field: orbis_core::limits::PowerLimitField,
+        result: Result<ApplyResult, ProviderError>,
+    },
     ChargeLimitRefresh(Result<orbis_core::battery::ChargeLimit, ProviderError>),
     GpuPowerRefresh(Result<GpuPowerState, ProviderError>),
     GpuMuxRefresh(Result<GpuMuxState, ProviderError>),
@@ -101,6 +114,8 @@ pub enum WorkerEvent {
         >,
     ),
     TelemetryRefresh(Result<orbis_core::telemetry::Telemetry, ProviderError>),
+    /// Result of an authoritative read-only power-limit refresh.
+    PowerLimitsRefresh(Result<orbis_core::limits::PowerLimitSnapshot, ProviderError>),
     FanCurve(Result<ApplyResult, ProviderError>),
     FanCurveRefresh {
         profile: AsusdFanProfile,
@@ -739,6 +754,24 @@ async fn run_worker_inner<G, B, R, F>(
             continue;
         }
 
+        if matches!(command, WorkerCommand::RefreshPowerLimits) {
+            let result = match runtime.power_limits.as_ref() {
+                Some(provider) => {
+                    bounded_provider_call(
+                        provider.as_ref(),
+                        "power_limits.snapshot",
+                        provider.power_limit_snapshot(),
+                    )
+                    .await
+                }
+                None => Err(ProviderError::BackendUnavailable(
+                    "power-limit Session1 provider unavailable".into(),
+                )),
+            };
+            emit(WorkerEvent::PowerLimitsRefresh(result));
+            continue;
+        }
+
         let event = match command {
             WorkerCommand::SetPerformance(profile) => {
                 WorkerEvent::Performance(runtime.performance.set_performance(profile).await)
@@ -754,6 +787,48 @@ async fn run_worker_inner<G, B, R, F>(
                     )),
                 };
                 WorkerEvent::ProductGpu(result)
+            }
+            WorkerCommand::SetPowerLimit {
+                field,
+                value,
+                snapshot_identity,
+            } => {
+                let result = match runtime.power_limits.as_ref() {
+                    Some(provider) => {
+                        bounded_provider_call(provider.as_ref(), "power_limits.set", async {
+                            let snapshot = provider.power_limit_snapshot().await?;
+                            if snapshot.identity != snapshot_identity {
+                                return Err(ProviderError::Conflict(
+                                    "power-limit snapshot changed; refresh required".into(),
+                                ));
+                            }
+                            provider
+                                .set_power_limit_from_snapshot(&snapshot, field.clone(), value)
+                                .await
+                        })
+                        .await
+                    }
+                    None => Err(ProviderError::BackendUnavailable(
+                        "power-limit provider unavailable".into(),
+                    )),
+                };
+                if result.is_ok() || matches!(result, Err(ProviderError::Timeout(_))) {
+                    let refresh = match runtime.power_limits.as_ref() {
+                        Some(provider) => {
+                            bounded_provider_call(
+                                provider.as_ref(),
+                                "power_limits.read_back",
+                                provider.power_limit_snapshot(),
+                            )
+                            .await
+                        }
+                        None => Err(ProviderError::Unsupported(
+                            "power-limit provider unavailable".into(),
+                        )),
+                    };
+                    emit(WorkerEvent::PowerLimitsRefresh(refresh));
+                }
+                WorkerEvent::PowerLimit { field, result }
             }
             WorkerCommand::SetChargeLimit { percent } => {
                 let mut latest_percent = percent;
@@ -799,7 +874,9 @@ async fn run_worker_inner<G, B, R, F>(
                 profile,
                 result: runtime.fan.reset_fan_curves_to_defaults(profile).await,
             },
-            WorkerCommand::RefreshCapabilities | WorkerCommand::RefreshTelemetry => {
+            WorkerCommand::RefreshCapabilities
+            | WorkerCommand::RefreshTelemetry
+            | WorkerCommand::RefreshPowerLimits => {
                 unreachable!("handled before service dispatch")
             }
         };
@@ -822,8 +899,9 @@ where
     R: PerformanceServiceRuntime,
 {
     runtime.requery_mutation_statuses().await;
+    let power_limit_write_status = runtime.requery_power_limit_write_status().await;
     let next_generation = runtime.capabilities().generation() + 1;
-    crate::composition::probe_capability_registry(
+    let snapshot = crate::composition::probe_capability_registry(
         runtime.battery.provider_battery(),
         runtime.performance.provider_performance(),
         runtime.gpu.provider_power(),
@@ -836,7 +914,16 @@ where
         next_generation,
         SystemTime::now(),
     )
-    .await
+    .await?;
+    match runtime.power_limits.as_ref() {
+        Some(provider) => Ok(crate::composition::augment_power_limit_capabilities(
+            provider.as_ref(),
+            snapshot,
+            power_limit_write_status,
+        )
+        .await),
+        None => Ok(snapshot),
+    }
 }
 
 #[cfg(test)]

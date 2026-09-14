@@ -29,6 +29,7 @@ pub mod battery;
 pub mod fans;
 pub mod keyboard_backlight;
 pub mod panel;
+pub mod power_limits;
 pub mod supergfxd;
 
 use battery::{BatteryMutationBackend, BatteryMutationReadback};
@@ -225,6 +226,8 @@ pub const KEYBOARD_BACKLIGHT_POLKIT_ACTION: &str =
 pub const AURA_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-aura-static-rgb";
 /// Polkit action id for ASUS Armoury product GPU mode queueing.
 pub const PRODUCT_GPU_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-product-gpu-mode";
+/// Polkit action id for SPL/SPPT/FPPT mutation.
+pub const POWER_LIMIT_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-power-limit";
 
 /// Wire-значения Performance profile (закрытый enum, никаких строк/путей).
 pub mod wire {
@@ -463,6 +466,36 @@ pub async fn handle_set_charge_limit(
         ApplyResult::Applied => Ok(readback.configured_percent),
         other => Err(zbus::fdo::Error::Failed(format!(
             "hardwared: battery operation not confirmed: {other:?}"
+        ))),
+    }
+}
+
+/// Обработка typed SPL/SPPT/FPPT mutation до публичного Hardware1 boundary.
+pub async fn handle_set_power_limit(
+    authorizer: &dyn Authorizer,
+    backend: &dyn power_limits::PowerLimitMutationBackend,
+    field_raw: u8,
+    value: i32,
+    sender: &str,
+) -> zbus::fdo::Result<i32> {
+    let field = power_limits::field_from_wire(field_raw).map_err(provider_error_to_dbus)?;
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+    let readback = tokio::time::timeout(
+        power_limits::operation_timeout(),
+        backend.set_power_limit(field, value),
+    )
+    .await
+    .map_err(|_| zbus::fdo::Error::Failed(power_limits::TIMEOUT_PREFIX.to_string()))?
+    .map_err(provider_error_to_dbus)?;
+    match readback.result {
+        ApplyResult::Applied if readback.requested == value && readback.observed == value => {
+            Ok(readback.observed)
+        }
+        other => Err(zbus::fdo::Error::Failed(format!(
+            "hardwared: power-limit operation not confirmed: {other:?}"
         ))),
     }
 }
@@ -733,6 +766,8 @@ pub struct HardwareService {
     kb_backend: Option<Box<dyn keyboard_backlight::KeyboardBacklightMutationBackend>>,
     aura_authorizer: Box<dyn Authorizer>,
     aura_backend: Option<Box<dyn aura::AuraStaticRgbMutationBackend>>,
+    power_limit_authorizer: Box<dyn Authorizer>,
+    power_limit_backend: Option<Box<dyn power_limits::PowerLimitMutationBackend>>,
 }
 
 impl HardwareService {
@@ -755,6 +790,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            power_limit_authorizer: Box::new(DisabledAuthorizer),
+            power_limit_backend: None,
         }
     }
 
@@ -781,6 +818,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            power_limit_authorizer: Box::new(DisabledAuthorizer),
+            power_limit_backend: None,
         }
     }
 
@@ -809,6 +848,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            power_limit_authorizer: Box::new(DisabledAuthorizer),
+            power_limit_backend: None,
         }
     }
 
@@ -835,6 +876,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            power_limit_authorizer: Box::new(DisabledAuthorizer),
+            power_limit_backend: None,
         }
     }
 
@@ -865,6 +908,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            power_limit_authorizer: Box::new(DisabledAuthorizer),
+            power_limit_backend: None,
         }
     }
 
@@ -892,6 +937,8 @@ impl HardwareService {
             kb_backend: None,
             aura_authorizer: Box::new(DisabledAuthorizer),
             aura_backend: None,
+            power_limit_authorizer: Box::new(DisabledAuthorizer),
+            power_limit_backend: None,
         }
     }
 
@@ -947,6 +994,15 @@ impl HardwareService {
         self.product_gpu_authorizer = authorizer;
         self
     }
+    pub fn with_power_limit_backend(
+        mut self,
+        backend: Box<dyn power_limits::PowerLimitMutationBackend>,
+        authorizer: Box<dyn Authorizer>,
+    ) -> Self {
+        self.power_limit_backend = Some(backend);
+        self.power_limit_authorizer = authorizer;
+        self
+    }
 }
 
 struct DisabledAuthorizer;
@@ -1000,6 +1056,29 @@ impl HardwareService {
             .as_deref()
             .ok_or_else(|| zbus::fdo::Error::NotSupported("battery backend unavailable".into()))?;
         handle_set_charge_limit(self.battery_authorizer.as_ref(), backend, percent, &sender).await
+    }
+
+    async fn set_power_limit(
+        &self,
+        field: u8,
+        value: i32,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<i32> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.power_limit_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("power-limit backend unavailable".into())
+        })?;
+        handle_set_power_limit(
+            self.power_limit_authorizer.as_ref(),
+            backend,
+            field,
+            value,
+            &sender,
+        )
+        .await
     }
 
     async fn set_gpu_mode(
@@ -1279,6 +1358,8 @@ pub trait Hardware1 {
     /// Установить Battery configured threshold; возвращает подтверждённый
     /// configured percent, effective value остаётся отдельным read-model field.
     fn set_charge_limit(&self, percent: u8) -> zbus::Result<u8>;
+    /// Set one of SPL/SPPT/FPPT and return authoritative read-back.
+    fn set_power_limit(&self, field: u8, value: i32) -> zbus::Result<i32>;
     fn set_gpu_mode(&self, requested_mode: u32) -> zbus::Result<GpuMutationResult>;
     fn set_product_gpu_mode(&self, requested_mode: u32) -> zbus::Result<ProductGpuMutationResult>;
     /// Read-only typed Battery mutation backend availability (wire enum).

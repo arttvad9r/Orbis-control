@@ -3,13 +3,44 @@
 // aware UI); GPU modes live in the Graphics section.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, PerformanceHwState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, ActionButton } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
+import { ValueSlider } from "../../components/value-slider.slint";
 import { Palette } from "../../themes/dark.slint";
+
+export component LimitRow inherits Rectangle {
+    in property <string> label;
+    in property <int> value;
+    in property <int> min;
+    in property <int> max;
+    in property <int> step;
+    in property <string> unit;
+    in property <string> range;
+    in property <bool> disabled: false;
+    callback changed(float);
+    height: 88px;
+    background: transparent;
+    VerticalLayout {
+        spacing: 2px;
+        Text { text: root.label; font-size: 12px; color: Palette.text-secondary; overflow: elide; }
+        Text { text: root.value + " " + root.unit; font-size: 18px; font-weight: 600; color: Palette.text-primary; }
+        ValueSlider {
+            min: root.min;
+            max: root.max;
+            step: root.step;
+            value: root.value;
+            disabled: root.disabled;
+            changed(v) => { root.changed(v); }
+        }
+        Text { text: root.range; font-size: 10.5px; color: Palette.text-secondary; overflow: elide; }
+    }
+}
 
 export component PerformanceSection inherits Rectangle {
     in property <UiState> ui-state;
     callback perf-clicked(int);
+    callback power-limit-changed(int, int);
+    callback power-limit-apply-clicked;
     callback graphics-open-requested;
 
     function bit-set(mask: int, bit: int) -> bool {
@@ -85,6 +116,34 @@ export component PerformanceSection inherits Rectangle {
                         color: Palette.text-secondary;
                         overflow: elide;
                     }
+                }
+            }
+            SectionCard {
+                visible: root.ui-state.power-limits-ready;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+                    SectionTitle { title: "Лимиты мощности и температуры"; detail: root.ui-state.power-limits-reason; }
+                    Text { text: "Значения и диапазоны получены от backend. Изменение проходит авторизацию, запись и authoritative read-back."; font-size: 11.5px; color: Palette.text-secondary; overflow: elide; }
+                    ActionButton { label: root.ui-state.power-limit-dirty-mask != 0 ? "Применить лимиты" : "Лимиты применены"; disabled: !root.ui-state.power-limits-writable || root.ui-state.power-limit-dirty-mask == 0 || root.ui-state.power-limit-pending-mask != 0; clicked => { root.power-limit-apply-clicked(); } }
+                    HorizontalLayout {
+                        spacing: 16px;
+                        if (root.ui-state.spl-unit != "") : LimitRow { label: "SPL / PL1"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 1) ? root.ui-state.spl-draft : root.ui-state.spl-value; min: root.ui-state.spl-min; max: root.ui-state.spl-max; step: root.ui-state.spl-step; unit: root.ui-state.spl-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 1); range: root.ui-state.spl-min + "–" + root.ui-state.spl-max + " · шаг " + root.ui-state.spl-step; changed(v) => { root.power-limit-changed(0, v); } }
+                        if (root.ui-state.sppt-unit != "") : LimitRow { label: "SPPT / PL2"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 2) ? root.ui-state.sppt-draft : root.ui-state.sppt-value; min: root.ui-state.sppt-min; max: root.ui-state.sppt-max; step: root.ui-state.sppt-step; unit: root.ui-state.sppt-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 2); range: root.ui-state.sppt-min + "–" + root.ui-state.sppt-max + " · шаг " + root.ui-state.sppt-step; changed(v) => { root.power-limit-changed(1, v); } }
+                        if (root.ui-state.fppt-unit != "") : LimitRow { label: "FPPT / PL3"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 4) ? root.ui-state.fppt-draft : root.ui-state.fppt-value; min: root.ui-state.fppt-min; max: root.ui-state.fppt-max; step: root.ui-state.fppt-step; unit: root.ui-state.fppt-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 4); range: root.ui-state.fppt-min + "–" + root.ui-state.fppt-max + " · шаг " + root.ui-state.fppt-step; changed(v) => { root.power-limit-changed(2, v); } }
+                    }
+                    HorizontalLayout {
+                        spacing: 16px;
+                        if (root.ui-state.cpu-temp-limit-unit != "") : LimitRow { label: "CPU temperature limit"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 8) ? root.ui-state.cpu-temp-limit-draft : root.ui-state.cpu-temp-limit-value; min: root.ui-state.cpu-temp-limit-min; max: root.ui-state.cpu-temp-limit-max; step: root.ui-state.cpu-temp-limit-step; unit: root.ui-state.cpu-temp-limit-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 8); range: root.ui-state.cpu-temp-limit-min + "–" + root.ui-state.cpu-temp-limit-max + " · шаг " + root.ui-state.cpu-temp-limit-step; changed(v) => { root.power-limit-changed(3, v); } }
+                        if (root.ui-state.gpu-dynamic-boost-unit != "") : LimitRow { label: "NVIDIA Dynamic Boost"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 16) ? root.ui-state.gpu-dynamic-boost-draft : root.ui-state.gpu-dynamic-boost-value; min: root.ui-state.gpu-dynamic-boost-min; max: root.ui-state.gpu-dynamic-boost-max; step: root.ui-state.gpu-dynamic-boost-step; unit: root.ui-state.gpu-dynamic-boost-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 16); range: root.ui-state.gpu-dynamic-boost-min + "–" + root.ui-state.gpu-dynamic-boost-max + " · шаг " + root.ui-state.gpu-dynamic-boost-step; changed(v) => { root.power-limit-changed(4, v); } }
+                        if (root.ui-state.gpu-temp-target-unit != "") : LimitRow { label: "GPU temperature target"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 32) ? root.ui-state.gpu-temp-target-draft : root.ui-state.gpu-temp-target-value; min: root.ui-state.gpu-temp-target-min; max: root.ui-state.gpu-temp-target-max; step: root.ui-state.gpu-temp-target-step; unit: root.ui-state.gpu-temp-target-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 32); range: root.ui-state.gpu-temp-target-min + "–" + root.ui-state.gpu-temp-target-max + " · шаг " + root.ui-state.gpu-temp-target-step; changed(v) => { root.power-limit-changed(5, v); } }
+                    }
+                }
+            }
+            if (!root.ui-state.power-limits-ready) : SectionCard {
+                VerticalLayout {
+                    padding: 16px;
+                    SectionTitle { title: "Лимиты мощности и температуры"; detail: root.ui-state.power-limits-reason; }
                 }
             }
             Rectangle { vertical-stretch: 100; background: transparent; }

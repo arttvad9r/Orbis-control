@@ -246,6 +246,36 @@ pub struct PerformanceInfo {
     pub available_mask: u8,
 }
 
+/// Wire field kind for a read-only power/thermal limit snapshot.
+pub mod power_limit_field {
+    /// SPL / PPT PL1.
+    pub const SPL: u8 = 0;
+    /// SPPT / PPT PL2.
+    pub const SPPT: u8 = 1;
+    /// FPPT / PPT PL3.
+    pub const FPPT: u8 = 2;
+    /// CPU temperature limit.
+    pub const CPU_TEMP_LIMIT: u8 = 3;
+    /// NVIDIA Dynamic Boost.
+    pub const GPU_DYNAMIC_BOOST: u8 = 4;
+    /// GPU temperature target.
+    pub const GPU_TEMP_TARGET: u8 = 5;
+    /// Backend-specific named field.
+    pub const OTHER: u8 = 255;
+}
+
+/// One authoritative power-limit entry: field kind/name, value, bounds, step,
+/// optional default and unit. The tuple is kept stable for the D-Bus wire.
+pub type PowerLimitInfoTuple = (u8, String, i32, i32, i32, i32, bool, i32, u8);
+/// Authoritative read-only power-limit snapshot.
+pub type PowerLimitsTuple = Vec<PowerLimitInfoTuple>;
+
+/// Prefix carried in the existing FDO `Failed` error for a known backend that
+/// is currently unavailable.  Session1 has no separate unavailable error
+/// member, so this keeps the result typed for clients without pretending that
+/// the capability is unsupported.
+pub const SESSION_BACKEND_UNAVAILABLE_PREFIX: &str = "orbis.session.backend-unavailable: ";
+
 /// Getter-only zbus proxy контракт интерфейса `Session1`.
 ///
 /// Свойства (`ChargeLimit`, `GpuPower`, `GpuMux`, `GpuAccess`, `Performance`)
@@ -279,6 +309,9 @@ pub trait Session1 {
     /// Текущий Performance Mode (current + available, read-only property).
     #[zbus(property)]
     fn performance(&self) -> zbus::Result<PerformanceInfo>;
+
+    /// Текущий authoritative read-only snapshot power/thermal limits.
+    fn power_limits(&self) -> zbus::Result<PowerLimitsTuple>;
 
     /// Сохранённая fan curve для профиля и вентилятора (read-only method).
     fn fan_curve(&self, profile: u32, fan: u8) -> zbus::Result<FanCurveInfo>;

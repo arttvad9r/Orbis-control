@@ -19,3 +19,4 @@ tests/screenshots/artifacts/
 
 # OS
 .DS_Store
+.worktrees/

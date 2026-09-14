@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use orbis_providers::traits::{
     BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
+    PowerLimitProvider,
 };
 use orbis_session_protocol::{BUS_NAME, OBJECT_PATH};
 
@@ -19,8 +20,9 @@ pub struct GpuCapabilities {
     pub mux: Option<Arc<dyn GpuMuxProvider>>,
     /// Read-only dGPU access policy provider.
     pub access: Option<Arc<dyn GpuAccessProvider>>,
+    /// Read-only power/thermal limit provider.
+    pub power_limits: Option<Arc<dyn PowerLimitProvider>>,
 }
-
 /// Построить session D-Bus server поверх подготовленного `Builder`.
 ///
 /// - caller предоставляет transport-configured Builder (session/system/P2P),
@@ -42,6 +44,7 @@ pub async fn build_session_server(
     gpu: GpuCapabilities,
     performance: Option<Arc<dyn PerformanceProvider>>,
     fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
+    power_limits: Option<Arc<dyn PowerLimitProvider>>,
 ) -> zbus::Result<zbus::Connection> {
     let mut service = SessionService::new(battery);
     if let Some(p) = gpu.power {
@@ -52,6 +55,9 @@ pub async fn build_session_server(
     }
     if let Some(a) = gpu.access {
         service = service.with_gpu_access(a);
+    }
+    if let Some(p) = power_limits.or(gpu.power_limits) {
+        service = service.with_power_limits(p);
     }
     if let Some(p) = performance {
         service = service.with_performance(p);

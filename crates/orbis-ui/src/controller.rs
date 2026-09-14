@@ -252,6 +252,20 @@ pub struct UiState {
     pub perf_capability: CapabilityAvailability,
     /// User-facing disabled reason for Performance mutation (None when writable).
     pub perf_unavailable_reason: Option<String>,
+    /// Latest authoritative power-limit snapshot; drafts are kept separately.
+    pub power_limits: orbis_core::limits::PowerLimits,
+    /// Identity of the immutable authoritative metadata snapshot shown in UI.
+    pub power_limit_snapshot_identity: u64,
+    /// User drafts, never treated as observed hardware values.
+    pub power_limit_drafts: std::collections::BTreeMap<orbis_core::limits::PowerLimitField, i32>,
+    /// Fields with an in-flight mutation or unknown outcome.
+    pub power_limit_pending: std::collections::BTreeSet<orbis_core::limits::PowerLimitField>,
+    /// The last power-limit read failed; observed values must be treated as stale.
+    pub power_limits_stale: bool,
+    /// Honest backend reason for an unavailable/unsupported power-limit read.
+    pub power_limits_unavailable_reason: Option<String>,
+    /// Whether a proven privileged power-limit writer is installed.
+    pub power_limits_writable: bool,
     /// Capability availability: Battery Charge Limit read/write support.
     pub charge_limit_capability: CapabilityAvailability,
     /// User-facing disabled reason for Charge Limit mutation (None when writable).
@@ -275,6 +289,10 @@ pub struct UiState {
     pub cpu_temp: String,
     /// Температура dGPU, °C ("—" = неизвестно).
     pub gpu_temp: String,
+    /// Температура iGPU, °C ("—" = неизвестно).
+    pub igpu_temp: String,
+    /// Потребление iGPU, Вт ("—" = неизвестно).
+    pub igpu_power_display: String,
     /// CPU fan RPM ("—" = неизвестно).
     pub cpu_fan_rpm: String,
     /// GPU fan RPM ("—" = неизвестно).
@@ -364,6 +382,12 @@ fn perf_index(p: PerformanceProfile) -> i32 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FanSelectionTransition {
+    Confirm { fan: i32, profile: i32 },
+    Refresh { fan: i32, profile: i32 },
+}
+
 impl UiState {
     /// Safe initial state for the interactive production UI.
     ///
@@ -398,6 +422,13 @@ impl UiState {
             gpu_access_value: 3,
             perf_capability: CapabilityAvailability::Unknown,
             perf_unavailable_reason: Some("Availability is unknown".into()),
+            power_limits: Default::default(),
+            power_limit_snapshot_identity: 0,
+            power_limit_drafts: Default::default(),
+            power_limit_pending: Default::default(),
+            power_limits_stale: true,
+            power_limits_unavailable_reason: Some("Availability is unknown".into()),
+            power_limits_writable: false,
             charge_limit_capability: CapabilityAvailability::Unknown,
             charge_limit_unavailable_reason: Some("Availability is unknown".into()),
             gpu_power_capability: CapabilityAvailability::Unknown,
@@ -406,6 +437,8 @@ impl UiState {
             telemetry_fresh: false,
             cpu_temp: "—".into(),
             gpu_temp: "—".into(),
+            igpu_temp: "—".into(),
+            igpu_power_display: "—".into(),
             cpu_fan_rpm: "—".into(),
             gpu_fan_rpm: "—".into(),
             battery_percent: "—".into(),
@@ -539,6 +572,21 @@ impl UiState {
             gpu_access_value: 0,
             perf_capability: CapabilityAvailability::Unknown,
             perf_unavailable_reason: None,
+            power_limits: state.power_limits.clone(),
+            power_limit_snapshot_identity: orbis_core::limits::PowerLimitSnapshot::new(
+                state.power_limits.clone(),
+            )
+            .identity,
+            power_limit_drafts: state
+                .power_limits
+                .fields
+                .iter()
+                .map(|(field, value)| (field.clone(), value.value))
+                .collect(),
+            power_limit_pending: std::collections::BTreeSet::new(),
+            power_limits_stale: false,
+            power_limits_unavailable_reason: None,
+            power_limits_writable: true,
             charge_limit_capability: CapabilityAvailability::Unknown,
             charge_limit_unavailable_reason: None,
             gpu_power_capability: CapabilityAvailability::Unknown,
@@ -547,6 +595,8 @@ impl UiState {
             telemetry_fresh: false,
             cpu_temp,
             gpu_temp,
+            igpu_temp: "—".into(),
+            igpu_power_display: "—".into(),
             cpu_fan_rpm,
             gpu_fan_rpm,
             battery_percent: format_percent(battery_percent),
@@ -649,6 +699,8 @@ impl UiState {
         self.telemetry_fresh = false;
         self.cpu_temp = "—".into();
         self.gpu_temp = "—".into();
+        self.igpu_temp = "—".into();
+        self.igpu_power_display = "—".into();
         self.cpu_fan_rpm = "—".into();
         self.gpu_fan_rpm = "—".into();
         self.battery_percent = "—".into();
@@ -691,7 +743,23 @@ impl UiState {
 
         self.telemetry_fresh = true;
         self.cpu_temp = format_celsius(telemetry.cpu_temp);
-        self.gpu_temp = format_celsius(telemetry.gpu_temp);
+        if telemetry.gpus.is_empty() {
+            self.gpu_temp = format_celsius(telemetry.gpu_temp);
+            self.igpu_temp = "—".into();
+            self.igpu_power_display = "—".into();
+        } else {
+            let discrete = telemetry
+                .gpus
+                .iter()
+                .find(|gpu| gpu.role == orbis_core::telemetry::GpuRole::Discrete);
+            let integrated = telemetry
+                .gpus
+                .iter()
+                .find(|gpu| gpu.role == orbis_core::telemetry::GpuRole::Integrated);
+            self.gpu_temp = format_celsius(discrete.and_then(|gpu| gpu.temperature));
+            self.igpu_temp = format_celsius(integrated.and_then(|gpu| gpu.temperature));
+            self.igpu_power_display = format_watts(integrated.and_then(|gpu| gpu.power));
+        }
 
         let mut cpu_fan_rpm = None;
         let mut gpu_fan_rpm = None;
@@ -702,6 +770,13 @@ impl UiState {
                 FanId::Gpu => gpu_fan_rpm = Some(rpm),
                 _ => {}
             }
+        }
+        if !telemetry.gpus.is_empty() {
+            gpu_fan_rpm = telemetry
+                .gpus
+                .iter()
+                .find(|gpu| gpu.role == orbis_core::telemetry::GpuRole::Discrete)
+                .and_then(|gpu| gpu.fan.as_ref().map(|fan| fan.rpm));
         }
         self.cpu_fan_rpm = format_rpm(cpu_fan_rpm);
         self.gpu_fan_rpm = format_rpm(gpu_fan_rpm);
@@ -730,7 +805,17 @@ impl UiState {
             Some(false) => "On battery".to_string(),
             None => "—".to_string(),
         };
-        self.gpu_power_display = format_watts(telemetry.power.gpu);
+        self.gpu_power_display = if telemetry.gpus.is_empty() {
+            format_watts(telemetry.power.gpu)
+        } else {
+            format_watts(
+                telemetry
+                    .gpus
+                    .iter()
+                    .find(|gpu| gpu.role == orbis_core::telemetry::GpuRole::Discrete)
+                    .and_then(|gpu| gpu.power),
+            )
+        };
         self.power_ac = format_watts(telemetry.power.ac);
     }
 
@@ -755,6 +840,24 @@ impl UiState {
             3 => Some(AsusdFanProfile::LowPower),
             _ => None,
         }
+    }
+
+    /// Keep a dirty editor in place until the user explicitly resolves it.
+    pub fn fan_selection_transition(dirty: bool, fan: i32, profile: i32) -> FanSelectionTransition {
+        if dirty {
+            FanSelectionTransition::Confirm { fan, profile }
+        } else {
+            FanSelectionTransition::Refresh { fan, profile }
+        }
+    }
+
+    /// Commit the explicit discard decision; the following read refresh restores
+    /// the authoritative observed curve.
+    pub fn discard_fan_selection(state: &mut UiState, fan: i32, profile: i32) {
+        state.fan_selected = fan;
+        state.fan_profile_selected = profile;
+        state.fan_curve_dirty = false;
+        state.fan_curve_error = false;
     }
 
     /// Load authoritative `FanCurve` into editor state.
@@ -814,10 +917,14 @@ impl UiState {
         Some(orbis_providers::traits::FanCurvePoints { temps, pwms })
     }
 
-    /// Check if fan curve mutation is allowed (writable + not dirty + valid).
+    /// Check if fan curve mutation is allowed (authoritatively ready, writable,
+    /// dirty, and valid).
     ///
     /// Used as Rust-side guard: disabled or invalid curves never send mutation.
     pub fn fan_curve_can_mutate(&self) -> bool {
+        if self.fan_curve_state != FanCurveHwState::Ready {
+            return false;
+        }
         if !self.fan_curve_writable {
             return false;
         }
@@ -1322,6 +1429,24 @@ mod tests {
                 state: "Full".into(),
             }),
             gpu_power_state: orbis_core::gpu::GpuPowerState::Unknown,
+            gpus: vec![orbis_core::telemetry::GpuTelemetry {
+                identity: Some(orbis_core::telemetry::GpuIdentity {
+                    vendor: Some("10de".into()),
+                    pci_id: Some("0000:01:00.0".into()),
+                }),
+                role: orbis_core::telemetry::GpuRole::Discrete,
+                source: "fixture".into(),
+                temperature: Some(orbis_core::newtypes::TemperatureC::new(43).unwrap()),
+                power: Some(orbis_core::newtypes::MilliWatt::new(13_073).unwrap()),
+                fan: Some(orbis_core::telemetry::FanTelemetry {
+                    source: "test".into(),
+                    fan: orbis_core::fan::FanId::Gpu,
+                    label: "gpu_fan".into(),
+                    rpm: orbis_core::newtypes::Rpm::new(2100).unwrap(),
+                    percent: None,
+                    quality: orbis_core::telemetry::FanTelemetryQuality::Complete,
+                }),
+            }],
             field_gaps: Vec::new(),
             ts: std::time::SystemTime::UNIX_EPOCH,
         }
@@ -1389,6 +1514,7 @@ mod tests {
         // Убираем CPU temp, fans и battery — остальные поля должны обновиться.
         t.cpu_temp = None;
         t.fans.clear();
+        t.gpus.clear();
         t.battery = None;
         t.ac_online = None;
         s.update_telemetry(&t);

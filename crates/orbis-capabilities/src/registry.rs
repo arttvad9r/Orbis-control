@@ -78,6 +78,21 @@ impl CapabilityRegistrySnapshot {
         self.capabilities.features.is_empty()
     }
 
+    /// Add capability entries while preserving snapshot generation and timestamp.
+    pub fn with_additional_capabilities(
+        &self,
+        entries: impl IntoIterator<Item = (FeatureId, Capability)>,
+    ) -> Result<Self, RegistryError> {
+        let mut builder = CapabilityRegistryBuilder::new(self.generation, self.checked_at);
+        for (feature, capability) in &self.capabilities.features {
+            builder.add(*feature, capability.clone())?;
+        }
+        for (feature, capability) in entries {
+            builder.add(feature, capability)?;
+        }
+        builder.build()
+    }
+
     /// Borrow the existing domain collection without exposing mutability.
     pub fn device_capabilities(&self) -> &DeviceCapabilities {
         &self.capabilities

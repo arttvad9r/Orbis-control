@@ -124,7 +124,9 @@ export component FanCurveEditor inherits Rectangle {
     callback pwm-point-changed(int, int);
 
     background: transparent;
-    min-height: 470px;
+    // Leave room for the status/action row at the 980×680 minimum;
+    // VerticalLayout stretches this surface on larger windows.
+    min-height: 390px;
 
     function state-text() -> string {
         if (root.error-state) { return "Ошибка кривой"; }
@@ -199,7 +201,7 @@ export component FanCurveEditor inherits Rectangle {
             }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             Text {
-                text: root.writable ? "Тяните точки кривой или измените температуры ниже" : "Авторитетная кривая · только чтение";
+                text: root.writable ? "Настройте точки кривой" : "Авторитетная кривая · только чтение";
                 font-size: 11.5px;
                 color: Palette.text-secondary;
                 vertical-alignment: center;

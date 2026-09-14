@@ -168,6 +168,7 @@ async fn connect_composition(
             Default::default(),
             None,
             None,
+            None,
         ),
         session_client_builder.build(),
     )?;

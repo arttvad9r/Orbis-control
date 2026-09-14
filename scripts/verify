@@ -81,6 +81,24 @@ def validate_packaging_assets(root: Path) -> None:
         print(f"+ parse XML {path.relative_to(root)}", flush=True)
         ET.parse(path)
 
+    expected_units = {
+        root / "data/systemd/user/orbis-sessiond.service": "/usr/bin/orbis-sessiond",
+        root / "packaging/orbis-hardwared.service": "/usr/bin/orbis-hardwared",
+    }
+    for path, executable in expected_units.items():
+        print(f"+ validate {path.relative_to(root)}", flush=True)
+        content = path.read_text(encoding="utf-8")
+        expected = f"ExecStart={executable}"
+        if expected not in content:
+            raise SystemExit(f"{path}: missing {expected}")
+        if "/usr/local/bin/orbis-" in content:
+            raise SystemExit(f"{path}: stale /usr/local/bin executable reference")
+
+    install_script = (root / "packaging/install-arch.sh").read_text(encoding="utf-8")
+    if 'BIN_DIR="${DESTDIR}/usr/bin"' not in install_script:
+        raise SystemExit("packaging/install-arch.sh: package binary prefix is not /usr/bin")
+
+    run(["bash", "-n", "packaging/install-arch.sh"], root)
     run(["bash", "-n", "packaging/deploy-dev-hardwared.sh"], root)
     run(["bash", "-n", "scripts/validate-support-matrix.sh"], root)
 

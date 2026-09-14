@@ -29,6 +29,7 @@ use crate::upower::{
 ///   возвращает `NotSupported`;
 /// - возвращённую session Connection необходимо удерживать живой; переданная
 ///   UPower Connection удерживается provider внутри service graph.
+#[allow(clippy::too_many_arguments)]
 pub async fn build_upower_session_server(
     session_builder: zbus::connection::Builder<'_>,
     upower_connection: zbus::Connection,
@@ -37,6 +38,7 @@ pub async fn build_upower_session_server(
     gpu: GpuCapabilities,
     performance: Option<Arc<dyn PerformanceProvider>>,
     fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
+    power_limits: Option<Arc<dyn orbis_providers::traits::PowerLimitProvider>>,
 ) -> zbus::Result<zbus::Connection> {
     let effective_source = SysfsBatteryEndThresholdSource::from_native_path(&battery_native_path)
         .map_err(|e| zbus::Error::Failure(e.to_string()))?;
@@ -50,6 +52,7 @@ pub async fn build_upower_session_server(
         gpu,
         performance,
         fan_curves,
+        power_limits,
     )
     .await
 }
@@ -70,6 +73,7 @@ pub async fn build_upower_session_server_with_effective_source<E>(
     gpu: GpuCapabilities,
     performance: Option<Arc<dyn PerformanceProvider>>,
     fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
+    power_limits: Option<Arc<dyn orbis_providers::traits::PowerLimitProvider>>,
 ) -> zbus::Result<zbus::Connection>
 where
     E: crate::upower::BatteryEffectiveSource + 'static,
@@ -78,7 +82,15 @@ where
     let provider =
         AsusdBatteryChargeLimitProvider::new(upower_source, asusd_source, effective_source);
     let battery: Arc<dyn BatteryProvider> = Arc::new(provider);
-    build_session_server(session_builder, battery, gpu, performance, fan_curves).await
+    build_session_server(
+        session_builder,
+        battery,
+        gpu,
+        performance,
+        fan_curves,
+        power_limits,
+    )
+    .await
 }
 
 /// Построить session server с **lazy** battery discovery.
@@ -94,10 +106,19 @@ pub async fn build_lazy_upower_session_server(
     gpu: GpuCapabilities,
     performance: Option<Arc<dyn PerformanceProvider>>,
     fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
+    power_limits: Option<Arc<dyn orbis_providers::traits::PowerLimitProvider>>,
 ) -> zbus::Result<zbus::Connection> {
     let battery: Arc<dyn BatteryProvider> = Arc::new(LazyBatteryChargeLimitProvider::new(
         ZbusBatteryDiscoverySource::new(upower_connection.clone()),
         AsusdBatteryReadFactory::new(upower_connection),
     ));
-    build_session_server(session_builder, battery, gpu, performance, fan_curves).await
+    build_session_server(
+        session_builder,
+        battery,
+        gpu,
+        performance,
+        fan_curves,
+        power_limits,
+    )
+    .await
 }

@@ -8,10 +8,16 @@ export component NavItem inherits Rectangle {
     in property <string> label;
     in property <int> icon-kind: 0;
     in property <bool> selected: false;
+    out property <bool> has-focus <=> focus-scope.has-focus;
     callback clicked;
 
     height: 44px;
     border-radius: 8px;
+    border-width: root.has-focus ? 1px : 0px;
+    border-color: root.has-focus ? Palette.accent-default : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
     background: root.selected ? Palette.accent-soft
         : touch.has-hover ? Palette.surface-hover
         : transparent;
@@ -37,7 +43,23 @@ export component NavItem inherits Rectangle {
         Rectangle { horizontal-stretch: 1; background: transparent; }
     }
 
+    forward-focus: focus-scope;
+
+    // Keep pointer activation unchanged while exposing the item to Slint's
+    // native focus traversal and keyboard activation path.
     touch := TouchArea {
         clicked => { root.clicked(); }
+    }
+
+    focus-scope := FocusScope {
+        width: 0px;
+        enabled: true;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                touch.clicked();
+                return accept;
+            }
+            return reject;
+        }
     }
 }

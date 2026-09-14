@@ -13,7 +13,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-BIN_DIR="/usr/local/bin"
+BIN_DIR="/usr/bin"
 SYSTEMD_DIR="/etc/systemd/system"
 DBUS_DIR="/etc/dbus-1/system.d"
 POLKIT_DIR="/usr/share/polkit-1/actions"

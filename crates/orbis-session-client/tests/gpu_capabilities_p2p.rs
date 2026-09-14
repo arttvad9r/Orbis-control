@@ -15,12 +15,15 @@ use async_trait::async_trait;
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
 use orbis_core::identity::BackendIdentity;
-use orbis_providers::error::ProviderError;
+use orbis_core::limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
+use orbis_providers::error::{ProviderError, ValidationResult};
 use orbis_providers::traits::{
-    GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, Provider, ProviderHealth,
+    GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PowerLimitProvider, Provider,
+    ProviderHealth,
 };
 use orbis_session_client::{
-    SessionGpuAccessProvider, SessionGpuMuxProvider, SessionGpuPowerProvider, ZbusSessionGpuSource,
+    SessionGpuAccessProvider, SessionGpuMuxProvider, SessionGpuPowerProvider,
+    SessionPowerLimitProvider, ZbusSessionGpuSource, ZbusSessionPowerLimitSource,
 };
 use orbis_sessiond::server::{GpuCapabilities, build_session_server};
 use zbus::connection::Builder;
@@ -54,6 +57,60 @@ impl Provider for ScriptedGpuPower {
 impl GpuPowerProvider for ScriptedGpuPower {
     async fn power_state(&self) -> Result<GpuPowerState, ProviderError> {
         Ok(self.value)
+    }
+}
+
+struct ScriptedPowerLimits;
+impl Provider for ScriptedPowerLimits {
+    fn id(&self) -> &'static str {
+        "scripted-power-limits"
+    }
+    fn backend(&self) -> BackendIdentity {
+        BackendIdentity::simple("fixture-power-limits")
+    }
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(1)
+    }
+    fn explain_unsupported(&self, feature: &str) -> String {
+        format!("fixture: {feature}")
+    }
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth::Healthy
+    }
+    fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+        Vec::new()
+    }
+}
+#[async_trait]
+impl PowerLimitProvider for ScriptedPowerLimits {
+    async fn power_limits(&self) -> Result<PowerLimits, ProviderError> {
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            PowerLimitField::Spl,
+            PowerLimitValue::new(45, 20, 80, 5, Some(45), Unit::Watts).unwrap(),
+        );
+        fields.insert(
+            PowerLimitField::GpuDynamicBoost,
+            PowerLimitValue::new(15, 0, 25, 5, Some(10), Unit::Watts).unwrap(),
+        );
+        fields.insert(
+            PowerLimitField::GpuTempTarget,
+            PowerLimitValue::new(75, 60, 87, 1, Some(80), Unit::DegreesC).unwrap(),
+        );
+        Ok(PowerLimits { fields })
+    }
+    async fn set_power_limit(
+        &self,
+        _: PowerLimitField,
+        _: i32,
+    ) -> Result<orbis_core::action::ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported("read-only fixture".into()))
+    }
+    async fn restore_defaults(&self) -> Result<orbis_core::action::ApplyResult, ProviderError> {
+        Err(ProviderError::Unsupported("read-only fixture".into()))
+    }
+    fn validate_power_limit(&self, _: &PowerLimitField, _: i32) -> ValidationResult {
+        ValidationResult::invalid("read-only fixture")
     }
 }
 
@@ -176,9 +233,10 @@ async fn connect_pair()
         access: Some(Arc::new(ScriptedGpuAccess {
             value: GpuAccessPolicy::Blocked,
         })),
+        power_limits: Some(Arc::new(ScriptedPowerLimits)),
     };
     let (server_conn, client_conn) = tokio::try_join!(
-        build_session_server(server_builder, battery, gpu, None, None),
+        build_session_server(server_builder, battery, gpu, None, None, None),
         client_builder.build()
     )?;
     Ok((server_conn, client_conn))
@@ -202,4 +260,21 @@ async fn gpu_capabilities_roundtrip_over_p2p() {
         access.access_policy().await.expect("access"),
         GpuAccessPolicy::Blocked
     );
+}
+
+#[tokio::test]
+async fn power_limits_roundtrip_over_p2p_and_writes_stay_unsupported() {
+    let (_server_conn, client_conn) = connect_pair().await.expect("pair");
+    let provider = SessionPowerLimitProvider::new(ZbusSessionPowerLimitSource::new(client_conn));
+    let limits = provider.power_limits().await.expect("power limits");
+    assert_eq!(limits.get(&PowerLimitField::Spl).unwrap().value, 45);
+    assert_eq!(
+        limits.get(&PowerLimitField::GpuDynamicBoost).unwrap().unit,
+        Unit::Watts
+    );
+    assert_eq!(limits.get(&PowerLimitField::GpuTempTarget).unwrap().max, 87);
+    assert!(matches!(
+        provider.set_power_limit(PowerLimitField::Spl, 50).await,
+        Err(ProviderError::Unsupported(_))
+    ));
 }

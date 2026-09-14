@@ -4,6 +4,7 @@ Type=Application
 Name=Orbis Control
 GenericName=ASUS Laptop Control Center
 Comment=Monitor and control supported ASUS laptop features on Linux
+Icon=io.github.orbiscontrol.Orbis
 TryExec=orbis-control
 Exec=orbis-control
 Terminal=false

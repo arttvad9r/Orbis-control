@@ -3451,8 +3451,11 @@ dependencies = [
  "orbis-capabilities",
  "orbis-core",
  "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "tracing",
  "wayland-client",
  "zbus",
 ]
@@ -4537,6 +4540,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "socket2"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
+dependencies = [
+ "libc",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "softbuffer"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4847,6 +4860,7 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "signal-hook-registry",
+ "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
 ]

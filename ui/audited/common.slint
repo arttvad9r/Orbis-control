@@ -191,7 +191,9 @@ export component ActionButton inherits Rectangle {
     callback clicked;
 
     height: 32px;
-    min-width: 76px;
+    // Keep Russian action labels fully legible at the 980px minimum window.
+    // Callers may still grow the button when a wider layout is available.
+    min-width: 132px;
     border-radius: 8px;
     border-width: 1px;
     border-color: root.accent && !root.disabled ? Palette.accent-default

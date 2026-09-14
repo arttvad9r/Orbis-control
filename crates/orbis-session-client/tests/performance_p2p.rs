@@ -135,6 +135,7 @@ async fn connect_pair()
             Default::default(),
             Some(performance),
             None,
+            None,
         ),
         client_builder.build()
     )?;

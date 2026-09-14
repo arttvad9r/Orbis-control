@@ -28,6 +28,7 @@ pub mod composition;
 pub mod discovery;
 pub mod fans;
 pub mod performance;
+pub mod power_limits;
 pub mod runtime;
 pub mod server;
 pub mod service;

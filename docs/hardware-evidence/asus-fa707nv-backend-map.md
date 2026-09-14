@@ -30,6 +30,69 @@ was attempted.
 - The installed system D-Bus policy file was not present at
   `/etc/dbus-1/system.d/io.github.orbiscontrol.Hardware.conf`.
 
+## Power-limit discovery matrix
+
+The deterministic selection order is: (1) a typed ASUS backend with complete
+current+metadata evidence; (2) no backend. `asus-nb-wmi` is inspected as a
+fixed-path source, but its current-only PPT files are not enough to advertise a
+field or enable writes. If both fixed ASUS backends become fully readable, the
+selector must compare overlapping values and report a conflict instead of
+silently choosing a writer. `asusd` is not an owner for these fields.
+
+The authoritative owner for the target power/thermal fields is the Linux
+kernel ASUS WMI/Armoury firmware-attributes ABI, not `xyz.ljones.Asusd`.
+The fixed production paths are under
+`/sys/class/firmware-attributes/asus-armoury/attributes`. `asusd` exposes the
+same names over `xyz.ljones.AsusArmoury`, but on this host its `CurrentValue`
+read returns `Could not read current value`; that is not a production contract.
+
+| Field | Backend owner | Read | Metadata | Write | Read-back | Privilege | Evidence | Status |
+|---|---|---|---|---|---|---|---|---|
+| SPL / PPT PL1 | kernel ASUS Armoury `ppt_pl1_spl` | fixed sysfs `current_value` | fixed sysfs `min_value`, `max_value`, `scalar_increment`, `default_value` | typed Hardware1 candidate, disabled | fresh `current_value` | hardwared + polkit if later proven | kernel ABI documents ASUS WMI PPT; current host returns `ENODEV` for Armoury value/limits | candidate rejected; runtime unsupported on audited host |
+| SPPT / PPT PL2 | kernel ASUS Armoury `ppt_pl2_sppt` | same | same | same | same | same | same | candidate rejected; runtime unsupported on audited host |
+| FPPT / PPT PL3 | kernel ASUS Armoury `ppt_pl3_fppt` | same | same | same | same | same | same | candidate rejected; runtime unsupported on audited host |
+| NVIDIA Dynamic Boost | kernel ASUS Armoury `nv_dynamic_boost` | fixed sysfs `current_value` | fixed sysfs metadata | typed Hardware1 candidate, disabled | fresh `current_value` | hardwared + polkit if later proven | kernel ABI documents `5..25` legacy range; current Armoury value/limits return `ENODEV` | candidate rejected; runtime unsupported on audited host |
+| GPU temperature target | kernel ASUS Armoury `nv_temp_target` | fixed sysfs `current_value` | fixed sysfs metadata | typed Hardware1 candidate, disabled | fresh `current_value` | hardwared + polkit if later proven | kernel ABI documents `75..87` legacy range; current Armoury value/limits return `ENODEV` | candidate rejected; runtime unsupported on audited host |
+| CPU temperature limit | no authoritative kernel ASUS Armoury field found | — | — | — | — | — | no kernel ABI field; no separate AMD authoritative interface found | Unsupported |
+| CPU Boost | no authoritative read/write interface found | — | — | — | — | — | `cpufv` is write-only and does not prove a CPU boost toggle; `amd_pstate` boost is a generic policy switch, not an ASUS CPU boost contract | Unsupported |
+
+### Host discovery evidence
+
+| Candidate | Read-only evidence on FA707NV | Ownership/semantics | Decision |
+|---|---|---|---|
+| AMD `amd_pstate` / cpufreq | `amd_pstate/status=active`; `cpufreq/boost=1`; policy `boost` is present and root-owned | Generic CPU frequency policy, not package PPT/SPL/SPPT/FPPT metadata; cannot stand in for CPU Boost product semantics without a separate contract | Not selected for power limits or CPU Boost |
+| powercap/RAPL | `/sys/class/powercap` exposes `intel-rapl` names on this host despite AMD CPU; no usable AMD package-limit owner | RAPL energy/powercap interfaces are not evidence for ASUS PPT fields; telemetry/accounting must not become a write backend | Rejected |
+| hwmon / thermal / power-supply | Read-only sensors and AMDGPU `PPT` telemetry are present | Telemetry has no authoritative limit ownership or write/read-back contract | Rejected |
+| AMD SMU / `ryzenadj` | Fixed candidate `/usr/bin/ryzenadj --info`; current host reports `Version: v0.19.0`, detects `ryzen_smu`, then fails `Unable to get os_access Obj` / `Unable to init ryzenadj` | Reference G-Helper Linux uses a bundled `ryzenadj -i` table plus elevated `sudo`/NOPASSWD batch setters and apply-on-start. That provides neither Orbis-authoritative min/max/step metadata nor an approved original-caller polkit/read-back contract; current host provides no current table values | Blocked-by-backend; read-only evidence parser only |
+| NVIDIA NVML / `nvidia-smi` | RTX 4060 Laptop; current GPU ceiling limit 80 W, min 5 W, max 140 W | Driver GPU ceiling limit is distinct from ASUS `nv_dynamic_boost`; `nvidia-smi` output is telemetry/driver state, not proof of Dynamic Boost ownership | Rejected for target fields |
+| `asusd` / `asusctl` Armoury | `asusctl armoury list` reports target Armoury fields `unavailable`; `xyz.ljones.AsusArmoury` is not activatable | Existing daemon does not provide a usable target-field owner; no fallback to old `asusd` wiring | Rejected |
+
+No supported power-limit write backend was found on the current host. The
+production selection therefore leaves power-limit writes disabled; candidate
+names and the first kernel probe error are surfaced in capability diagnostics.
+
+### SMU / RyzenAdj feasibility decision
+
+The repository now records a bounded, read-only evidence contract:
+
+- executable path: `/usr/bin/ryzenadj`;
+- arguments: `--info` only;
+- parser: version, detected kernel module, and known current-value table rows;
+- no generic command/path API and no setter representation;
+- `--info` metadata is explicitly not treated as authoritative min/max/step;
+- no write promotion is possible without a separate typed Hardware1 operation,
+  original-caller polkit authorization, validation against authoritative
+  metadata, timeout/unknown handling, and fresh read-back.
+
+The G-Helper Linux reference is useful feasibility evidence for the SMU tool,
+but its elevated `sudo`/NOPASSWD helper and startup re-apply behavior are not a
+safe Orbis privileged boundary. No privileged executable or ryzenadj write path
+is added until that contract and its threat model are independently proven.
+
+The provider advertises a field only after all required runtime reads succeed;
+legacy `/sys/devices/platform/asus-nb-wmi/*` values without authoritative
+metadata are not promoted and are never used as fake defaults.
+
 ### Current NixOS activation audit
 
 The active configuration at `/home/artt/.nixos` imports only

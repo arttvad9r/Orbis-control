@@ -158,12 +158,32 @@ fn parse_curve_entry(
             ))
         })?;
     }
-    Ok(AsusdFanCurve {
+    let curve = AsusdFanCurve {
         fan,
         temps: temps_arr,
         pwms: pwms_arr,
         enabled,
-    })
+    };
+    // A vendor reply is an input trust boundary too: malformed ordering or a
+    // zero cooling point at a critical temperature must remain an error, never
+    // become a plausible-looking UI curve.
+    let domain_curve = FanCurve {
+        profile: PerformanceProfile::Balanced,
+        fan: curve.fan.clone(),
+        enabled: Some(curve.enabled),
+        points: curve
+            .temps
+            .iter()
+            .zip(curve.pwms.iter())
+            .map(|(temp, pwm)| FanCurvePoint::new(*temp, *pwm))
+            .collect(),
+    };
+    domain_curve
+        .validate(CURVE_POINT_COUNT, false)
+        .map_err(|error| {
+            ProviderError::Internal(format!("asusd FanCurves: malformed {name} curve: {error}"))
+        })?;
+    Ok(curve)
 }
 
 #[async_trait]
@@ -187,7 +207,17 @@ impl AsusdFanCurveSource for ZbusAsusdFanCurveSource {
         for (name, temps, pwms, enabled) in raw {
             let curve = parse_curve_entry(&name, &temps, &pwms, enabled)?;
             match curve.fan {
+                FanId::Cpu if cpu.is_some() => {
+                    return Err(ProviderError::Internal(
+                        "asusd FanCurves: duplicate CPU curve".into(),
+                    ));
+                }
                 FanId::Cpu => cpu = Some(curve),
+                FanId::Gpu if gpu.is_some() => {
+                    return Err(ProviderError::Internal(
+                        "asusd FanCurves: duplicate GPU curve".into(),
+                    ));
+                }
                 FanId::Gpu => gpu = Some(curve),
                 _ => {}
             }
@@ -948,6 +978,25 @@ mod tests {
         assert_eq!(gpu.fan, FanId::Gpu);
         assert_eq!(gpu.pwms[7].get(), 112);
         assert!(!gpu.enabled);
+    }
+
+    #[test]
+    fn parse_curve_entry_rejects_malformed_vendor_ordering() {
+        let err = parse_curve_entry("CPU", &[45, 60, 55, 70, 75, 80, 85, 90], &[5; 8], true)
+            .expect_err("decreasing vendor temperatures");
+        assert!(matches!(err, ProviderError::Internal(_)));
+    }
+
+    #[test]
+    fn parse_curve_entry_rejects_zero_cooling_at_critical_temperature() {
+        let err = parse_curve_entry(
+            "GPU",
+            &[45, 60, 70, 80, 85, 90, 95, 100],
+            &[5, 5, 5, 5, 5, 5, 5, 0],
+            true,
+        )
+        .expect_err("zero vendor cooling at critical temperature");
+        assert!(matches!(err, ProviderError::Internal(_)));
     }
 
     #[test]

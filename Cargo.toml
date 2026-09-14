@@ -40,6 +40,7 @@ tokio = { version = "1", features = [
     "time",
     "signal",
     "process",
+    "net",
     "test-util",
 ] }
 zbus = "5"

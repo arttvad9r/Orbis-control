@@ -18,6 +18,7 @@ pub mod asus_armoury;
 pub mod asus_boot_sound;
 pub mod asus_diagnostics;
 pub mod asus_gpu_mode;
+pub mod asus_legacy_power;
 pub mod aura;
 pub mod bounded_probes;
 pub mod display_diagnostics;
@@ -28,10 +29,12 @@ pub mod fan_defaults;
 pub mod gpu_diagnostics;
 pub mod hardware_identity;
 pub mod keyboard_backlight;
+pub mod lact_telemetry;
 pub mod linux_memory;
 pub mod native_asus_eco;
 pub mod probes;
 pub mod readiness;
+pub mod ryzenadj_diagnostics;
 pub mod service_presence;
 pub mod service_readiness;
 pub mod supergfxd;
@@ -52,6 +55,7 @@ pub use asus_diagnostics::{
     probe_asus_diagnostics_capabilities, probe_aura, probe_keyboard_backlight,
 };
 pub use asus_gpu_mode::{AsusGpuMode, decode_asus_gpu_mode};
+pub use asus_legacy_power::AsusNbWmiPowerLimitProvider;
 pub use aura::*;
 pub use bounded_probes::{
     probe_charge_limit, probe_display_output, probe_fan_curve, probe_gpu_access, probe_gpu_mux,
@@ -69,11 +73,15 @@ pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsPro
 pub use gpu_diagnostics::gpu_diagnostics_snapshot;
 pub use hardware_identity::HardwareIdentityProvider;
 pub use keyboard_backlight::*;
+pub use lact_telemetry::{LactTelemetryProvider, merge_telemetry};
 pub use linux_memory::{
     LinuxSystemMemoryProvider, SystemMemoryProvider, parse_meminfo, parse_memory_pressure,
 };
 pub use native_asus_eco::*;
 pub use readiness::{bounded_readiness_probe, join_readiness2};
+pub use ryzenadj_diagnostics::{
+    RyzenAdjCurrentValue, RyzenAdjInfoEvidence, parse_info_output as parse_ryzenadj_info_output,
+};
 pub use service_presence::*;
 pub use service_readiness::readiness_from_service_diagnostics;
 pub use sysfs_telemetry::SysfsTelemetryProvider;

@@ -256,6 +256,7 @@ export component DashboardSection inherits Rectangle {
                 spacing: 16px;
                 MetricCard { label: "CPU"; value: root.ui-state.cpu-temp; detail: "процессор · температура"; icon-kind: 10; }
                 MetricCard { label: "GPU"; value: root.ui-state.gpu-temp; detail: "дискретная графика"; icon-kind: 4; }
+                MetricCard { label: "iGPU"; value: root.ui-state.igpu-temp; detail: "интегрированная графика"; icon-kind: 4; }
                 MetricCard { label: "Потребление"; value: root.ui-state.power-ac-mw; detail: "от адаптера питания"; icon-kind: 13; }
                 MetricCard { label: "dGPU"; value: root.ui-state.gpu-power; detail: "потребление графики"; icon-kind: 4; }
             }

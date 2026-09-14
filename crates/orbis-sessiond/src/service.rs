@@ -15,13 +15,17 @@ use orbis_core::battery::{
 };
 use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMuxState, GpuPowerState};
+use orbis_core::limits::{PowerLimitField, PowerLimits, Unit};
 use orbis_core::newtypes::{FanPwm, TemperatureC};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::{
     BatteryProvider, GpuAccessProvider, GpuMuxProvider, GpuPowerProvider, PerformanceProvider,
+    PowerLimitProvider,
 };
-use orbis_session_protocol::{ChargeLimitInfo, gpu_access, gpu_mux, gpu_power, performance};
+use orbis_session_protocol::{
+    ChargeLimitInfo, gpu_access, gpu_mux, gpu_power, performance, power_limit_field,
+};
 
 use crate::fans::{AsusdFanCurveSource, asusd_fan_profile_from_wire};
 
@@ -40,6 +44,7 @@ pub struct SessionService {
     gpu_access: Option<Arc<dyn GpuAccessProvider>>,
     performance: Option<Arc<dyn PerformanceProvider>>,
     fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
+    power_limits: Option<Arc<dyn PowerLimitProvider>>,
 }
 
 impl SessionService {
@@ -52,6 +57,7 @@ impl SessionService {
             gpu_access: None,
             performance: None,
             fan_curves: None,
+            power_limits: None,
         }
     }
 
@@ -83,6 +89,20 @@ impl SessionService {
     pub fn with_fan_curves(mut self, source: Arc<dyn AsusdFanCurveSource>) -> Self {
         self.fan_curves = Some(source);
         self
+    }
+
+    /// Add the optional read-only power-limit provider.
+    pub fn with_power_limits(mut self, provider: Arc<dyn PowerLimitProvider>) -> Self {
+        self.power_limits = Some(provider);
+        self
+    }
+
+    /// Read the authoritative power-limit snapshot without caching or writes.
+    pub async fn read_power_limits(&self) -> Result<PowerLimits, ProviderError> {
+        let provider = self.power_limits.as_ref().ok_or_else(|| {
+            ProviderError::Unsupported("session: power-limit capability недоступна".into())
+        })?;
+        provider.power_limits().await
     }
 
     /// Прочитать authoritative domain Charge Limit и вернуть wire DTO.
@@ -243,6 +263,47 @@ fn performance_mask_to_wire(available: &[PerformanceProfile]) -> u8 {
     mask
 }
 
+/// Convert the typed power-limit snapshot to the stable D-Bus tuple wire.
+fn power_limits_to_wire(value: PowerLimits) -> orbis_session_protocol::PowerLimitsTuple {
+    value
+        .fields
+        .into_iter()
+        .map(|(field, value)| {
+            let (kind, name) = match field {
+                PowerLimitField::Spl => (power_limit_field::SPL, String::new()),
+                PowerLimitField::Sppt => (power_limit_field::SPPT, String::new()),
+                PowerLimitField::Fppt => (power_limit_field::FPPT, String::new()),
+                PowerLimitField::CpuTempLimit => (power_limit_field::CPU_TEMP_LIMIT, String::new()),
+                PowerLimitField::GpuDynamicBoost => {
+                    (power_limit_field::GPU_DYNAMIC_BOOST, String::new())
+                }
+                PowerLimitField::GpuTempTarget => {
+                    (power_limit_field::GPU_TEMP_TARGET, String::new())
+                }
+                PowerLimitField::Other(name) => (power_limit_field::OTHER, name),
+            };
+            let unit = match value.unit {
+                Unit::Watts => 0,
+                Unit::DegreesC => 1,
+                Unit::Percent => 2,
+                Unit::Count => 3,
+                Unit::Unknown => 255,
+            };
+            (
+                kind,
+                name,
+                value.value,
+                value.min,
+                value.max,
+                value.step,
+                value.default.is_some(),
+                value.default.unwrap_or(0),
+                unit,
+            )
+        })
+        .collect()
+}
+
 /// Преобразовать domain `ChargeLimit` в canonical wire `ChargeLimitInfo`.
 ///
 /// Значения configured/effective переносятся раздельно, без clamp/округления;
@@ -348,7 +409,11 @@ fn provider_error_to_dbus(error: ProviderError) -> zbus::fdo::Error {
         ProviderError::Unsupported(msg) => zbus::fdo::Error::NotSupported(msg),
         ProviderError::PermissionDenied(msg) => zbus::fdo::Error::AccessDenied(msg),
         ProviderError::InvalidRequest(msg) => zbus::fdo::Error::InvalidArgs(msg),
-        ProviderError::BackendUnavailable(msg) => zbus::fdo::Error::Failed(msg),
+        ProviderError::BackendUnavailable(msg) => zbus::fdo::Error::Failed(format!(
+            "{}{}",
+            orbis_session_protocol::SESSION_BACKEND_UNAVAILABLE_PREFIX,
+            msg
+        )),
         ProviderError::Timeout(msg) => zbus::fdo::Error::Failed(msg),
         ProviderError::Io(e) => zbus::fdo::Error::Failed(e.to_string()),
         ProviderError::Dbus(msg) => zbus::fdo::Error::Failed(msg),
@@ -489,6 +554,17 @@ impl SessionService {
             performance_current_to_wire(current),
             performance_mask_to_wire(&available),
         ))
+    }
+
+    async fn power_limits(&self) -> zbus::fdo::Result<orbis_session_protocol::PowerLimitsTuple> {
+        // Keep the provider/domain error at this method boundary until the
+        // explicit mapper converts it to the generated zbus FDO error. Do not
+        // let the provider's zbus/backend failure escape as a generic Failed.
+        let limits = self
+            .read_power_limits()
+            .await
+            .map_err(provider_error_to_dbus)?;
+        Ok(power_limits_to_wire(limits))
     }
 
     /// Сохранённая fan curve для профиля и вентилятора
