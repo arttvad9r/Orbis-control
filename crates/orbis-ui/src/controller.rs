@@ -262,6 +262,14 @@ pub struct UiState {
     pub power_limit_pending: std::collections::BTreeSet<orbis_core::limits::PowerLimitField>,
     /// The last power-limit read failed; observed values must be treated as stale.
     pub power_limits_stale: bool,
+    /// The last power-limit mutation failed definitively (authorization,
+    /// validation, backend refusal). Displayed until the user edits a draft
+    /// again or a later mutation succeeds. Never set for unknown outcomes.
+    pub power_limit_error: bool,
+    /// Fields whose mutation ended in an unknown outcome (timeout) and whose
+    /// pending lock may only be released by a fresh authoritative read.
+    pub power_limit_awaiting_verification:
+        std::collections::BTreeSet<orbis_core::limits::PowerLimitField>,
     /// Honest backend reason for an unavailable/unsupported power-limit read.
     pub power_limits_unavailable_reason: Option<String>,
     /// Whether a proven privileged power-limit writer is installed.
@@ -336,6 +344,11 @@ pub struct UiState {
     pub fan_curve_pwms: [i32; 8],
     /// Ошибка backend в fan-секции (остальное окно остаётся рабочим).
     pub fan_curve_error: bool,
+    /// Validation failure of the current draft shown to the user. Set only
+    /// when Apply was refused because the draft violates curve validation,
+    /// before any hardware mutation; carries the reason. Cleared when the
+    /// draft is edited again or an authoritative curve is loaded.
+    pub fan_curve_invalid_draft: Option<String>,
     /// Есть ли несохранённые изменения ( dirty flag для UI кнопки Apply).
     pub fan_curve_dirty: bool,
     /// Stored curve enabled-state evidence from the authoritative read.
@@ -427,6 +440,8 @@ impl UiState {
             power_limit_drafts: Default::default(),
             power_limit_pending: Default::default(),
             power_limits_stale: true,
+            power_limit_error: false,
+            power_limit_awaiting_verification: Default::default(),
             power_limits_unavailable_reason: Some("Availability is unknown".into()),
             power_limits_writable: false,
             charge_limit_capability: CapabilityAvailability::Unknown,
@@ -460,6 +475,7 @@ impl UiState {
             fan_curve_temps: [0; 8],
             fan_curve_pwms: [0; 8],
             fan_curve_error: false,
+            fan_curve_invalid_draft: None,
             fan_curve_dirty: false,
             fan_curve_enabled: None,
         }
@@ -577,14 +593,14 @@ impl UiState {
                 state.power_limits.clone(),
             )
             .identity,
-            power_limit_drafts: state
-                .power_limits
-                .fields
-                .iter()
-                .map(|(field, value)| (field.clone(), value.value))
-                .collect(),
+            // Drafts represent user intent and stay empty until the user
+            // edits a slider; an empty draft always means "matches observed"
+            // (same invariant as `production_initial`).
+            power_limit_drafts: Default::default(),
             power_limit_pending: std::collections::BTreeSet::new(),
             power_limits_stale: false,
+            power_limit_error: false,
+            power_limit_awaiting_verification: Default::default(),
             power_limits_unavailable_reason: None,
             power_limits_writable: true,
             charge_limit_capability: CapabilityAvailability::Unknown,
@@ -622,6 +638,7 @@ impl UiState {
             fan_curve_temps: [0; 8],
             fan_curve_pwms: [0; 8],
             fan_curve_error: false,
+            fan_curve_invalid_draft: None,
             fan_curve_dirty: false,
             fan_curve_enabled: None,
         }
@@ -858,6 +875,7 @@ impl UiState {
         state.fan_profile_selected = profile;
         state.fan_curve_dirty = false;
         state.fan_curve_error = false;
+        state.fan_curve_invalid_draft = None;
     }
 
     /// Load authoritative `FanCurve` into editor state.
@@ -895,6 +913,7 @@ impl UiState {
         self.fan_curve_temps = temps;
         self.fan_curve_pwms = pwms;
         self.fan_curve_dirty = false;
+        self.fan_curve_invalid_draft = None;
         // Preserve stored enabled-state evidence from the authoritative read (#116).
         self.fan_curve_enabled = curve.enabled;
     }

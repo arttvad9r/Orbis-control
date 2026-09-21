@@ -511,14 +511,21 @@ mod tests {
     use super::*;
 
     /// Create a unique temporary fixture root (house pattern: no tempfile dep).
+    ///
+    /// The name combines a timestamp with a process-wide atomic counter:
+    /// two tests starting within the same clock tick must still get distinct
+    /// directories (a pure timestamp collided under parallel test execution).
     fn fixture_root() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static FIXTURE_SEQ: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "orbis-providers-panel-overdrive-{}-{}",
+            "orbis-providers-panel-overdrive-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            FIXTURE_SEQ.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(&dir).unwrap();
         dir

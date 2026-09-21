@@ -78,6 +78,13 @@ export component PerformanceSection inherits Rectangle {
                         detail: root.perf-reason();
                     }
 
+                    if (root.ui-state.power-limit-error) : Text {
+                        text: "Не удалось применить лимиты мощности: доступ запрещён или backend отклонил запись. Измените черновик и повторите.";
+                        font-size: 11.5px;
+                        color: Palette.error;
+                        overflow: elide;
+                        wrap: word-wrap;
+                    }
                     HorizontalLayout {
                         height: 84px;
                         spacing: 12px;

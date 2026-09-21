@@ -108,6 +108,17 @@ fn scenario_state(_name: &str) -> anyhow::Result<controller::UiState> {
     anyhow::bail!("--screenshot/--ui-state scenarios require a build with --features ui-review")
 }
 
+/// Bitmask over the six power-limit UI fields (SPL=1, SPPT=2, FPPT=4,
+/// CPU temp limit=8, Dynamic Boost=16, GPU temp target=32).
+fn power_limit_pending_mask(fields: &std::collections::BTreeSet<PowerLimitField>) -> i32 {
+    (fields.contains(&PowerLimitField::Spl) as i32)
+        | ((fields.contains(&PowerLimitField::Sppt) as i32) << 1)
+        | ((fields.contains(&PowerLimitField::Fppt) as i32) << 2)
+        | ((fields.contains(&PowerLimitField::CpuTempLimit) as i32) << 3)
+        | ((fields.contains(&PowerLimitField::GpuDynamicBoost) as i32) << 4)
+        | ((fields.contains(&PowerLimitField::GpuTempTarget) as i32) << 5)
+}
+
 fn to_slint(state: &controller::UiState) -> UiState {
     let power = |field: &PowerLimitField| {
         state.power_limits.get(field).map(|v| {
@@ -127,21 +138,8 @@ fn to_slint(state: &controller::UiState) -> UiState {
     let cpu_temp_limit = power(&PowerLimitField::CpuTempLimit);
     let dynamic_boost = power(&PowerLimitField::GpuDynamicBoost);
     let gpu_temp_target = power(&PowerLimitField::GpuTempTarget);
-    let pending_mask = (state.power_limit_pending.contains(&PowerLimitField::Spl) as i32)
-        | ((state.power_limit_pending.contains(&PowerLimitField::Sppt) as i32) << 1)
-        | ((state.power_limit_pending.contains(&PowerLimitField::Fppt) as i32) << 2)
-        | ((state
-            .power_limit_pending
-            .contains(&PowerLimitField::CpuTempLimit) as i32)
-            << 3)
-        | ((state
-            .power_limit_pending
-            .contains(&PowerLimitField::GpuDynamicBoost) as i32)
-            << 4)
-        | ((state
-            .power_limit_pending
-            .contains(&PowerLimitField::GpuTempTarget) as i32)
-            << 5);
+    let pending_mask = power_limit_pending_mask(&state.power_limit_pending);
+    let verification_mask = power_limit_pending_mask(&state.power_limit_awaiting_verification);
     let dirty_mask = (state.power_limit_drafts.contains_key(&PowerLimitField::Spl) as i32)
         | ((state
             .power_limit_drafts
@@ -189,6 +187,9 @@ fn to_slint(state: &controller::UiState) -> UiState {
             "Лимиты мощности недоступны".into()
         } else if !state.power_limits_writable {
             "Только чтение: подтверждённый privileged backend записи отсутствует".into()
+        } else if state.power_limit_error {
+            "Не удалось применить лимиты: доступ запрещён или backend отклонил запись. Исправьте черновик и повторите."
+                .into()
         } else if !state.power_limit_pending.is_empty() {
             "Применение… ожидается authoritative read-back".into()
         } else {
@@ -196,7 +197,9 @@ fn to_slint(state: &controller::UiState) -> UiState {
         },
         power_limits_stale: state.power_limits_stale,
         power_limits_writable: state.power_limits_writable,
+        power_limit_error: state.power_limit_error,
         power_limit_pending_mask: pending_mask,
+        power_limit_verification_mask: verification_mask,
         power_limit_dirty_mask: dirty_mask,
         power_limit_snapshot_identity: state.power_limit_snapshot_identity.to_string().into(),
         spl_value: spl.as_ref().map_or(0, |v| v.0),
@@ -374,6 +377,11 @@ fn to_slint(state: &controller::UiState) -> UiState {
             .unwrap_or_default()
             .into(),
         fan_curve_error: state.fan_curve_error,
+        fan_curve_invalid_draft: state
+            .fan_curve_invalid_draft
+            .clone()
+            .unwrap_or_default()
+            .into(),
         fan_curve_dirty: state.fan_curve_dirty,
         fan_curve_enabled_known: state.fan_curve_enabled.is_some(),
         fan_curve_enabled: state.fan_curve_enabled.unwrap_or(false),
@@ -561,7 +569,41 @@ fn update_power_limit_draft(
     } else {
         state.power_limit_drafts.insert(field, value);
     }
+    // The user is actively retrying; a displayed mutation error is obsolete.
+    state.power_limit_error = false;
     true
+}
+
+/// Inverse of [`power_limit_pending_mask`]: decode a UI bitmask into the
+/// typed field set.
+fn power_limit_fields_from_mask(mask: i32) -> std::collections::BTreeSet<PowerLimitField> {
+    let mut fields = std::collections::BTreeSet::new();
+    if mask & 1 != 0 {
+        fields.insert(PowerLimitField::Spl);
+    }
+    if mask & 2 != 0 {
+        fields.insert(PowerLimitField::Sppt);
+    }
+    if mask & 4 != 0 {
+        fields.insert(PowerLimitField::Fppt);
+    }
+    if mask & 8 != 0 {
+        fields.insert(PowerLimitField::CpuTempLimit);
+    }
+    if mask & 16 != 0 {
+        fields.insert(PowerLimitField::GpuDynamicBoost);
+    }
+    if mask & 32 != 0 {
+        fields.insert(PowerLimitField::GpuTempTarget);
+    }
+    fields
+}
+
+/// Decode the UI `fan-curve-invalid-draft` string into the typed
+/// `Option<String>`; an empty UI string means "no invalid draft".
+fn fan_curve_invalid_draft_from_slint(state: &UiState) -> Option<String> {
+    let text = state.fan_curve_invalid_draft.to_string();
+    if text.is_empty() { None } else { Some(text) }
 }
 
 fn from_slint(state: &UiState) -> controller::UiState {
@@ -629,30 +671,13 @@ fn from_slint(state: &UiState) -> controller::UiState {
         power_limits: power_limits_from_slint(state),
         power_limit_drafts: power_drafts_from_slint(state),
         power_limit_snapshot_identity: state.power_limit_snapshot_identity.parse().unwrap_or(0),
-        power_limit_pending: {
-            let mut pending = std::collections::BTreeSet::new();
-            if state.power_limit_pending_mask & 1 != 0 {
-                pending.insert(PowerLimitField::Spl);
-            }
-            if state.power_limit_pending_mask & 2 != 0 {
-                pending.insert(PowerLimitField::Sppt);
-            }
-            if state.power_limit_pending_mask & 4 != 0 {
-                pending.insert(PowerLimitField::Fppt);
-            }
-            if state.power_limit_pending_mask & 8 != 0 {
-                pending.insert(PowerLimitField::CpuTempLimit);
-            }
-            if state.power_limit_pending_mask & 16 != 0 {
-                pending.insert(PowerLimitField::GpuDynamicBoost);
-            }
-            if state.power_limit_pending_mask & 32 != 0 {
-                pending.insert(PowerLimitField::GpuTempTarget);
-            }
-            pending
-        },
+        power_limit_pending: power_limit_fields_from_mask(state.power_limit_pending_mask),
+        power_limit_awaiting_verification: power_limit_fields_from_mask(
+            state.power_limit_verification_mask,
+        ),
         power_limits_stale: state.power_limits_stale,
         power_limits_writable: state.power_limits_writable,
+        power_limit_error: state.power_limit_error,
         power_limits_unavailable_reason: state
             .power_limits_stale
             .then(|| state.power_limits_reason.to_string()),
@@ -677,6 +702,7 @@ fn from_slint(state: &UiState) -> controller::UiState {
         fan_curve_writable: state.fan_curve_writable,
         fan_curve_unavailable_reason: None,
         fan_curve_error: state.fan_curve_error,
+        fan_curve_invalid_draft: fan_curve_invalid_draft_from_slint(state),
         fan_curve_dirty: state.fan_curve_dirty,
         fan_curve_enabled: if state.fan_curve_enabled_known {
             Some(state.fan_curve_enabled)
@@ -1441,6 +1467,8 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             result: Ok(ApplyResult::Applied),
         } => {
             state.power_limit_pending.remove(&field);
+            state.power_limit_awaiting_verification.remove(&field);
+            state.power_limit_error = false;
             tracing::debug!(field = ?field, "power-limit mutation applied; observed state comes from read-back refresh");
         }
         WorkerEvent::PowerLimit {
@@ -1448,6 +1476,8 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             result: Ok(other),
         } => {
             state.power_limit_pending.remove(&field);
+            state.power_limit_awaiting_verification.remove(&field);
+            state.power_limit_error = true;
             tracing::warn!(field = ?field, "power-limit mutation returned non-applied result: {other:?}");
         }
         WorkerEvent::PowerLimit {
@@ -1456,6 +1486,9 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         } => {
             // A write may have reached hardware. Keep the draft and pending marker;
             // only a later authoritative refresh can resolve this unknown outcome.
+            state
+                .power_limit_awaiting_verification
+                .insert(field.clone());
             tracing::warn!(field = ?field, "power-limit mutation outcome unknown; fresh verification required: {message}");
         }
         WorkerEvent::PowerLimit {
@@ -1463,6 +1496,7 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             result: Err(error),
         } => {
             state.power_limit_pending.remove(&field);
+            state.power_limit_error = true;
             tracing::warn!(field = ?field, "power-limit mutation failed without replacing observed state: {error:?}");
         }
         WorkerEvent::ChargeLimitRefresh(result) => apply_charge_limit_refresh(state, result),
@@ -1504,6 +1538,22 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             for field in confirmed {
                 state.power_limit_drafts.remove(&field);
                 state.power_limit_pending.remove(&field);
+                state.power_limit_awaiting_verification.remove(&field);
+            }
+            // A pending field not confirmed by this fresh read is resolved only
+            // when its own mutation ended in an unknown outcome: the fresh
+            // authoritative snapshot then proves the timed-out write did not
+            // land. Definitively failed fields were already unlocked in their
+            // own event arm; fields still mid-flight keep their pending lock.
+            let resolved: Vec<_> = state
+                .power_limit_pending
+                .intersection(&state.power_limit_awaiting_verification)
+                .cloned()
+                .collect();
+            for field in resolved {
+                state.power_limit_pending.remove(&field);
+                state.power_limit_awaiting_verification.remove(&field);
+                state.power_limit_error = true;
             }
         }
         WorkerEvent::PowerLimitsRefresh(Err(e)) => {
@@ -1914,6 +1964,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             if (0..8).contains(&index) {
                 s.fan_curve_temps[index as usize] = value;
                 s.fan_curve_dirty = true;
+                s.fan_curve_invalid_draft = None;
             }
             app.set_ui_state(to_slint(&s));
         });
@@ -1928,6 +1979,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             if (0..8).contains(&index) {
                 s.fan_curve_pwms[index as usize] = value;
                 s.fan_curve_dirty = true;
+                s.fan_curve_invalid_draft = None;
             }
             app.set_ui_state(to_slint(&s));
         });
@@ -1974,6 +2026,43 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 tracing::warn!(
                     "fan-apply rejected: not writable, not dirty, error, or invalid curve"
                 );
+                // AC-022: when the refusal is the draft itself (writable backend,
+                // authoritative curve loaded, but validation fails), surface the
+                // validation failure. Non-validation refusals are button gating.
+                if s.fan_curve_state == controller::FanCurveHwState::Ready
+                    && s.fan_curve_writable
+                    && !s.fan_curve_error
+                    && s.fan_curve_dirty
+                    && s.fan_curve_invalid_draft.is_none()
+                {
+                    let reason = s
+                        .build_fan_curve_points()
+                        .map(|points| {
+                            use orbis_core::fan::{FanCurve, FanCurvePoint, FanId};
+                            let curve = FanCurve {
+                                profile: PerformanceProfile::Silent,
+                                fan: FanId::Cpu,
+                                enabled: None,
+                                points: points
+                                    .temps
+                                    .iter()
+                                    .zip(points.pwms.iter())
+                                    .map(|(t, p)| FanCurvePoint::new(*t, *p))
+                                    .collect(),
+                            };
+                            match curve.validate(8, false) {
+                                Ok(()) => "Черновик не применён: кривая не изменена".to_string(),
+                                Err(e) => format!("Кривая не проходит проверку: {e}"),
+                            }
+                        })
+                        .unwrap_or_else(|| {
+                            "Кривая не проходит проверку: значения вне допустимого диапазона"
+                                .to_string()
+                        });
+                    let mut state = from_slint(&app.get_ui_state());
+                    state.fan_curve_invalid_draft = Some(reason);
+                    app.set_ui_state(to_slint(&state));
+                }
                 return;
             }
             let Some(profile) =

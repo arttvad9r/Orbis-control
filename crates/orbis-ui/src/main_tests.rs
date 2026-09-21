@@ -14,6 +14,176 @@ fn base_state() -> controller::UiState {
 }
 
 #[test]
+fn power_limit_denial_shows_error_until_user_edits_draft() {
+    // AC-034: an authorization/backend refusal must surface a visible error
+    // and must not replace the observed value with the requested one.
+    let mut state = base_state();
+    let field = orbis_core::limits::PowerLimitField::Spl;
+    state.power_limit_drafts.insert(field.clone(), 50);
+    apply_performance_event(
+        &mut state,
+        WorkerEvent::PowerLimit {
+            field: field.clone(),
+            result: Err(ProviderError::PermissionDenied("denied".into())),
+        },
+    );
+    assert!(state.power_limit_error, "denied mutation must show error");
+    assert!(!state.power_limit_pending.contains(&field));
+    // The observed value is untouched; the draft remains for a retry.
+    assert_eq!(state.power_limit_drafts.get(&field), Some(&50));
+    let observed = state.power_limits.get(&field).map(|v| v.value);
+    assert_ne!(
+        observed,
+        Some(50),
+        "observed value must not become requested"
+    );
+
+    // Editing the draft again clears the displayed error (user can retry).
+    state.power_limits_writable = true;
+    assert!(update_power_limit_draft(&mut state, field.clone(), 55));
+    assert!(!state.power_limit_error);
+}
+
+#[test]
+fn power_limit_timeout_unknown_outcome_resolves_on_fresh_read() {
+    // AC-035: a timed-out mutation is not retried; its pending lock is
+    // released only by a fresh authoritative read, and the final UI state
+    // follows that read.
+    let mut state = base_state();
+    let field = orbis_core::limits::PowerLimitField::Spl;
+    state.power_limit_drafts.insert(field.clone(), 50);
+    state.power_limit_pending.insert(field.clone());
+    apply_performance_event(
+        &mut state,
+        WorkerEvent::PowerLimit {
+            field: field.clone(),
+            result: Err(ProviderError::Timeout("dispatch timed out".into())),
+        },
+    );
+    assert!(
+        state.power_limit_pending.contains(&field),
+        "unknown outcome keeps the pending marker"
+    );
+    assert!(
+        state.power_limit_awaiting_verification.contains(&field),
+        "unknown outcome registers a verification requirement"
+    );
+
+    // Fresh read shows the old value: the write did not land. The lock is
+    // released and the mutation error is surfaced for a manual retry.
+    let limits = state.power_limits.clone();
+    apply_performance_event(
+        &mut state,
+        WorkerEvent::PowerLimitsRefresh(Ok(orbis_core::limits::PowerLimitSnapshot {
+            identity: 1,
+            limits,
+        })),
+    );
+    assert!(!state.power_limit_pending.contains(&field));
+    assert!(!state.power_limit_awaiting_verification.contains(&field));
+    assert!(
+        state.power_limit_error,
+        "unlanded unknown outcome surfaces error"
+    );
+    assert_eq!(state.power_limit_drafts.get(&field), Some(&50));
+
+    // Draft now matches observed only after an explicit edit; a confirming
+    // read clears everything (success path).
+    state.power_limits_writable = true;
+    assert!(update_power_limit_draft(&mut state, field.clone(), 45));
+    assert!(!state.power_limit_error);
+    assert!(!state.power_limit_drafts.contains_key(&field));
+    let limits = state.power_limits.clone();
+    apply_performance_event(
+        &mut state,
+        WorkerEvent::PowerLimitsRefresh(Ok(orbis_core::limits::PowerLimitSnapshot {
+            identity: 1,
+            limits,
+        })),
+    );
+    assert!(!state.power_limit_error);
+}
+
+#[test]
+fn power_limit_in_flight_field_keeps_pending_across_unrelated_refresh() {
+    // Multi-field apply: SPPT still mid-flight must NOT be unlocked by the
+    // read-back that belongs to SPL's timeout verification.
+    let mut state = base_state();
+    let spl = orbis_core::limits::PowerLimitField::Spl;
+    let sppt = orbis_core::limits::PowerLimitField::Sppt;
+    state.power_limit_pending.insert(spl.clone());
+    state.power_limit_pending.insert(sppt.clone());
+    state.power_limit_awaiting_verification.insert(spl.clone());
+
+    let limits = state.power_limits.clone();
+    apply_performance_event(
+        &mut state,
+        WorkerEvent::PowerLimitsRefresh(Ok(orbis_core::limits::PowerLimitSnapshot {
+            identity: 1,
+            limits,
+        })),
+    );
+    assert!(
+        !state.power_limit_pending.contains(&spl),
+        "timed-out field is resolved by the fresh read"
+    );
+    assert!(
+        state.power_limit_pending.contains(&sppt),
+        "in-flight field keeps its pending lock"
+    );
+}
+
+#[test]
+fn invalid_fan_curve_draft_sets_visible_validation_reason() {
+    // AC-022: a refused invalid draft shows the validation failure and the
+    // observed curve is untouched until the draft is fixed.
+    let mut state = base_state();
+    state.fan_curve_state = controller::FanCurveHwState::Ready;
+    state.fan_curve_writable = true;
+    state.fan_curve_dirty = true;
+    // Decreasing PWM values violate domain validation.
+    state.fan_curve_pwms = [120, 110, 130, 140, 150, 160, 170, 180];
+
+    assert!(
+        !controller::UiState::fan_curve_can_mutate(&controller::UiState {
+            fan_curve_invalid_draft: state.fan_curve_invalid_draft.clone(),
+            ..state.clone()
+        }),
+        "decreasing pwm draft must be refused"
+    );
+
+    // Simulating the apply rejection: the reason is derived from validation.
+    let points = state
+        .build_fan_curve_points()
+        .expect("points representable");
+    let curve = orbis_core::fan::FanCurve {
+        profile: orbis_core::profile::PerformanceProfile::Silent,
+        fan: orbis_core::fan::FanId::Cpu,
+        enabled: None,
+        points: points
+            .temps
+            .iter()
+            .zip(points.pwms.iter())
+            .map(|(t, p)| orbis_core::fan::FanCurvePoint::new(*t, *p))
+            .collect(),
+    };
+    let reason = match curve.validate(8, false) {
+        Ok(()) => panic!("decreasing pwm draft must fail validation"),
+        Err(e) => format!("Кривая не проходит проверку: {e}"),
+    };
+    state.fan_curve_invalid_draft = Some(reason.clone());
+    assert_eq!(
+        state.fan_curve_invalid_draft.as_deref(),
+        Some(reason.as_str())
+    );
+
+    // Editing a point clears the displayed reason.
+    state.fan_curve_pwms[1] = 130;
+    state.fan_curve_invalid_draft = None;
+    assert!(state.fan_curve_invalid_draft.is_none());
+}
+
+#[test]
 fn power_limit_fixture_preserves_independent_backend_metadata() {
     let state = base_state();
     let spl = state

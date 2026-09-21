@@ -31,7 +31,7 @@ export component AppWindow inherits Window {
 
     in-out property <UiState> ui-state: {
         perf-selected: 1, available-perf-mask: 0, perf-state: PerformanceHwState.Loading, perf-writable: false, perf-unavailable-reason: "",
-        power-limits-ready: false, power-limits-reason: "Лимиты мощности недоступны", power-limit-dirty-mask: 0, power-limit-snapshot-identity: "",
+        power-limits-ready: false, power-limits-reason: "Лимиты мощности недоступны", power-limit-error: false, power-limit-dirty-mask: 0, power-limit-snapshot-identity: "",
         spl-value: 0, spl-min: 0, spl-max: 0, spl-step: 1, spl-unit: "", spl-default: "", spl-draft: 0,
         sppt-value: 0, sppt-min: 0, sppt-max: 0, sppt-step: 1, sppt-unit: "", sppt-default: "", sppt-draft: 0,
         fppt-value: 0, fppt-min: 0, fppt-max: 0, fppt-step: 1, fppt-unit: "", fppt-default: "", fppt-draft: 0,
@@ -46,7 +46,7 @@ export component AppWindow inherits Window {
         cpu-temp: "—", gpu-temp: "—", igpu-temp: "—", igpu-power: "—", cpu-fan-rpm: "—", gpu-fan-rpm: "—",
         battery-percent: "—", power-ac-mw: "—", battery-health: "—", battery-cycles: "—",
         battery-status: "", ac-online: "—", gpu-power: "—", telemetry-fresh: false, version: "0.1.0", mock-profile: "zephyrus-full",
-        fan-curve-state: FanCurveHwState.Loading, fan-curve-writable: false, fan-curve-unavailable-reason: "", fan-curve-error: false, fan-curve-dirty: false,
+        fan-curve-state: FanCurveHwState.Loading, fan-curve-writable: false, fan-curve-unavailable-reason: "", fan-curve-error: false, fan-curve-invalid-draft: "", fan-curve-dirty: false,
         fan-curve-enabled-known: false, fan-curve-enabled: false,
         fan-selected: 0, fan-profile-selected: 0,
         fan-temp-0: 0, fan-temp-1: 0, fan-temp-2: 0, fan-temp-3: 0, fan-temp-4: 0, fan-temp-5: 0, fan-temp-6: 0, fan-temp-7: 0,

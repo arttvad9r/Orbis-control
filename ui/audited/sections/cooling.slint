@@ -30,6 +30,7 @@ export component CoolingSection inherits Rectangle {
         if (root.mutation-safety-blocked) { return root.policy-status; }
         if (root.ui-state.fan-curve-state == FanCurveHwState.Loading) { return "Чтение кривой…"; }
         if (root.ui-state.fan-curve-state == FanCurveHwState.Unavailable) { return root.ui-state.fan-curve-unavailable-reason != "" ? root.ui-state.fan-curve-unavailable-reason : "Кривая недоступна"; }
+        if (root.ui-state.fan-curve-invalid-draft != "") { return root.ui-state.fan-curve-invalid-draft; }
         if (root.ui-state.fan-curve-error) { return "Операция с кривой завершилась ошибкой"; }
         if (root.factory-reset-pending) { return "Заводские значения выбраны · ещё не применены"; }
         if (!root.ui-state.fan-curve-writable) { return "Только чтение"; }
@@ -43,7 +44,7 @@ export component CoolingSection inherits Rectangle {
     }
 
     function status-color() -> color {
-        if (root.ui-state.fan-curve-error) { return Palette.error; }
+        if (root.ui-state.fan-curve-error || root.ui-state.fan-curve-invalid-draft != "") { return Palette.error; }
         if (root.mutation-safety-blocked || root.factory-reset-pending || root.ui-state.fan-curve-dirty || !root.ui-state.fan-curve-enabled-known) { return Palette.warning; }
         return root.ui-state.fan-curve-enabled ? Palette.success : Palette.text-secondary;
     }
