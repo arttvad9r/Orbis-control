@@ -422,3 +422,108 @@ scripts/verify full
 7. просмотреть полный diff ветки относительно `main`;
 8. проверить отсутствие случайных generated/debug files;
 9. перечислить всё, что не получило real-hardware validation.
+
+---
+
+## Статус верификации этапов (verification log)
+
+Проверки выполняются против production source, executable tests и
+`ACCEPTANCE.md`; real-hardware validation отдельно не проводилась и требует
+явного разрешения пользователя. Лог обновляется по факту пройденной проверки,
+не по плану работ.
+
+### Этап 1 — Fan curves (AC-020, AC-021, AC-022, AC-023, AC-024): verified
+
+- [x] AC-020 — CPU curve: Dirty только на draft, Apply = typed mutation +
+      read-back, Dirty снимается только после успеха
+      (`controller.rs` build_fan_curve_points/load_fan_curve/fan_curve_can_mutate;
+      `main_tests.rs` invalid_fan_curve_draft_sets_visible_validation_reason;
+      `session_fan_curve_p2p.rs` — profile-specific sentinel read, CPU/GPU
+      isolation, error-class preservation).
+- [x] AC-021 — GPU curve редактируется независимо, CPU не смешивается
+      (`session_fan_curve_p2p.rs` session1_fan_curve_cpu_gpu_not_mixed;
+      `controller.rs` fan_id_from_index/fan_curve_fan_id_mapping).
+- [x] AC-022 — невалидный draft: mutation не отправляется, причина видна,
+      observed не меняется, draft правится
+      (`main_tests.rs` invalid_fan_curve_draft_sets_visible_validation_reason,
+      power_limit… — аналогичные fan gating:
+      fan_curve_writable_matches_write_operation_status).
+- [x] AC-023 — Dirty при смене fan/profile: явный Confirm/Discard
+      (`controller.rs` fan_selection_transition/discard_fan_selection;
+      `main_tests.rs` asserting FanSelectionTransition::Confirm/Refresh и
+      discard; `main.rs` wire_callbacks on_fan_*).
+- [x] AC-024 — factory reset: доступен только при доказанной capability
+      (`main.rs` factory_reset_available из RegistryChange snapshot, FeatureId
+      FanCurves + write-status evidence; `fan_defaults.rs` — vendor-curve
+      read-back до ответа; `main_tests.rs` applied/successful/accepted,
+      factory_reset_mutation_called_exactly_once, no_retry_on_timeout,
+      no_rollback).
+
+### Этап 2 — Power/thermal read-only slice (AC-002, AC-003, AC-030, AC-033): verified
+
+- [x] AC-030 — три отдельных поля SPL/SPPT/FPPT с metadata value/unit/min/max/
+      step, без объединения в фиктивное значение
+      (`main_tests.rs` power_limit_fixture_preserves_independent_backend_metadata,
+      advanced_power_limits_render_authoritative_metadata_and_pending_bits,
+      production_initial_power_limits_are_unknown_not_fake_defaults).
+- [x] AC-033 — slider bounds привязаны к authoritative metadata свежего
+      snapshot, hard-coded ограничений нет
+      (`worker_runtime.rs` SetPowerLimit: fresh snapshot + identity check;
+      `session-client` set_power_limit_from_snapshot: min/max/step validation;
+      `main.rs` update_power_limit_draft + stale-snapshot guard).
+- [x] AC-002/AC-003 — read-only/unsupported честно разделены, запись не
+      предлагается (composition.rs tests
+      power_limit_read_only_and_unsupported_are_distinct,
+      power_limit_read_errors_preserve_typed_status_and_never_advertise_write;
+      `session_server_p2p.rs`
+      power_limits_maps_unreadable_current_value_to_not_supported_without_write).
+
+### Этап 3 — SPL/SPPT/FPPT mutation (AC-031, AC-032, AC-034, AC-035): verified
+
+- [x] AC-031 — read → validate (authoritative metadata) → typed Hardware1
+      mutation → read-back; Applied только при подтверждённом равенстве
+      (`session-client` set_power_limit_from_snapshot;
+      `hardwared/tests/power_limits_p2p.rs`
+      private_hardware1_success_and_readback_mismatch).
+- [x] AC-032 — значение вне диапазона отклоняется до mutation, на всех
+      уровнях (`power_limits_p2p.rs`
+      invalid_range_is_rejected_before_authorization_or_backend;
+      `main_tests.rs` power_limit_slider_change_is_dirty_draft_only_and_range_rejected).
+- [x] AC-034 — polkit denial: AccessDenied до backend, UI показывает
+      authorization error и не подменяет observed на requested
+      (`power_limits_p2p.rs` authorization_failure_timeout_and_unsupported_are_honest;
+      `main_tests.rs` power_limit_denial_shows_error_until_user_edits_draft).
+- [x] AC-035 — timeout/unknown outcome: без авторетрая, Unknown/Pending
+      verification, fresh read определяет итог
+      (`main_tests.rs` power_limit_timeout_unknown_outcome_resolves_on_fresh_read,
+      power_limit_in_flight_field_keeps_pending_across_unrelated_refresh;
+      `worker_runtime.rs` — read-back после Ok/Timeout, без retry;
+      `factory_reset_no_retry_on_timeout` — тот же принцип для fan reset).
+
+### Этап 0 — Performance profiles (AC-010, AC-011): verified
+
+- [x] AC-010 — typed mutation + authoritative read-back; UI обновляется
+      только подтверждённым observed state; mismatch/unconfirmed не
+      изображается как Applied
+      (`orbis-application` set_performance/recover_unknown_performance;
+      `main_tests.rs` authoritative_performance_result_updates_ui,
+      performance_unconfirmed_error_preserves_ui,
+      performance_click_guard_*).
+- [x] AC-011 — выбор уже активного профиля не создаёт ложного Pending:
+      click guard не ставит оптимистический pending, no-op outcome
+      подтверждает observed Balanced без побочных изменений состояния
+      (`main_tests.rs`
+      selecting_already_observed_profile_stays_balanced_without_false_pending —
+      добавлен в ходе этой верификации).
+
+### Сводка проверок
+
+- `cargo test --workspace` до изменений: 1488 passed / 0 failed / 0 ignored
+  (49 test suites).
+- Добавлен 1 отсутствовавший тест (AC-011 UI no-op/pending guard); повторный
+  `cargo test --workspace`: 1489 passed / 0 failed / 0 ignored (exit 0).
+- `cargo fmt --all` — чисто; `cargo clippy -p orbis-ui --all-targets` — чисто;
+  `scripts/verify task` (fmt + check + tests + clippy `-D warnings`) — прогон
+  зафиксирован в логе верификации.
+- Real-hardware validation: не выполнялась (требуется отдельное разрешение);
+  все проверки выше — mocked/private-bus, без real hardware mutation.

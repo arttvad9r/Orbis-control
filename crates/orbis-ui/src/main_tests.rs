@@ -511,6 +511,37 @@ fn authoritative_performance_result_updates_ui() {
 }
 
 #[test]
+fn selecting_already_observed_profile_stays_balanced_without_false_pending() {
+    // AC-011: Balanced is already the observed profile. Selecting Balanced must
+    // not fabricate a pending/error state, and the authoritative outcome must
+    // confirm the same observed state (backend no-op contract).
+    let mut s = base_state();
+    assert_eq!(s.perf_selected, 1);
+    assert!(performance_click_allowed(&s, 1));
+    let before = s.clone();
+
+    let outcome = PerformanceCommandOutcome {
+        result: ApplyResult::Applied,
+        state: orbis_application::PerformanceState {
+            current: PerformanceProfile::Balanced,
+            available: vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo,
+            ],
+        },
+    };
+    apply_performance_event(&mut s, WorkerEvent::Performance(Ok(outcome)));
+
+    assert_eq!(s.perf_selected, 1, "observed profile must remain Balanced");
+    assert_eq!(s.available_perf_mask, 0b111);
+    assert_eq!(
+        s, before,
+        "no-op selection must not fabricate any state change"
+    );
+}
+
+#[test]
 fn performance_result_preserves_other_sections() {
     let mut s = base_state();
     s.gpu_selected = 3;
