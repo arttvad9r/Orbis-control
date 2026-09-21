@@ -1,0 +1,2 @@
+51ea5d78f6c94ff88ca5d2111919ccded966b6a2
+    Finished `release` profile [optimized] target(s) in 0.32s

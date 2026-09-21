@@ -1,0 +1,3 @@
+51ea5d78f6c94ff88ca5d2111919ccded966b6a2
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.26s
+verification passed
