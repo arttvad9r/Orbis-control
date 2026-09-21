@@ -1121,6 +1121,73 @@ fn charge_limit_unconfirmed_error_preserves_ui() {
 // Fan Factory Reset Tests
 // ============================================================================
 
+/// Registry snapshot with FanCurves read/write operation statuses.
+fn snapshot_with_fan_curves(
+    read: orbis_core::capability::CapabilityStatus,
+    write: orbis_core::capability::CapabilityStatus,
+) -> std::sync::Arc<orbis_capabilities::CapabilityRegistrySnapshot> {
+    use orbis_core::capability::{Capability, CapabilityOperations, OperationCapability};
+    let mut builder =
+        orbis_capabilities::CapabilityRegistryBuilder::new(1, std::time::SystemTime::now());
+    builder
+        .add(
+            orbis_core::FeatureId::FanCurves,
+            Capability::new(orbis_core::capability::CapabilityStatus::Supported).with_operations(
+                CapabilityOperations {
+                    read: OperationCapability::new(read),
+                    write: OperationCapability::new(write),
+                },
+            ),
+        )
+        .expect("capability must validate");
+    std::sync::Arc::new(builder.build().expect("snapshot must build"))
+}
+
+#[test]
+fn factory_reset_available_requires_proven_read_and_write_capability() {
+    // AC-024: reset only with proven capability; anything less disables it.
+    use orbis_core::capability::CapabilityStatus::*;
+
+    // Proven read + write => available (both proven-operation statuses).
+    for status in [Supported, SupportedWithRequirement] {
+        assert!(
+            controller::fan_factory_reset_available(&snapshot_with_fan_curves(status, status)),
+            "read+write {status:?} must allow factory reset"
+        );
+    }
+
+    // Any unproven read or write status => unavailable.
+    let unproven = [
+        ReadOnly,
+        TemporarilyUnavailable,
+        Unsupported,
+        BackendMissing,
+        PermissionDenied,
+        Experimental,
+        Conflicted,
+        Unknown,
+    ];
+    for status in unproven {
+        assert!(
+            !controller::fan_factory_reset_available(&snapshot_with_fan_curves(status, Supported)),
+            "read={status:?} must not allow factory reset"
+        );
+        assert!(
+            !controller::fan_factory_reset_available(&snapshot_with_fan_curves(Supported, status)),
+            "write={status:?} must not allow factory reset"
+        );
+    }
+}
+
+#[test]
+fn factory_reset_unavailable_when_capability_absent_from_registry() {
+    // AC-024: no FanCurves evidence at all => action unavailable, not assumed.
+    let builder =
+        orbis_capabilities::CapabilityRegistryBuilder::new(1, std::time::SystemTime::now());
+    let snapshot = std::sync::Arc::new(builder.build().expect("snapshot must build"));
+    assert!(!controller::fan_factory_reset_available(&snapshot));
+}
+
 fn accepted_factory_reset_outcome(profile: AsusdFanProfile) -> WorkerEvent {
     WorkerEvent::FanCurveDefaults {
         profile,

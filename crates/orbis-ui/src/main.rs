@@ -1650,14 +1650,9 @@ fn handle_worker_event(
 
     let refresh_quick_controls = matches!(&event, WorkerEvent::TelemetryRefresh(_));
     let factory_reset_available = match &event {
-        WorkerEvent::RegistryChange(Ok((_generation, snapshot))) => Some(
-            snapshot
-                .capability(orbis_core::FeatureId::FanCurves)
-                .is_some_and(|cap| {
-                    cap.operations.read.status == orbis_core::CapabilityStatus::Supported
-                        && cap.operations.write.status == orbis_core::CapabilityStatus::Supported
-                }),
-        ),
+        WorkerEvent::RegistryChange(Ok((_generation, snapshot))) => {
+            Some(controller::fan_factory_reset_available(snapshot))
+        }
         _ => None,
     };
     if let WorkerEvent::RegistryChange(Ok((_generation, snapshot))) = &event {

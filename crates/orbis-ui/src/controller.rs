@@ -63,6 +63,23 @@ pub fn write_allows_mutation(status: CapabilityStatus) -> bool {
     )
 }
 
+/// AC-024: доказан ли factory reset для fan curves в registry snapshot.
+///
+/// Reset требует доказанного read **и** write для `FeatureId::FanCurves`;
+/// отсутствие capability или любой недоказанный статус скрывает/блокирует
+/// действие. Отделено от `fan_curve_writable` (editor mutation gate): это
+/// отдельный gate для кнопки "Заводские значения".
+pub fn fan_factory_reset_available(
+    snapshot: &orbis_capabilities::CapabilityRegistrySnapshot,
+) -> bool {
+    snapshot
+        .capability(orbis_core::FeatureId::FanCurves)
+        .is_some_and(|cap| {
+            write_allows_mutation(cap.operations.read.status)
+                && write_allows_mutation(cap.operations.write.status)
+        })
+}
+
 /// UI gate for the evidence-only ASUS platform-profile model.
 ///
 /// Available choices and a current read never enable this control; only a
