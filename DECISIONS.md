@@ -98,3 +98,39 @@ Controls появляются и становятся writable на основа
 Почему:
 
 Software path можно реализовывать и проверять через unit, fixture, private-D-Bus и P2P integration tests. Отдельное разрешение требуется для утверждения, что конкретная mutation live-validated на физическом устройстве.
+
+---
+
+## D-008: Разрешение на bounded live-hardware round-trip validation
+
+Решение:
+
+Пользователь заранее разрешил bounded real-hardware round-trip валидацию на целевой машине (ASUS TUF Gaming A17) для финального релизного гейта v0.1. Условия: каждое изменённое значение восстанавливается после теста; валидация выполняется только для включённых mutation paths на release candidate.
+
+Почему:
+
+Целевая машина доступна, `asusd` активен. Без live-валидации релизная претензия «controls work end to end» недоказуема.
+
+---
+
+## D-009: Цель итерации — первый релиз v0.1
+
+Решение:
+
+Цель подтверждена: installable Arch-пакет (`packaging/arch/PKGBUILD`), installed smoke на целевой машине, bump версии и первый релиз после прохождения ACCEPTANCE.md. Draft PR #130 (`agent/finish-v01`) закрыт как устаревший — работа продолжается в ветке `implementation/current-plan`.
+
+Почему:
+
+Совпадает с finish target в `FINISH_PLAN.md`; устаревший PR создавал вторую конкурирующую линию работ.
+
+---
+
+## D-010: Remote-политика текущей итерации
+
+Решение:
+
+Ветка `implementation/current-plan` пушится в origin для сохранности работы. `main` не переписывается и не продвигается вперёд до готовности release candidate.
+
+Почему:
+
+Защищает локальные коммиты (power-limit pipeline и docs) от потери, сохраняя `main` стабильным базовым уровнем.
