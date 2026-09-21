@@ -1,0 +1,192 @@
+# Orbis Control — acceptance contract (v0.1 iteration)
+#
+# Materialized from SPEC.md / ACCEPTANCE.md / IMPLEMENTATION_PLAN.md / DECISIONS.md
+# on branch implementation/current-plan (06fbf16).
+version: 1
+slug: orbis-v01
+product: Orbis Control
+discovery_status: APPROVED
+platform: DESKTOP
+project_mode: EXISTING
+delivery_target: COMPLETE_SMALL_PRODUCT
+locale: ru-RU
+reference_authority: INSPIRATION
+placeholder_policy: FORBIDDEN
+asset_source: PROJECT_OWN
+source_boundary:
+  repo: https://github.com/arttvad9r/Orbis-control
+  local_checkout: /home/artt/Orbis-control-implementation
+
+requirements:
+  - id: REQ-LAUNCH
+    statement: Установленный Orbis Control запускается на Arch Linux без root и показывает реальное состояние железа.
+  - id: REQ-HONESTY
+    statement: Неподдерживаемые и read-only capability отображаются честно, без dead-контролов и фикстурных значений.
+  - id: REQ-PROFILE
+    statement: Performance profile читается и переключается через реальный backend с read-back.
+  - id: REQ-FAN
+    statement: CPU и GPU fan curves редактируются и применяются независимо, с Dirty state, валидацией и read-back.
+  - id: REQ-POWER
+    statement: SPL/SPPT/FPPT читаются и применяются через typed privileged path с authoritative диапазонами и read-back.
+  - id: REQ-BOOST
+    statement: NVIDIA Dynamic Boost и применимые temperature/boost контролы работают по тому же typed-паттерну.
+  - id: REQ-GPU-MODE
+    statement: GPU mode / MUX flow честно разводит current, queued и reboot-required состояния.
+  - id: REQ-NO-RESTORE
+    statement: Hardware state не восстанавливается из preferences без evidence backend.
+  - id: REQ-BACKEND-GONE
+    statement: Отсутствие или исчезновение backend обрабатывается как honest Unavailable state.
+  - id: REQ-VISUAL
+    statement: Интерфейс без visual дефектов на 980×680 и 1200×800, в dark и light темах, во всех обязательных состояниях.
+  - id: REQ-REGRESSION
+    statement: Уже production-ready функции (profile, charge limit) не регрессируют.
+  - id: REQ-PACKAGE
+    statement: Arch-пакет устанавливает binaries, units, D-Bus policy, polkit actions и desktop-ассеты в package-owned locations.
+  - id: REQ-VERIFY
+    statement: Верификация сообщает фактические команды и результаты; failing check не помечается как success.
+
+scenarios:
+  - id: SC-LAUNCH
+    name: launch_installed_no_root
+    requirement_ids: [REQ-LAUNCH]
+    actions: [install_release_candidate, launch_orbis_control_as_user]
+    expected_observable: GUI запускается от обычного пользователя; sections переходят из Loading в реальные состояния; services активны.
+  - id: SC-UNSUPPORTED
+    name: unsupported_capability_honest
+    requirement_ids: [REQ-HONESTY]
+    actions: [open_page_with_unsupported_capability]
+    expected_observable: Контрол отсутствует или явно помечен Unsupported; нет выглядящего рабочим dead-контрола.
+  - id: SC-READONLY
+    name: readonly_capability_honest
+    requirement_ids: [REQ-HONESTY]
+    actions: [open_page_with_readonly_capability]
+    expected_observable: Значения реальны; мутация недоступна с объяснением, а не молча.
+  - id: SC-PROFILE-SET
+    name: profile_switch_roundtrip
+    requirement_ids: [REQ-PROFILE]
+    actions: [open_performance, select_supported_profile]
+    expected_observable: Профиль применён; read-back подтверждает; повторный выбор активного профиля ничего не ломает.
+  - id: SC-FAN-CPU
+    name: cpu_fan_curve_edit_apply
+    requirement_ids: [REQ-FAN]
+    actions: [open_cooling, edit_cpu_curve_point, click_apply]
+    expected_observable: До Apply железо не меняется и виден Dirty; после Apply read-back совпадает; невалидная кривая отклоняется с ошибкой.
+  - id: SC-FAN-GPU
+    name: gpu_fan_curve_edit_apply
+    requirement_ids: [REQ-FAN]
+    actions: [open_cooling, edit_gpu_curve_point, click_apply]
+    expected_observable: То же, что SC-FAN-CPU, независимо для GPU fan; несохранённая curve при смене fan/profile сбрасывается с предупреждением.
+  - id: SC-FAN-RESET
+    name: fan_factory_reset_gated
+    requirement_ids: [REQ-FAN]
+    actions: [open_cooling, attempt_factory_reset]
+    expected_observable: Factory reset доступен только при доказанной capability; иначе контрол скрыт/отключён.
+  - id: SC-POWER-VIEW
+    name: power_limits_display
+    requirement_ids: [REQ-POWER]
+    actions: [open_performance, observe_power_limits]
+    expected_observable: Видны реальные SPL/SPPT/FPPT с min/max/step из backend; изменение диапазона backend отражается.
+  - id: SC-POWER-APPLY
+    name: power_limit_apply_roundtrip
+    requirement_ids: [REQ-POWER]
+    actions: [open_performance, set_spl_in_range, click_apply_limits]
+    expected_observable: Вне диапазона отклоняется; применение идёт через Hardware1; read-back подтверждает; отказ polkit и неизвестный исход показываются пользователю.
+  - id: SC-BOOST
+    name: dynamic_boost_roundtrip
+    requirement_ids: [REQ-BOOST]
+    actions: [open_performance, set_dynamic_boost, click_apply]
+    expected_observable: Dynamic Boost применяетcя по typed-паттерну с read-back; CPU Boost без доказанного backend показан Unsupported.
+  - id: SC-GPU-MODE
+    name: gpu_mode_reboot_queue
+    requirement_ids: [REQ-GPU-MODE]
+    actions: [open_graphics, select_ultimate]
+    expected_observable: Ultimate не показан как Applied до фактического перехода; queued/reboot-required разведены; без изменения — honest no-op.
+  - id: SC-GPU-PARTIAL
+    name: gpu_partial_capability
+    requirement_ids: [REQ-GPU-MODE]
+    actions: [open_graphics, observe_unavailable_parts]
+    expected_observable: Частичная capability показывает независимые Unavailable states, а не общий fake.
+  - id: SC-NO-RESTORE
+    name: no_hardware_restore_from_prefs
+    requirement_ids: [REQ-NO-RESTORE]
+    actions: [change_control, restart_app]
+    expected_observable: После рестарта UI не молча возвращает прошлое hardware значение; восстановление только при evidence.
+  - id: SC-BACKEND-GONE
+    name: backend_unavailable_states
+    requirement_ids: [REQ-BACKEND-GONE]
+    actions: [stop_sessiond_or_hardwared, launch_or_observe]
+    expected_observable: Запуск без backend даёт honest Unavailable, не краш и не фикстуры; пропажа backend в рантайме ресинхронизирует UI.
+  - id: SC-VISUAL-980
+    name: minimum_window_layout
+    requirement_ids: [REQ-VISUAL]
+    actions: [set_window_980x680, open_each_page]
+    expected_observable: На Dashboard, Performance, Cooling, Graphics нет overlap/clipping/наездов текста и нет горизонтального скролла основного контента.
+  - id: SC-VISUAL-STATES
+    name: visual_state_regression
+    requirement_ids: [REQ-VISUAL]
+    actions: [cycle_dark_light, drive_normal_dirty_pending_error_states]
+    expected_observable: Все обязательные состояния читаемы в обеих темах; геометрия чистая на обоих размерах окна.
+  - id: SC-REGRESSION
+    name: existing_features_regression
+    requirement_ids: [REQ-REGRESSION]
+    actions: [switch_profile, set_charge_limit, rerun_verify_task]
+    expected_observable: Profile и charge limit продолжают работать с read-back; scripts/verify task зелёный.
+  - id: SC-PACKAGE
+    name: arch_install_smoke
+    requirement_ids: [REQ-PACKAGE]
+    actions: [build_pkgbuild, pacman_install, launch_installed_app, verify_services]
+    expected_observable: Пакет ставится; binaries/units/policy/polkit/desktop на package-owned путях; GUI и services работают из установки; namcap без существенных замечаний.
+  - id: SC-VERIFY
+    name: verification_gate
+    requirement_ids: [REQ-VERIFY]
+    actions: [run_verify_full, report_results]
+    expected_observable: Сообщены фактические команды и результаты; недоступное проверено явно; каждый write path имеет validation и read-back.
+
+workstreams:
+  - id: WS-CORE
+    statement: Backend flow — providers, sessiond, hardwared, Hardware1 mutation paths, read-back semantics.
+  - id: WS-UI
+    statement: Audited Slint UI — pages, components, visual states, layout at 980x680 and 1200x800.
+  - id: WS-QA
+    statement: Independent QA — interaction inventory, visual states, regression, honest-capability audit.
+
+acceptance:
+  - id: AC-LAUNCH
+    requirement_ids: [REQ-LAUNCH]
+    scenario_ids: [SC-LAUNCH]
+  - id: AC-HONESTY
+    requirement_ids: [REQ-HONESTY]
+    scenario_ids: [SC-UNSUPPORTED, SC-READONLY]
+  - id: AC-PROFILE
+    requirement_ids: [REQ-PROFILE]
+    scenario_ids: [SC-PROFILE-SET]
+  - id: AC-FAN
+    requirement_ids: [REQ-FAN]
+    scenario_ids: [SC-FAN-CPU, SC-FAN-GPU, SC-FAN-RESET]
+  - id: AC-POWER
+    requirement_ids: [REQ-POWER]
+    scenario_ids: [SC-POWER-VIEW, SC-POWER-APPLY]
+  - id: AC-BOOST
+    requirement_ids: [REQ-BOOST]
+    scenario_ids: [SC-BOOST]
+  - id: AC-GPU-MODE
+    requirement_ids: [REQ-GPU-MODE]
+    scenario_ids: [SC-GPU-MODE, SC-GPU-PARTIAL]
+  - id: AC-NO-RESTORE
+    requirement_ids: [REQ-NO-RESTORE]
+    scenario_ids: [SC-NO-RESTORE]
+  - id: AC-BACKEND-GONE
+    requirement_ids: [REQ-BACKEND-GONE]
+    scenario_ids: [SC-BACKEND-GONE]
+  - id: AC-VISUAL
+    requirement_ids: [REQ-VISUAL]
+    scenario_ids: [SC-VISUAL-980, SC-VISUAL-STATES]
+  - id: AC-REGRESSION
+    requirement_ids: [REQ-REGRESSION]
+    scenario_ids: [SC-REGRESSION]
+  - id: AC-PACKAGE
+    requirement_ids: [REQ-PACKAGE]
+    scenario_ids: [SC-PACKAGE]
+  - id: AC-VERIFY
+    requirement_ids: [REQ-VERIFY]
+    scenario_ids: [SC-VERIFY]
