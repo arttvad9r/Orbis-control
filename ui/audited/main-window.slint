@@ -18,10 +18,11 @@ import { SettingsSection } from "sections/settings.slint";
 import { AboutSection } from "sections/about.slint";
 
 export component AppWindow inherits Window {
-    preferred-width: 1240px;
-    preferred-height: 820px;
-    min-width: 1024px;
-    min-height: 700px;
+    // Window size contract (user decision): 980x680 minimum, 1200x800 comfort.
+    preferred-width: 1200px;
+    preferred-height: 800px;
+    min-width: 980px;
+    min-height: 680px;
     no-frame: true;
     background: transparent;
     title: "Orbis Control";
