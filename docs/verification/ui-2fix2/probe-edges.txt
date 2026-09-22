@@ -1,0 +1,45 @@
+--- target/ui-2fix2/after/perf-ready-980x680-dark.png (980x680) page-bg=(23, 24, 28)
+    card bands: [(120, 295, 176), (312, 627, 316)]
+      card1 y=[120,295] h=176 x=[229,951] left-inset=7px right-margin=28px
+      card2 y=[312,627] h=316 x=[229,951] left-inset=7px right-margin=28px
+      gap between card1 and card2 = 16px y=[296,311]
+--- target/ui-2fix2/after/perf-notready-980x680-dark.png (980x680) page-bg=(23, 24, 28)
+    card bands: [(120, 298, 179), (315, 368, 54)]
+      card1 y=[120,298] h=179 x=[229,951] left-inset=7px right-margin=28px
+      card2 y=[315,368] h=54 x=[229,951] left-inset=7px right-margin=28px
+      gap between card1 and card2 = 16px y=[299,314]
+--- target/ui-2fix2/after/perf-ready-980x680-light.png (980x680) page-bg=(247, 248, 250)
+    card bands: [(120, 120, 1), (170, 170, 1), (253, 253, 1), (295, 295, 1), (312, 312, 1), (384, 384, 1), (415, 415, 1), (627, 627, 1)]
+      card1 y=[120,120] h=1 x=[229,942] left-inset=7px right-margin=37px
+      card2 y=[170,170] h=1 x=[229,951] left-inset=7px right-margin=28px
+      card3 y=[253,253] h=1 x=[229,951] left-inset=7px right-margin=28px
+      card4 y=[295,295] h=1 x=[229,942] left-inset=7px right-margin=37px
+      card5 y=[312,312] h=1 x=[229,942] left-inset=7px right-margin=37px
+      card6 y=[384,384] h=1 x=[229,951] left-inset=7px right-margin=28px
+      card7 y=[415,415] h=1 x=[229,951] left-inset=7px right-margin=28px
+      card8 y=[627,627] h=1 x=[229,942] left-inset=7px right-margin=37px
+      gap between card1 and card2 = 49px y=[121,169]
+      gap between card2 and card3 = 82px y=[171,252]
+      gap between card3 and card4 = 41px y=[254,294]
+      gap between card4 and card5 = 16px y=[296,311]
+      gap between card5 and card6 = 71px y=[313,383]
+      gap between card6 and card7 = 30px y=[385,414]
+      gap between card7 and card8 = 211px y=[416,626]
+--- target/ui-2fix2/after/perf-notready-980x680-light.png (980x680) page-bg=(247, 248, 250)
+    card bands: [(120, 120, 1), (170, 170, 1), (253, 253, 1), (298, 298, 1), (315, 315, 1), (368, 368, 1)]
+      card1 y=[120,120] h=1 x=[229,942] left-inset=7px right-margin=37px
+      card2 y=[170,170] h=1 x=[229,951] left-inset=7px right-margin=28px
+      card3 y=[253,253] h=1 x=[229,951] left-inset=7px right-margin=28px
+      card4 y=[298,298] h=1 x=[229,942] left-inset=7px right-margin=37px
+      card5 y=[315,315] h=1 x=[229,942] left-inset=7px right-margin=37px
+      card6 y=[368,368] h=1 x=[229,942] left-inset=7px right-margin=37px
+      gap between card1 and card2 = 49px y=[121,169]
+      gap between card2 and card3 = 82px y=[171,252]
+      gap between card3 and card4 = 44px y=[254,297]
+      gap between card4 and card5 = 16px y=[299,314]
+      gap between card5 and card6 = 52px y=[316,367]
+--- target/ui-2fix2/live/live-performance-start-980x680.png (980x680) page-bg=(23, 24, 28)
+    card bands: [(120, 299, 180), (315, 369, 55)]
+      card1 y=[120,299] h=180 x=[229,951] left-inset=7px right-margin=28px
+      card2 y=[315,369] h=55 x=[229,951] left-inset=7px right-margin=28px
+      gap between card1 and card2 = 15px y=[300,314]

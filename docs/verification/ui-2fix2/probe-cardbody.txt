@@ -1,0 +1,14 @@
+--- target/ui-2fix2/after/perf-ready-980x680-dark.png card y=[312,627] card-bg=(35, 37, 41)
+    top-5 interior colours: [((35, 37, 41), 54792), ((32, 34, 38), 6339), ((51, 54, 61), 1012), ((77, 141, 255), 882), ((241, 242, 244), 408)]
+    content blocks (ink, >=6px separation) = 11
+      block1: y=[334,347] h=14
+      block2: y=[362,373] h=12
+      block3: y=[395,406] h=12
+      block4: y=[429,437] h=9
+      block5: y=[450,463] h=14
+      block6: y=[478,493] h=16
+      block7: y=[506,513] h=8
+      block8: y=[527,538] h=12
+      block9: y=[548,561] h=14
+      block10: y=[576,591] h=16
+      block11: y=[604,611] h=8

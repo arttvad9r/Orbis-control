@@ -1,0 +1,10 @@
+--- /home/artt/.hermes/profiles/qa/cache/scratch/qa-t5b9d96c6/shots/c5ca-performance-reselect.png (980x680) page-bg=(23, 24, 28)
+    card bands: [(120, 297, 178), (471, 524, 54)]
+      card1 y=[120,297] h=178 x=[229,951] left-inset=7px right-margin=28px
+      card2 y=[471,524] h=54 x=[229,951] left-inset=7px right-margin=28px
+      gap between card1 and card2 = 173px y=[298,470]
+--- target/ui-2fix2/live/live-performance-start-980x680.png (980x680) page-bg=(23, 24, 28)
+    card bands: [(120, 299, 180), (315, 369, 55)]
+      card1 y=[120,299] h=180 x=[229,951] left-inset=7px right-margin=28px
+      card2 y=[315,369] h=55 x=[229,951] left-inset=7px right-margin=28px
+      gap between card1 and card2 = 15px y=[300,314]
