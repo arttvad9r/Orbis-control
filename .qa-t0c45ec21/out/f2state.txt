@@ -1,0 +1,30 @@
+### 1. state-scenario collapse checks (renders that must NOT be identical)
+  merged normal vs merged UNSUPPORTED (perf)               DIFFER n=52854 frac=0.079313
+  merged normal-dark vs merged LIGHT (perf)                DIFFER n=666368 frac=0.999952
+  baseline normal vs baseline unsupported (perf)           DIFFER n=52854 frac=0.079313
+  baseline performance normal vs dirty                     IDENTICAL
+  baseline performance normal vs error                     IDENTICAL
+  baseline performance normal vs pending                   IDENTICAL
+  p980-performance (pre-fix ctrl) vs c5ca-performance-reselect (verdict set) DIFFER n=9589 frac=0.014389
+  c5ca-perf vs c5ca-dashboard-early                        DIFFER n=316 frac=0.000474
+
+### 2. content-area row diff: c5ca-performance-reselect vs references
+  vs baseline/performance-980x680-dark (PRE-fix tree, not-ready)
+        content diff n=28663 frac=0.055172 y=[0,679] x=[216,979]
+        changed bands (y0,y1,npx): [(0, 11, 42), (17, 26, 113), (61, 82, 2442), (89, 102, 2576), (114, 131, 81), (142, 155, 1395), (170, 253, 6705), (268, 280, 3123), (285, 298, 2110), (469, 483, 2805), (491, 506, 4429), (511, 525, 2804), (669, 679, 38)]
+  vs merged/performance-980x680-dark (candidate tree, READY)
+        content diff n=210052 frac=0.404319 y=[0,679] x=[216,979]
+        changed bands (y0,y1,npx): [(0, 11, 42), (17, 26, 113), (61, 82, 2442), (89, 102, 2576), (114, 131, 81), (142, 155, 1395), (170, 253, 6705), (268, 280, 3123), (284, 298, 2804), (312, 627, 190733), (669, 679, 38)]
+  vs merged/performance-980x680-dark-unsupported (candidate, unsupported)
+        content diff n=256791 frac=0.494285 y=[0,679] x=[216,979]
+        changed bands (y0,y1,npx): [(0, 11, 42), (17, 26, 113), (61, 82, 2442), (89, 102, 2576), (114, 131, 81), (141, 155, 1993), (170, 253, 52846), (268, 280, 3123), (284, 298, 2804), (312, 627, 190733), (669, 679, 38)]
+
+### 3. card-border geometry on the performance page (content area)
+  LIVE c5ca-performance-reselect
+     full-width edge rows: [120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159]
+  LIVE p980-performance (pre-fix ctrl)
+     full-width edge rows: [120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159]
+  REF baseline/performance-980x680-dark (pre-fix)
+     full-width edge rows: [120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159]
+  REF merged/performance-980x680-dark (candidate)
+     full-width edge rows: [44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83]

@@ -1,0 +1,67 @@
+{
+  "orchestration_result": {
+    "orchestration_contract_version": 1,
+    "task_id": "t_3864d46e",
+    "run_id": 32,
+    "candidate_note": "Card candidate_pin 5ca36ab = pre-merge functional-line baseline. The verified merged candidate advanced the line: 5f0d3da4f3da281a4bfd271ed9ef579a6ca651f0 (full git SHA of the merge commit; 5f0d3da is its short form). All checks below were executed and observed on that merged commit.",
+    "stage_results": {
+      "self_verification": {
+        "verdict": "PASS",
+        "candidate": {
+          "git_sha": "5f0d3da4f3da281a4bfd271ed9ef579a6ca651f0"
+        },
+        "checks": [
+          {
+            "id": "merge",
+            "result": "PASS",
+            "expected": "Ветка wt/ui-symmetry влита без конфликтов; конфликты с функциональными правками разрешены с сохранением обоих замыслов",
+            "observed": "git merge --no-ff f45f55db91ad2bb9e94d11860528d227c6e1a649 exit 0, no conflicts; merged candidate 5f0d3da4f3da281a4bfd271ed9ef579a6ca651f0. f45f55d is the verified tip of the wt/ui-symmetry line (860bc07 -> 2c3e3af -> f45f55d; 860bc07 is an ancestor, confirmed with git merge-base --is-ancestor), so merging it integrates the whole symmetry line including the QA-PASSed fixes. Both intents survive in both overlapping files: cooling.slint keeps fan-curve-invalid-draft status/color (lines 33, 47) and gains Grid gutter geometry (lines 54-55); performance.slint keeps the power-limit-error block (line 85) and gains Grid/show-percent (lines 36, 64-65).",
+            "evidence_references": [
+              "/home/artt/Orbis-control-implementation/.int-smoke/merge_identity.md"
+            ]
+          },
+          {
+            "id": "build-merged",
+            "result": "PASS",
+            "expected": "cargo build --workspace --release --locked зелёный на объединённой ветке",
+            "observed": "cargo build --workspace --release --locked exit 0; orbis-control binary rebuilt after the merge commit (mtime 07:17:03 > merge commit time 07:14:01); orbis-ui ui_snapshot example compiled fresh from the merged tree (mtime 07:30:41).",
+            "evidence_references": [
+              "/home/artt/Orbis-control-implementation/.int-smoke/merge_identity.md",
+              "/home/artt/Orbis-control-implementation/.int-smoke/verify.log"
+            ]
+          },
+          {
+            "id": "verify-merged",
+            "result": "PASS",
+            "expected": "scripts/verify task зелёный на объединённой ветке",
+            "observed": "./scripts/verify task on the merged tree: VERIFY_EXIT=0, runner prints 'verification passed', 49 'test result: ok' suite summaries across workspace tests and doc-tests; clippy step 'cargo clippy --workspace --all-targets --locked -- -D warnings' finished with no diagnostics.",
+            "evidence_references": [
+              "/home/artt/Orbis-control-implementation/.int-smoke/verify.log"
+            ]
+          },
+          {
+            "id": "smoke-merged",
+            "result": "PASS",
+            "expected": "Приложение из объединённой ветки запускается; страницы открываются; фан/power контролы на месте",
+            "observed": "No display server exists in this environment (DISPLAY and WAYLAND_DISPLAY empty), so launch/render smoke used the project's offscreen snapshot harness (crates/orbis-ui/examples/ui_snapshot, Slint software renderer) — the same instrument UI-QA used. Merged-tree binary rendered 26 shots: all 10 sections at 980x680 dark plus light/1200x800 variants plus graphics-pending / performance-unsupported / performance-error scenarios; all decoded, correct size, non-blank. Regression arm: merged normal-scenario renders are pixel-identical (26/26, diff_frac=0.000000, maxdelta=0) to renders by a provenance-verified binary built by UI-QA from QA-PASSed f45f55d (baseline binary's own render byte-identical to UI-QA's attached screenshot .qa3-shots/about-980x680-light.png). Functional arm: error/pending/unsupported scenarios all render differently from normal (diff_frac 0.0061-0.0793) and the merged cooling fan-curve invalid-draft error surface renders with red error text (156 red pixels). Smoke verdict: PASS.",
+            "evidence_references": [
+              "/home/artt/Orbis-control-implementation/.int-smoke/smoke_probes.log",
+              "/home/artt/Orbis-control-implementation/.int-smoke/merge_identity.md",
+              "/home/artt/Orbis-control-implementation/.int-smoke/merged/dashboard-980x680-dark.png",
+              "/home/artt/Orbis-control-implementation/.int-smoke/merged/cooling-980x680-dark-error.png"
+            ]
+          }
+        ],
+        "evidence": [
+          "/home/artt/Orbis-control-implementation/.int-smoke/merge_identity.md",
+          "/home/artt/Orbis-control-implementation/.int-smoke/verify.log",
+          "/home/artt/Orbis-control-implementation/.int-smoke/smoke_probes.log",
+          "/home/artt/Orbis-control-implementation/.int-smoke/merged/dashboard-980x680-dark.png",
+          "/home/artt/Orbis-control-implementation/.int-smoke/merged/cooling-980x680-dark-error.png"
+        ],
+        "checker": "developer",
+        "timestamp": "2026-09-22T04:45:22Z"
+      }
+    }
+  }
+}

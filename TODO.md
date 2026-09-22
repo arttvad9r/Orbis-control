@@ -1,7 +1,158 @@
-# Orbis Control — backlog pointer
+# Orbis Control — real remaining work
 
-The canonical project completion queue is [`FINISH_PLAN.md`](FINISH_PLAN.md).
+This is the **single completion queue** for Orbis Control. It tracks only product-sized work that still changes whether the application is genuinely usable, trustworthy, installable, or releasable.
 
-Agents must not maintain a second competing roadmap in this file. When the user asks to continue or finish Orbis Control, work through `FINISH_PLAN.md` in order and update its checkboxes only after the stated behavior has actually been verified.
+## Current baseline — do not reopen without a regression
 
-Production source and executable behavior remain the source of truth. If a plan item is already satisfied by current `main`, verify it, mark it complete in `FINISH_PLAN.md`, and continue to the next item in the same work session.
+The product UI and its canonical 10-screen review set are complete enough to develop against. The core daily-control architecture already exists: production telemetry, Performance profile, battery charge limit, ASUS product GPU mode, custom fan curves, keyboard brightness, Aura Static RGB, Panel Overdrive, diagnostics, tray/preferences/lifecycle, Hardware1, sessiond, Arch integration assets and a PKGBUILD. Workspace CI and UI Review are green at the time this plan was rewritten.
+
+That baseline is not the same as a finished product: several intentional controls are still UI contracts waiting for real backend ownership, and the current release candidate has not yet been proven end to end on the target Arch installation.
+
+## Verified progress snapshot
+
+Local commits `b10ab9f`, `b6c19b0`, `6c736a0`, `a5cffa5`, `bb1e178`, `4ba8d00`, `a984ab9`, `cafc664` and `996ed18` verify the Advanced Apply typed slice, fail-closed unsupported controls, fail-closed platform-profile owner conflict handling, and typed power-profiles-daemon D-Bus delegation with read-back and fake-D-Bus tests. The target has active power-profiles-daemon, and Orbis now delegates through its typed API with conflict fallback. The target Arch package was installed and runtime ownership moved to package-owned `/usr/bin` paths; `pacman -Qkk` reported 0 altered files after the hardwared repair; D-Bus, polkit and `orbisctl` status were verified. `PKGBUILD` is pinned to published commit `4ba8d006` with a source checksum and a clean `makepkg` build. Published commit `382f3c7` verifies through the read-only probe that the target exposes driver `amd-pstate-epp`, EPP preference `power`, available preferences `default`, `performance`, `balance_performance`, `balance_power`, `power`, and `custom`, and boost `0`. Published commit `1061970` adds read-only NVIDIA GPU power/thermal evidence: observed power, current/default/min/max limits where authoritative, and temperature; power-limit control is explicitly marked `ReadOnly`. Published commit `5154d07` wires read-only ASUS Armoury CPU package-limit evidence through the core diagnostics snapshot, DTO/runtime/export, with distinct `ENODEV`, unsupported, permission, malformed and unknown states and allowlisted current/min/max/default values. Mutation remains disabled because the target live attributes return `ENODEV` and PL3 is absent. EPP and boost remain observable-only because no safe typed write owner was established; `supergfxd` is inactive/unavailable. The bounded profile/workload test was deferred/limited: power-profiles-daemon denied profile switching from SSH and no graphical display was available for `vkcube`; the profile remained/restored to power-saver and no hardware writes occurred. No live hardware writes have been performed for this delegation. CPU EPP, TDP, boost and NVIDIA mutation support are not claimed.
+
+Published commit `4ca2ff9` adds read-only CPU frequency diagnostics through provider/core/application/runtime/DTO/export, exposing the `amd-pstate-epp` driver, available/current EPP preferences, and boost state with write=`ReadOnly` and explicit unavailable, permission, malformed and unknown states. EPP and boost mutation remain unsupported; this snapshot does not claim 140W validation.
+
+Blocks 1, 3 and 5 remain open: live validation is still incomplete and merge/tag/release actions have not been performed. Block 4 package lifecycle validation is complete. This snapshot does not claim full completion.
+
+## Current repository audit — 2026-09-09
+
+The active local candidate is commit `d135205` on `agent/finish-v01`, seven commits ahead of `origin/agent/finish-v01`. The candidate includes the aggregate Advanced Apply flow, truthful partial/unknown/error handling, authoritative refresh guards and the package verification command. `scripts/verify full` passes on the current tree, including workspace tests, clippy with `-D warnings`, release build and packaging asset validation. Generated probe/package artifacts and detached audit worktrees were removed from the checkout; no tracked changes are required for this cleanup.
+
+The candidate package `orbis-control 0.1.0-2` was installed and its package ownership/runtime smoke checks passed. Block 4 is now closed by the clean downgrade/upgrade/uninstall/reinstall cycle; Block 3 still needs an authorized current-Arch hardware round-trip from the active graphical session. No push, merge, tag or release has been performed.
+
+## How this TODO is used
+
+- Only the **five top-level blocks** below are tracked as completion items. Do not turn their sub-bullets into a second micro-backlog.
+- Do not edit this file after every small commit. Mark a block complete only when its exit condition is actually satisfied.
+- Production source and executable behavior override this file if they disagree.
+- Do not remove or hide an intentional product control merely because its backend is unfinished. Complete the backend. If the actual machine does not support the capability, show a truthful unsupported/read-only/unavailable state.
+- Do not spend development sessions on issue bookkeeping, roadmap rewrites, source-marker tests, line-count refactors, or documentation cleanup unless one of them is blocking product work.
+- Real hardware writes are performed only with explicit user authorization for that validation session. Software implementation and fake/P2P testing continue without that authorization.
+
+---
+
+## [ ] 1. Connect the remaining visible product controls end to end
+
+The main open implementation gap is the **System → Advanced ASUS parameters** surface. Its UI is already intentionally present; the backend must catch up to it.
+
+Complete real observation, capability detection, mutation ownership, error/pending state and read-back where technically possible for the visible controls, including:
+
+- boot/POST sound mutation;
+- status LEDs;
+- automatic clamshell behavior;
+- PCIe ASPM policy on AC;
+- networking behavior in Modern Standby;
+- iGPU memory allocation;
+- hibernation timeout;
+- active P/E core controls where the platform exposes a safe owner;
+- M1–M5 key bindings.
+
+Comparative repository research sets these implementation priorities for the remaining power and GPU work:
+
+- expose CPU package power/TDP through ASUS Armoury attributes only when authoritative values become available;
+- define amd-pstate EPP/boost policy behind a real typed owner;
+- expose NVIDIA power/thermal controls only through a safe typed owner with authoritative read-back;
+- implement snapshot-validate-apply-readback-rollback transactions, with pending/logout/reboot semantics and conflict detection for power and GPU managers;
+- provide fake backends and hardware simulators for the full state and failure paths;
+- require a confirmation/rollback lease for risky power or undervolt controls;
+- keep daemon, CLI and UI schemas stable and clients thin.
+
+External projects informed architectural research only. Reuse of code or assets from GPL/MPL or unlicensed projects requires license review first.
+The research matrix and adopted decisions are maintained in [`docs/research/comparative-projects.md`](docs/research/comparative-projects.md).
+
+The aggregate Advanced `Apply` action is implemented in `extra_backend` for the currently supported typed controls, with unresolved-state guards, authoritative refresh and partial/unknown result handling. Continue using narrow typed ownership: Hardware1 for genuinely privileged machine mutations, user/session ownership for user-session settings, and no generic root/sysfs/shell proxy.
+
+As part of this block, perform one **source-driven pass over every enabled user action in the current UI**. An enabled button/toggle/stepper must not terminate in a log warning, placeholder callback, fixture value or silent no-op. Existing completed daily controls should not be redesigned unless this pass finds a real defect.
+
+**Exit condition:** every intentional visible action has a real end-to-end owner and truthful observed/pending/error behavior, or is automatically presented as unsupported/read-only because the current machine truly lacks the capability. No enabled product action is a placeholder.
+
+---
+
+## [x] 2. Finish safe Fan Factory Defaults semantics
+
+The UI intentionally contains **Factory Defaults**. A typed Hardware1 reset path already exists, but the current provider can only return `Accepted`: it cannot prove that post-reset observed curves equal the vendor defaults.
+
+Finish this as a real product operation:
+
+- define what authoritative confirmation is possible with the current ASUS/asusd ABI;
+- after reset, read the affected profile/fans back and detect malformed, partial or mismatched results;
+- preserve the distinction between `Accepted`, `Applied`, pending/unknown and failure instead of converting any reply into fake success;
+- make failure recovery/resynchronization explicit so the editor never keeps a false state;
+- prove the final behavior on the target machine before enabling it as a supported mutation there.
+
+Do not solve this by deleting the UI control. If authoritative support cannot be established on a machine, capability state should make the control unavailable there while keeping the product surface intact.
+
+**Exit condition:** Factory Defaults has bounded, failure-safe semantics and the GUI can truthfully state what happened after a real reset request.
+
+---
+
+## [ ] 3. Prove the current product on the target Arch laptop
+
+Historical FA707NV live evidence is useful reference material, but it was revision-scoped and performed on NixOS. It is not release proof for the current Arch branch.
+
+Build/install the exact current release candidate on the target Arch machine and validate the product as installed, not from repository-relative development paths:
+
+- package installation, `orbis-hardwared`, `orbis-sessiond`, D-Bus and polkit;
+- normal-user GUI startup, tray, autostart, close/minimize behavior and diagnostics;
+- authoritative read state across Dashboard, Performance, Power, Cooling, Graphics, Backlight, Display and System;
+- with explicit authorization, bounded round trips for every mutation that the installed product reports as supported, restoring original values where appropriate;
+- current/queued/reboot-required GPU semantics;
+- service/backend disappearance and restart, permission denial/cancel, timeouts and unknown outcomes;
+- suspend/resume and user-session restart so long-lived UI state cannot remain falsely writable or stale;
+- no blind retry of an uncertain hardware write and no fake success after a backend failure.
+
+Record only enough provenance to know which exact revision/package was proven. Do not turn live validation into another documentation project.
+
+**Exit condition:** the exact candidate behaves as a daily-driver application on the target Arch laptop, including recovery/degradation paths, and every enabled hardware mutation has fresh current-Arch evidence.
+
+---
+
+## [x] 4. Freeze a real Arch release package
+
+The candidate `PKGBUILD` now uses an exact source archive and checksum for the proven package layout. The release recipe remains local to this candidate until the release commit is authorized.
+
+The release package must:
+
+- build an exact version/tag rather than whatever `main` contains that day;
+- have coherent version/source/checksum handling suitable for the chosen distribution method;
+- install the four binaries and all systemd/D-Bus/polkit/desktop/AppStream/icon assets under pacman-owned paths;
+- pass a clean build and substantive package checks (`namcap` where useful);
+- survive clean install, upgrade and uninstall without conflicting with the local `/usr/local` development installer;
+- launch the same production composition that was hardware-validated.
+
+AUR publication, AppImage and other distributions are **not** blockers for the first Arch release unless explicitly added later.
+
+**Exit condition:** a clean Arch system can build/install an immutable release candidate package from its release source and obtain the same proven application layout. The exact `orbis-control 0.1.0-2` candidate passed build, downgrade/upgrade, clean uninstall and reinstall validation; `pacman -Qkk` reported 28 files and 0 altered files, and both packaged daemons returned active after reinstall.
+
+---
+
+## [ ] 5. Ship v0.1
+
+Only after blocks 1–4 are complete:
+
+- freeze version metadata consistently (the workspace currently identifies itself as `0.1.0`);
+- run `scripts/verify full` and UI Review on the exact release commit;
+- land the reviewed release candidate in `main` when authorized;
+- create the `v0.1.0` tag/release and publish the chosen Arch install artifact/instructions;
+- perform one install-from-release smoke test rather than trusting the development checkout.
+
+Merging the current PR, tagging and publishing a release are explicit release actions and should not be performed merely because an agent reached this block; execute them when the user asks to ship.
+
+**Exit condition:** `v0.1.0` is installable from its released source, matches the hardware-proven candidate, and has no known enabled placeholder or unproven unsafe mutation.
+
+---
+
+## Known later work — not v0.1 blockers
+
+These are real possible extensions, but they must not distract from the five blocks above:
+
+- display refresh/modeset mutation when a concrete compositor owner is chosen and proven;
+- broader ASUS model support based on new runtime evidence;
+- richer Aura effects beyond the currently owned Static RGB flow;
+- automation/policies if there is a concrete user need;
+- application self-update only if package-manager updates prove insufficient;
+- Debian/Fedora/AppImage packaging and wider distribution.
+
+Do not promote one of these into the main queue unless the user explicitly changes release scope or it becomes necessary to finish an existing visible product flow.

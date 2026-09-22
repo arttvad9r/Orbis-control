@@ -58,9 +58,7 @@ pub use preferences::{
     WindowPreferences, load_preferences, load_preferences_from_dir, preferences_dir,
     preferences_dir_with, preferences_file, save_preferences, save_preferences_to_dir,
 };
-pub use store::{
-    AppConfig, AutomationConfig, BatteryConfig, ExperimentalConfig, UiConfig, load_or_default,
-};
+pub use store::{AppConfig, BatteryConfig, ExperimentalConfig, UiConfig, load_or_default};
 pub use window_state::{
     WINDOW_STATE_FILE, WINDOW_STATE_SCHEMA_VERSION, WindowPositionState, WindowState,
     WindowStateError, WindowStateLoad, WindowStateLoadSource, WindowStatePathError,

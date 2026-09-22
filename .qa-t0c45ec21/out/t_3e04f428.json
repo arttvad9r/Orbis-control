@@ -1,0 +1,43 @@
+TITLE: Orbis A: верификация этапов 1-3 против критериев AC (фиксация вердиктов)
+ASSIGNEE: developer STATUS: done
+RESULT: re-verified at 0b18dff
+BODY:
+{
+  "orchestration_contract_version": 1,
+  "task_class": "implementation",
+  "objective": "Верификация уже реализованного против критериев этапов 1-3: зафиксировать вердикты, обновить чекбоксы, починить только сломанное",
+  "requirement_ids": [
+    "REQ-PROFILE",
+    "REQ-FAN",
+    "REQ-POWER",
+    "REQ-HONESTY"
+  ],
+  "acceptance_ids": [
+    "SC-PROFILE-SET",
+    "SC-FAN-CPU",
+    "SC-FAN-GPU",
+    "SC-POWER-VIEW",
+    "SC-POWER-APPLY"
+  ],
+  "scope": "{\"workspace\": \"/home/artt/Orbis-control-implementation\", \"branch\": \"implementation/current-plan\", \"queue\": \"IMPLEMENTATION_PLAN.md этапы 1-3 (документ в корне репо)\", \"details\": [\"Проверить по коду и тестам: какие из AC-010/011, AC-020..024, AC-030..035 уже выполняются. Этап 2-3 (power limits read + SPL/SPPT/FPPT через Hardware1 с read-back) предположительно уже реализован (power_limits_p2p тесты, dirty/pending маски в UI) — доказать прогоном.\", \"Этап 1 из IMPLEMENTATION_PLAN: пройтись по каждому пункту 'Что реализовать' (fan UI safety block, hard-coded capability блок).\", \"Вердикт PASS -> отметить соответствующий пункт в IMPLEMENTATION_PLAN.md и не трогать код. FAIL -> починить только сломанное в зоне этапов 1-3.\", \"Референс при техническом затыке: /home/artt/g-helper-linux (src/Platform/Linux/Asus/, src/Fan/) — изучить и адаптировать под Rust/capability-driven/Hardware1 архитектуру Orbis; слепое копирование запрещено; проверить совместимость лицензий при переносе нетривиальных решений.\", \"Запрещено: generic sysfs writer, generic privileged API, automation, fan automation/EMA policy, UI redesign, real hardware writes (read-only наблюдения допустимы).\"], \"evidence\": \"таблица AC -> PASS/FAIL/MISSING -> команда+вывод; обновлённые чекбоксы; commit SHA\"}",
+  "verification": {
+    "required": true,
+    "checks": [
+      {
+        "id": "verify-task",
+        "method": "static_analysis",
+        "expected_observable": "scripts/verify task завершается нулём (fmt+check+test+clippy -D warnings)"
+      },
+      {
+        "id": "release-build",
+        "method": "build",
+        "expected_observable": "cargo build --workspace --release --locked завершается нулём, бинарники в target/release"
+      },
+      {
+        "id": "ac-evidence",
+        "method": "unit_test",
+        "expected_observable": "Для каждого заявленного AC приведена команда теста и её фактический вывод (PASS) либо честный MISSING с причиной"
+      }
+    ]
+  }
+}

@@ -1,0 +1,78 @@
+
+===== c5ca-* vs sources (980x680 dark) =====
+  base(5ca36ab,PREfix)     dashboard    : QA-side MISSING
+  base(5ca36ab,PREfix)     performance  : QA-side MISSING
+  base(5ca36ab,PREfix)     power        : diff_frac=0.047386
+  base(5ca36ab,PREfix)     cooling      : diff_frac=0.134518
+  base(5ca36ab,PREfix)     graphics     : diff_frac=0.031408
+  base(5ca36ab,PREfix)     backlight    : diff_frac=0.091400
+  base(5ca36ab,PREfix)     display      : diff_frac=0.031125
+  base(5ca36ab,PREfix)     system       : diff_frac=0.038983
+  base(5ca36ab,PREfix)     settings     : QA-side MISSING
+  base(5ca36ab,PREfix)     about        : diff_frac=0.054923
+  merged(5f0d3da,POSTfix)  dashboard    : QA-side MISSING
+  merged(5f0d3da,POSTfix)  performance  : QA-side MISSING
+  merged(5f0d3da,POSTfix)  power        : diff_frac=0.047386
+  merged(5f0d3da,POSTfix)  cooling      : diff_frac=0.134518
+  merged(5f0d3da,POSTfix)  graphics     : diff_frac=0.031408
+  merged(5f0d3da,POSTfix)  backlight    : diff_frac=0.091400
+  merged(5f0d3da,POSTfix)  display      : diff_frac=0.031125
+  merged(5f0d3da,POSTfix)  system       : diff_frac=0.038983
+  merged(5f0d3da,POSTfix)  settings     : QA-side MISSING
+  merged(5f0d3da,POSTfix)  about        : diff_frac=0.054923
+  baseline(PREfix)         dashboard    : QA-side MISSING
+  baseline(PREfix)         performance  : QA-side MISSING
+  baseline(PREfix)         power        : diff_frac=0.052483
+  baseline(PREfix)         cooling      : diff_frac=0.139734
+  baseline(PREfix)         graphics     : diff_frac=0.036550
+  baseline(PREfix)         backlight    : diff_frac=0.096505
+  baseline(PREfix)         display      : diff_frac=0.036232
+  baseline(PREfix)         system       : diff_frac=0.044073
+  baseline(PREfix)         settings     : QA-side MISSING
+  baseline(PREfix)         about        : diff_frac=0.060237
+
+===== p980-* vs sources (980x680 dark) =====
+  base(5ca36ab,PREfix)     dashboard    : QA-side MISSING
+  base(5ca36ab,PREfix)     performance  : diff_frac=0.330168
+  base(5ca36ab,PREfix)     power        : diff_frac=0.052565
+  base(5ca36ab,PREfix)     cooling      : diff_frac=0.139811
+  base(5ca36ab,PREfix)     graphics     : diff_frac=0.036606
+  base(5ca36ab,PREfix)     backlight    : diff_frac=0.096583
+  base(5ca36ab,PREfix)     display      : diff_frac=0.036304
+  base(5ca36ab,PREfix)     system       : diff_frac=0.044142
+  base(5ca36ab,PREfix)     settings     : diff_frac=0.051948
+  base(5ca36ab,PREfix)     about        : diff_frac=0.060225
+  merged(5f0d3da,POSTfix)  dashboard    : QA-side MISSING
+  merged(5f0d3da,POSTfix)  performance  : diff_frac=0.330168
+  merged(5f0d3da,POSTfix)  power        : diff_frac=0.052565
+  merged(5f0d3da,POSTfix)  cooling      : diff_frac=0.139811
+  merged(5f0d3da,POSTfix)  graphics     : diff_frac=0.036606
+  merged(5f0d3da,POSTfix)  backlight    : diff_frac=0.096583
+  merged(5f0d3da,POSTfix)  display      : diff_frac=0.036304
+  merged(5f0d3da,POSTfix)  system       : diff_frac=0.044142
+  merged(5f0d3da,POSTfix)  settings     : diff_frac=0.051948
+  merged(5f0d3da,POSTfix)  about        : diff_frac=0.060225
+  baseline(PREfix)         dashboard    : QA-side MISSING
+  baseline(PREfix)         performance  : diff_frac=0.053409
+  baseline(PREfix)         power        : diff_frac=0.048081
+  baseline(PREfix)         cooling      : diff_frac=0.135309
+  baseline(PREfix)         graphics     : diff_frac=0.032101
+  baseline(PREfix)         backlight    : diff_frac=0.092068
+  baseline(PREfix)         display      : diff_frac=0.031870
+  baseline(PREfix)         system       : diff_frac=0.039685
+  baseline(PREfix)         settings     : diff_frac=0.047485
+  baseline(PREfix)         about        : diff_frac=0.055696
+
+===== QA sets vs qa3 (f45f55d live shots) =====
+  c5ca-about        vs qa3/about-980x680-dark.png       diff_frac=0.054923
+  p980-about        vs qa3/about-980x680-dark.png       diff_frac=0.060225
+  p980-settings     vs qa3/settings-980x680-dark.png    diff_frac=0.051948
+
+===== c5ca-* vs p980-* (same page, two live captures) =====
+  power       : diff_frac=0.014389
+  cooling     : diff_frac=0.014389
+  graphics    : diff_frac=0.014389
+  backlight   : diff_frac=0.014389
+  display     : diff_frac=0.014389
+  system      : diff_frac=0.014389
+  about       : diff_frac=0.018510

@@ -2,14 +2,14 @@ use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use crate::automation_shadow_runtime::{
+    AutomationShadowBlock, AutomationShadowOutcome, AutomationShadowRuntime,
+};
 use anyhow::Context;
 use orbis_capabilities::CapabilityRegistrySnapshot;
 use orbis_config::{AutomationPolicy, load_automation_policy};
 use orbis_core::lifecycle::{ResumeGateOutcome, ResumeTelemetryGate};
 use orbis_core::telemetry::Telemetry;
-use orbis_ui::automation_shadow_runtime::{
-    AutomationShadowBlock, AutomationShadowOutcome, AutomationShadowRuntime,
-};
 
 // The Automation editing surface left the UI (spec §2.5). What remains here is
 // the hardware-inert shadow core: persisted-policy observation, telemetry and

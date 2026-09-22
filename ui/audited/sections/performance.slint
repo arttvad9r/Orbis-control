@@ -1,50 +1,14 @@
-// Performance page — proven platform profiles only. The ASUS product has no
-// "manual" profile in the backend, so no such card is offered (capability-
-// aware UI); GPU modes live in the Graphics section.
+// Performance page — platform profiles with explicit current/availability state.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, PerformanceHwState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, ActionButton, Grid } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, ActionButton, StatusPill, LayoutMetrics } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
-import { ValueSlider } from "../../components/value-slider.slint";
+import { MetricCard } from "../../components/metric-card.slint";
 import { Palette } from "../../themes/dark.slint";
-
-export component LimitRow inherits Rectangle {
-    in property <string> label;
-    in property <int> value;
-    in property <int> min;
-    in property <int> max;
-    in property <int> step;
-    in property <string> unit;
-    in property <string> range;
-    in property <bool> disabled: false;
-    callback changed(float);
-    height: 88px;
-    background: transparent;
-    VerticalLayout {
-        spacing: 2px;
-        Text { text: root.label; font-size: 12px; color: Palette.text-secondary; overflow: elide; }
-        Text { text: root.value + " " + root.unit; font-size: 18px; font-weight: 600; color: Palette.text-primary; }
-        ValueSlider {
-            min: root.min;
-            max: root.max;
-            step: root.step;
-            value: root.value;
-            disabled: root.disabled;
-            // The row headline already carries the authoritative value+unit;
-            // hiding the slider's own percent readout keeps three limit rows
-            // inside the card at the 980px minimum window (audit t_29073c31).
-            show-percent: false;
-            changed(v) => { root.changed(v); }
-        }
-        Text { text: root.range; font-size: 10.5px; color: Palette.text-secondary; overflow: elide; }
-    }
-}
 
 export component PerformanceSection inherits Rectangle {
     in property <UiState> ui-state;
     callback perf-clicked(int);
-    callback power-limit-changed(int, int);
-    callback power-limit-apply-clicked;
     callback graphics-open-requested;
 
     function bit-set(mask: int, bit: int) -> bool {
@@ -53,48 +17,61 @@ export component PerformanceSection inherits Rectangle {
     }
 
     function perf-reason() -> string {
+        if (root.ui-state.performance-delegated-pending) { return "Ожидание подтверждения"; }
+        if (root.ui-state.performance-delegated-error != "") { return root.ui-state.performance-delegated-error; }
         if (root.ui-state.perf-state == PerformanceHwState.Ready) {
-            return root.ui-state.perf-writable ? "" : "Только чтение";
+            return root.ui-state.perf-writable ? (root.ui-state.performance-delegated-ready ? "Доступно через power-profiles-daemon" : "Доступно") : "Только чтение";
         }
+        if (root.ui-state.perf-state == PerformanceHwState.Loading) { return "Получение профиля"; }
         return root.ui-state.perf-unavailable-reason;
+    }
+
+    function current-profile() -> string {
+        if (root.ui-state.perf-state != PerformanceHwState.Ready) { return "—"; }
+        if (root.ui-state.perf-selected == 0) { return "Тихий"; }
+        if (root.ui-state.perf-selected == 1) { return "Сбалансированный"; }
+        if (root.ui-state.perf-selected == 2) { return "Турбо"; }
+        return "—";
     }
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 2 * Grid.page-gutter;
-            x: Grid.page-gutter;
-            spacing: Grid.card-spacing;
-            padding-top: Grid.page-top;
-            padding-bottom: Grid.page-bottom;
+            width: root.width - 2 * LayoutMetrics.page-margin;
+            x: LayoutMetrics.page-margin;
+            spacing: LayoutMetrics.page-gap;
+            padding-top: 14px;
+            padding-bottom: LayoutMetrics.page-bottom-padding;
 
             PageHeader {
                 title: "Производительность";
-                description: "Профиль платформы управляет частотами и шумом системы.";
+                description: "Профиль платформы управляет балансом производительности, температуры и шума.";
             }
 
             SectionCard {
                 VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 14px;
 
-                    SectionTitle {
-                        title: "Режим производительности";
-                        detail: root.perf-reason();
-                    }
-
-                    if (root.ui-state.power-limit-error) : Text {
-                        text: "Не удалось применить лимиты мощности: доступ запрещён или backend отклонил запись. Измените черновик и повторите.";
-                        font-size: 11.5px;
-                        color: Palette.error;
-                        overflow: elide;
-                        wrap: word-wrap;
-                    }
                     HorizontalLayout {
-                        height: 84px;
+                        height: 30px;
+                        SectionTitle {
+                            horizontal-stretch: 1;
+                            title: "Режим производительности";
+                            detail: root.perf-reason();
+                        }
+                        StatusPill {
+                            width: 156px;
+                            text: root.current-profile();
+                            accent: root.ui-state.perf-state == PerformanceHwState.Ready ? Palette.balanced : Palette.text-secondary;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        height: 94px;
                         spacing: 12px;
                         ModeCard {
                             title: "Тихий";
-                            description: "Минимум шума";
+                            description: "Минимум шума и нагрева";
                             icon-kind: 16;
                             accent: Palette.silent;
                             selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0;
@@ -103,7 +80,7 @@ export component PerformanceSection inherits Rectangle {
                         }
                         ModeCard {
                             title: "Сбалансированный";
-                            description: "Повседневные задачи";
+                            description: "Оптимален для повседневной работы";
                             icon-kind: 17;
                             accent: Palette.balanced;
                             selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1;
@@ -120,48 +97,49 @@ export component PerformanceSection inherits Rectangle {
                             clicked => { root.perf-clicked(2); }
                         }
                     }
+                }
+            }
 
-                    Text {
-                        text: "Изменение применяется через Hardware1 и подтверждается чтением фактического состояния.";
-                        font-size: 11.5px;
-                        color: Palette.text-secondary;
-                        overflow: elide;
+            HorizontalLayout {
+                height: 108px;
+                spacing: 14px;
+                MetricCard { label: "CPU"; value: root.ui-state.cpu-temp; detail: "температура процессора"; icon-kind: 10; }
+                MetricCard { label: "GPU"; value: root.ui-state.gpu-temp; detail: "температура графики"; icon-kind: 4; }
+                MetricCard { label: "Вентилятор CPU"; value: root.ui-state.cpu-fan-rpm; detail: "скорость вентилятора"; icon-kind: 3; }
+                MetricCard { label: "ПИТАНИЕ"; value: root.ui-state.power-ac-mw; detail: "потребление от адаптера"; icon-kind: 13; }
+            }
+
+            SectionCard {
+                min-height: 108px;
+                HorizontalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 18px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 4px;
+                        Text { text: "Графический режим"; font-size: 15px; font-weight: 650; color: Palette.text-primary; }
+                        Text {
+                            text: "Режим GPU настраивается отдельно и может требовать перезагрузку.";
+                            font-size: 12.5px;
+                            color: Palette.text-secondary;
+                            wrap: word-wrap;
+                        }
                     }
+                    Rectangle {
+              width: 126px;
+              vertical-stretch: 1;
+              background: transparent;
+              ActionButton {
+                  width: parent.width;
+                  y: (parent.height - self.height) / 2;
+                  label: "Открыть графику";
+                  clicked => { root.graphics-open-requested(); }
+              }
+          }
                 }
             }
-            // D-AUD-G02 (audit t_5fc90d28): the limits card used to be hidden
-            // with `visible:` next to a trailing `if (!ready)` fallback. Slint
-            // `visible: false` hides without collapsing, so the card kept its
-            // full height and the fallback rendered below a ~170px hole. A
-            // conditional pair reserves no space, so the not-Ready startup
-            // state has no phantom band (audit fix F2, lines 39-41).
-            if (root.ui-state.power-limits-ready) : SectionCard {
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 10px;
-                    SectionTitle { title: "Лимиты мощности и температуры"; detail: root.ui-state.power-limits-reason; }
-                    Text { text: "Значения и диапазоны получены от backend. Изменение проходит авторизацию, запись и authoritative read-back."; font-size: 11.5px; color: Palette.text-secondary; overflow: elide; }
-                    ActionButton { label: root.ui-state.power-limit-dirty-mask != 0 ? "Применить лимиты" : "Лимиты применены"; disabled: !root.ui-state.power-limits-writable || root.ui-state.power-limit-dirty-mask == 0 || root.ui-state.power-limit-pending-mask != 0; clicked => { root.power-limit-apply-clicked(); } }
-                    HorizontalLayout {
-                        spacing: 16px;
-                        if (root.ui-state.spl-unit != "") : LimitRow { label: "SPL / PL1"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 1) ? root.ui-state.spl-draft : root.ui-state.spl-value; min: root.ui-state.spl-min; max: root.ui-state.spl-max; step: root.ui-state.spl-step; unit: root.ui-state.spl-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 1); range: root.ui-state.spl-min + "–" + root.ui-state.spl-max + " · шаг " + root.ui-state.spl-step; changed(v) => { root.power-limit-changed(0, v); } }
-                        if (root.ui-state.sppt-unit != "") : LimitRow { label: "SPPT / PL2"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 2) ? root.ui-state.sppt-draft : root.ui-state.sppt-value; min: root.ui-state.sppt-min; max: root.ui-state.sppt-max; step: root.ui-state.sppt-step; unit: root.ui-state.sppt-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 2); range: root.ui-state.sppt-min + "–" + root.ui-state.sppt-max + " · шаг " + root.ui-state.sppt-step; changed(v) => { root.power-limit-changed(1, v); } }
-                        if (root.ui-state.fppt-unit != "") : LimitRow { label: "FPPT / PL3"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 4) ? root.ui-state.fppt-draft : root.ui-state.fppt-value; min: root.ui-state.fppt-min; max: root.ui-state.fppt-max; step: root.ui-state.fppt-step; unit: root.ui-state.fppt-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 4); range: root.ui-state.fppt-min + "–" + root.ui-state.fppt-max + " · шаг " + root.ui-state.fppt-step; changed(v) => { root.power-limit-changed(2, v); } }
-                    }
-                    HorizontalLayout {
-                        spacing: 16px;
-                        if (root.ui-state.cpu-temp-limit-unit != "") : LimitRow { label: "CPU temperature limit"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 8) ? root.ui-state.cpu-temp-limit-draft : root.ui-state.cpu-temp-limit-value; min: root.ui-state.cpu-temp-limit-min; max: root.ui-state.cpu-temp-limit-max; step: root.ui-state.cpu-temp-limit-step; unit: root.ui-state.cpu-temp-limit-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 8); range: root.ui-state.cpu-temp-limit-min + "–" + root.ui-state.cpu-temp-limit-max + " · шаг " + root.ui-state.cpu-temp-limit-step; changed(v) => { root.power-limit-changed(3, v); } }
-                        if (root.ui-state.gpu-dynamic-boost-unit != "") : LimitRow { label: "NVIDIA Dynamic Boost"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 16) ? root.ui-state.gpu-dynamic-boost-draft : root.ui-state.gpu-dynamic-boost-value; min: root.ui-state.gpu-dynamic-boost-min; max: root.ui-state.gpu-dynamic-boost-max; step: root.ui-state.gpu-dynamic-boost-step; unit: root.ui-state.gpu-dynamic-boost-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 16); range: root.ui-state.gpu-dynamic-boost-min + "–" + root.ui-state.gpu-dynamic-boost-max + " · шаг " + root.ui-state.gpu-dynamic-boost-step; changed(v) => { root.power-limit-changed(4, v); } }
-                        if (root.ui-state.gpu-temp-target-unit != "") : LimitRow { label: "GPU temperature target"; value: root.bit-set(root.ui-state.power-limit-dirty-mask, 32) ? root.ui-state.gpu-temp-target-draft : root.ui-state.gpu-temp-target-value; min: root.ui-state.gpu-temp-target-min; max: root.ui-state.gpu-temp-target-max; step: root.ui-state.gpu-temp-target-step; unit: root.ui-state.gpu-temp-target-unit; disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 32); range: root.ui-state.gpu-temp-target-min + "–" + root.ui-state.gpu-temp-target-max + " · шаг " + root.ui-state.gpu-temp-target-step; changed(v) => { root.power-limit-changed(5, v); } }
-                    }
-                }
-            }
-            if (!root.ui-state.power-limits-ready) : SectionCard {
-                VerticalLayout {
-                    padding: 16px;
-                    SectionTitle { title: "Лимиты мощности и температуры"; detail: root.ui-state.power-limits-reason; }
-                }
-            }
+
             Rectangle { vertical-stretch: 100; background: transparent; }
         }
     }

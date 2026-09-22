@@ -1,0 +1,72 @@
+### F4a: icon vertical centring (image-derived rows)
+  LIVE   c5ca-about (verdict set)
+      detected 10 nav bands
+      icon_centre - row_centre : vals=[np.float64(0.0), np.float64(-1.0), np.float64(-0.5), np.float64(-0.5), np.float64(-0.5), np.float64(0.0), np.float64(0.0), np.float64(0.0), np.float64(-1.0), np.float64(-0.5)]
+          mean=-0.40  |max|=1.00
+      icon_centre - label_centre: vals=[np.float64(0.0), np.float64(-2.0), np.float64(-0.5), np.float64(-2.0), np.float64(-1.5), np.float64(-1.5), np.float64(-1.0), np.float64(-0.5), np.float64(-1.5), np.float64(-2.0)]
+          mean=-1.25  |max|=2.00
+
+  LIVE   c5ca-power (verdict set)
+      detected 10 nav bands
+      icon_centre - row_centre : vals=[np.float64(0.0), np.float64(-1.0), np.float64(-0.5), np.float64(-0.5), np.float64(-0.5), np.float64(0.0), np.float64(0.0), np.float64(0.0), np.float64(-1.0), np.float64(-0.5)]
+          mean=-0.40  |max|=1.00
+      icon_centre - label_centre: vals=[np.float64(0.0), np.float64(-2.0), np.float64(-0.5), np.float64(-2.0), np.float64(-1.5), np.float64(-1.5), np.float64(-1.0), np.float64(-0.5), np.float64(-1.5), np.float64(-2.0)]
+          mean=-1.25  |max|=2.00
+
+  LIVE   c5ca-system (verdict set)
+      detected 10 nav bands
+      icon_centre - row_centre : vals=[np.float64(0.0), np.float64(-1.0), np.float64(-0.5), np.float64(-0.5), np.float64(-0.5), np.float64(0.0), np.float64(0.0), np.float64(0.0), np.float64(-1.0), np.float64(-0.5)]
+          mean=-0.40  |max|=1.00
+      icon_centre - label_centre: vals=[np.float64(0.0), np.float64(-2.0), np.float64(-0.5), np.float64(-2.0), np.float64(-1.5), np.float64(-1.5), np.float64(-1.0), np.float64(-0.5), np.float64(-1.5), np.float64(-2.0)]
+          mean=-1.25  |max|=2.00
+
+  REF    merged/dashboard (candidate tree)
+      detected 10 nav bands
+      icon_centre - row_centre : vals=[np.float64(0.5), np.float64(-1.5), np.float64(0.0), np.float64(-0.5), np.float64(-1.0), np.float64(0.0), np.float64(-0.5), np.float64(0.0), np.float64(-2.0), np.float64(-1.0)]
+          mean=-0.60  |max|=2.00
+      icon_centre - label_centre: vals=[np.float64(0.5), np.float64(-2.0), np.float64(0.0), np.float64(-1.5), np.float64(-2.0), np.float64(-1.0), np.float64(-1.0), np.float64(-0.5), np.float64(-2.0), np.float64(-1.5)]
+          mean=-1.10  |max|=2.00
+
+  REF    baseline/dashboard (PRE-fix tree)
+      detected 10 nav bands
+      icon_centre - row_centre : vals=[np.float64(-8.0)]
+          mean=-8.00  |max|=8.00
+      icon_centre - label_centre: vals=[np.float64(-15.0)]
+          mean=-15.00  |max|=15.00
+
+  CTRL   p980-settings (pre-merge)
+      detected 10 nav bands
+      icon_centre - row_centre : vals=[np.float64(-7.5)]
+          mean=-7.50  |max|=7.50
+      icon_centre - label_centre: vals=[np.float64(-15.0)]
+          mean=-15.00  |max|=15.00
+
+### F1/F3 sweep on every c5ca page shot (content-column gutters)
+  shot                                   content-x span
+  c5ca-about.png                         (np.int64(216), np.int64(979))
+  c5ca-after-nastroit.png                (np.int64(216), np.int64(979))
+  c5ca-after-nastroit2.png               (np.int64(216), np.int64(979))
+  c5ca-after-nastroit3.png               (np.int64(216), np.int64(979))
+  c5ca-backlight.png                     (np.int64(216), np.int64(979))
+  c5ca-cooling-dirty.png                 (np.int64(216), np.int64(979))
+  c5ca-cooling-gpu-discarded.png         (np.int64(216), np.int64(979))
+  c5ca-cooling-gpu-tab.png               (np.int64(216), np.int64(979))
+  c5ca-cooling.png                       (np.int64(216), np.int64(979))
+  c5ca-dashboard-bottom.png              (np.int64(216), np.int64(979))
+  c5ca-dashboard-bottom2.png             (np.int64(216), np.int64(979))
+  c5ca-dashboard-early.png               (np.int64(216), np.int64(979))
+  c5ca-dashboard-light.png               (np.int64(216), np.int64(979))
+  c5ca-dashboard-top-again.png           (np.int64(216), np.int64(979))
+  c5ca-display.png                       (np.int64(216), np.int64(979))
+  c5ca-graphics-after-click.png          (np.int64(216), np.int64(979))
+  c5ca-graphics.png                      (np.int64(216), np.int64(979))
+  c5ca-perf.png                          (np.int64(216), np.int64(979))
+  c5ca-performance-reselect.png          (np.int64(216), np.int64(979))
+  c5ca-power.png                         (np.int64(216), np.int64(979))
+  c5ca-settings-dark-restore.png         (np.int64(216), np.int64(979))
+  c5ca-settings-light.png                (np.int64(216), np.int64(979))
+  c5ca-settings-toggled-back.png         (np.int64(216), np.int64(979))
+  c5ca-settings-toggled.png              (np.int64(216), np.int64(979))
+  c5ca-system.png                        (np.int64(216), np.int64(979))
+  merged/perf (candidate, post-fix)      (np.int64(216), np.int64(979))
+  baseline/perf (PRE-fix)                (np.int64(216), np.int64(979))

@@ -3,10 +3,12 @@ use std::time::{Duration, SystemTime};
 use orbis_application::diagnostics::DiagnosticsCollector;
 use orbis_core::capability::DeviceCapabilities;
 use orbis_core::diagnostics::{
-    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, DiagnosticObservation,
-    DisplayDiagnostics, DisplayProtocol, GpuDiagnostics, HardwareDiagnostics, SessionType,
-    SystemDiagnostics, TelemetryCollectionStatus, TelemetryDiagnostics, TelemetryFreshness,
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuFrequencyObservation,
+    CpuPackagePowerLimitsObservation, DiagnosticObservation, DisplayDiagnostics, DisplayProtocol,
+    GpuDiagnostics, HardwareDiagnostics, SessionType, SystemDiagnostics, TelemetryCollectionStatus,
+    TelemetryDiagnostics, TelemetryFreshness,
 };
+use orbis_core::limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
 use orbis_ui::diagnostics_dto::DiagnosticsUiDto;
 use orbis_ui::diagnostics_export::{report_json, summary_text};
 
@@ -39,7 +41,17 @@ fn typed_snapshot_projects_through_privacy_bounded_exports() {
             mux: DiagnosticObservation::Unknown,
             access_policy: DiagnosticObservation::PermissionDenied,
             runtime_power: DiagnosticObservation::Unavailable,
+            nvidia: DiagnosticObservation::Unknown,
         },
+        CpuPackagePowerLimitsObservation::Value(PowerLimits {
+            fields: [(
+                PowerLimitField::Spl,
+                PowerLimitValue::new(45, 20, 80, 5, Some(45), Unit::Watts).unwrap(),
+            )]
+            .into_iter()
+            .collect(),
+        }),
+        CpuFrequencyObservation::Unknown,
         TelemetryDiagnostics {
             latest: None,
             status: TelemetryCollectionStatus::Unavailable,
@@ -63,6 +75,12 @@ fn typed_snapshot_projects_through_privacy_bounded_exports() {
     assert!(text.contains("mux=Unknown"));
     assert!(text.contains("access_policy=PermissionDenied"));
     assert!(text.contains("runtime_power=Unavailable"));
+    assert!(text.contains("[cpu_package_power_limits]"));
+    assert!(text.contains("spl current_w=45 min_w=20 max_w=80 default_w=45"));
+    assert!(json.contains("\"cpu_package_power_limits\""));
+    assert!(json.contains("\"current_w\": 45"));
+    assert!(!json.contains("step"));
+    assert!(!json.contains("unit"));
     assert!(json.contains("\"schema_version\": 1"));
     assert!(json.contains("\"capability_generation\": 4"));
 

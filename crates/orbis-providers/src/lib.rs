@@ -15,12 +15,16 @@
 #![warn(missing_docs)]
 
 pub mod asus_armoury;
+/// Read-only ASUS Armoury CPU package-limit evidence.
+pub mod asus_armoury_power_limits;
 pub mod asus_boot_sound;
 pub mod asus_diagnostics;
 pub mod asus_gpu_mode;
 pub mod asus_legacy_power;
 pub mod aura;
 pub mod bounded_probes;
+/// Read-only Linux CPU frequency policy evidence.
+pub mod cpu_frequency;
 pub mod display_diagnostics;
 pub mod display_refresh_owner;
 pub mod error;
@@ -38,18 +42,19 @@ pub mod ryzenadj_diagnostics;
 pub mod service_presence;
 pub mod service_readiness;
 pub mod supergfxd;
+pub mod sysfs_gpu_power;
 pub mod sysfs_telemetry;
 pub mod system_metadata;
 pub mod telemetry_diagnostics;
 pub mod traits;
 pub mod wayland_output;
-pub mod wayland_output_management;
 pub mod wlr_output_head;
 
 #[cfg(feature = "mock")]
 pub mod mock;
 
 pub use asus_armoury::*;
+pub use asus_armoury_power_limits::*;
 pub use asus_boot_sound::*;
 pub use asus_diagnostics::{
     probe_asus_diagnostics_capabilities, probe_aura, probe_keyboard_backlight,
@@ -60,8 +65,9 @@ pub use aura::*;
 pub use bounded_probes::{
     probe_charge_limit, probe_display_output, probe_fan_curve, probe_gpu_access, probe_gpu_mux,
     probe_gpu_power, probe_mini_led_mode, probe_panel_overdrive, probe_performance,
-    probe_screen_auto_brightness,
+    probe_power_limits, probe_screen_auto_brightness,
 };
+pub use cpu_frequency::SysfsCpuFrequencyProvider;
 pub use display_diagnostics::display_diagnostics_snapshot;
 pub use display_refresh_owner::{
     DisplayRefreshMutationOwner, validate_display_refresh_readback,
@@ -84,12 +90,12 @@ pub use ryzenadj_diagnostics::{
 };
 pub use service_presence::*;
 pub use service_readiness::readiness_from_service_diagnostics;
+pub use sysfs_gpu_power::SysfsGpuPowerProvider;
 pub use sysfs_telemetry::SysfsTelemetryProvider;
 pub use system_metadata::SystemMetadataProvider;
 pub use telemetry_diagnostics::telemetry_diagnostics_after_attempt;
 pub use traits::*;
 pub use wayland_output::*;
-pub use wayland_output_management::*;
 pub use wlr_output_head::*;
 
 #[cfg(feature = "mock")]

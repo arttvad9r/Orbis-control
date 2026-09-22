@@ -31,6 +31,7 @@ where
         mux,
         access_policy,
         runtime_power,
+        nvidia: DiagnosticObservation::Unknown,
     }
 }
 

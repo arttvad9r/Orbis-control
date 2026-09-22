@@ -1,49 +1,67 @@
-import { WindowHeader, SectionCard, ActionButton } from "common.slint";
+import { WindowHeader, SectionCard, ActionButton, StatusPill } from "common.slint";
+import { AppMark } from "../components/app-mark.slint";
 import { Palette } from "../themes/dark.slint";
 
-// Compatibility name retained for current Rust glue. This is a real frontend
-// dialog contract: the UI never performs the underlying operation itself.
 export component PreviewDialogWindow inherits Window {
-    width: 430px;
-    height: 220px;
+    width: 470px;
+    height: 228px;
     title: "Orbis Control";
     background: Palette.window-background;
 
     in-out property <int> kind: 0; // 0 reboot, 1 logout, 2 failure, 3 confirm
-    in property <string> action-label: "Confirm";
+    in property <string> action-label: "Подтвердить";
     in property <bool> action-enabled: true;
 
     callback dismiss-clicked;
     callback confirm-clicked;
 
     VerticalLayout {
-        padding: 16px; spacing: 12px;
-        WindowHeader {
-            title: root.kind == 0 ? "Требуется перезагрузка"
-                : root.kind == 1 ? "Требуется выход из сессии"
-                : root.kind == 2 ? "Действие не удалось"
-                : "Подтвердите действие";
-            subtitle: root.kind == 2 ? "Наблюдаемое состояние не было изменено" : "Требуется системное действие";
+        padding: 18px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            height: 46px;
+            spacing: 12px;
+            AppMark { width: 38px; height: 38px; }
+            WindowHeader {
+                horizontal-stretch: 1;
+                title: root.kind == 0 ? "Требуется перезагрузка"
+                    : root.kind == 1 ? "Требуется выход из сессии"
+                    : root.kind == 2 ? "Действие не удалось"
+                    : "Подтвердите действие";
+                subtitle: root.kind == 2 ? "Фактическое состояние не было подтверждено" : "Orbis сохранит текущий контекст операции";
+            }
+            StatusPill {
+                text: root.kind == 2 ? "Ошибка" : root.kind == 0 || root.kind == 1 ? "Системное действие" : "Подтверждение";
+                accent: root.kind == 2 ? Palette.error : root.kind == 0 || root.kind == 1 ? Palette.warning : Palette.accent-default;
+            }
         }
+
         SectionCard {
             vertical-stretch: 1;
+            background: Palette.surface-raised;
             Text {
-                x: 14px; y: 12px; width: parent.width - 28px; height: parent.height - 24px;
-                text: root.kind == 0 ? "Запрошенный режим GPU применится после перезагрузки."
-                    : root.kind == 1 ? "Переключение требует выхода из сессии, чтобы рабочий стол переключился безопасно."
-                    : root.kind == 2 ? "Backend не подтвердил операцию. Прежнее наблюдаемое состояние сохранено."
-                    : "Проверьте запрошенную операцию перед продолжением.";
-                font-size: 12.5px;
+                x: 16px;
+                y: 14px;
+                width: parent.width - 32px;
+                height: parent.height - 28px;
+                text: root.kind == 0 ? "Запрошенный режим GPU применится после перезагрузки. Можно продолжить работу и выполнить её позже."
+                    : root.kind == 1 ? "Переключение требует выхода из сессии, чтобы рабочий стол завершил изменение безопасно."
+                    : root.kind == 2 ? "Backend не подтвердил операцию. Orbis сохранил прежнее наблюдаемое состояние и не показывает ложный успех."
+                    : "Проверьте запрошенное действие перед продолжением.";
+                font-size: 13px;
                 color: root.kind == 2 ? Palette.error : Palette.text-primary;
                 wrap: word-wrap;
             }
         }
+
         HorizontalLayout {
-            height: 32px; spacing: 8px;
+            height: 36px;
+            spacing: 8px;
             Rectangle { horizontal-stretch: 1; background: transparent; }
             if (root.kind != 2) : ActionButton { label: "Отмена"; clicked => { root.dismiss-clicked(); } }
             ActionButton {
-                min-width: 120px;
+                min-width: 142px;
                 label: root.kind == 0 ? "Перезагрузить позже" : root.kind == 1 ? "Выйти позже" : root.kind == 2 ? "Закрыть" : root.action-label;
                 accent: root.kind != 2;
                 disabled: root.kind == 3 && !root.action-enabled;

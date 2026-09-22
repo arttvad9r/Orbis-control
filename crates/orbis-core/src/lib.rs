@@ -80,7 +80,8 @@ pub use capability::{
 };
 pub use desired_observed::{DesiredObservedState, DesiredValue, ObservedValue, PendingValue};
 pub use diagnostics::{
-    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, DIAGNOSTICS_SNAPSHOT_SCHEMA_VERSION,
+    ApplicationDiagnostics, CapabilitySnapshotDiagnostics, CpuFrequencyDiagnostics,
+    CpuFrequencyObservation, CpuPackagePowerLimitsObservation, DIAGNOSTICS_SNAPSHOT_SCHEMA_VERSION,
     DiagnosticEntry, DiagnosticObservation, DiagnosticReport, DiagnosticsServiceId,
     DiagnosticsSnapshot, DiagnosticsSnapshotSections, DisplayDiagnostics, DisplayProtocol,
     GpuDiagnostics, HardwareDiagnostics, ServiceAvailability, ServiceBusScope, ServiceCriticality,

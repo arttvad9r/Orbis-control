@@ -1,0 +1,10 @@
+=== pixel comparison of every reference against the LIVE capture ===
+  baseline PREfix not-ready    diff_frac=0.057887 n= 38576 bbox x=[0,979] y=[0,679]
+  merged POSTfix ready         diff_frac=0.324988 n=216572 bbox x=[0,979] y=[0,679]
+  merged POSTfix unsupported   diff_frac=0.395125 n=263311 bbox x=[0,979] y=[0,679]
+
+=== text extent inside the fallback/limits card region ===
+  LIVE c5ca-performance-reselect y460-540: x=[258,951] y=[471,524]
+  baseline PREfix not-ready    y460-540: x=[258,951] y=[469,522]
+  merged POSTfix ready         y460-540: x=[258,951] y=[460,539]
+  merged POSTfix unsupported   y460-540: x=[258,951] y=[460,539]

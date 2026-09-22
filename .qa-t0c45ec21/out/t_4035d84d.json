@@ -1,0 +1,46 @@
+TITLE: Orbis UI-QA2verdict: записать вердикт по собранной матрице f45f55d
+ASSIGNEE: qa STATUS: done
+RESULT: None
+BODY:
+{
+  "orchestration_contract_version": 1,
+  "task_class": "qa",
+  "objective": "Финализировать вердикт UI-QA2: артефакты приёмки кандидата f45f55d уже собраны (матрица 82 рендера + live-интеракция), нужно записать типизированный PASS/FAIL вердикт по каждому пункту без повторного рендера.",
+  "requirement_ids": [
+    "REQ-VISUAL",
+    "REQ-REGRESSION"
+  ],
+  "acceptance_ids": [
+    "SC-VISUAL-980",
+    "SC-VISUAL-STATES"
+  ],
+  "verification": {
+    "required": true,
+    "checks": [
+      {
+        "id": "verdict-typed",
+        "method": "static_analysis",
+        "required": true,
+        "expected_observable": "Задача завершена gate-valid envelope'ом: вердикт per-item (G03 PASS/FAIL, F1/F2/F4a/F4b регрессия, кликабельность), ссылки на конкретные файлы артефактов"
+      },
+      {
+        "id": "evidence-ref",
+        "method": "log_check",
+        "required": true,
+        "expected_observable": "В конверте перечислены пути: /home/artt/.hermes/profiles/qa/cache/scratch/ui-qa2/render (82 png) + live-*; каждый упомянутый артефакт существует"
+      }
+    ]
+  },
+  "scope": {
+    "workspace": "/home/artt/Orbis-control-implementation",
+    "branch": "wt/ui-qa2",
+    "details": [
+      "НЕ перерендеривать. НЕ пересобирать. Только анализ существующих артефактов и запись вердикта.",
+      "Известные planner-замеры: about 980/1200, обе темы — text_px_outside_card=0 (проба на render/about-*.png).",
+      "Если по какому-то пункту данных не хватает — честный INCONCLUSIVE по этому пункту, не догадки."
+    ]
+  },
+  "candidate": {
+    "git_sha": "f45f55db91ad2bb9e94d11860528d227c6e1a649"
+  }
+}

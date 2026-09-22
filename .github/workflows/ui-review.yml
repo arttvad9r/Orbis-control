@@ -1,0 +1,68 @@
+name: UI Review
+
+on:
+  pull_request:
+    paths:
+      - 'ui/**'
+      - 'crates/orbis-ui/**'
+      - 'scripts/update-ui-screenshots.sh'
+      - '.github/workflows/ui-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libdbus-1-dev \
+            libssl-dev \
+            libsystemd-dev \
+            libglib2.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            libgdk-pixbuf-2.0-dev
+
+      - name: Install Rust 1.87
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.87'
+
+      - name: Render canonical screenshots
+        run: bash scripts/update-ui-screenshots.sh
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbis-ui-screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
+          retention-days: 7

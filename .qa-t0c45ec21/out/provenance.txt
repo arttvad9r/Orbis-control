@@ -1,0 +1,281 @@
+== per-group fingerprints ==
+
+-- QA-t5b9d96c6 (/home/artt/.hermes/profiles/qa/cache/scratch/qa-t5b9d96c6/shots) --
+   712bf729b23c5346  c5ca-about.png                               IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1f\x0f'|tEXt:b'date:create\x002026-09-22T04:31:15+00:00'|tEXt:b
+   061735ac574d9cf8  c5ca-after-nastroit.png                      IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04 \x19'|tEXt:b'date:create\x002026-09-22T04:32:25+00:00'|tEXt:b'da
+   830a33e30e41b555  c5ca-after-nastroit2.png                     IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04!\x02'|tEXt:b'date:create\x002026-09-22T04:33:02+00:00'|tEXt:b'da
+   f38a57ab9d539ed3  c5ca-after-nastroit3.png                     IHDR|cHRM|bKGD|pHYs|tIME:b"\x07\xea\t\x16\x04!'"|tEXt:b'date:create\x002026-09-22T04:33:39+00:00'|tEXt:b'date:
+   bdd905e16da27d15  c5ca-after-rapid-nav.png                     IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04"\''|tEXt:b'date:create\x002026-09-22T04:34:39+00:00'|tEXt:b'date
+   8e6e891b15333a37  c5ca-backlight.png                           IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1e-'|tEXt:b'date:create\x002026-09-22T04:30:45+00:00'|tEXt:b'da
+   6e981ec47e9899f8  c5ca-cooling-1200.png                        IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04"\x0e'|tEXt:b'date:create\x002026-09-22T04:34:08+00:00'|tEXt:b'da
+   325b8310b2e8fa5d  c5ca-cooling-dirty.png                       IHDR|cHRM|bKGD|pHYs|tIME:b"\x07\xea\t\x16\x04\x17'"|tEXt:b'date:create\x002026-09-22T04:23:39+00:00'|tEXt:b'da
+   44cbba3b775d35f4  c5ca-cooling-gpu-discarded.png               IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x180'|tEXt:b'date:create\x002026-09-22T04:24:48+00:00'|tEXt:b'da
+   120a5b8ea754fd5f  c5ca-cooling-gpu-tab.png                     IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x18\x1f'|tEXt:b'date:create\x002026-09-22T04:24:31+00:00'|tEXt:b
+   e2317b9d5e75b651  c5ca-cooling.png                             IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x162'|tEXt:b'date:create\x002026-09-22T04:22:50+00:00'|tEXt:b'da
+   2587728f43bfb250  c5ca-dashboard-bottom.png                    IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1b:'|tEXt:b'date:create\x002026-09-22T04:27:58+00:00'|tEXt:b'da
+   966d55acaff23f89  c5ca-dashboard-bottom2.png                   IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1c\r'|tEXt:b'date:create\x002026-09-22T04:28:13+00:00'|tEXt:b'd
+   47586f6071463de4  c5ca-dashboard-early.png                     IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x11\x1d'|tEXt:b'date:create\x002026-09-22T04:17:29+00:00'|tEXt:b
+   452fd1dcd56935b4  c5ca-dashboard-light.png                     IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1a/'|tEXt:b'date:create\x002026-09-22T04:26:46+00:00'|tEXt:b'da
+   7f51b8182b56ef07  c5ca-dashboard-top-again.png                 IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1c('|tEXt:b'date:create\x002026-09-22T04:28:40+00:00'|tEXt:b'da
+   dd8e2a1d67665198  c5ca-display.png                             IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1e\x0b'|tEXt:b'date:create\x002026-09-22T04:30:10+00:00'|tEXt:b
+   783f422f25855d86  c5ca-graphics-after-click.png                IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x149'|tEXt:b'date:create\x002026-09-22T04:20:57+00:00'|tEXt:b'da
+   679ee2c4255f721c  c5ca-graphics.png                            IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x13\x13'|tEXt:b'date:create\x002026-09-22T04:19:19+00:00'|tEXt:b
+   c195a22ca66edc64  c5ca-perf.png                                IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x11\x1f'|tEXt:b'date:create\x002026-09-22T04:17:31+00:00'|tEXt:b
+   3af628bb2619634b  c5ca-performance-reselect.png                IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x19\x0f'|tEXt:b'date:create\x002026-09-22T04:25:15+00:00'|tEXt:b
+   572efa902f4c2375  c5ca-power.png                               IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x118'|tEXt:b'date:create\x002026-09-22T04:17:56+00:00'|tEXt:b'da
+   799ed61dadc896cc  c5ca-settings-dark-restore.png               IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1a2'|tEXt:b'date:create\x002026-09-22T04:26:50+00:00'|tEXt:b'da
+   3c10b546d30672ff  c5ca-settings-light.png                      IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1a\x14'|tEXt:b'date:create\x002026-09-22T04:26:20+00:00'|tEXt:b
+   ae523930a676ee23  c5ca-settings-toggled-back.png               IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04 \x04'|tEXt:b'date:create\x002026-09-22T04:32:04+00:00'|tEXt:b'da
+   ac9d85b62629ff21  c5ca-settings-toggled.png                    IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04 \x03'|tEXt:b'date:create\x002026-09-22T04:32:03+00:00'|tEXt:b'da
+   8ee34f90178980b0  c5ca-system.png                              IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1e\x0c'|tEXt:b'date:create\x002026-09-22T04:30:12+00:00'|tEXt:b
+   cae3a99778ddd8ee  p980-about.png                               IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x1b'|tEXt:b'date:create\x002026-09-22T04:06:27+00:00'|tEXt:b
+   f05562240ce6dae8  p980-backlight.png                           IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x0e'|tEXt:b'date:create\x002026-09-22T04:06:14+00:00'|tEXt:b
+   5853d203c9cfff1a  p980-cooling.png                             IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x05+'|tEXt:b'date:create\x002026-09-22T04:05:43+00:00'|tEXt:b'da
+   75f606ce9bc71cf9  p980-display.png                             IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x16'|tEXt:b'date:create\x002026-09-22T04:06:22+00:00'|tEXt:b
+   525ac5723c8df741  p980-graphics.png                            IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x0c'|tEXt:b'date:create\x002026-09-22T04:06:12+00:00'|tEXt:b
+   d0b843a04fa523a4  p980-performance.png                         IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\t'|tEXt:b'date:create\x002026-09-22T04:06:08+00:00'|tEXt:b'd
+   bf0a476b31c969bb  p980-power.png                               IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\n'|tEXt:b'date:create\x002026-09-22T04:06:10+00:00'|tEXt:b'd
+   71d05f1218295aff  p980-settings.png                            IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x19'|tEXt:b'date:create\x002026-09-22T04:06:25+00:00'|tEXt:b
+   714d57ceb92d2777  p980-system.png                              IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x18'|tEXt:b'date:create\x002026-09-22T04:06:23+00:00'|tEXt:b
+   b0f85f8e1e2632fb  win-01.png                                   IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x00)'|tEXt:b'date:create\x002026-09-22T04:00:41+00:00'|tEXt:b'da
+   6847847c246a0415  win-02.png                                   IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x01\x08'|tEXt:b'date:create\x002026-09-22T04:01:08+00:00'|tEXt:b
+   >> distinct PNG chunk signatures in this group:
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1f\x0f'|tEXt:b'date:cre] x1: ['c5ca-about.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04 \x19'|tEXt:b'date:create] x1: ['c5ca-after-nastroit.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04!\x02'|tEXt:b'date:create] x1: ['c5ca-after-nastroit2.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b"\x07\xea\t\x16\x04!'"|tEXt:b'date:create\x0] x1: ['c5ca-after-nastroit3.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04"\''|tEXt:b'date:create\x] x1: ['c5ca-after-rapid-nav.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1e-'|tEXt:b'date:create] x1: ['c5ca-backlight.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04"\x0e'|tEXt:b'date:create] x1: ['c5ca-cooling-1200.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b"\x07\xea\t\x16\x04\x17'"|tEXt:b'date:create] x1: ['c5ca-cooling-dirty.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x180'|tEXt:b'date:create] x1: ['c5ca-cooling-gpu-discarded.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x18\x1f'|tEXt:b'date:cre] x1: ['c5ca-cooling-gpu-tab.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x162'|tEXt:b'date:create] x1: ['c5ca-cooling.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1b:'|tEXt:b'date:create] x1: ['c5ca-dashboard-bottom.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1c\r'|tEXt:b'date:creat] x1: ['c5ca-dashboard-bottom2.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x11\x1d'|tEXt:b'date:cre] x1: ['c5ca-dashboard-early.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1a/'|tEXt:b'date:create] x1: ['c5ca-dashboard-light.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1c('|tEXt:b'date:create] x1: ['c5ca-dashboard-top-again.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1e\x0b'|tEXt:b'date:cre] x1: ['c5ca-display.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x149'|tEXt:b'date:create] x1: ['c5ca-graphics-after-click.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x13\x13'|tEXt:b'date:cre] x1: ['c5ca-graphics.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x11\x1f'|tEXt:b'date:cre] x1: ['c5ca-perf.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x19\x0f'|tEXt:b'date:cre] x1: ['c5ca-performance-reselect.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x118'|tEXt:b'date:create] x1: ['c5ca-power.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1a2'|tEXt:b'date:create] x1: ['c5ca-settings-dark-restore.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1a\x14'|tEXt:b'date:cre] x1: ['c5ca-settings-light.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04 \x04'|tEXt:b'date:create] x1: ['c5ca-settings-toggled-back.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04 \x03'|tEXt:b'date:create] x1: ['c5ca-settings-toggled.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x1e\x0c'|tEXt:b'date:cre] x1: ['c5ca-system.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x1b'|tEXt:b'date:cre] x1: ['p980-about.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x0e'|tEXt:b'date:cre] x1: ['p980-backlight.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x05+'|tEXt:b'date:create] x1: ['p980-cooling.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x16'|tEXt:b'date:cre] x1: ['p980-display.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x0c'|tEXt:b'date:cre] x1: ['p980-graphics.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\t'|tEXt:b'date:creat] x1: ['p980-performance.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\n'|tEXt:b'date:creat] x1: ['p980-power.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x19'|tEXt:b'date:cre] x1: ['p980-settings.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x06\x18'|tEXt:b'date:cre] x1: ['p980-system.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x00)'|tEXt:b'date:create] x1: ['win-01.png']
+      [IHDR|cHRM|bKGD|pHYs|tIME:b'\x07\xea\t\x16\x04\x01\x08'|tEXt:b'date:cre] x1: ['win-02.png']
+
+-- INT-merged (/home/artt/Orbis-control-implementation/.int-smoke/merged) --
+   59ce2def77376c16  about-1200x800-dark.png                      IHDR|IDAT|IEND
+   89e08d80a5273d6c  about-1200x800-light.png                     IHDR|IDAT|IEND
+   9482084ff68fbfda  about-980x680-dark.png                       IHDR|IDAT|IEND
+   7c57da6caaf077c7  about-980x680-light.png                      IHDR|IDAT|IEND
+   24e8adc7f6cea501  backlight-1200x800-dark.png                  IHDR|IDAT|IEND
+   48aab02b68d7499f  backlight-980x680-dark.png                   IHDR|IDAT|IEND
+   c0048ccc09066b94  cooling-1200x800-dark.png                    IHDR|IDAT|IEND
+   971e0b205ddcb8b4  cooling-1200x800-light.png                   IHDR|IDAT|IEND
+   28f80ba15b9c2bb3  cooling-980x680-dark-error.png               IHDR|IDAT|IEND
+   2c2e2488e318d610  cooling-980x680-dark.png                     IHDR|IDAT|IEND
+   c0c54b9a7e4d8d85  cooling-980x680-light.png                    IHDR|IDAT|IEND
+   a04331c77ec7cea3  dashboard-1200x800-dark.png                  IHDR|IDAT|IEND
+   e124a04fda4e5c5e  dashboard-980x680-dark.png                   IHDR|IDAT|IEND
+   a1fc9c30ae0fdb14  display-1200x800-dark.png                    IHDR|IDAT|IEND
+   9e2bb4d494868826  display-980x680-dark.png                     IHDR|IDAT|IEND
+   434a8c3055f29fda  graphics-1200x800-dark.png                   IHDR|IDAT|IEND
+   3b75ada7f38793c6  graphics-980x680-dark-pending.png            IHDR|IDAT|IEND
+   459bfbea2e95f4e9  graphics-980x680-dark.png                    IHDR|IDAT|IEND
+   1f2ec6efe9ff8ee2  performance-1200x800-dark.png                IHDR|IDAT|IEND
+   8a2deb7648d2d326  performance-1200x800-light.png               IHDR|IDAT|IEND
+   0f43f94ea24ccf72  performance-980x680-dark-unsupported.png     IHDR|IDAT|IEND
+   ab2f33c40c1198e1  performance-980x680-dark.png                 IHDR|IDAT|IEND
+   7ee68b612a4b46d0  performance-980x680-light.png                IHDR|IDAT|IEND
+   6c682775a7b9a4be  power-1200x800-dark.png                      IHDR|IDAT|IEND
+   482ed2dc6a3da83c  power-980x680-dark.png                       IHDR|IDAT|IEND
+   c3e84bcdd588bb1d  settings-1200x800-dark.png                   IHDR|IDAT|IEND
+   351bb5acbe6b9c32  settings-980x680-dark.png                    IHDR|IDAT|IEND
+   f87949a84766ac61  system-1200x800-dark.png                     IHDR|IDAT|IEND
+   aa6a6ee435edad14  system-980x680-dark.png                      IHDR|IDAT|IEND
+
+-- INT-base (/home/artt/Orbis-control-implementation/.int-smoke/base) --
+   59ce2def77376c16  about-1200x800-dark.png                      IHDR|IDAT|IEND
+   89e08d80a5273d6c  about-1200x800-light.png                     IHDR|IDAT|IEND
+   9482084ff68fbfda  about-980x680-dark.png                       IHDR|IDAT|IEND
+   7c57da6caaf077c7  about-980x680-light.png                      IHDR|IDAT|IEND
+   24e8adc7f6cea501  backlight-1200x800-dark.png                  IHDR|IDAT|IEND
+   48aab02b68d7499f  backlight-980x680-dark.png                   IHDR|IDAT|IEND
+   c0048ccc09066b94  cooling-1200x800-dark.png                    IHDR|IDAT|IEND
+   971e0b205ddcb8b4  cooling-1200x800-light.png                   IHDR|IDAT|IEND
+   28f80ba15b9c2bb3  cooling-980x680-dark-error.png               IHDR|IDAT|IEND
+   2c2e2488e318d610  cooling-980x680-dark.png                     IHDR|IDAT|IEND
+   c0c54b9a7e4d8d85  cooling-980x680-light.png                    IHDR|IDAT|IEND
+   a04331c77ec7cea3  dashboard-1200x800-dark.png                  IHDR|IDAT|IEND
+   e124a04fda4e5c5e  dashboard-980x680-dark.png                   IHDR|IDAT|IEND
+   a1fc9c30ae0fdb14  display-1200x800-dark.png                    IHDR|IDAT|IEND
+   9e2bb4d494868826  display-980x680-dark.png                     IHDR|IDAT|IEND
+   434a8c3055f29fda  graphics-1200x800-dark.png                   IHDR|IDAT|IEND
+   3b75ada7f38793c6  graphics-980x680-dark-pending.png            IHDR|IDAT|IEND
+   459bfbea2e95f4e9  graphics-980x680-dark.png                    IHDR|IDAT|IEND
+   1f2ec6efe9ff8ee2  performance-1200x800-dark.png                IHDR|IDAT|IEND
+   8a2deb7648d2d326  performance-1200x800-light.png               IHDR|IDAT|IEND
+   0f43f94ea24ccf72  performance-980x680-dark-unsupported.png     IHDR|IDAT|IEND
+   ab2f33c40c1198e1  performance-980x680-dark.png                 IHDR|IDAT|IEND
+   7ee68b612a4b46d0  performance-980x680-light.png                IHDR|IDAT|IEND
+   6c682775a7b9a4be  power-1200x800-dark.png                      IHDR|IDAT|IEND
+   482ed2dc6a3da83c  power-980x680-dark.png                       IHDR|IDAT|IEND
+   c3e84bcdd588bb1d  settings-1200x800-dark.png                   IHDR|IDAT|IEND
+   351bb5acbe6b9c32  settings-980x680-dark.png                    IHDR|IDAT|IEND
+   f87949a84766ac61  system-1200x800-dark.png                     IHDR|IDAT|IEND
+   aa6a6ee435edad14  system-980x680-dark.png                      IHDR|IDAT|IEND
+
+-- UIQA2-qa3 (/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots) --
+   59ce2def77376c16  about-1200x800-dark.png                      IHDR|IDAT|IEND
+   89e08d80a5273d6c  about-1200x800-light.png                     IHDR|IDAT|IEND
+   9482084ff68fbfda  about-980x680-dark.png                       IHDR|IDAT|IEND
+   7c57da6caaf077c7  about-980x680-light.png                      IHDR|IDAT|IEND
+   e124a04fda4e5c5e  dashboard-980x680-dark.png                   IHDR|IDAT|IEND
+   7c57da6caaf077c7  rebuild-check.png                            IHDR|IDAT|IEND
+   351bb5acbe6b9c32  settings-980x680-dark.png                    IHDR|IDAT|IEND
+
+-- audit-baseline (/home/artt/Orbis-control-implementation/docs/ui-audit-baseline) --
+   b1ae5d0bf65d7ada  about-1200x800-dark.png                      IHDR|IDAT|IEND
+   a483ba2aa5c596c8  about-1200x800-light.png                     IHDR|IDAT|IEND
+   f019aab9f32d695a  about-980x680-dark.png                       IHDR|IDAT|IEND
+   04392a8ab11e28c4  about-980x680-light.png                      IHDR|IDAT|IEND
+   985fd1e68eba39ee  backlight-1200x800-dark.png                  IHDR|IDAT|IEND
+   69dd50b4ecb4b8a9  backlight-1200x800-light.png                 IHDR|IDAT|IEND
+   76219f4ed1b27d85  backlight-980x680-dark.png                   IHDR|IDAT|IEND
+   3fa7dba06291d576  backlight-980x680-light.png                  IHDR|IDAT|IEND
+   0dfada0cbf57e1f5  cooling-1200x800-dark-dirty.png              IHDR|IDAT|IEND
+   f1fb548f29dc93ee  cooling-1200x800-dark-error.png              IHDR|IDAT|IEND
+   b09e7963867af6c5  cooling-1200x800-dark-pending.png            IHDR|IDAT|IEND
+   f6e8188e22ca6b55  cooling-1200x800-dark-readonly.png           IHDR|IDAT|IEND
+   7a7ae50bbe3348e4  cooling-1200x800-dark-unsupported.png        IHDR|IDAT|IEND
+   b09e7963867af6c5  cooling-1200x800-dark.png                    IHDR|IDAT|IEND
+   b44792084b92d3a1  cooling-1200x800-light.png                   IHDR|IDAT|IEND
+   8083b7267bdd6ee9  cooling-980x680-dark-dirty.png               IHDR|IDAT|IEND
+   855ffd0bb4be2cac  cooling-980x680-dark-error.png               IHDR|IDAT|IEND
+   1da651ee602dc07a  cooling-980x680-dark-pending.png             IHDR|IDAT|IEND
+   6bbb0d2bf153b7d4  cooling-980x680-dark-readonly.png            IHDR|IDAT|IEND
+   6099520a4fd75ff1  cooling-980x680-dark-unsupported.png         IHDR|IDAT|IEND
+   1da651ee602dc07a  cooling-980x680-dark.png                     IHDR|IDAT|IEND
+   baf14c1e5c2e4e6e  cooling-980x680-light.png                    IHDR|IDAT|IEND
+   f52cda22b42fa68e  dashboard-1200x800-dark-dirty.png            IHDR|IDAT|IEND
+   f52cda22b42fa68e  dashboard-1200x800-dark-error.png            IHDR|IDAT|IEND
+   f52cda22b42fa68e  dashboard-1200x800-dark-pending.png          IHDR|IDAT|IEND
+   d6c5b10f2ebf9e3c  dashboard-1200x800-dark-readonly.png         IHDR|IDAT|IEND
+   fec5f99d63a18647  dashboard-1200x800-dark-unsupported.png      IHDR|IDAT|IEND
+   f52cda22b42fa68e  dashboard-1200x800-dark.png                  IHDR|IDAT|IEND
+   ba11fe62f2739ff6  dashboard-1200x800-light.png                 IHDR|IDAT|IEND
+   a35b9d7607855e37  dashboard-980x680-dark-dirty.png             IHDR|IDAT|IEND
+   a35b9d7607855e37  dashboard-980x680-dark-error.png             IHDR|IDAT|IEND
+   a35b9d7607855e37  dashboard-980x680-dark-pending.png           IHDR|IDAT|IEND
+   29dba47b7086bf7e  dashboard-980x680-dark-readonly.png          IHDR|IDAT|IEND
+   d11354dc959beffc  dashboard-980x680-dark-unsupported.png       IHDR|IDAT|IEND
+   a35b9d7607855e37  dashboard-980x680-dark.png                   IHDR|IDAT|IEND
+   a871fa048a77de77  dashboard-980x680-light.png                  IHDR|IDAT|IEND
+   6cf21e7f6ea89291  dialog-1200x800-dark.png                     IHDR|IDAT|IEND
+   c0b3b90b6c9d19d4  dialog-1200x800-light.png                    IHDR|IDAT|IEND
+   6cf21e7f6ea89291  dialog-980x680-dark.png                      IHDR|IDAT|IEND
+   c0b3b90b6c9d19d4  dialog-980x680-light.png                     IHDR|IDAT|IEND
+   92e5b240dbebbf26  display-1200x800-dark.png                    IHDR|IDAT|IEND
+   035fe2dc84e303ef  display-1200x800-light.png                   IHDR|IDAT|IEND
+   fa7452a8c4bbc94a  display-980x680-dark.png                     IHDR|IDAT|IEND
+   71670005daf2db77  display-980x680-light.png                    IHDR|IDAT|IEND
+   2e214065d78822d1  graphics-1200x800-dark-dirty.png             IHDR|IDAT|IEND
+   1d1a9a0383a773c3  graphics-1200x800-dark-error.png             IHDR|IDAT|IEND
+   8acbac7581548afd  graphics-1200x800-dark-pending.png           IHDR|IDAT|IEND
+   2e214065d78822d1  graphics-1200x800-dark-readonly.png          IHDR|IDAT|IEND
+   8ebc296b556def3e  graphics-1200x800-dark-unsupported.png       IHDR|IDAT|IEND
+   2e214065d78822d1  graphics-1200x800-dark.png                   IHDR|IDAT|IEND
+   66ff3f075a39974e  graphics-1200x800-light.png                  IHDR|IDAT|IEND
+   e8f0090e5ea9135a  graphics-980x680-dark-dirty.png              IHDR|IDAT|IEND
+   4338d0e541dde379  graphics-980x680-dark-error.png              IHDR|IDAT|IEND
+   9d4dc67775ac3e9f  graphics-980x680-dark-pending.png            IHDR|IDAT|IEND
+   e8f0090e5ea9135a  graphics-980x680-dark-readonly.png           IHDR|IDAT|IEND
+   6e283b5dbd2b644d  graphics-980x680-dark-unsupported.png        IHDR|IDAT|IEND
+   e8f0090e5ea9135a  graphics-980x680-dark.png                    IHDR|IDAT|IEND
+   b99e63e4063e0aba  graphics-980x680-light.png                   IHDR|IDAT|IEND
+   d43c1b8e857edbfb  performance-1200x800-dark-dirty.png          IHDR|IDAT|IEND
+   d43c1b8e857edbfb  performance-1200x800-dark-error.png          IHDR|IDAT|IEND
+   d43c1b8e857edbfb  performance-1200x800-dark-pending.png        IHDR|IDAT|IEND
+   56ded517e18abbe1  performance-1200x800-dark-readonly.png       IHDR|IDAT|IEND
+   3aa9a1542d2a7c10  performance-1200x800-dark-unsupported.png    IHDR|IDAT|IEND
+   d43c1b8e857edbfb  performance-1200x800-dark.png                IHDR|IDAT|IEND
+   100ed721562bbe6e  performance-1200x800-light.png               IHDR|IDAT|IEND
+   69a8aed7904f62f5  performance-980x680-dark-dirty.png           IHDR|IDAT|IEND
+   69a8aed7904f62f5  performance-980x680-dark-error.png           IHDR|IDAT|IEND
+   69a8aed7904f62f5  performance-980x680-dark-pending.png         IHDR|IDAT|IEND
+   c4cf41a0840499fb  performance-980x680-dark-readonly.png        IHDR|IDAT|IEND
+   44e94591b1454d11  performance-980x680-dark-unsupported.png     IHDR|IDAT|IEND
+   69a8aed7904f62f5  performance-980x680-dark.png                 IHDR|IDAT|IEND
+   04633cc39f17f2c1  performance-980x680-light.png                IHDR|IDAT|IEND
+   1769b5b843977a66  power-1200x800-dark.png                      IHDR|IDAT|IEND
+   da01d35c91ac63a6  power-1200x800-light.png                     IHDR|IDAT|IEND
+   395b388ba1307caf  power-980x680-dark.png                       IHDR|IDAT|IEND
+   aad0a40aba71783f  power-980x680-light.png                      IHDR|IDAT|IEND
+   5cc523bed64292e5  settings-1200x800-dark.png                   IHDR|IDAT|IEND
+   8c5fb68d425f7b6b  settings-1200x800-light.png                  IHDR|IDAT|IEND
+   0d8a9e7e7b5e23b7  settings-980x680-dark.png                    IHDR|IDAT|IEND
+   dfeec28067da64c1  settings-980x680-light.png                   IHDR|IDAT|IEND
+   839c35abf0a62720  system-1200x800-dark.png                     IHDR|IDAT|IEND
+   137ef895cf626ab9  system-1200x800-light.png                    IHDR|IDAT|IEND
+   206ecf3e820f3287  system-980x680-dark.png                      IHDR|IDAT|IEND
+   7780c7b8075601b5  system-980x680-light.png                     IHDR|IDAT|IEND
+
+== duplicate content inside QA group ==
+   total pngs: 38  distinct: 38
+
+== cross-group identical files ==
+   0f43f94ea24ccf72  ['INT-merged/performance-980x680-dark-unsupported.png', 'INT-base/performance-980x680-dark-unsupported.png']
+   1da651ee602dc07a  ['audit-baseline/cooling-980x680-dark-pending.png', 'audit-baseline/cooling-980x680-dark.png']
+   1f2ec6efe9ff8ee2  ['INT-merged/performance-1200x800-dark.png', 'INT-base/performance-1200x800-dark.png']
+   24e8adc7f6cea501  ['INT-merged/backlight-1200x800-dark.png', 'INT-base/backlight-1200x800-dark.png']
+   28f80ba15b9c2bb3  ['INT-merged/cooling-980x680-dark-error.png', 'INT-base/cooling-980x680-dark-error.png']
+   2c2e2488e318d610  ['INT-merged/cooling-980x680-dark.png', 'INT-base/cooling-980x680-dark.png']
+   2e214065d78822d1  ['audit-baseline/graphics-1200x800-dark-dirty.png', 'audit-baseline/graphics-1200x800-dark-readonly.png', 'audit-baseline/graphics-1200x800-dark.png']
+   351bb5acbe6b9c32  ['INT-merged/settings-980x680-dark.png', 'INT-base/settings-980x680-dark.png', 'UIQA2-qa3/settings-980x680-dark.png']
+   3b75ada7f38793c6  ['INT-merged/graphics-980x680-dark-pending.png', 'INT-base/graphics-980x680-dark-pending.png']
+   434a8c3055f29fda  ['INT-merged/graphics-1200x800-dark.png', 'INT-base/graphics-1200x800-dark.png']
+   459bfbea2e95f4e9  ['INT-merged/graphics-980x680-dark.png', 'INT-base/graphics-980x680-dark.png']
+   482ed2dc6a3da83c  ['INT-merged/power-980x680-dark.png', 'INT-base/power-980x680-dark.png']
+   48aab02b68d7499f  ['INT-merged/backlight-980x680-dark.png', 'INT-base/backlight-980x680-dark.png']
+   59ce2def77376c16  ['INT-merged/about-1200x800-dark.png', 'INT-base/about-1200x800-dark.png', 'UIQA2-qa3/about-1200x800-dark.png']
+   69a8aed7904f62f5  ['audit-baseline/performance-980x680-dark-dirty.png', 'audit-baseline/performance-980x680-dark-error.png', 'audit-baseline/performance-980x680-dark-pending.png', 'audit-baseline/performance-980x680-dark.png']
+   6c682775a7b9a4be  ['INT-merged/power-1200x800-dark.png', 'INT-base/power-1200x800-dark.png']
+   6cf21e7f6ea89291  ['audit-baseline/dialog-1200x800-dark.png', 'audit-baseline/dialog-980x680-dark.png']
+   7c57da6caaf077c7  ['INT-merged/about-980x680-light.png', 'INT-base/about-980x680-light.png', 'UIQA2-qa3/about-980x680-light.png', 'UIQA2-qa3/rebuild-check.png']
+   7ee68b612a4b46d0  ['INT-merged/performance-980x680-light.png', 'INT-base/performance-980x680-light.png']
+   89e08d80a5273d6c  ['INT-merged/about-1200x800-light.png', 'INT-base/about-1200x800-light.png', 'UIQA2-qa3/about-1200x800-light.png']
+   8a2deb7648d2d326  ['INT-merged/performance-1200x800-light.png', 'INT-base/performance-1200x800-light.png']
+   9482084ff68fbfda  ['INT-merged/about-980x680-dark.png', 'INT-base/about-980x680-dark.png', 'UIQA2-qa3/about-980x680-dark.png']
+   971e0b205ddcb8b4  ['INT-merged/cooling-1200x800-light.png', 'INT-base/cooling-1200x800-light.png']
+   9e2bb4d494868826  ['INT-merged/display-980x680-dark.png', 'INT-base/display-980x680-dark.png']
+   a04331c77ec7cea3  ['INT-merged/dashboard-1200x800-dark.png', 'INT-base/dashboard-1200x800-dark.png']
+   a1fc9c30ae0fdb14  ['INT-merged/display-1200x800-dark.png', 'INT-base/display-1200x800-dark.png']
+   a35b9d7607855e37  ['audit-baseline/dashboard-980x680-dark-dirty.png', 'audit-baseline/dashboard-980x680-dark-error.png', 'audit-baseline/dashboard-980x680-dark-pending.png', 'audit-baseline/dashboard-980x680-dark.png']
+   aa6a6ee435edad14  ['INT-merged/system-980x680-dark.png', 'INT-base/system-980x680-dark.png']
+   ab2f33c40c1198e1  ['INT-merged/performance-980x680-dark.png', 'INT-base/performance-980x680-dark.png']
+   b09e7963867af6c5  ['audit-baseline/cooling-1200x800-dark-pending.png', 'audit-baseline/cooling-1200x800-dark.png']
+   c0048ccc09066b94  ['INT-merged/cooling-1200x800-dark.png', 'INT-base/cooling-1200x800-dark.png']
+   c0b3b90b6c9d19d4  ['audit-baseline/dialog-1200x800-light.png', 'audit-baseline/dialog-980x680-light.png']
+   c0c54b9a7e4d8d85  ['INT-merged/cooling-980x680-light.png', 'INT-base/cooling-980x680-light.png']
+   c3e84bcdd588bb1d  ['INT-merged/settings-1200x800-dark.png', 'INT-base/settings-1200x800-dark.png']
+   d43c1b8e857edbfb  ['audit-baseline/performance-1200x800-dark-dirty.png', 'audit-baseline/performance-1200x800-dark-error.png', 'audit-baseline/performance-1200x800-dark-pending.png', 'audit-baseline/performance-1200x800-dark.png']
+   e124a04fda4e5c5e  ['INT-merged/dashboard-980x680-dark.png', 'INT-base/dashboard-980x680-dark.png', 'UIQA2-qa3/dashboard-980x680-dark.png']
+   e8f0090e5ea9135a  ['audit-baseline/graphics-980x680-dark-dirty.png', 'audit-baseline/graphics-980x680-dark-readonly.png', 'audit-baseline/graphics-980x680-dark.png']
+   f52cda22b42fa68e  ['audit-baseline/dashboard-1200x800-dark-dirty.png', 'audit-baseline/dashboard-1200x800-dark-error.png', 'audit-baseline/dashboard-1200x800-dark-pending.png', 'audit-baseline/dashboard-1200x800-dark.png']
+   f87949a84766ac61  ['INT-merged/system-1200x800-dark.png', 'INT-base/system-1200x800-dark.png']

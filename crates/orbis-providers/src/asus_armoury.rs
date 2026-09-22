@@ -507,8 +507,11 @@ impl ScreenAutoBrightnessProvider for AsusArmouryScreenAutoBrightnessProvider {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
+
+    static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     /// Create a unique temporary fixture root (house pattern: no tempfile dep).
     ///
@@ -516,8 +519,6 @@ mod tests {
     /// two tests starting within the same clock tick must still get distinct
     /// directories (a pure timestamp collided under parallel test execution).
     fn fixture_root() -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static FIXTURE_SEQ: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "orbis-providers-panel-overdrive-{}-{}-{}",
             std::process::id(),
@@ -525,10 +526,27 @@ mod tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos(),
-            FIXTURE_SEQ.fetch_add(1, Ordering::Relaxed)
+            FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn fixture_roots_are_unique_when_created_concurrently() {
+        let roots: Vec<_> = std::thread::scope(|scope| {
+            (0..32)
+                .map(|_| scope.spawn(fixture_root))
+                .map(|thread| thread.join().unwrap())
+                .collect()
+        });
+
+        let unique = roots.iter().collect::<std::collections::HashSet<_>>().len();
+        assert_eq!(unique, roots.len());
+
+        for root in roots {
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     fn fixture(content: &str) -> (std::path::PathBuf, AsusArmouryPanelOverdriveProvider) {

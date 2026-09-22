@@ -1,0 +1,30 @@
+loaded 30 reference title bands
+
+=== live c5ca shot -> best-matching reference title band ===
+  c5ca-about.png                     weak        best=merged/about           0.0749  2nd=base/about             0.0749
+  c5ca-after-nastroit.png            TITLE-MATCH best=merged/dashboard       0.0026  2nd=base/dashboard         0.0026
+  c5ca-after-nastroit2.png           TITLE-MATCH best=merged/dashboard       0.0026  2nd=base/dashboard         0.0026
+  c5ca-after-nastroit3.png           weak        best=merged/about           0.0747  2nd=base/about             0.0747
+  c5ca-after-rapid-nav.png           (1200x800) skipped (not 980x680)
+  c5ca-backlight.png                 weak        best=merged/backlight       0.0623  2nd=base/backlight         0.0623
+  c5ca-cooling-1200.png              (1200x800) skipped (not 980x680)
+  c5ca-cooling-dirty.png             weak        best=merged/about           0.0747  2nd=base/about             0.0747
+  c5ca-cooling-gpu-discarded.png     weak        best=merged/about           0.0747  2nd=base/about             0.0747
+  c5ca-cooling-gpu-tab.png           weak        best=merged/about           0.0747  2nd=base/about             0.0747
+  c5ca-cooling.png                   weak        best=merged/about           0.0747  2nd=base/about             0.0747
+  c5ca-dashboard-bottom.png          NO-MATCH    best=merged/dashboard       0.5457  2nd=base/dashboard         0.5457
+  c5ca-dashboard-bottom2.png         NO-MATCH    best=merged/dashboard       0.5457  2nd=base/dashboard         0.5457
+  c5ca-dashboard-early.png           TITLE-MATCH best=merged/dashboard       0.0026  2nd=base/dashboard         0.0026
+  c5ca-dashboard-light.png           NO-MATCH    best=merged/dashboard       1.0000  2nd=merged/performance     1.0000
+  c5ca-dashboard-top-again.png       TITLE-MATCH best=merged/dashboard       0.0026  2nd=base/dashboard         0.0026
+  c5ca-display.png                   weak        best=merged/display         0.0362  2nd=base/display           0.0362
+  c5ca-graphics-after-click.png      weak        best=merged/power           0.0616  2nd=base/power             0.0616
+  c5ca-graphics.png                  weak        best=merged/power           0.0616  2nd=base/power             0.0616
+  c5ca-perf.png                      TITLE-MATCH best=merged/dashboard       0.0026  2nd=base/dashboard         0.0026
+  c5ca-performance-reselect.png      weak        best=merged/settings        0.1113  2nd=base/settings          0.1113
+  c5ca-power.png                     weak        best=merged/power           0.0502  2nd=base/power             0.0502
+  c5ca-settings-dark-restore.png     weak        best=merged/backlight       0.0640  2nd=base/backlight         0.0640
+  c5ca-settings-light.png            NO-MATCH    best=merged/settings        0.9998  2nd=base/settings          0.9998
+  c5ca-settings-toggled-back.png     weak        best=merged/backlight       0.0640  2nd=base/backlight         0.0640
+  c5ca-settings-toggled.png          weak        best=merged/backlight       0.0640  2nd=base/backlight         0.0640
+  c5ca-system.png                    weak        best=merged/system          0.0517  2nd=base/system            0.0517

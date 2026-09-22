@@ -1,6 +1,6 @@
 //! Offscreen section snapshots for the single-window UI (ui-review companion).
 //!
-//! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme] [width] [height] [state]`
+//! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme]`
 //! Sections: dashboard | performance | power | cooling | graphics | backlight
 //! | display | system | settings | about | dialog.
 
@@ -56,20 +56,27 @@ impl Platform for SoftwarePlatform {
     }
 }
 
-/// Realistic review state for section screenshots (dev-only; never shipped).
+/// Product-complete review state. It is intentionally richer than production
+/// startup state so visual review judges the finished surface rather than a
+/// collection of unavailable placeholders. This example is never shipped.
 fn demo_state(component: &AppWindow) {
     let mut state = component.get_ui_state();
     state.perf_state = PerformanceHwState::Ready;
     state.perf_writable = true;
     state.perf_selected = 1;
     state.available_perf_mask = 0b0111;
+
     state.gpu_mode_state = GpuModeHwState::Ready;
-    state.gpu_mode_writable = false;
+    state.gpu_mode_writable = true;
     state.gpu_selected = 1;
-    state.available_gpu_mask = 0b0111;
+    state.available_gpu_mask = 0b1111;
+    state.gpu_queued = -1;
+    state.gpu_reboot_required = false;
+
     state.charge_limit_state = ChargeLimitState::Ready;
     state.charge_limit_writable = true;
     state.charge_limit = 80;
+
     state.cpu_temp = "56°C".into();
     state.gpu_temp = "51°C".into();
     state.cpu_fan_rpm = "2300 rpm".into();
@@ -83,11 +90,19 @@ fn demo_state(component: &AppWindow) {
     state.power_ac_mw = "23 W".into();
     state.gpu_power = "8 W".into();
     state.telemetry_fresh = true;
+
+    state.gpu_power_state = GpuHwState::Ready;
+    state.gpu_mux_state = GpuHwState::Ready;
+    state.gpu_access_state = GpuHwState::Ready;
+    state.gpu_power_value = 0;
+    state.gpu_mux_value = 0;
+    state.gpu_access_value = 0;
+
     state.fan_curve_state = FanCurveHwState::Ready;
     state.fan_curve_writable = true;
     state.fan_curve_dirty = false;
     state.fan_curve_enabled_known = true;
-    state.fan_curve_enabled = false;
+    state.fan_curve_enabled = true;
     state.fan_selected = 0;
     state.fan_profile_selected = 0;
     state.fan_temp_0 = 30;
@@ -106,142 +121,61 @@ fn demo_state(component: &AppWindow) {
     state.fan_pwm_5 = 144;
     state.fan_pwm_6 = 196;
     state.fan_pwm_7 = 255;
-    // F2 (audit t_5fc90d28): "normal" claims a fully Ready machine, so the
-    // power-limit fields must be populated too — otherwise the Performance
-    // page renders a phantom empty limit band that no real Ready backend
-    // would produce (ui-review fixture parity, same values as #115).
-    state.power_limits_ready = true;
-    state.power_limits_writable = true;
-    state.power_limits_reason = "Метаданные backend · запись через Hardware1".into();
-    state.spl_value = 45;
-    state.spl_min = 20;
-    state.spl_max = 80;
-    state.spl_step = 5;
-    state.spl_unit = "Вт".into();
-    state.spl_default = "45".into();
-    state.spl_draft = 45;
-    state.sppt_value = 65;
-    state.sppt_min = 20;
-    state.sppt_max = 100;
-    state.sppt_step = 5;
-    state.sppt_unit = "Вт".into();
-    state.sppt_default = "65".into();
-    state.sppt_draft = 65;
-    state.fppt_value = 65;
-    state.fppt_min = 20;
-    state.fppt_max = 100;
-    state.fppt_step = 5;
-    state.fppt_unit = "Вт".into();
-    state.fppt_default = "65".into();
-    state.fppt_draft = 65;
-    state.cpu_temp_limit_value = 85;
-    state.cpu_temp_limit_min = 60;
-    state.cpu_temp_limit_max = 95;
-    state.cpu_temp_limit_step = 1;
-    state.cpu_temp_limit_unit = "°C".into();
-    state.cpu_temp_limit_draft = 85;
-    state.gpu_dynamic_boost_value = 15;
-    state.gpu_dynamic_boost_min = 5;
-    state.gpu_dynamic_boost_max = 25;
-    state.gpu_dynamic_boost_step = 5;
-    state.gpu_dynamic_boost_unit = "Вт".into();
-    state.gpu_dynamic_boost_draft = 15;
-    state.gpu_temp_target_value = 83;
-    state.gpu_temp_target_min = 60;
-    state.gpu_temp_target_max = 87;
-    state.gpu_temp_target_step = 1;
-    state.gpu_temp_target_unit = "°C".into();
-    state.gpu_temp_target_draft = 83;
     component.set_ui_state(state);
-}
 
-/// Honest non-Ready power-limit shape, as the production startup path leaves it
-/// before any authoritative read arrives (`UiState::production_initial`).
-///
-/// Audit F5 / D-AUD-G02: the offscreen matrix previously could not render this
-/// state at all, so the Performance page's phantom band was invisible to it
-/// while the live application showed it on every start.
-fn clear_power_limits(state: &mut UiState, reason: &str) {
-    state.power_limits_ready = false;
-    state.power_limits_writable = false;
-    state.power_limits_reason = reason.into();
-    state.power_limits_stale = true;
-    state.spl_value = 0;
-    state.spl_unit = "".into();
-    state.spl_draft = 0;
-    state.sppt_value = 0;
-    state.sppt_unit = "".into();
-    state.sppt_draft = 0;
-    state.fppt_value = 0;
-    state.fppt_unit = "".into();
-    state.fppt_draft = 0;
-    state.cpu_temp_limit_value = 0;
-    state.cpu_temp_limit_unit = "".into();
-    state.cpu_temp_limit_draft = 0;
-    state.gpu_dynamic_boost_value = 0;
-    state.gpu_dynamic_boost_unit = "".into();
-    state.gpu_dynamic_boost_draft = 0;
-    state.gpu_temp_target_value = 0;
-    state.gpu_temp_target_unit = "".into();
-    state.gpu_temp_target_draft = 0;
-    state.power_limit_dirty_mask = 0;
-    state.power_limit_pending_mask = 0;
-}
+    component.set_device_name("ASUS TUF Gaming A17 FA707NV".into());
+    component.set_device_board("FA707NV".into());
+    component.set_bios_version("FA707NV.318".into());
+    component.set_bios_date("2026-07-14".into());
 
-fn apply_scenario(component: &AppWindow, name: &str) -> anyhow::Result<()> {
-    let mut state = component.get_ui_state();
-    match name {
-        "normal" => {}
-        // The real startup shape: the backend has not produced power-limit
-        // metadata yet, so the limits card must render as the honest fallback
-        // and must not reserve the height of the full card.
-        "limits-notready" | "limits-loading" => {
-            clear_power_limits(
-                &mut state,
-                "Лимиты мощности недоступны: backend не отвечает",
-            );
-        }
-        "dirty" => {
-            state.fan_curve_state = FanCurveHwState::Ready;
-            state.fan_curve_writable = true;
-            state.fan_curve_dirty = true;
-        }
-        "pending" => {
-            state.gpu_queued = 2;
-            state.gpu_reboot_required = true;
-            state.gpu_selected = 1;
-            state.gpu_ultimate_pending = true;
-        }
-        "error" => {
-            state.gpu_section_error = true;
-            state.fan_curve_state = FanCurveHwState::Ready;
-            state.fan_curve_writable = true;
-            state.fan_curve_error = true;
-        }
-        "unsupported" => {
-            state.perf_state = PerformanceHwState::Unavailable;
-            state.perf_writable = false;
-            state.perf_unavailable_reason = "Backend недоступен".into();
-            state.gpu_mode_state = GpuModeHwState::Unavailable;
-            state.gpu_mode_writable = false;
-            state.fan_curve_state = FanCurveHwState::Unavailable;
-            state.fan_curve_writable = false;
-            state.fan_curve_unavailable_reason = "Backend недоступен".into();
-            state.charge_limit_state = ChargeLimitState::Unavailable;
-            state.charge_limit_writable = false;
-        }
-        "readonly" => {
-            state.perf_writable = false;
-            state.gpu_mode_writable = false;
-            state.fan_curve_state = FanCurveHwState::Ready;
-            state.fan_curve_writable = false;
-            state.fan_curve_enabled_known = true;
-            state.charge_limit_writable = false;
-        }
-        other => anyhow::bail!("unknown state: {other}"),
-    }
-    component.set_ui_state(state);
-    Ok(())
+    component.set_keyboard_state_ready(true);
+    component.set_keyboard_control_ready(true);
+    component.set_keyboard_brightness(2);
+    component.set_aura_state_ready(true);
+    component.set_aura_control_ready(true);
+    component.set_keyboard_effect(0);
+    component.set_keyboard_speed(1);
+
+    component.set_display_state_ready(true);
+    component.set_display_status("1920×1080 · 144 Hz".into());
+    component.set_panel_overdrive_state_ready(true);
+    component.set_panel_overdrive_control_ready(true);
+    component.set_panel_overdrive(true);
+
+    component.set_boot_sound_state_ready(true);
+    component.set_boot_sound(true);
+    component.set_backend_ready(true);
+    component.set_status("Состояние расширенных параметров синхронизировано".into());
+    component.set_status_led(true);
+    component.set_disable_aspm(false);
+    component.set_disable_standby_networking(false);
+    component.set_igpu_memory(2);
+    component.set_hibernate_after(30);
+    component.set_p_cores(8);
+    component.set_e_cores(0);
+    component.set_m1_action(2);
+    component.set_m2_action(3);
+    component.set_m3_action(4);
+    component.set_m4_action(7);
+    component.set_m5_action(8);
+
+    component.set_startup(true);
+    component.set_startup_enabled(true);
+    component.set_startup_status("Автозапуск включён".into());
+    component.set_start_minimized(false);
+    component.set_start_minimized_enabled(true);
+    component.set_remember_position(true);
+    component.set_remember_position_enabled(true);
+    component.set_close_action(1);
+    component.set_close_action_enabled(true);
+    component.set_hide_to_tray_enabled(true);
+    component.set_settings_local_status("Настройки сохранены".into());
+
+    component.set_refresh_enabled(true);
+    component.set_refresh_pending(false);
+    component.set_export_enabled(true);
+    component.set_diagnostics_summary("Orbis diagnostics review state".into());
+    component.set_diagnostics_status("Диагностика актуальна".into());
 }
 
 fn setup(width: u32, height: u32) -> Rc<slint::platform::software_renderer::SoftwareRenderer> {
@@ -290,27 +224,15 @@ fn main() -> anyhow::Result<()> {
     let kind = args.next().unwrap_or_else(|| "dashboard".to_string());
     let path = args.next().unwrap_or_else(|| format!("{kind}.png"));
     let theme = args.next().unwrap_or_else(|| "dark".to_string());
-    let width = args
-        .next()
-        .map(|v| v.parse())
-        .transpose()?
-        .unwrap_or(1200u32);
-    let height = args
-        .next()
-        .map(|v| v.parse())
-        .transpose()?
-        .unwrap_or(800u32);
-    let state = args.next().unwrap_or_else(|| "normal".to_string());
     let light = match theme.as_str() {
         "dark" => false,
         "light" => true,
         other => anyhow::bail!("unknown theme: {other}"),
     };
 
-    // The shell is fixed-size; the dialog keeps its own compact canvas.
     let (width, height) = match kind.as_str() {
-        "dialog" => (430, 220),
-        _ => (width, height),
+        "dialog" => (470, 228),
+        _ => (1240, 820),
     };
 
     let renderer = setup(width, height);
@@ -325,11 +247,6 @@ fn main() -> anyhow::Result<()> {
                 ThemeMode::Dark
             });
             demo_state(&component);
-            apply_scenario(&component, &state)?;
-            // Keyboard backlight observation is ready in the review scenario.
-            component.set_keyboard_state_ready(true);
-            component.set_keyboard_control_ready(false);
-            component.set_keyboard_brightness(2);
             let section = match kind.as_str() {
                 "performance" => Section::Performance,
                 "power" => Section::Power,

@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use orbis_providers::traits::{BatteryProvider, PerformanceProvider};
 
+use crate::clamshell::SystemdClamshellInhibitor;
 use crate::fans::AsusdFanCurveSource;
-use crate::server::{GpuCapabilities, build_session_server};
+use crate::server::{GpuCapabilities, build_session_server_with_clamshell};
 use crate::upower::{
     AsusdBatteryChargeLimitProvider, AsusdBatteryReadFactory, LazyBatteryChargeLimitProvider,
     SysfsBatteryEndThresholdSource, ZbusAsusdConfiguredSource, ZbusBatteryDiscoverySource,
@@ -82,13 +83,14 @@ where
     let provider =
         AsusdBatteryChargeLimitProvider::new(upower_source, asusd_source, effective_source);
     let battery: Arc<dyn BatteryProvider> = Arc::new(provider);
-    build_session_server(
+    build_session_server_with_clamshell(
         session_builder,
         battery,
         gpu,
         performance,
         fan_curves,
         power_limits,
+        Some(Arc::new(SystemdClamshellInhibitor::new())),
     )
     .await
 }
@@ -112,13 +114,14 @@ pub async fn build_lazy_upower_session_server(
         ZbusBatteryDiscoverySource::new(upower_connection.clone()),
         AsusdBatteryReadFactory::new(upower_connection),
     ));
-    build_session_server(
+    build_session_server_with_clamshell(
         session_builder,
         battery,
         gpu,
         performance,
         fan_curves,
         power_limits,
+        Some(Arc::new(SystemdClamshellInhibitor::new())),
     )
     .await
 }

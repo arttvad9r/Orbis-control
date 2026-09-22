@@ -1,0 +1,11 @@
+### F1 :: dashboard card column x-edges (gutter symmetry)
+  LIVE  c5ca-dashboard-early             card x = (205, 974)   right-margin=6
+  LIVE  c5ca-dashboard-top-again         card x = (205, 974)   right-margin=6
+  LIVE  c5ca-dashboard-light (light)     card x = (205, 974)   right-margin=6
+  POST  merged/dashboard (candidate)     card x = (205, 974)   right-margin=6
+  PRE   baseline/dashboard (pre-fix)     card x = (205, 974)   right-margin=6
+
+### F3 :: About — rightmost paragraph text ink vs card right border
+  LIVE  c5ca-about (verdict set)         card border right x=229  text right x=None  margin=Nonepx
+  POST  merged/about (candidate)         card border right x=229  text right x=None  margin=Nonepx
+  PRE   baseline/about (pre-fix)         card border right x=229  text right x=None  margin=Nonepx

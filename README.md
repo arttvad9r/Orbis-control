@@ -21,6 +21,8 @@ The current codebase includes production paths for the core application shell an
 
 The project still contains unfinished or deliberately disabled product surfaces. The active completion queue is [`TODO.md`](TODO.md). A feature is considered finished only when the user-visible flow is connected end to end or the unused shell has been removed.
 
+The current local development candidate is on `agent/finish-v01`. Its software verification gate (`scripts/verify full`) is green, but the project is not yet declared released: target-session mutation evidence and clean package lifecycle validation remain tracked in `TODO.md`.
+
 ## Arch Linux development setup
 
 Rust workspace: edition 2024, MSRV/toolchain 1.87.
@@ -117,6 +119,7 @@ Important invariants:
 - an unknown mutation outcome is never blindly retried.
 
 Stable architecture details live in [`docs/architecture.md`](docs/architecture.md) and accepted ADRs under [`docs/adr/`](docs/adr/). Hardware evidence under `docs/hardware-evidence/` is revision/device-specific reference material, not a development gate.
+Comparative project decisions are recorded in [`docs/research/comparative-projects.md`](docs/research/comparative-projects.md); they guide ownership and state semantics but do not authorize copying external code or enabling unsupported mutations.
 
 ## Repository workflow for AI agents
 

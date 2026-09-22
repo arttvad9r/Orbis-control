@@ -1,0 +1,38 @@
+### 1. D-AUD-G02 band emptiness
+  LIVE c5ca-performance-reselect (verdict set)
+      page bg = [23, 24, 28]
+      y=302..466 (the D-AUD-G02 band) -> non-background px = 1650 of 122100 (1.351%)
+        located at y=[302,466] x=[220,229]
+      ink bands = [(0, 679)]
+      gaps     = []   phantom(>=100) = none
+
+  CONTROL p980-performance (pre-fix tree)
+      page bg = [23, 24, 28]
+      y=302..466 (the D-AUD-G02 band) -> non-background px = 1650 of 122100 (1.351%)
+        located at y=[302,466] x=[220,229]
+      ink bands = [(0, 679)]
+      gaps     = []   phantom(>=100) = none
+
+  REF baseline/performance (pre-fix tree)
+      page bg = [23, 24, 28]
+      y=302..466 (the D-AUD-G02 band) -> non-background px = 1650 of 122100 (1.351%)
+        located at y=[302,466] x=[220,229]
+      ink bands = [(0, 679)]
+      gaps     = []   phantom(>=100) = none
+
+  REF merged/performance (candidate tree, post-fix)
+      page bg = [35, 37, 41]
+      y=302..466 (the D-AUD-G02 band) -> non-background px = 24519 of 122100 (20.081%)
+        located at y=[302,466] x=[220,959]
+      ink bands = [(0, 679)]
+      gaps     = []   phantom(>=100) = none
+
+### 2. Structural comparison of the Performance page
+  LIVE bands        = [(0, 679)]
+  PRE-FIX bands     = [(0, 679)]
+  POST-FIX bands    = [(0, 679)]
+  CONTROL bands     = [(0, 679)]
+
+  LIVE identical to PRE-FIX structure?     True
+  LIVE identical to CONTROL structure?     True
+  LIVE identical to POST-FIX structure?    True

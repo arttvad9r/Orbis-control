@@ -1,0 +1,23 @@
+### F3 :: About paragraph text vs card right border
+  LIVE   c5ca-about (verdict set): no text ink found
+  POSTFIX merged/about (candidate tree): no text ink found
+  PREFIX  baseline/about (PRE-fix tree): no text ink found
+  CTRL   p980-about (pre-merge): no text ink found
+
+### F2 honesty :: does 'unsupported' change the limits-card region?
+  limits-card region y=312..627 x=222..959: differing px = 0 of 233208 (0.000%)
+  -> the limits card renders IDENTICALLY in normal and unsupported: True
+  whole-page differing px = 52854 (the Unavailable messaging lives in the profile-card area)
+
+### honesty :: read-only discipline from the state probes
+Traceback (most recent call last):
+  File "/home/artt/Orbis-control-implementation/.qa-t0c45ec21/f3honest.py", line 77, in <module>
+    d = json.loads(p.read_text())
+                   ^^^^^^^^^^^^^
+  File "/home/artt/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/lib/python3.11/pathlib.py", line 1058, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/artt/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/lib/python3.11/pathlib.py", line 1044, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/home/artt/.hermes/profiles/qa/cache/scratch/qa-t5b9d96c6/shots/logs/status-before-reselect.json'

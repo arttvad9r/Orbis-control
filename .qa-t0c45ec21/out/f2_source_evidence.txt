@@ -1,0 +1,61 @@
+### F2 (D-AUD-G02) source at every relevant revision
+
+--- 860bc07 ---
+    line 122: visible: root.ui-state.power-limits-ready;
+    line 143: if (!root.ui-state.power-limits-ready) : SectionCard {
+--- 2c3e3af ---
+    line 126: visible: root.ui-state.power-limits-ready;
+    line 147: if (!root.ui-state.power-limits-ready) : SectionCard {
+--- f45f55d ---
+    line 126: visible: root.ui-state.power-limits-ready;
+    line 147: if (!root.ui-state.power-limits-ready) : SectionCard {
+--- 5ca36ab ---
+    line 129: visible: root.ui-state.power-limits-ready;
+    line 150: if (!root.ui-state.power-limits-ready) : SectionCard {
+--- 5f0d3da ---
+    line 133: visible: root.ui-state.power-limits-ready;
+    line 154: if (!root.ui-state.power-limits-ready) : SectionCard {
+--- a21139e8 ---
+    line 133: visible: root.ui-state.power-limits-ready;
+    line 154: if (!root.ui-state.power-limits-ready) : SectionCard {
+
+### commit that CLAIMS to fix F1-F4b (self-report)
+2c3e3af14d19599bff2489644d188879a42557f2
+ui: apply symmetry-audit fixes F1, F2, F3, F4a, F4b (t_29073c31)
+F1  dashboard page grid unified with all sections: shared Grid global
+    (28px gutter, 16px card spacing, 8/20 vertical rhythm) replaces the
+    old 14px gutter / 4px top magic numbers; all 10 section pages now
+    reference the same constants (measured edges identical to reference
+    pages: left 257 / right 952 at 980px, symmetric 27px margins).
+F2  ui_snapshot demo state now populates power-limit fields, so the
+    Performance page stops rendering a phantom empty limits band that a
+    real Ready backend would not produce; LimitRow sliders drop the
+    redundant percent readout so three rows fit the card at 980px
+    (previously row 3 overflowed the card border by ~25px).
+F3  About body text width follows the layout instead of an 812px
+    min-width, fixing the clipped last word at 980px window width.
+F4a nav icons render in fixed 18x18 wrappers with explicit y centering
+    (mixed fixed/stretch layout centering is unreliable in the software
+    renderer); measured icon-vs-label offset now -0.5..-3px (was -13..-15).
+F4b nav icon column locked to a constant x (left edge 26px +/-1, was
+    34..78 zigzag); TitleBar identity group aligned to the same 24px
+    column. Planner-approved 2026-09-22.
+
+Evidence: 84 before/after screenshots (980x680 + 1200x800, dark+light,
+5 state variants) plus pixel probes; scripts/verify task green.
+
+### UI line self-verification evidence
+UI-2 self-verification backfill by planner
+branch: wt/ui-fixes
+candidate: 2c3e3af14d19599bff2489644d188879a42557f2
+check: scripts/verify task -> PASS (fmt, check, tests, clippy -D warnings)
+four defects fixed: F1 grid 28px, F2 performance phantom card, F3 cooling buttons, F4a/F4b nav icons straight vertical column
+note: after-fix screenshot matrix is rendered by independent UI-QA (t_ccbe5158)
+
+### pixel strip across the card's left border at y=400
+  LIVE  c5ca-performance-reselect:
+      [(27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (51, 54, 61), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28)]
+  PREFIX  baseline/performance:
+      [(27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (51, 54, 61), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28)]
+  POSTFIX merged/performance:
+      [(27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (27, 28, 33), (51, 54, 61), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28), (23, 24, 28)]

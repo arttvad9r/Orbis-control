@@ -1,0 +1,28 @@
+-- LIVE c5ca-performance-reselect
+     card-band y=[ 64, 75] height= 12  
+     card-band y=[120,298] height=179  gap_before=  44px
+     card-band y=[471,525] height= 55  gap_before= 172px
+
+-- LIVE p980-performance (pre-merge)
+     card-band y=[ 64, 75] height= 12  
+     card-band y=[120,298] height=179  gap_before=  44px
+     card-band y=[471,525] height= 55  gap_before= 172px
+
+-- REF merged/performance-980x680-dark
+     card-band y=[ 64, 77] height= 14  
+     card-band y=[ 91, 99] height=  9  gap_before=  13px
+     card-band y=[120,295] height=176  gap_before=  20px
+     card-band y=[312,627] height=316  gap_before=  16px
+
+-- REF merged/performance-980x680-dark-unsupported
+     card-band y=[ 64, 77] height= 14  
+     card-band y=[ 91, 99] height=  9  gap_before=  13px
+     card-band y=[120,295] height=176  gap_before=  20px
+     card-band y=[312,627] height=316  gap_before=  16px
+
+-- REF baseline/performance-980x680-dark (pre-fix)
+     card-band y=[ 64, 77] height= 14  
+     card-band y=[ 91, 99] height=  9  gap_before=  13px
+     card-band y=[120,296] height=177  gap_before=  20px
+     card-band y=[469,522] height= 54  gap_before= 172px
+

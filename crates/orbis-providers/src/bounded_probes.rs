@@ -19,8 +19,8 @@ use crate::bounded_provider_call;
 use crate::error::ProviderError;
 use crate::traits::{
     BatteryProvider, DisplayOutputProvider, FanProvider, GpuAccessProvider, GpuMuxProvider,
-    GpuPowerProvider, MiniLedModeProvider, PanelOverdriveProvider, PerformanceProvider, Provider,
-    ProviderHealth, ScreenAutoBrightnessProvider,
+    GpuPowerProvider, MiniLedModeProvider, PanelOverdriveProvider, PerformanceProvider,
+    PowerLimitProvider, Provider, ProviderHealth, ScreenAutoBrightnessProvider,
 };
 
 fn operation(status: CapabilityStatus, reason: String) -> OperationCapability {
@@ -293,6 +293,20 @@ where
         "probe_screen_auto_brightness",
         CapabilityStatus::ReadOnly,
         crate::probes::probe_screen_auto_brightness(provider),
+    )
+    .await
+}
+
+/// Bounded ASUS Armoury CPU package-limit capability probe.
+pub async fn probe_power_limits<P>(provider: &P) -> Result<Capability, ProbeError>
+where
+    P: PowerLimitProvider + ?Sized,
+{
+    bounded_single_read_probe(
+        provider,
+        "probe_power_limits",
+        CapabilityStatus::ReadOnly,
+        crate::asus_armoury_power_limits::probe_power_limits_unbounded(provider),
     )
     .await
 }

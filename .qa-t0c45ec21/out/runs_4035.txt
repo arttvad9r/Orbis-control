@@ -1,0 +1,62 @@
+task_runs columns: ['id', 'task_id', 'profile', 'step_key', 'status', 'claim_lock', 'claim_expires', 'worker_pid', 'worker_started_at', 'max_runtime_seconds', 'last_heartbeat_at', 'started_at', 'ended_at', 'outcome', 'summary', 'metadata', 'error']
+======================================================================
+  id: 31
+  status: done
+  outcome: completed
+  summary: QA PASS for candidate f45f55db91ad2bb9e94d11860528d227c6e1a649 (wt/ui-qa2 worktree): the D-AUD-G03 About-page fix is now genuinely applied — both paragraphs' `width: parent.width` removed, text verified inside the card border at 980x680 and 1200x800 in both themes (longest line x=909 vs border 951; x=1146 vs 1171), no regression on dashboard/settings renders, cargo test -p orbis-ui --lib 153 passed, candidate not mutated (probes kept in untracked .qa3-shots/).
+  started_at: 1790048814
+  -- metadata --
+{
+  "artifacts": [
+    "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-980x680-light.png",
+    "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-980x680-dark.png",
+    "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-1200x800-light.png",
+    "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-1200x800-dark.png",
+    "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/dashboard-980x680-dark.png",
+    "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/settings-980x680-dark.png"
+  ],
+  "changed_files": [],
+  "defects": [],
+  "orchestration_result": {
+    "orchestration_contract_version": 1,
+    "run_id": 31,
+    "stage_results": {
+      "qa": {
+        "candidate": {
+          "git_sha": "a21139e8f4591237c38075d54350e5bf7afc8974"
+        },
+        "checker": "qa",
+        "checks": [
+          {
+            "evidence_references": [
+              "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-980x680-light.png",
+              "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-980x680-dark.png",
+              "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-1200x800-light.png",
+              "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-1200x800-dark.png",
+              "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/dashboard-980x680-dark.png",
+              "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/settings-980x680-dark.png"
+            ],
+            "expected": "Кандидат собран из заявленного коммита f45f55db91ad2bb9e94d11860528d227c6e1a649 (worktree .worktrees/t_23cd8fb8, ветка wt/ui-qa2 = wt/ui-g03fix), дерево чистое; ui_snapshot пересобран из текущего исходника",
+            "id": "candidate-integrity",
+            "observed": "git rev-parse HEAD = f45f55db91ad2bb9e94d11860528d227c6e1a649, git status чистый до начала прогона; ui_snapshot собран после touch about.slint и выдал попиксельно идентичный рендер (imgcmp identical=True), т.е. бинарник соответствует текущему дереву",
+            "result": "PASS"
+          },
+          {
+            "evidence_references": [
+              "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/ui/audited/sections/about.slint"
+            ],
+            "expected": "Фикс D-AUD-G03 присутствует в исходнике: width: parent.width удалён у обоих Text-абзацев (about.slint:60-71), wrap: word-wrap сохранён",
+            "id": "fix-source",
+            "observed": "Подтверждено чтением файла: у обоих абзацев (13px primary и 12.5px secondary) свойства width нет, wrap: word-wrap на месте; git diff 2c3e3af..f45f55d показывает удаление ровно двух width-строк плюс снятие комментария",
+            "result": "PASS"
+          },
+          {
+            "evidence_references": [
+              "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-980x680-light.png",
+              "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-980x680-dark.png",
+              "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-1200x800-light.png",
+              "/home/artt/Orbis-control-implementation/.worktrees/t_23cd8fb8/.qa3-shots/about-1200x800-dark.png"
+            ],
+            "expected": "Текст абзацев остаётся внутри правой границы карточки; фикс D-AUD-G03 применён по предписанию UI_AUDIT_BASELINE.md — удалить width: parent.width на about.slint:61/:68",
+            "id": "fix-applied",
+            "observed": "FAIL устранён. Пиксельные пробы: 980px — граница карточки x=951, самая длинная строка текста до x=909 (запас 42px; до фикса x=963, +12px за границей); 1200px — граница x=1171, текст до x=1146 (запас 25px; до фикса x=1185, +14px). Обе темы, оба размера: ни одна строка не 

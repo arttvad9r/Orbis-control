@@ -27,6 +27,7 @@ use orbis_session_protocol::{
     ChargeLimitInfo, gpu_access, gpu_mux, gpu_power, performance, power_limit_field,
 };
 
+use crate::clamshell::ClamshellInhibitor;
 use crate::fans::{AsusdFanCurveSource, asusd_fan_profile_from_wire};
 
 /// Service object session интерфейса.
@@ -45,6 +46,7 @@ pub struct SessionService {
     performance: Option<Arc<dyn PerformanceProvider>>,
     fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
     power_limits: Option<Arc<dyn PowerLimitProvider>>,
+    clamshell: Option<Arc<dyn ClamshellInhibitor>>,
 }
 
 impl SessionService {
@@ -58,6 +60,7 @@ impl SessionService {
             performance: None,
             fan_curves: None,
             power_limits: None,
+            clamshell: None,
         }
     }
 
@@ -95,6 +98,28 @@ impl SessionService {
     pub fn with_power_limits(mut self, provider: Arc<dyn PowerLimitProvider>) -> Self {
         self.power_limits = Some(provider);
         self
+    }
+
+    /// Add the user-session-owned clamshell inhibitor lifecycle.
+    pub fn with_clamshell(mut self, inhibitor: Arc<dyn ClamshellInhibitor>) -> Self {
+        self.clamshell = Some(inhibitor);
+        self
+    }
+
+    /// Read clamshell inhibitor state without changing it.
+    pub fn clamshell_status(&self) -> u8 {
+        self.clamshell
+            .as_ref()
+            .map(|inhibitor| inhibitor.status())
+            .unwrap_or(orbis_session_protocol::clamshell::UNAVAILABLE)
+    }
+
+    /// Request clamshell inhibitor state through the session owner.
+    pub fn set_clamshell(&self, enabled: bool) -> u8 {
+        self.clamshell
+            .as_ref()
+            .map(|inhibitor| inhibitor.set_enabled(enabled))
+            .unwrap_or(orbis_session_protocol::clamshell::UNAVAILABLE)
     }
 
     /// Read the authoritative power-limit snapshot without caching or writes.
@@ -599,6 +624,16 @@ impl SessionService {
             })?,
         };
         Ok(asusd_curve_to_wire_tuple(profile, &asusd))
+    }
+
+    /// Authoritative session-owned clamshell inhibitor state.
+    async fn clamshell_inhibitor(&self) -> zbus::fdo::Result<u8> {
+        Ok(self.clamshell_status())
+    }
+
+    /// Request a session-owned clamshell inhibitor lifecycle change.
+    async fn set_clamshell_inhibitor(&self, enabled: bool) -> zbus::fdo::Result<u8> {
+        Ok(self.set_clamshell(enabled))
     }
 }
 

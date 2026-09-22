@@ -1,0 +1,58 @@
+id = 't_0c45ec21'
+title = 'Orbis QA-verdict: записать вердикт общей QA по собранным артефактам (5ca36ab)'
+assignee = 'qa'
+status = 'running'
+priority = 80
+created_by = 'user'
+created_at = 1790052337
+started_at = 1790052352
+completed_at = None
+workspace_kind = 'dir'
+workspace_path = '/home/artt/Orbis-control-implementation'
+branch_name = None
+project_id = None
+claim_lock = 'archlinux:1695005'
+claim_expires = 1790055386
+tenant = None
+idempotency_key = None
+consecutive_failures = 0
+worker_pid = 1695008
+worker_started_at = '697dd3cc-846f-4c98-8015-3b26aed24519:13|20967654'
+last_failure_error = None
+max_runtime_seconds = None
+last_heartbeat_at = 1790054486
+current_run_id = 34
+workflow_template_id = None
+current_step_key = None
+skills = None
+model_override = None
+provider_override = None
+reasoning_effort = None
+max_retries = None
+goal_mode = 0
+goal_max_turns = None
+session_id = None
+block_kind = 'needs_input'
+block_recurrences = 1
+completion_contract = 'local-only'
+
+########## BODY ##########
+{"orchestration_contract_version": 1, "task_class": "qa", "objective": "Записать типизированный вердикт по артефактам общей QA. Карта переиздана планировщиком: исходная редакция содержала противоречие (три разных идентификатора кандидата) и запрещала замер — см. комментарий планировщика. Артефакты делятся на два набора из РАЗНЫХ деревьев; вердикт относится только к набору c5ca-*.", "requirement_ids": ["REQ-LAUNCH", "REQ-HONESTY", "REQ-VISUAL", "REQ-REGRESSION"], "acceptance_ids": ["SC-LAUNCH", "SC-VISUAL-980", "SC-VISUAL-STATES"], "verification": {"required": true, "checks": [{"id": "liveness-verdict", "method": "runtime_interaction", "required": true, "expected_observable": "Вердикт по liveness: приложение запускается, все страницы открываются, навигация стабильна — по набору c5ca-* (27+ live-скриншотов после слияния)"}, {"id": "honesty-verdict", "method": "runtime_state", "required": true, "expected_observable": "Вердикт по честности состояний: read-only дисциплина соблюдена (пробы не показывают мутаций железа), а непроверенное честно помечено INCONCLUSIVE с причиной"}, {"id": "visual-verdict", "method": "visual_runtime", "required": true, "expected_observable": "Вердикт по визуальной линии: замер разрешён и обязателен — разброс левых краёв иконок навигации и соответствие зафиксированной симметрии F1-F4b на наборе c5ca-*"}]}, "scope": {"workspace": "/home/artt/Orbis-control-implementation", "branch": "implementation/current-plan", "details": ["НЕ перерендеривать, НЕ пересобирать, НЕ запускать приложение. Только анализ существующих артефактов.", "ЗАМЕР РАЗРЕШЁН И ТРЕБУЕТСЯ (в отличие от исходной редакции карты): пиксельные пробы по существующим png.", "НАБОР ДЛЯ ВЕРДИКТА — c5ca-* (/home/artt/.hermes/profiles/qa/cache/scratch/qa-t5b9d96c6/shots/c5ca-*.png, 27 файлов, 07:17–07:34): пост-слияние, дерево 5f0d3da. Это и есть кандидат.", "НАБОР-КОНТРОЛЬ — p980-* (/home/artt/.hermes/profiles/qa/cache/scratch/qa-t5b9d96c6/shots/p980-*.png, 9 файлов, 07:05–07:06): снят ДО слияния (пре-фикс дерево 5ca36ab). Использовать только как контраст для калибровки пробы; НЕ читать как свидетельство о принятом кандидате.", "Почему наборы разные (планировщик, зафиксировано): merge-карта INT мутировала общий чекаут, пока эта QA снимала с него же кадры. Это ошибка планировщика, не дефект воркера.", "Пробы состояния: status-*.json (schema v3) показывают отсутствие мутаций; gpu.power=unavailable, т.к. hardwared не запущен — путь мутации НЕ проверен.", "Ожидаемый замер на c5ca-*: левые края иконок навигации в узком коридоре (планировщик независимо измерил: lefts≈25..27, spread=2). На p980-* контроле: spread≈47..67 (зигзаг пре-фикса).", "Если по пункту данных не хватает — честный INCONCLUSIVE по этому пункту с причиной, без догадок и без сужения объёма.", "Полные находки предыдущего забега: /home/artt/Orbis-control-implementation/.qa-t0c45ec21/FINDINGS-t_0c45ec21.md"]}, "candidate": {"git_sha": "a21139e8f4591237c38075d54350e5bf7afc8974"}}
+
+########## RESULT ##########
+(empty)
+
+########## METADATA ##########
+Traceback (most recent call last):
+  File "/home/artt/Orbis-control-implementation/.qa-t0c45ec21/card.py", line 32, in <module>
+    md = json.loads(r["metadata"]) if r["metadata"] else {}
+                                      ~^^^^^^^^^^^^
+IndexError: No item with that key
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/artt/Orbis-control-implementation/.qa-t0c45ec21/card.py", line 34, in <module>
+    md = {"__raw": r["metadata"]}
+                   ~^^^^^^^^^^^^
+IndexError: No item with that key

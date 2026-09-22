@@ -1,13 +1,14 @@
 # orbis-hardwared.service — package-owned Arch/Linux system service.
 #
-# Installed by packaging/deploy-dev-hardwared.sh as a regular file in
-# /etc/systemd/system/. Privileged mutation stays behind the typed Hardware1
-# D-Bus API and per-capability polkit actions.
+# Local installers substitute their /usr/local prefix before installing this
+# template. Privileged mutation stays behind the typed Hardware1 D-Bus API and
+# per-capability polkit actions.
 
 [Unit]
 Description=Orbis Control hardware helper
-After=dbus.service
+After=dbus.service asusd.service
 Requires=dbus.service
+Wants=asusd.service
 
 [Service]
 Type=dbus
@@ -38,6 +39,8 @@ ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/nv_dynami
 ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/nv_temp_target/current_value
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/brightness
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/max_brightness
+ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/boot_sound/current_value
+ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/apu_mem/current_value
 
 [Install]
 WantedBy=multi-user.target

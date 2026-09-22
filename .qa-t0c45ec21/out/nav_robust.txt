@@ -1,0 +1,48 @@
+== p980-settings (QA live) :: p980-settings.png
+   chunks: ['IHDR', 'cHRM', 'bKGD', 'pHYs', 'tIME 2026-09-22 04:06:25', "tEXt 'date:create\\x002026-09-22T04:06:25+00:00'", "tEXt 'date:modify\\x002026-09-22T04:06:25+00:00'", "tEXt 'date:timestamp\\x002026-09-22T04:06:25+00:00'", "tEXt 'logicalX\\x000'", "tEXt 'logicalY\\x000'", "tEXt 'screen\\x00eDP-1'", 'IDAT', 'IDAT', 'IEND']
+   Главная                icon_x=70 label_x=98 fill_cols=1
+   Производительность     icon_x=30 label_x=57 fill_cols=1
+   Питание                icon_x=69 label_x=97 fill_cols=1
+   Охлаждение             icon_x=57 label_x=84 fill_cols=1
+   Графика                icon_x=69 label_x=97 fill_cols=1
+   Подсветка              icon_x=63 label_x=91 fill_cols=1
+   Экран                  icon_x=77 label_x=104 fill_cols=1
+   Система                icon_x=69 label_x=97 fill_cols=1
+   Настройки              icon_x=62 label_x=90 fill_cols=1
+   О программе            icon_x=54 label_x=81 fill_cols=1
+== c5ca-settings-dark-restore (QA live) :: c5ca-settings-dark-restore.png
+   chunks: ['IHDR', 'cHRM', 'bKGD', 'pHYs', 'tIME 2026-09-22 04:26:50', "tEXt 'date:create\\x002026-09-22T04:26:50+00:00'", "tEXt 'date:modify\\x002026-09-22T04:26:50+00:00'", "tEXt 'date:timestamp\\x002026-09-22T04:26:50+00:00'", "tEXt 'logicalX\\x000'", "tEXt 'logicalY\\x000'", "tEXt 'screen\\x00eDP-1'", 'IDAT', 'IDAT', 'IEND']
+   Главная                icon_x=26 label_x=54 fill_cols=1
+   Производительность     icon_x=27 label_x=54 fill_cols=1
+   Питание                icon_x=26 label_x=54 fill_cols=1
+   Охлаждение             icon_x=26 label_x=53 fill_cols=1
+   Графика                icon_x=26 label_x=54 fill_cols=1
+   Подсветка              icon_x=25 label_x=54 fill_cols=1
+   Экран                  icon_x=26 label_x=53 fill_cols=1
+   Система                icon_x=26 label_x=53 fill_cols=1
+   Настройки              icon_x=26 label_x=54 fill_cols=1
+   О программе            icon_x=26 label_x=53 fill_cols=1
+== merged/settings (offscreen 5f0d3da) :: settings-980x680-dark.png
+   chunks: ['IHDR', 'IDAT', 'IEND']
+   Главная                icon_x=26 label_x=54 fill_cols=1
+   Производительность     icon_x=27 label_x=54 fill_cols=1
+   Питание                icon_x=26 label_x=54 fill_cols=1
+   Охлаждение             icon_x=27 label_x=53 fill_cols=1
+   Графика                icon_x=26 label_x=54 fill_cols=1
+   Подсветка              icon_x=25 label_x=54 fill_cols=1
+   Экран                  icon_x=26 label_x=53 fill_cols=1
+   Система                icon_x=26 label_x=53 fill_cols=1
+   Настройки              icon_x=27 label_x=54 fill_cols=1
+   О программе            icon_x=27 label_x=53 fill_cols=1
+== audit-baseline/settings (offscreen PRE-fix) :: settings-980x680-dark.png
+   chunks: ['IHDR', 'IDAT', 'IEND']
+   Главная                icon_x=73 label_x=101 fill_cols=1
+   Производительность     icon_x=34 label_x=61 fill_cols=1
+   Питание                icon_x=71 label_x=99 fill_cols=1
+   Охлаждение             icon_x=59 label_x=86 fill_cols=1
+   Графика                icon_x=72 label_x=100 fill_cols=1
+   Подсветка              icon_x=65 label_x=94 fill_cols=1
+   Экран                  icon_x=78 label_x=105 fill_cols=1
+   Система                icon_x=71 label_x=98 fill_cols=1
+   Настройки              icon_x=63 label_x=91 fill_cols=1
+   О программе            icon_x=57 label_x=83 fill_cols=1

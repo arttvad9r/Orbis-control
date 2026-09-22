@@ -159,6 +159,8 @@ pub type SetChargeLimitError = CommandError;
 
 /// Ошибка команды Fan Factory Defaults (alias общего `CommandError`).
 pub type SetFanDefaultsError = CommandError;
+/// Error returned by a fan-curve mutation, including ambiguous dispatch.
+pub type SetFanCurveError = CommandError;
 
 /// Application service.
 ///
@@ -574,8 +576,11 @@ where
         profile: AsusdFanProfile,
         fan: &FanId,
         curve: &FanCurvePoints,
-    ) -> Result<ApplyResult, ProviderError> {
-        self.provider.set_fan_curve(profile, fan, curve).await
+    ) -> Result<ApplyResult, SetFanCurveError> {
+        self.provider
+            .set_fan_curve(profile, fan, curve)
+            .await
+            .map_err(CommandError::Command)
     }
 
     /// Вызывает `FanCurveMutationProvider::reset_fan_curves_to_defaults`.
@@ -1705,7 +1710,7 @@ mod tests {
         assert!(matches!(
             svc.set_fan_curve(AsusdFanProfile::Quiet, &FanId::Cpu, &points)
                 .await,
-            Err(ProviderError::PermissionDenied(_))
+            Err(CommandError::Command(ProviderError::PermissionDenied(_)))
         ));
     }
 

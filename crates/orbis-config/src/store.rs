@@ -11,9 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::os::unix::fs::OpenOptionsExt;
 use thiserror::Error;
 
-use orbis_core::gpu::GpuMode;
-use orbis_core::profile::PerformanceProfile;
-
 use crate::CONFIG_VERSION;
 use crate::paths;
 
@@ -70,46 +67,6 @@ impl Default for UiConfig {
     }
 }
 
-/// Правило автоматизации для источника питания.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct PowerAutomationConfig {
-    /// Профиль производительности.
-    pub profile: Option<PerformanceProfile>,
-    /// GPU-политика.
-    pub gpu_policy: Option<GpuMode>,
-    /// Политика частоты экрана.
-    pub refresh_policy: Option<String>,
-}
-
-/// Секция автоматизации.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct AutomationConfig {
-    /// Автоматизация включена.
-    pub enabled: bool,
-    /// Задержка реакции на событие питания, мс.
-    pub power_event_delay_ms: u64,
-    /// AC-правило.
-    pub ac: PowerAutomationConfig,
-    /// Правило батареи.
-    pub battery: PowerAutomationConfig,
-}
-
-impl Default for AutomationConfig {
-    fn default() -> Self {
-        // Legacy/default configuration must be inert. Missing or malformed
-        // compatibility config is never permission to synthesize hardware
-        // intent or start reconciliation.
-        Self {
-            enabled: false,
-            power_event_delay_ms: 1500,
-            ac: PowerAutomationConfig::default(),
-            battery: PowerAutomationConfig::default(),
-        }
-    }
-}
-
 /// Секция батареи.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -140,8 +97,6 @@ pub struct AppConfig {
     pub config_version: u32,
     /// Секция UI.
     pub ui: UiConfig,
-    /// Секция автоматизации.
-    pub automation: AutomationConfig,
     /// Секция батареи.
     pub battery: BatteryConfig,
     /// Экспериментальные возможности.
@@ -153,7 +108,6 @@ impl Default for AppConfig {
         Self {
             config_version: CONFIG_VERSION,
             ui: UiConfig::default(),
-            automation: AutomationConfig::default(),
             battery: BatteryConfig::default(),
             experimental: ExperimentalConfig::default(),
         }
@@ -342,9 +296,6 @@ mod tests {
         cfg.validate().unwrap();
         assert_eq!(cfg.config_version, CONFIG_VERSION);
         assert_eq!(cfg.ui.theme, "dark");
-        assert!(!cfg.automation.enabled);
-        assert_eq!(cfg.automation.ac, PowerAutomationConfig::default());
-        assert_eq!(cfg.automation.battery, PowerAutomationConfig::default());
         assert_eq!(cfg.battery.charge_limit, None);
     }
 
@@ -398,7 +349,6 @@ mod tests {
         let td = temp_test_env();
         let cfg = load_from_dir(&td.path().join("nope")).unwrap();
         assert_eq!(cfg, AppConfig::default());
-        assert!(!cfg.automation.enabled);
         assert_eq!(cfg.battery.charge_limit, None);
     }
 

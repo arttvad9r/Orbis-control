@@ -23,7 +23,7 @@ A useful Orbis installation should let the user:
 - **Safe degradation.** Missing or failing providers remain localized and explicit rather than producing fake fallback state.
 - **Bounded privilege.** The GUI remains unprivileged. Privileged mutations use narrow typed operations and capability-specific authorization, never a generic root/sysfs/shell proxy.
 - **Concept separation.** Different meanings such as GPU product mode, physical MUX, runtime power and pending reboot state must not be collapsed into one misleading value.
-- **Practical completeness.** A feature is not complete because domain types, a backend method, tests or a design document exist. The user-visible flow must work end to end, or the unfinished product surface should be removed until it does.
+- **Practical completeness.** A feature is not complete because domain types, a backend method, tests or a polished UI exist. The user-visible flow must work end to end. Intentional product UI is not deleted merely because backend work is still pending; until the backend is complete, runtime state must remain honest about availability.
 
 ## Non-goals
 
@@ -34,10 +34,10 @@ Orbis is not intended to:
 - use mock/test state as production state;
 - hide uncertainty behind a successful-looking UI;
 - automatically apply persisted values merely because configuration was loaded;
-- keep nonfunctional UI or architecture shells indefinitely for hypothetical future features.
+- present an unfinished or unsupported action as enabled and functional.
 
 ## Completion target
 
-The product is ready for a first release when the core daily-control experience is coherent, the packaged application starts and behaves correctly, supported actions have honest confirmation/error semantics, known unsafe writes are not enabled, and `scripts/verify full` passes for the release candidate.
+The product is ready for a first release when the core daily-control experience is coherent, the packaged application starts and behaves correctly, supported actions have honest confirmation/error semantics, known unsafe writes are not enabled, the current release candidate has fresh target-platform validation, and `scripts/verify full` passes for the exact release commit.
 
 The concrete unfinished queue is [`../TODO.md`](../TODO.md). Stable implementation boundaries are described in [`architecture.md`](architecture.md) and accepted ADRs.

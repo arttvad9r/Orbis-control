@@ -1,0 +1,42 @@
+===== VERDICT SET c5ca-* (post-merge 5f0d3da): 27 files =====
+  c5ca-about.png                     rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-after-nastroit.png            rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-after-nastroit2.png           rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-after-nastroit3.png           rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-after-rapid-nav.png           rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-backlight.png                 rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-cooling-1200.png              rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-cooling-dirty.png             rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-cooling-gpu-discarded.png     rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-cooling-gpu-tab.png           rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-cooling.png                   rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-dashboard-bottom.png          rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-dashboard-bottom2.png         rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-dashboard-early.png           rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-dashboard-light.png           rows=11 lefts=[4, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[4, 25, 26, 27] spread=23
+  c5ca-dashboard-top-again.png       rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-display.png                   rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-graphics-after-click.png      rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-graphics.png                  rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-perf.png                      rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-performance-reselect.png      rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-power.png                     rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-settings-dark-restore.png     rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-settings-light.png            rows=11 lefts=[4, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[4, 25, 26, 27] spread=23
+  c5ca-settings-toggled-back.png     rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-settings-toggled.png          rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  c5ca-system.png                    rows=11 lefts=[24, 26, 27, 26, 26, 26, 25, 26, 26, 26, 26] distinct=[24, 25, 26, 27] spread=3
+  --> POOLED: n=297 min=4 max=27 spread=23
+
+===== CONTROL SET p980-* (pre-merge 5ca36ab): 9 files =====
+  p980-about.png                     rows=15 lefts=[68, 70, 98, 30, 57, 69, 97, 57, 84, 69, 63, 77, 69, 62, 54] distinct=[30, 54, 57, 62, 63, 68, 69, 70, 77, 84, 97, 98] spread=68
+  p980-backlight.png                 rows=15 lefts=[68, 70, 98, 30, 57, 69, 97, 57, 84, 69, 63, 77, 69, 62, 54] distinct=[30, 54, 57, 62, 63, 68, 69, 70, 77, 84, 97, 98] spread=68
+  p980-cooling.png                   rows=15 lefts=[68, 70, 98, 30, 57, 69, 97, 57, 84, 69, 63, 77, 69, 62, 54] distinct=[30, 54, 57, 62, 63, 68, 69, 70, 77, 84, 97, 98] spread=68
+  p980-display.png                   rows=15 lefts=[68, 70, 98, 30, 57, 69, 97, 57, 84, 69, 63, 77, 69, 62, 54] distinct=[30, 54, 57, 62, 63, 68, 69, 70, 77, 84, 97, 98] spread=68
+  p980-graphics.png                  rows=15 lefts=[68, 70, 98, 30, 57, 69, 97, 57, 84, 69, 63, 77, 69, 62, 54] distinct=[30, 54, 57, 62, 63, 68, 69, 70, 77, 84, 97, 98] spread=68
+  p980-performance.png               rows=15 lefts=[68, 70, 98, 30, 57, 69, 97, 57, 84, 69, 63, 77, 69, 62, 54] distinct=[30, 54, 57, 62, 63, 68, 69, 70, 77, 84, 97, 98] spread=68
+  p980-power.png                     rows=15 lefts=[68, 70, 98, 30, 57, 69, 97, 57, 84, 69, 63, 77, 69, 62, 54] distinct=[30, 54, 57, 62, 63, 68, 69, 70, 77, 84, 97, 98] spread=68
+  p980-settings.png                  rows=15 lefts=[68, 70, 98, 30, 57, 69, 97, 57, 84, 69, 63, 77, 69, 62, 54] distinct=[30, 54, 57, 62, 63, 68, 69, 70, 77, 84, 97, 98] spread=68
+  p980-system.png                    rows=15 lefts=[68, 70, 98, 30, 57, 69, 97, 57, 84, 69, 63, 77, 69, 62, 54] distinct=[30, 54, 57, 62, 63, 68, 69, 70, 77, 84, 97, 98] spread=68
+  --> POOLED: n=135 min=30 max=98 spread=68
+

@@ -1,4 +1,4 @@
-//! Bootstrap helper для read-only session D-Bus server.
+//! Bootstrap helper for the session D-Bus server.
 
 use std::sync::Arc;
 
@@ -8,6 +8,7 @@ use orbis_providers::traits::{
 };
 use orbis_session_protocol::{BUS_NAME, OBJECT_PATH};
 
+use crate::clamshell::ClamshellInhibitor;
 use crate::fans::AsusdFanCurveSource;
 use crate::service::SessionService;
 
@@ -46,6 +47,29 @@ pub async fn build_session_server(
     fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
     power_limits: Option<Arc<dyn PowerLimitProvider>>,
 ) -> zbus::Result<zbus::Connection> {
+    build_session_server_with_clamshell(
+        builder,
+        battery,
+        gpu,
+        performance,
+        fan_curves,
+        power_limits,
+        None,
+    )
+    .await
+}
+
+/// Build the Session1 server with an injected session-owned clamshell lifecycle.
+#[allow(clippy::too_many_arguments)]
+pub async fn build_session_server_with_clamshell(
+    builder: zbus::connection::Builder<'_>,
+    battery: Arc<dyn BatteryProvider>,
+    gpu: GpuCapabilities,
+    performance: Option<Arc<dyn PerformanceProvider>>,
+    fan_curves: Option<Arc<dyn AsusdFanCurveSource>>,
+    power_limits: Option<Arc<dyn PowerLimitProvider>>,
+    clamshell: Option<Arc<dyn ClamshellInhibitor>>,
+) -> zbus::Result<zbus::Connection> {
     let mut service = SessionService::new(battery);
     if let Some(p) = gpu.power {
         service = service.with_gpu_power(p);
@@ -64,6 +88,9 @@ pub async fn build_session_server(
     }
     if let Some(f) = fan_curves {
         service = service.with_fan_curves(f);
+    }
+    if let Some(inhibitor) = clamshell {
+        service = service.with_clamshell(inhibitor);
     }
     let builder = builder.name(BUS_NAME)?;
     let builder = builder.serve_at(OBJECT_PATH, service)?;

@@ -1,0 +1,57 @@
+TITLE: Orbis QA-verdict: записать вердикт общей QA по собранным артефактам (5ca36ab)
+ASSIGNEE: qa STATUS: running
+RESULT: None
+BODY:
+{
+  "orchestration_contract_version": 1,
+  "task_class": "qa",
+  "objective": "Финализировать вердикт общей QA (карта t_5b9d96c6): артефакты двух забегов собраны — 38 live-скриншотов кандидата 5ca36ab (prefix c5ca-* и 980-набор p980-*), status-пробы (schema v3) до/после кликов, verify-task логи обоих кончиков (PASS, exit 0). Записать типизированный вердикт по пунктам карты t_5b9d96c6, НЕ повторяя прогон.",
+  "requirement_ids": [
+    "REQ-LAUNCH",
+    "REQ-HONESTY",
+    "REQ-VISUAL",
+    "REQ-REGRESSION"
+  ],
+  "acceptance_ids": [
+    "SC-LAUNCH",
+    "SC-VISUAL-980",
+    "SC-VISUAL-STATES"
+  ],
+  "verification": {
+    "required": true,
+    "checks": [
+      {
+        "id": "liveness-verdict",
+        "method": "runtime_interaction",
+        "required": true,
+        "expected_observable": "Приложение запускается, страницы открываются, навигация стабильна (rapid-nav, reselect пробы) — вердикт по live-скриншотам c5ca-*/p980-*"
+      },
+      {
+        "id": "honesty-verdict",
+        "method": "runtime_state",
+        "required": true,
+        "expected_observable": "Status-пробы (schema v3) показывают честные состояния; кнопки не мутуют железо в QA-сессии; вердикт по diff-пробам"
+      },
+      {
+        "id": "visual-verdict",
+        "method": "visual_runtime",
+        "required": true,
+        "expected_observable": "Скриншоты 980-набора соответствуют зафиксированной симметрии (F1-F4b PASS из UI-QA2verdict); вердикт по каждому p980-*"
+      }
+    ]
+  },
+  "scope": {
+    "workspace": "/home/artt/Orbis-control-implementation",
+    "branch": "wt/qa-verdict",
+    "details": [
+      "НЕ перерендеривать, НЕ пересобирать, НЕ запускать приложение: только анализ существующих артефактов и запись вердикта.",
+      "Артефакты: /home/artt/.hermes/profiles/qa/cache/scratch/qa-t5b9d96c6/shots (38 png), /home/artt/.hermes/profiles/qa/cache/scratch/qa-t5b9d96c6/logs (status-пробы json + diff, verify-task логи: 1253c5f PASS, 5ca36ab PASS), /home/artt/.hermes/profiles/qa/cache/scratch/qa-t5b9d96c6/probes/grab.py",
+      "Кандидат проверок: 5ca36ab (пREFIX c5ca-*, p980-*); verify на 5ca36ab уже PASS exit 0.",
+      "Геометрическая симметрия уже PASS в t_4035d84d — не дублировать пиксельные замеры, только сверка соответствия.",
+      "Если данных по какому-то пункту не хватает — честный INCONCLUSIVE по пункту, не догадки."
+    ]
+  },
+  "candidate": {
+    "git_sha": "5f0d3da4f3da"
+  }
+}
