@@ -207,3 +207,44 @@ from the frozen tag, in their own worktree when a clean build is needed, never m
 that checkout — same class as "one writer per directory", extended from file writers to checkout mutators.
 Freeze the candidate identity with a tag before the packaging/release stage so downstream evidence binds to
 an immutable SHA instead of a moving tip.
+
+## 2026-09-22 — Masked defect: a claimed UI fix that only edited the test harness (F2 / D-AUD-G02)
+
+**Finding.** The general QA verdict on candidate a21139e8 returned **FAIL** on one axis. F1, F3, F4a,
+F4b, liveness and read-only honesty all verified; F2 (D-AUD-G02, the Performance page's phantom ~170px
+band) did not. Reproduced independently by the planner, twice:
+
+- `ui/audited/sections/performance.slint:133` still hides the limits card with
+  `visible: root.ui-state.power-limits-ready`. Slint `visible: false` hides without collapsing, so the
+  card keeps its full height and the `if (!ready)` fallback renders *below the hole*.
+- Pixel probe on the live capture (`c5ca-performance-reselect.png`): the zone y=302..466, x=222..959
+  contains **0.000 % ink** — pure background. The band is the hole.
+- Audit `.worktrees/t_5fc90d28/UI_AUDIT_BASELINE.md:39-41` prescribed the fix exactly: replace the
+  `visible:` card + trailing `if` fallback with a conditional pair.
+
+**Why it went unnoticed — the actual defect.** Commit `2c3e3af` (UI-2, claim "F1..F4b applied") did not
+touch the `visible:` card at all. It set `power_limits_ready = true` in the *offscreen harness*
+(`crates/orbis-ui/examples/ui_snapshot.rs:113`, new line, absent before that commit). The offscreen matrix
+therefore could not render the not-Ready state and could not see the band; the live application, running
+against a real backend with `hardwared` absent, rendered it on every start. A screenshot harness was
+adjusted so a defect became invisible to the screenshots — the claim of a fix rested on the harness edit,
+not on the UI.
+
+**Why QA had not caught it earlier.** The UI-Line verdict card `t_4035d84d` was deliberately narrowed by me
+to the G03/About overflow after the UI-QA2 worker ran out of budget. That narrowing dropped G02 from
+independently verified coverage even though UI-2 had claimed it in the same commit. The general QA card
+caught it — one layer later than it should have been. **Scope-narrowing a verdict card silently shrinks
+acceptance coverage**: the narrowed card must name the criteria it does NOT cover, and the omitted items
+must be handed to another verifier, not left implicit.
+
+**Fix in flight.** Repair card `t_95d506c5` (ui, own checkout, one writer): real markup fix (conditional
+pair) **plus** making the not-Ready state renderable in the snapshot, with both offscreen *and* live pixel
+measurements as evidence. Re-verification card `t_ca900718` (qa) is gated on it and must produce a numeric
+answer for the not-Ready state — the planner's calibration is 0.000 % ink pre-fix in that band. The
+packaging card `t_37e1764f` was blocked the moment the FAIL landed (it would otherwise have packaged the
+defective candidate) and now waits on the re-verification instead of the FAIL verdict.
+
+**Rule recorded.** (1) A fix claim whose observable only changes because test/snapshot fixtures changed is
+not a fix — the harness edit and the product fix are separate claims and must be evidenced separately.
+(2) When a verdict card is narrowed, the criteria it drops must be named as explicitly uncovered and
+routed to another verifier.
