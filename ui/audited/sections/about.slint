@@ -58,17 +58,12 @@ export component AboutSection inherits Rectangle {
                     }
 
                     Text {
-                        // F3 (audit t_5fc90d28): follow the layout width — the
-                        // previous hard min-width exceeded the 980px window's
-                        // text area and clipped the last word.
-                        width: parent.width;
                         text: "Лёгкое управление ноутбуками ASUS ROG / TUF / Zephyrus для Linux: профили производительности, заряд батареи, вентиляторы и наблюдение за оборудованием.";
                         font-size: 13px;
                         color: Palette.text-primary;
                         wrap: word-wrap;
                     }
                     Text {
-                        width: parent.width;
                         text: "Интерфейс построен на данных о возможностях устройства: поддерживаемые функции показываются, неподдерживаемые — скрываются. Изменения применяются через ограниченный Hardware1-интерфейс с подтверждением фактического состояния.";
                         font-size: 12.5px;
                         color: Palette.text-secondary;
