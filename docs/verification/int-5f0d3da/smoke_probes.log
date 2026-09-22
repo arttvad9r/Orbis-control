@@ -1,0 +1,35 @@
+== MERGED SANITY ==
+PROBLEMS: none
+== REGRESSION vs f45f55d (normal scenario) ==
+  dashboard-980x680-dark: identical=True diff_frac=0.000000 maxdelta=0
+  dashboard-1200x800-dark: identical=True diff_frac=0.000000 maxdelta=0
+  performance-980x680-dark: identical=True diff_frac=0.000000 maxdelta=0
+  performance-980x680-light: identical=True diff_frac=0.000000 maxdelta=0
+  performance-1200x800-dark: identical=True diff_frac=0.000000 maxdelta=0
+  performance-1200x800-light: identical=True diff_frac=0.000000 maxdelta=0
+  power-980x680-dark: identical=True diff_frac=0.000000 maxdelta=0
+  power-1200x800-dark: identical=True diff_frac=0.000000 maxdelta=0
+  cooling-980x680-dark: identical=True diff_frac=0.000000 maxdelta=0
+  cooling-980x680-light: identical=True diff_frac=0.000000 maxdelta=0
+  cooling-1200x800-dark: identical=True diff_frac=0.000000 maxdelta=0
+  cooling-1200x800-light: identical=True diff_frac=0.000000 maxdelta=0
+  graphics-980x680-dark: identical=True diff_frac=0.000000 maxdelta=0
+  graphics-1200x800-dark: identical=True diff_frac=0.000000 maxdelta=0
+  backlight-980x680-dark: identical=True diff_frac=0.000000 maxdelta=0
+  backlight-1200x800-dark: identical=True diff_frac=0.000000 maxdelta=0
+  display-980x680-dark: identical=True diff_frac=0.000000 maxdelta=0
+  display-1200x800-dark: identical=True diff_frac=0.000000 maxdelta=0
+  system-980x680-dark: identical=True diff_frac=0.000000 maxdelta=0
+  system-1200x800-dark: identical=True diff_frac=0.000000 maxdelta=0
+  settings-980x680-dark: identical=True diff_frac=0.000000 maxdelta=0
+  settings-1200x800-dark: identical=True diff_frac=0.000000 maxdelta=0
+  about-980x680-dark: identical=True diff_frac=0.000000 maxdelta=0
+  about-980x680-light: identical=True diff_frac=0.000000 maxdelta=0
+  about-1200x800-dark: identical=True diff_frac=0.000000 maxdelta=0
+  about-1200x800-light: identical=True diff_frac=0.000000 maxdelta=0
+== FUNCTIONAL SCENARIOS (merged) ==
+  error: differs_from_normal=True diff_frac=0.0061 error_red_pixels=156 red_present=True
+  pending: differs_from_normal=True diff_frac=0.0771
+  unsupported: differs_from_normal=True diff_frac=0.0793
+== SMOKE VERDICT ==
+PASS

@@ -1,0 +1,27 @@
+Planner independent verification — INT merged candidate 5f0d3da4f3da281a4bfd271ed9ef579a6ca651f0
+(merge --no-ff of f45f55d, QA-PASSed UI line, into 5ca36ab functional line)
+
+1. G03 fix survival after merge
+   git diff f45f55d HEAD -- ui/audited/sections/about.slint  -> identical (no output)
+   grep 'width: parent.width' ui/audited/sections/about.slint -> 0 matches (both paragraphs unconstrained)
+   (base 5ca36ab still had both lines at 61,68 -> the merge is what removed them)
+
+2. scripts/verify task @ merged      -> verification passed (exit 0)
+3. cargo build --workspace --release --locked @ merged -> Finished release profile (exit 0)
+4. cargo test --workspace --locked @ merged -> 1513 tests passed, 0 failed
+   (pre-merge 1489 -> +24 new tests from D1/D2/UI lines)
+
+5. Planner pixel probe on MERGED renders (.int-smoke/merged, 29 renders)
+   probe: locate card right border, count text pixels strictly right of it
+   about-980x680-dark   border_x=951  px_outside_card=0
+   about-980x680-light  border_x=951  px_outside_card=0
+   about-1200x800-dark  border_x=1171 px_outside_card=0
+   about-1200x800-light border_x=1171 px_outside_card=0
+   (the defect state measured +12..+14 px outside before the fix)
+
+6. Render identity base vs merged: 29/29 bit-identical.
+   'base' is byte-identical to the QA-PASSed renders in .worktrees/t_23cd8fb8/.qa3-shots,
+   so the merged candidate renders exactly as the line QA accepted — no visual drift from the merge.
+
+Verdict: INT merge accepted as the v0.1 candidate identity. Remaining downstream: QA-verdict (t_0c45ec21)
+-> Arch package (t_37e1764f) -> release gate (t_9f6592c8).
