@@ -1,0 +1,28 @@
+D-AUD-G03 verification — 2026-09-22T01:47:33Z
+candidate: 94a7004cd05ab914fafedefccb4d543c580e3f2e (branch wt/ui-g03fix, pushed to origin)
+change: ui/audited/sections/about.slint — removed 'width: parent.width;' from both
+        card paragraphs (audit prescription; layout already stretches to padded width)
+
+== 1. post-fix card-region probe (PASS required): ink right of card border, y>=30 ==
+PASS fixed-980-dark 980x680: no ink right of x=951 for y>=30
+PASS fixed-1200-dark 1200x800: no ink right of x=1171 for y>=30
+PASS fixed-980-light 980x680: no ink right of x=951 for y>=30
+PASS fixed-1200-light 1200x800: no ink right of x=1171 for y>=30
+
+== 2. baseline probe (FAIL expected — documents the defect on QA archive 2c3e3af) ==
+FAIL baseline-980-dark 980x680: ink right of x=951, max_x=963, y=[178..230], cols=11
+FAIL baseline-1200-dark 1200x800: ink right of x=1171, max_x=1185, y=[223..230], cols=14
+FAIL baseline-980-light 980x680: ink right of x=951, max_x=963, y=[178..230], cols=11
+FAIL baseline-1200-light 1200x800: ink right of x=1171, max_x=1185, y=[223..230], cols=14
+
+== 3. diff scope baseline->fixed (must be text-only, no card-geometry bands) ==
+980x680 dark: diff pixels=8145 bbox x=[278..963] y=[175..264] rows=64 row-band gaps: [(188, 192), (205, 223), (232, 236), (248, 252)] 
+1200x800 dark: diff pixels=3728 bbox x=[278..1185] y=[223..248] rows=23 row-band gaps: [(232, 236)] 
+980x680 light: diff pixels=8274 bbox x=[278..963] y=[175..264] rows=64 row-band gaps: [(188, 192), (205, 223), (232, 236), (248, 252)] 
+1200x800 light: diff pixels=3795 bbox x=[278..1185] y=[223..248] rows=23 row-band gaps: [(232, 236)] 
+
+== 4. cargo check -p orbis-ui (default features) ==
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+
+== 5. cargo test -p orbis-ui --features ui-review --lib ==
+test result: ok. 153 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
