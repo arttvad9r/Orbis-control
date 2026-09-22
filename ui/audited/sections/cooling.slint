@@ -1,7 +1,7 @@
 // Cooling page — capability-gated fan curves, current RPM and honest status.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, FanCurveHwState } from "../model.slint";
-import { PageHeader, SectionCard, LocalStatus, ActionButton } from "../common.slint";
+import { PageHeader, SectionCard, LocalStatus, ActionButton, Grid } from "../common.slint";
 import { FanCurveEditor } from "../fan-curve-editor-v3.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -50,11 +50,11 @@ export component CoolingSection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * Grid.page-gutter;
+            x: Grid.page-gutter;
+            spacing: Grid.card-spacing;
+            padding-top: Grid.page-top;
+            padding-bottom: Grid.page-bottom;
 
             PageHeader {
                 title: "Охлаждение";
@@ -116,11 +116,13 @@ export component CoolingSection inherits Rectangle {
                             alignment: end;
                             ActionButton {
                                 label: "Остаться";
+                                min-width: Grid.button-min-width;
                                 visible: root.selection-change-pending;
                                 clicked => { root.selection-change-pending = false; }
                             }
                             ActionButton {
                                 label: "Отбросить";
+                                min-width: Grid.button-min-width;
                                 visible: root.selection-change-pending;
                                 accent: true;
                                 clicked => {

@@ -2,7 +2,7 @@
 // read-only dGPU hardware status (power state, physical MUX, access policy).
 import { ScrollView } from "std-widgets.slint";
 import { UiState, GpuHwState, GpuModeHwState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, InfoRow } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, InfoRow, Grid } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -51,11 +51,11 @@ export component GraphicsSection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * Grid.page-gutter;
+            x: Grid.page-gutter;
+            spacing: Grid.card-spacing;
+            padding-top: Grid.page-top;
+            padding-bottom: Grid.page-bottom;
 
             PageHeader {
                 title: "Графика";

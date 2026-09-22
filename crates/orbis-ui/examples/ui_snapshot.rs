@@ -106,6 +106,52 @@ fn demo_state(component: &AppWindow) {
     state.fan_pwm_5 = 144;
     state.fan_pwm_6 = 196;
     state.fan_pwm_7 = 255;
+    // F2 (audit t_5fc90d28): "normal" claims a fully Ready machine, so the
+    // power-limit fields must be populated too — otherwise the Performance
+    // page renders a phantom empty limit band that no real Ready backend
+    // would produce (ui-review fixture parity, same values as #115).
+    state.power_limits_ready = true;
+    state.power_limits_writable = true;
+    state.power_limits_reason = "Метаданные backend · запись через Hardware1".into();
+    state.spl_value = 45;
+    state.spl_min = 20;
+    state.spl_max = 80;
+    state.spl_step = 5;
+    state.spl_unit = "Вт".into();
+    state.spl_default = "45".into();
+    state.spl_draft = 45;
+    state.sppt_value = 65;
+    state.sppt_min = 20;
+    state.sppt_max = 100;
+    state.sppt_step = 5;
+    state.sppt_unit = "Вт".into();
+    state.sppt_default = "65".into();
+    state.sppt_draft = 65;
+    state.fppt_value = 65;
+    state.fppt_min = 20;
+    state.fppt_max = 100;
+    state.fppt_step = 5;
+    state.fppt_unit = "Вт".into();
+    state.fppt_default = "65".into();
+    state.fppt_draft = 65;
+    state.cpu_temp_limit_value = 85;
+    state.cpu_temp_limit_min = 60;
+    state.cpu_temp_limit_max = 95;
+    state.cpu_temp_limit_step = 1;
+    state.cpu_temp_limit_unit = "°C".into();
+    state.cpu_temp_limit_draft = 85;
+    state.gpu_dynamic_boost_value = 15;
+    state.gpu_dynamic_boost_min = 5;
+    state.gpu_dynamic_boost_max = 25;
+    state.gpu_dynamic_boost_step = 5;
+    state.gpu_dynamic_boost_unit = "Вт".into();
+    state.gpu_dynamic_boost_draft = 15;
+    state.gpu_temp_target_value = 83;
+    state.gpu_temp_target_min = 60;
+    state.gpu_temp_target_max = 87;
+    state.gpu_temp_target_step = 1;
+    state.gpu_temp_target_unit = "°C".into();
+    state.gpu_temp_target_draft = 83;
     component.set_ui_state(state);
 }
 

@@ -5,7 +5,7 @@
 // the honest loading/absence form.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, ChargeLimitState, PerformanceHwState, FanCurveHwState } from "../model.slint";
-import { SectionCard, SectionTitle, ActionButton, Divider } from "../common.slint";
+import { SectionCard, SectionTitle, ActionButton, Divider, Grid } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { MetricCard } from "../../components/metric-card.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
@@ -71,11 +71,14 @@ export component DashboardSection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 28px;
-            x: 14px;
-            spacing: 16px;
-            padding-top: 4px;
-            padding-bottom: 20px;
+            // F1 (audit t_5fc90d28): shared page grid — same 28px gutter and
+            // 16px card spacing as every other section, so page margins are
+            // symmetric and cards align across pages.
+            width: root.width - 2 * Grid.page-gutter;
+            x: Grid.page-gutter;
+            spacing: Grid.card-spacing;
+            padding-top: Grid.page-top;
+            padding-bottom: Grid.page-bottom;
 
             // ── Device header ───────────────────────────────────────────
             SectionCard {

@@ -1,6 +1,19 @@
 import { Palette as WidgetPalette } from "std-widgets.slint";
 import { Palette, ThemeState, ThemeMode } from "../themes/dark.slint";
 
+// Unified page grid (audit t_5fc90d28 / F1): every content page shares the
+// same outer gutters, vertical rhythm and control dimensions.
+export global Grid {
+    // Page gutter: left inset = right inset (page width - 2×gutter = content).
+    out property <length> page-gutter: 28px;
+    // Top offset of the scroll content and spacing between cards.
+    out property <length> page-top: 8px;
+    out property <length> page-bottom: 20px;
+    out property <length> card-spacing: 16px;
+    // Shared control widths so same-class buttons stay one dimension.
+    out property <length> button-min-width: 132px;
+}
+
 // Standard Slint widgets (ComboBox/SpinBox/etc.) have their own style palette.
 // Every top-level Orbis window instantiates this zero-size bridge so the native
 // widget color scheme follows the application theme rather than the OS theme.
@@ -193,7 +206,7 @@ export component ActionButton inherits Rectangle {
     height: 32px;
     // Keep Russian action labels fully legible at the 980px minimum window.
     // Callers may still grow the button when a wider layout is available.
-    min-width: 132px;
+    min-width: Grid.button-min-width;
     border-radius: 8px;
     border-width: 1px;
     border-color: root.accent && !root.disabled ? Palette.accent-default

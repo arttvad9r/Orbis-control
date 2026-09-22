@@ -3,7 +3,7 @@
 // aware UI); GPU modes live in the Graphics section.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, PerformanceHwState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, ActionButton } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, ActionButton, Grid } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
 import { Palette } from "../../themes/dark.slint";
@@ -30,6 +30,10 @@ export component LimitRow inherits Rectangle {
             step: root.step;
             value: root.value;
             disabled: root.disabled;
+            // The row headline already carries the authoritative value+unit;
+            // hiding the slider's own percent readout keeps three limit rows
+            // inside the card at the 980px minimum window (audit t_29073c31).
+            show-percent: false;
             changed(v) => { root.changed(v); }
         }
         Text { text: root.range; font-size: 10.5px; color: Palette.text-secondary; overflow: elide; }
@@ -57,11 +61,11 @@ export component PerformanceSection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * Grid.page-gutter;
+            x: Grid.page-gutter;
+            spacing: Grid.card-spacing;
+            padding-top: Grid.page-top;
+            padding-bottom: Grid.page-bottom;
 
             PageHeader {
                 title: "Производительность";

@@ -55,14 +55,16 @@ export component TitleBar inherits Rectangle {
     }
 
     HorizontalLayout {
-        // App identity aligned with the sidebar column.
+        // App identity aligned with the sidebar's nav icon column
+        // (F4b: constant x — the icon sits at the same 24px window x as the
+        // nav icons: 12px sidebar padding + 12px row inset).
         Rectangle {
             width: 230px;
             background: transparent;
             HorizontalLayout {
-                padding-left: 16px;
+                padding-left: 24px;
                 spacing: 9px;
-                alignment: center;
+                alignment: start;
                 Rectangle {
                     width: 18px;
                     height: 18px;

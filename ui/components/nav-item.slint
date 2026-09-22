@@ -1,6 +1,15 @@
 // Sidebar navigation item: 44px row, 18px line icon + 13px label.
 // Selected = soft accent fill with accent icon/text (reference design);
 // hover = quiet neutral fill. No gradients, no glow.
+//
+// F4a/F4b (audit t_5fc90d28): the icon sits in a fixed 18×18 box, centered
+// per row and sharing one left edge across all rows, and the label starts at
+// the same x on every row. Vertical centering is done with explicit y so it
+// is deterministic in both the femtovg and software renderers (layout-based
+// centering of fixed-height children next to stretchy ones is not — see
+// LocalStatus/ModeCard precedent); horizontal geometry is constant-x by
+// construction instead of layout balancing, so the icon column cannot zigzag
+// with label length.
 import { Icon } from "icon.slint";
 import { Palette } from "../themes/dark.slint";
 
@@ -10,6 +19,13 @@ export component NavItem inherits Rectangle {
     in property <bool> selected: false;
     out property <bool> has-focus <=> focus-scope.has-focus;
     callback clicked;
+
+    // Constant column geometry (F4b): 12px row inset + 18px icon + 11px gap.
+    // The 24px window x of the icon edge (12px sidebar padding + 12px inset)
+    // is the same column the TitleBar identity block aligns to.
+    out property <length> icon-size: 18px;
+    out property <length> spacing-icon-label: 11px;
+    out property <length> row-inset: 12px;
 
     height: 44px;
     border-radius: 8px;
@@ -21,27 +37,6 @@ export component NavItem inherits Rectangle {
     background: root.selected ? Palette.accent-soft
         : touch.has-hover ? Palette.surface-hover
         : transparent;
-
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 11px;
-        alignment: center;
-
-        Icon {
-            kind: root.icon-kind;
-            tint: root.selected ? Palette.accent-default : Palette.text-secondary;
-        }
-        Text {
-            text: root.label;
-            font-size: 13px;
-            font-weight: root.selected ? 600 : 500;
-            color: root.selected ? Palette.accent-default : Palette.text-primary;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-        Rectangle { horizontal-stretch: 1; background: transparent; }
-    }
 
     forward-focus: focus-scope;
 
@@ -60,6 +55,46 @@ export component NavItem inherits Rectangle {
                 return accept;
             }
             return reject;
+        }
+    }
+
+    // Absolute positioning: deterministic in both renderers (LocalStatus
+    // precedent). The label fills the remaining width and elides at the row
+    // edge; clipping keeps the hit row inside the window.
+    content := Rectangle {
+        x: root.row-inset;
+        width: parent.width - self.x;
+        background: transparent;
+        clip: true;
+
+        // Fixed 18×18 box: all icons share left edge and optical center
+        // regardless of individual glyph geometry (F4a).
+        Rectangle {
+            width: root.icon-size;
+            height: root.icon-size;
+            x: 0;
+            y: (parent.height - self.height) / 2;
+            background: transparent;
+            Icon {
+                width: root.icon-size;
+                height: root.icon-size;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                kind: root.icon-kind;
+                tint: root.selected ? Palette.accent-default : Palette.text-secondary;
+            }
+        }
+
+        Text {
+            x: root.icon-size + root.spacing-icon-label;
+            width: parent.width - self.x;
+            height: parent.height;
+            text: root.label;
+            font-size: 13px;
+            font-weight: root.selected ? 600 : 500;
+            color: root.selected ? Palette.accent-default : Palette.text-primary;
+            vertical-alignment: center;
+            overflow: elide;
         }
     }
 }

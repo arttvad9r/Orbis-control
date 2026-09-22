@@ -2,7 +2,7 @@
 // All toggles are request-only: the authoritative value is published by the
 // preferences backends after persistence.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, LocalStatus, ActionButton, ChoiceButton } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, LocalStatus, ActionButton, ChoiceButton, Grid } from "../common.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { Palette, ThemeState, ThemeMode } from "../../themes/dark.slint";
 
@@ -27,11 +27,11 @@ export component SettingsSection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * Grid.page-gutter;
+            x: Grid.page-gutter;
+            spacing: Grid.card-spacing;
+            padding-top: Grid.page-top;
+            padding-bottom: Grid.page-bottom;
 
             PageHeader {
                 title: "Настройки";
