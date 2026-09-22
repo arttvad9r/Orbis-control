@@ -309,6 +309,14 @@ mod tests {
                 .iter()
                 .any(|spec| spec.field == PowerLimitField::CpuTempLimit)
         );
+        // AC-041: без доказанного authoritative contract CPU boost не читается
+        // и не пишется этим провайдером — никакой вариант "cpu_boost" не
+        // подсунут под generic-полем.
+        assert!(
+            !FIELDS
+                .iter()
+                .any(|spec| spec.name.contains("cpu_boost") || spec.name.contains("cpufv"))
+        );
         assert_eq!(
             ARMOURY_ATTRIBUTES_ROOT,
             "/sys/class/firmware-attributes/asus-armoury/attributes"

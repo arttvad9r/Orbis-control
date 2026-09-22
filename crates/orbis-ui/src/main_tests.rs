@@ -300,6 +300,84 @@ fn advanced_power_limits_render_authoritative_metadata_and_pending_bits() {
 }
 
 #[test]
+fn dynamic_boost_rendering_shows_real_unit_and_no_invented_cpu_boost_field() {
+    // AC-040/AC-041: boost rows render real backend metadata (unit included);
+    // no invented CPU-boost entry exists in the authoritative field map, so no
+    // working CPU Boost toggle can appear.
+    let state = controller::UiState::from_mock_profile("tuf-fa707nv-realistic");
+    assert!(state.power_limits_writable);
+    assert!(
+        !state
+            .power_limits
+            .fields
+            .keys()
+            .any(|field| matches!(field, orbis_core::limits::PowerLimitField::Other(_))),
+        "no invented (backend-unproven) power fields may exist"
+    );
+    let rendered = to_slint(&state);
+    assert_eq!(rendered.gpu_dynamic_boost_unit, "Вт");
+    assert_eq!(rendered.gpu_dynamic_boost_value, 5);
+    assert_eq!(rendered.gpu_temp_target_unit, "°C");
+    assert_eq!(rendered.gpu_temp_target_value, 75);
+}
+
+#[test]
+fn dynamic_boost_draft_apply_and_failure_lifecycle_is_field_independent() {
+    // AC-040 (AC-032/AC-034 classes): the Dynamic Boost control follows the
+    // same draft/dirty/pending/error lifecycle as SPL — range violations are
+    // rejected before mutation, denial surfaces an error without replacing the
+    // observed value, and a confirming edit clears the state.
+    let mut state = controller::UiState::from_mock_profile("tuf-fa707nv-realistic");
+    state.power_limits_writable = true;
+    let boost = orbis_core::limits::PowerLimitField::GpuDynamicBoost;
+    let target = orbis_core::limits::PowerLimitField::GpuTempTarget;
+
+    // Out of authoritative range: rejected at draft level, nothing dirty.
+    assert!(!update_power_limit_draft(&mut state, boost.clone(), 30));
+    assert!(state.power_limit_drafts.is_empty());
+
+    // Valid draft: only the boost dirty bit is set; temp target untouched.
+    assert!(update_power_limit_draft(&mut state, boost.clone(), 20));
+    let rendered = to_slint(&state);
+    assert_eq!(rendered.power_limit_dirty_mask & 16, 16);
+    assert_eq!(rendered.power_limit_dirty_mask & 32, 0);
+    assert_eq!(rendered.gpu_dynamic_boost_draft, 20);
+
+    // Backend denial: visible error, draft kept for retry, observed value
+    // unchanged (still the backend-reported 5 W).
+    apply_performance_event(
+        &mut state,
+        WorkerEvent::PowerLimit {
+            field: boost.clone(),
+            result: Err(ProviderError::PermissionDenied("denied".into())),
+        },
+    );
+    assert!(state.power_limit_error);
+    assert!(!state.power_limit_pending.contains(&boost));
+    assert_eq!(state.power_limits.get(&boost).map(|v| v.value), Some(5));
+    assert_eq!(state.power_limit_drafts.get(&boost), Some(&20));
+
+    // Editing the draft clears the error; matching the observed value drops it.
+    assert!(update_power_limit_draft(&mut state, boost.clone(), 20));
+    assert!(!state.power_limit_error);
+    assert!(update_power_limit_draft(&mut state, boost.clone(), 5));
+    assert!(!state.power_limit_drafts.contains_key(&boost));
+
+    // GPU temp target confirms through the same typed outcome without noise.
+    state.power_limit_drafts.insert(target.clone(), 84);
+    state.power_limit_pending.insert(target.clone());
+    apply_performance_event(
+        &mut state,
+        WorkerEvent::PowerLimit {
+            field: target,
+            result: Ok(ApplyResult::Applied),
+        },
+    );
+    assert!(state.power_limit_pending.is_empty());
+    assert!(!state.power_limit_error);
+}
+
+#[test]
 fn interactive_initial_state_has_no_fixture_values_or_write_access() {
     let state = controller::UiState::production_initial();
 

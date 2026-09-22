@@ -3641,4 +3641,200 @@ mod tests {
         assert_eq!(gpu.points[0].temp.get(), 30);
         assert_eq!(gpu.points[7].pwm.get(), 0);
     }
+
+    /// Сессия-читатель: authoritative metadata только для boost-полей.
+    struct ScriptedBoostSessionSource {
+        limits: PowerLimits,
+    }
+
+    #[async_trait]
+    impl PowerLimitProvider for ScriptedBoostSessionSource {
+        async fn power_limits(&self) -> Result<PowerLimits, ProviderError> {
+            Ok(self.limits.clone())
+        }
+
+        async fn set_power_limit(
+            &self,
+            field: PowerLimitField,
+            _value: i32,
+        ) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported(format!(
+                "session read path cannot mutate {field:?}"
+            )))
+        }
+
+        async fn restore_defaults(&self) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported(
+                "session read path has no power-limit defaults".into(),
+            ))
+        }
+
+        fn validate_power_limit(&self, field: &PowerLimitField, value: i32) -> ValidationResult {
+            ValidationResult::invalid(format!(
+                "fresh authoritative metadata required before applying {field:?}={value}"
+            ))
+        }
+    }
+
+    impl Provider for ScriptedBoostSessionSource {
+        fn id(&self) -> &'static str {
+            "scripted-boost-session"
+        }
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("scripted boost session source")
+        }
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("scripted boost session source cannot {feature}")
+        }
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    /// Приватный Hardware1-заместитель: принимает только wire-коды из
+    /// `orbis_hardwared::power_limits::wire`, выполняет read-back и считает
+    /// записи. Никакого реального hardware.
+    #[derive(Default)]
+    struct ScriptedHardwareBoostSource {
+        writes: std::sync::Mutex<Vec<(u8, i32)>>,
+        observed: std::sync::Mutex<Vec<(PowerLimitField, i32)>>,
+        diverge: bool,
+    }
+
+    #[async_trait]
+    impl HardwarePowerLimitSource for ScriptedHardwareBoostSource {
+        async fn set_power_limit(&self, field: u8, value: i32) -> Result<i32, ProviderError> {
+            self.writes.lock().unwrap().push((field, value));
+            let decoded = orbis_hardwared::power_limits::field_from_wire(field)?;
+            self.observed.lock().unwrap().push((decoded, value));
+            let observed = if self.diverge { value - 1 } else { value };
+            Ok(observed)
+        }
+    }
+
+    fn boost_fixture_limits() -> PowerLimits {
+        let mut limits = PowerLimits::default();
+        limits.fields.insert(
+            PowerLimitField::GpuDynamicBoost,
+            PowerLimitValue::new(5, 0, 25, 5, Some(10), Unit::Watts).expect("boost metadata"),
+        );
+        limits.fields.insert(
+            PowerLimitField::GpuTempTarget,
+            PowerLimitValue::new(75, 60, 87, 1, Some(80), Unit::DegreesC).expect("target metadata"),
+        );
+        limits
+    }
+
+    #[tokio::test]
+    async fn dynamic_boost_and_temp_target_apply_through_typed_hardware_path() {
+        // AC-040 (уровни AC-031/AC-032): backend-предоставленные
+        // GpuDynamicBoost/GpuTempTarget применяются тем же typed путём
+        // read → metadata-validate → Hardware1 write → read-back, что и
+        // SPL/SPPT/FPPT; выдуманных обходных путей нет.
+        let session = ScriptedBoostSessionSource {
+            limits: boost_fixture_limits(),
+        };
+        let hardware = ScriptedHardwareBoostSource::default();
+        let provider = SessionHardwarePowerLimitProvider::new(session, hardware);
+
+        assert_eq!(
+            provider
+                .set_power_limit(PowerLimitField::GpuDynamicBoost, 20)
+                .await
+                .expect("dynamic boost applied"),
+            ApplyResult::Applied
+        );
+        assert_eq!(
+            provider
+                .set_power_limit(PowerLimitField::GpuTempTarget, 84)
+                .await
+                .expect("temp target applied"),
+            ApplyResult::Applied
+        );
+
+        let writes = provider.hardware.writes.lock().unwrap().clone();
+        assert_eq!(
+            writes,
+            vec![
+                (orbis_hardwared::power_limits::wire::GPU_DYNAMIC_BOOST, 20),
+                (orbis_hardwared::power_limits::wire::GPU_TEMP_TARGET, 84),
+            ],
+            "mutations must carry the typed Hardware1 wire codes"
+        );
+        let observed = provider.hardware.observed.lock().unwrap().clone();
+        assert!(
+            observed.contains(&(PowerLimitField::GpuDynamicBoost, 20)),
+            "read-back must observe the applied boost value"
+        );
+        assert!(
+            observed.contains(&(PowerLimitField::GpuTempTarget, 84)),
+            "read-back must observe the applied temp-target value"
+        );
+
+        // Значение, нарушающее authoritative step, отклоняется до Hardware1.
+        let error = provider
+            .set_power_limit(PowerLimitField::GpuDynamicBoost, 22)
+            .await
+            .expect_err("step violation must be rejected");
+        assert!(
+            matches!(error, ProviderError::InvalidRequest(_)),
+            "unexpected error: {error:?}"
+        );
+
+        // Поле, отсутствующее в authoritative snapshot, честно Unsupported.
+        let error = provider
+            .set_power_limit(PowerLimitField::Spl, 45)
+            .await
+            .expect_err("absent field must not be writable");
+        assert!(matches!(error, ProviderError::Unsupported(_)));
+
+        // AC-041: выдуманное CPU-boost поле не имеет authoritative contract
+        // и отклоняется как unsupported — shell/sysfs workaround недостижим.
+        let error = provider
+            .set_power_limit(PowerLimitField::Other("cpu_boost".into()), 1)
+            .await
+            .expect_err("invented CPU-boost field must be refused");
+        assert!(matches!(error, ProviderError::Unsupported(_)));
+
+        let writes = provider.hardware.writes.lock().unwrap();
+        assert_eq!(
+            writes.len(),
+            2,
+            "rejected values must never reach the mutation backend"
+        );
+    }
+
+    #[tokio::test]
+    async fn dynamic_boost_readback_mismatch_is_conflict_not_applied() {
+        // AC-040: Apply подтверждается только совпавшим read-back; расхождение
+        // возвращается как Conflict, observed не подменяется запрошенным.
+        let session = ScriptedBoostSessionSource {
+            limits: boost_fixture_limits(),
+        };
+        let hardware = ScriptedHardwareBoostSource {
+            diverge: true,
+            ..Default::default()
+        };
+        let provider = SessionHardwarePowerLimitProvider::new(session, hardware);
+
+        let error = provider
+            .set_power_limit(PowerLimitField::GpuDynamicBoost, 20)
+            .await
+            .expect_err("mismatched read-back must not report Applied");
+        match error {
+            ProviderError::Conflict(message) => {
+                assert!(
+                    message.contains("requested=20") && message.contains("observed=19"),
+                    "conflict must name both values: {message}"
+                );
+            }
+            other => panic!("expected conflict, got {other:?}"),
+        }
+    }
 }

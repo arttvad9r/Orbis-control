@@ -3076,6 +3076,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dynamic_boost_and_temp_target_capabilities_carry_real_metadata() {
+        // AC-040: предоставленные backend'ом boost-поля публикуют реальные
+        // unit/min/max/step в capability snapshot; отсутствующие поля честно
+        // Unsupported, а не выдуманный default.
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("tuf-fa707nv-realistic").expect("profile exists"),
+        ));
+        let snapshot = CapabilityRegistryBuilder::new(4, SystemTime::now())
+            .build()
+            .expect("empty snapshot");
+        let snapshot = super::augment_power_limit_capabilities(
+            provider.as_ref(),
+            snapshot,
+            CapabilityStatus::Supported,
+        )
+        .await;
+
+        let boost = snapshot
+            .capability(FeatureId::NvDynamicBoost)
+            .expect("dynamic boost capability present");
+        assert_eq!(boost.operations.read.status, CapabilityStatus::Supported);
+        let orbis_core::capability::CapabilityConstraints::PowerLimits(constraints) =
+            &boost.constraints
+        else {
+            panic!("dynamic boost must publish typed power-limit constraints");
+        };
+        let boost_constraint = constraints
+            .iter()
+            .find(|c| c.field == orbis_core::limits::PowerLimitField::GpuDynamicBoost)
+            .expect("dynamic boost constraint");
+        assert_eq!(boost_constraint.unit, orbis_core::limits::Unit::Watts);
+        let range = &boost_constraint.range;
+        assert_eq!(range.min, Some(0));
+        assert_eq!(range.max, Some(25));
+        assert_eq!(range.step, Some(1));
+        assert_eq!(range.default, Some(5));
+
+        let target = snapshot
+            .capability(FeatureId::NvTempTarget)
+            .expect("temp target capability present");
+        assert_eq!(target.operations.read.status, CapabilityStatus::Supported);
+        let orbis_core::capability::CapabilityConstraints::PowerLimits(constraints) =
+            &target.constraints
+        else {
+            panic!("temp target must publish typed power-limit constraints");
+        };
+        let target_constraint = constraints
+            .iter()
+            .find(|c| c.field == orbis_core::limits::PowerLimitField::GpuTempTarget)
+            .expect("temp target constraint");
+        assert_eq!(target_constraint.unit, orbis_core::limits::Unit::DegreesC);
+        assert_eq!(target_constraint.range.min, Some(60));
+        assert_eq!(target_constraint.range.max, Some(87));
+        assert_eq!(target_constraint.range.step, Some(1));
+
+        // CPU boost не предоставляется backend'ом: capability отсутствует в
+        // реестре вообще — working toggle не создаётся (AC-041).
+        assert!(
+            !snapshot.contains(FeatureId::CpuBoost),
+            "invented CPU boost capability must not exist"
+        );
+    }
+
+    #[tokio::test]
     async fn power_limit_snapshot_identity_remains_authoritative_across_augmentation() {
         let provider = Arc::new(MockProvider::new(
             build_state_arc("zephyrus-full").expect("profile exists"),

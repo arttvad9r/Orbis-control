@@ -500,6 +500,33 @@ scripts/verify full
       `worker_runtime.rs` — read-back после Ok/Timeout, без retry;
       `factory_reset_no_retry_on_timeout` — тот же принцип для fan reset).
 
+### Этап 4 — Boost и temperature target mutation (AC-040, AC-041): verified
+
+- [x] AC-040 — NVIDIA Dynamic Boost и GPU temperature target проходят полный
+      read → metadata → UI → validate → typed Hardware1 write → read-back
+      цикл, отдельны от platform Turbo-профиля и показывают реальные
+      unit/min/max/step
+      (`sessiond/power_limits.rs` FIELDS: nv_dynamic_boost (Вт),
+      nv_temp_target (°C) читаются только при полном metadata;
+      `hardwared/power_limits.rs` field_name/wire: nv_dynamic_boost=4,
+      nv_temp_target=5 c validate+read-back;
+      `session-client` set_power_limit_from_snapshot: typed validation,
+      mismatch = Conflict;
+      `main_tests.rs` dynamic_boost_rendering_shows_real_unit_and_no_invented_cpu_boost_field,
+      dynamic_boost_draft_apply_and_failure_lifecycle_is_field_independent;
+      `session-client` tests dynamic_boost_and_temp_target_apply_through_typed_hardware_path,
+      dynamic_boost_readback_mismatch_is_conflict_not_applied;
+      `composition.rs` dynamic_boost_and_temp_target_capabilities_carry_real_metadata).
+- [x] AC-041 — authoritative CPU boost read/write capability отсутствует:
+      production toggle не существует, platform Turbo остаётся отдельным
+      профилем производительности, shell/sysfs workaround нет
+      (`sessiond/power_limits.rs`
+      cpu_temperature_limit_and_cpu_boost_have_no_kernel_armoury_field —
+      FIELDS не содержит cpu_boost/cpufv;
+      `main_tests.rs` dynamic_boost_rendering_... — в authoritative field map
+      нет invented-полей; capability id cpu_boost не публикуется без
+      backend-доказательств).
+
 ### Этап 0 — Performance profiles (AC-010, AC-011): verified
 
 - [x] AC-010 — typed mutation + authoritative read-back; UI обновляется
