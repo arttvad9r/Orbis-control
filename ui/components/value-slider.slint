@@ -9,6 +9,10 @@ export component ValueSlider inherits Rectangle {
     in property <int> step: 1;
     in property <int> value: 80;
     in property <bool> disabled: false;
+    // The trailing live percent readout is redundant when the enclosing row
+    // already shows the authoritative value (LimitRow); it also makes the
+    // minimum slider width exceed a 1/3 card column at the 980px window.
+    in property <bool> show-percent: true;
     callback changed(float);
 
     height: 32px;
@@ -99,7 +103,7 @@ export component ValueSlider inherits Rectangle {
             vertical-alignment: center;
         }
 
-        Text {
+        if (root.show-percent) : Text {
             text: round(root.internal-value) + " %";
             font-size: 12.5px;
             font-weight: 600;

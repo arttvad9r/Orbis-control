@@ -1,7 +1,7 @@
 // Display page — observed refresh rate (read-only in production), the display
 // mode request surface and the panel overdrive request toggle.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow, Grid } from "../common.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -19,11 +19,11 @@ export component DisplaySection inherits Rectangle {
 
     ScrollView {
         VerticalLayout {
-            width: root.width - 56px;
-            x: 28px;
-            spacing: 16px;
-            padding-top: 8px;
-            padding-bottom: 20px;
+            width: root.width - 2 * Grid.page-gutter;
+            x: Grid.page-gutter;
+            spacing: Grid.card-spacing;
+            padding-top: Grid.page-top;
+            padding-bottom: Grid.page-bottom;
 
             PageHeader {
                 title: "Экран";
