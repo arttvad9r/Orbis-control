@@ -174,3 +174,36 @@ text byte-equal to the card's `expected_observable`, (2) evidence references to 
 
 **Forecloses:** nothing about scope. It does establish that merge-invariant acceptance evidence must be
 produced by the planner, not inherited from the branch that was merged.
+
+## 2026-09-22 — Process defect: shared-checkout mutation during a QA run (root-caused and fixed)
+
+**What happened.** The functional-line QA card (t_5b9d96c6) rendered live screenshots from the shared
+checkout `/home/artt/Orbis-control-implementation` while the INT merge card (t_3864d46e) was dispatched
+into the *same* directory. At 07:14 the merge changed HEAD under the running QA worker. The worker
+therefore produced two artifact sets from two different trees in one run: `p980-*` (07:05–07:06, pre-fix
+tree 5ca36ab) and `c5ca-*` (07:17–07:34, post-merge tree 5f0d3da). Its verdict card then inherited three
+different candidate identities (card pin, scope text, artifact provenance) and a measurement ban that made
+one check unsatisfiable — so the QA worker correctly refused to invent a verdict and blocked with
+`needs_input`.
+
+**Why the worker was right.** Independently reproduced: `git show 5ca36ab:ui/components/nav-item.slint`
+has no absolute-x geometry (fix first lands at merge 5f0d3da), and a pixel probe on the two sets gives nav
+icon-column spread 67 px for `p980-*` (zigzag) vs 2 px for `c5ca-*` (straight column). No single verdict
+could cover both, and reading the pre-fix set as evidence of the post-fix property would have been a false
+PASS. Verified, not accepted on report.
+
+**Root cause (mine).** I dispatched a tree-mutating card (merge) concurrently with a card that reads that
+tree. "One writer per directory" was applied to *writers of files* but not to *mutators of the checkout*.
+
+**Fix applied.** (1) The verdict card was re-issued: candidate pinned to the current code-identical tip,
+verdict scope limited to `c5ca-*`, `p980-*` demoted to calibration control only, pixel measurement
+explicitly permitted and required, and honesty split into proven (no mutation observed) vs untested
+(mutation path — hardwared not running). (2) The candidate identity is now frozen with an annotated tag
+`v0.1-rc1` = `5f0d3da` (the merge commit), and both downstream cards (packaging, release) are pinned to that
+tag instead of a moving branch tip. (3) Packaging and release cards carry an explicit instruction to work
+from the frozen tag, in their own worktree when a clean build is needed, never mutating the shared checkout.
+
+**Rule recorded.** A card that mutates the shared checkout must not run concurrently with any card reading
+that checkout — same class as "one writer per directory", extended from file writers to checkout mutators.
+Freeze the candidate identity with a tag before the packaging/release stage so downstream evidence binds to
+an immutable SHA instead of a moving tip.
