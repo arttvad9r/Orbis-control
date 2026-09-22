@@ -747,6 +747,58 @@ pub async fn handle_set_product_gpu_mode(
     })
 }
 
+/// Read-only authoritative product GPU status; no authorization, no mutation.
+///
+/// This is capability/read evidence, not a mutation: it exposes the same
+/// authoritative current/queued/reboot triple the mutation read-back returns,
+/// so the UI can honestly show the queued state that survives application
+/// restarts. A missing backend reports `NotSupported` instead of guessed
+/// defaults.
+pub async fn handle_product_gpu_status(
+    backend: Option<&dyn asus_gpu_mode::AsusProductGpuMutationOperation>,
+) -> zbus::fdo::Result<ProductGpuMutationResult> {
+    let backend = backend.ok_or_else(|| {
+        zbus::fdo::Error::NotSupported("ASUS product GPU backend unavailable".into())
+    })?;
+    let result = backend
+        .read_status()
+        .await
+        .map_err(provider_error_to_dbus)?;
+    let queued_mode = result
+        .snapshot
+        .queued_mode
+        .and_then(|mode| match mode {
+            AsusGpuMode::Hybrid => Some(0),
+            AsusGpuMode::Integrated => Some(1),
+            AsusGpuMode::Ultimate => Some(2),
+            _ => None,
+        })
+        .unwrap_or(u32::MAX);
+    let outcome = match result.outcome {
+        ProductGpuOutcome::AlreadyActive => 0,
+        ProductGpuOutcome::RebootRequired => 1,
+        ProductGpuOutcome::Unknown => 2,
+        ProductGpuOutcome::Inconsistent => 3,
+    };
+    Ok(ProductGpuMutationResult {
+        requested_mode: match result.snapshot.current_mode {
+            AsusGpuMode::Hybrid => 0,
+            AsusGpuMode::Integrated => 1,
+            AsusGpuMode::Ultimate => 2,
+            _ => u32::MAX,
+        },
+        current_mode: match result.snapshot.current_mode {
+            AsusGpuMode::Hybrid => 0,
+            AsusGpuMode::Integrated => 1,
+            AsusGpuMode::Ultimate => 2,
+            _ => u32::MAX,
+        },
+        queued_mode,
+        outcome,
+        reboot_required: result.snapshot.reboot_required(),
+    })
+}
+
 /// Service object интерфейса `io.github.orbiscontrol.Hardware1`.
 pub struct HardwareService {
     authorizer: Box<dyn Authorizer>,
@@ -1118,6 +1170,16 @@ impl HardwareService {
         .await
     }
 
+    /// Read-only authoritative product GPU status (no auth, no mutation).
+    ///
+    /// Returns the same wire triple as `SetProductGpuMode` read-back:
+    /// `(requested_mode=current wire, queued_mode wire, reboot_required)`.
+    /// `queued_mode == u32::MAX` means no deferred target. Missing backend
+    /// reports `NotSupported`; read failures map to honest D-Bus errors.
+    async fn product_gpu_status(&self) -> zbus::fdo::Result<ProductGpuMutationResult> {
+        handle_product_gpu_status(self.product_gpu_backend.as_deref()).await
+    }
+
     /// Read-only typed evidence about Battery mutation backend availability.
     ///
     /// This is capability metadata, not a mutation: no authorization is
@@ -1362,6 +1424,8 @@ pub trait Hardware1 {
     fn set_power_limit(&self, field: u8, value: i32) -> zbus::Result<i32>;
     fn set_gpu_mode(&self, requested_mode: u32) -> zbus::Result<GpuMutationResult>;
     fn set_product_gpu_mode(&self, requested_mode: u32) -> zbus::Result<ProductGpuMutationResult>;
+    /// Read-only authoritative product GPU status (no auth, no mutation).
+    fn product_gpu_status(&self) -> zbus::Result<ProductGpuMutationResult>;
     /// Read-only typed Battery mutation backend availability (wire enum).
     fn battery_mutation_status(&self) -> zbus::Result<u8>;
 
@@ -1753,6 +1817,17 @@ mod tests {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.result.lock().unwrap().take().unwrap()
         }
+
+        async fn read_status(
+            &self,
+        ) -> Result<asus_gpu_mode::AsusGpuMutationReadback, ProviderError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.result
+                .lock()
+                .unwrap()
+                .take()
+                .expect("fake status result not configured")
+        }
     }
 
     fn product_gpu_readback() -> asus_gpu_mode::AsusGpuMutationReadback {
@@ -1825,6 +1900,66 @@ mod tests {
         assert_eq!(result.outcome, 1);
         assert!(result.reboot_required);
         assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+    }
+
+    fn product_gpu_status_readback() -> asus_gpu_mode::AsusGpuMutationReadback {
+        // Live hybrid machine with a queued Ultimate switch: current pair
+        // (dgpu=0, mux=1), queued pair (dgpu=0, mux=0), reboot required.
+        let snapshot = orbis_providers::asus_gpu_mode::AsusGpuModeSnapshot::from_values(
+            Some(0),
+            Some(1),
+            Some(0),
+            Some(0),
+        );
+        asus_gpu_mode::AsusGpuMutationReadback {
+            requested: snapshot.current_mode,
+            outcome: ProductGpuOutcome::RebootRequired,
+            snapshot,
+        }
+    }
+
+    #[tokio::test]
+    async fn product_gpu_status_reports_queued_and_reboot_without_auth() {
+        let backend = FakeProductGpuBackend {
+            calls: AtomicUsize::new(0),
+            result: Mutex::new(Some(Ok(product_gpu_status_readback()))),
+        };
+
+        let result = handle_product_gpu_status(Some(&backend))
+            .await
+            .expect("product GPU status read");
+
+        assert_eq!(result.requested_mode, 0, "wire current mode (Hybrid)");
+        assert_eq!(result.current_mode, 0);
+        assert_eq!(result.queued_mode, 2, "wire queued mode (Ultimate)");
+        assert_eq!(result.outcome, 1, "RebootRequired wire outcome");
+        assert!(result.reboot_required);
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn product_gpu_status_without_backend_is_not_supported() {
+        let error = handle_product_gpu_status(None)
+            .await
+            .expect_err("missing backend must be honest");
+
+        assert!(matches!(error, zbus::fdo::Error::NotSupported(_)));
+    }
+
+    #[tokio::test]
+    async fn product_gpu_status_maps_provider_error_to_dbus_failure() {
+        let backend = FakeProductGpuBackend {
+            calls: AtomicUsize::new(0),
+            result: Mutex::new(Some(Err(ProviderError::BackendUnavailable(
+                "asusd armoury peer unreachable".into(),
+            )))),
+        };
+
+        let error = handle_product_gpu_status(Some(&backend))
+            .await
+            .expect_err("provider failure must surface");
+
+        assert!(matches!(error, zbus::fdo::Error::Failed(_)));
     }
 
     #[tokio::test]

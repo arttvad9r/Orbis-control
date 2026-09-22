@@ -254,6 +254,11 @@ pub fn target_values(mode: AsusGpuMode) -> Option<(u32, u32)> {
     }
 }
 
+/// Whether the decoded mode is one of the three complete supported states.
+pub fn is_known(mode: AsusGpuMode) -> bool {
+    target_values(mode).is_some()
+}
+
 /// Classify current and deferred ASUS attribute values against a requested mode.
 pub fn classify_product_gpu_readback(
     mode: AsusGpuMode,

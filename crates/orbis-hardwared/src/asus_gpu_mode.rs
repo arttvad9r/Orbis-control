@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use orbis_providers::asus_gpu_mode::{
-    AsusGpuMode, AsusGpuModeSnapshot, ProductGpuOutcome, classify_product_gpu_readback,
+    AsusGpuMode, AsusGpuModeSnapshot, ProductGpuOutcome, classify_product_gpu_readback, is_known,
     target_values,
 };
 use orbis_providers::error::ProviderError;
@@ -27,12 +27,21 @@ pub trait AsusGpuAttributePairClient: Send + Sync {
     async fn gpu_mux_mode(&self) -> Result<Box<dyn AsusGpuAttributeClient>, ProviderError>;
 }
 
+/// Typed mutation/read surface for the ASUS product GPU queue pair.
+///
+/// `read_status` is the read-only sibling of `set_mode`: it exposes the same
+/// authoritative current/queued snapshot without any mutation. Every real
+/// backend must implement both; there is deliberately no default that could
+/// fabricate state.
 #[async_trait]
 pub trait AsusProductGpuMutationOperation: Send + Sync {
     async fn set_mode(
         &self,
         requested: AsusGpuMode,
     ) -> Result<AsusGpuMutationReadback, ProviderError>;
+
+    /// Read-only authoritative snapshot of current + queued firmware state.
+    async fn read_status(&self) -> Result<AsusGpuMutationReadback, ProviderError>;
 }
 
 /// Result of one paired ASUS GPU queue operation.
@@ -91,6 +100,35 @@ where
             outcome,
         })
     }
+
+    /// Read-only status: current snapshot without a requested target.
+    ///
+    /// The outcome is [`ProductGpuOutcome::AlreadyActive`] only when the current
+    /// pair is a complete known mode and no deferred target is pending. A
+    /// partially queued pair (only one of the two attributes carries a deferred
+    /// value) is reported as [`ProductGpuOutcome::Unknown`]: a half-written
+    /// queue must never be presented as "nothing pending", and a complete
+    /// deferred pair that differs from current keeps the honest reboot-required
+    /// outcome.
+    pub async fn read_status(&self) -> Result<AsusGpuMutationReadback, ProviderError> {
+        let dgpu = self.client.dgpu_disable().await?;
+        let mux = self.client.gpu_mux_mode().await?;
+        let snapshot = snapshot(&*dgpu, &*mux).await?;
+        let partial_queue =
+            snapshot.queued_dgpu_disable.is_some() != snapshot.queued_gpu_mux_mode.is_some();
+        let outcome = if !is_known(snapshot.current_mode) || partial_queue {
+            ProductGpuOutcome::Unknown
+        } else if snapshot.reboot_required() {
+            ProductGpuOutcome::RebootRequired
+        } else {
+            ProductGpuOutcome::AlreadyActive
+        };
+        Ok(AsusGpuMutationReadback {
+            requested: snapshot.current_mode,
+            snapshot,
+            outcome,
+        })
+    }
 }
 
 #[async_trait]
@@ -103,6 +141,10 @@ where
         requested: AsusGpuMode,
     ) -> Result<AsusGpuMutationReadback, ProviderError> {
         Self::set_mode(self, requested).await
+    }
+
+    async fn read_status(&self) -> Result<AsusGpuMutationReadback, ProviderError> {
+        Self::read_status(self).await
     }
 }
 

@@ -31,9 +31,9 @@ use orbis_core::action::ApplyResult;
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
-use orbis_providers::bounded_provider_call;
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::FanCurvePoints;
+use orbis_providers::{bounded_operation, bounded_provider_call};
 use orbis_session_client::{HardwareProductGpuSource, ProductGpuMutationResult};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -43,6 +43,13 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 /// an external registry accidentally advertises Automation write support.
 const AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED: bool = false;
 const AUTOMATION_MAX_CAPABILITY_AGE: Duration = Duration::from_secs(45);
+
+/// Deadline for one read-only ASUS product GPU status query.
+///
+/// The query is read-only evidence: a hung asusd peer must not stall the single
+/// sequential worker, and a timeout is never reported as success. The next
+/// periodic refresh simply re-queries.
+const PRODUCT_GPU_STATUS_DEADLINE: Duration = Duration::from_secs(2);
 
 /// Typed command accepted by the single sequential worker.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +82,8 @@ pub enum WorkerCommand {
     RefreshTelemetry,
     /// Authoritative read-only power/thermal limit snapshot.
     RefreshPowerLimits,
+    /// Authoritative read-only product GPU status (current/queued/reboot).
+    RefreshProductGpuStatus,
     SetFanCurve {
         profile: AsusdFanProfile,
         fan: FanId,
@@ -96,6 +105,12 @@ pub enum WorkerEvent {
     Gpu(Result<GpuCommandOutcome, SetGpuModeError>),
     /// Authoritative result of the ASUS product GPU queue operation.
     ProductGpu(Result<ProductGpuMutationResult, ProviderError>),
+    /// Authoritative read-only product GPU status (current/queued/reboot).
+    ///
+    /// Distinguishes "the status read itself failed" from a mutation outcome:
+    /// a failure here must degrade the product-mode section to an honest
+    /// unavailable state instead of inventing a mode.
+    ProductGpuStatusRefresh(Result<ProductGpuMutationResult, ProviderError>),
     ChargeLimit(Result<ChargeLimitCommandOutcome, SetChargeLimitError>),
     /// Result of a typed power-limit mutation, labelled with its field.
     PowerLimit {
@@ -787,6 +802,28 @@ async fn run_worker_inner<G, B, R, F>(
                     )),
                 };
                 WorkerEvent::ProductGpu(result)
+            }
+            WorkerCommand::RefreshProductGpuStatus => {
+                // Read-only authoritative status read. `bounded_operation` is the
+                // deadline boundary for this non-`Provider` adapter: a hung asusd
+                // peer yields a timeout, never a fabricated mode. The result is
+                // published unchanged so the presentation boundary can distinguish
+                // a failed read from a mutation outcome.
+                let result = match product_gpu.as_deref() {
+                    Some(source) => {
+                        bounded_operation(
+                            PRODUCT_GPU_STATUS_DEADLINE,
+                            "hardware1.product_gpu_status",
+                            "product_gpu_status",
+                            source.product_gpu_status(),
+                        )
+                        .await
+                    }
+                    None => Err(ProviderError::Unsupported(
+                        "ASUS product GPU status is not promoted on this build".into(),
+                    )),
+                };
+                WorkerEvent::ProductGpuStatusRefresh(result)
             }
             WorkerCommand::SetPowerLimit {
                 field,

@@ -1461,6 +1461,24 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         }
         WorkerEvent::Gpu(result) => apply_gpu_result(state, result),
         WorkerEvent::ProductGpu(result) => apply_product_gpu_result(state, result),
+        WorkerEvent::ProductGpuStatusRefresh(Ok(reply)) => {
+            // Read-only authoritative evidence. Presentation wiring (selecting the
+            // card from `current_mode`, marking the queued target and the reboot
+            // requirement) belongs to the follow-up UI card, so this arm only
+            // records what the backend reported and invents no mode.
+            tracing::debug!(
+                "product gpu status: current={}, queued={}, reboot_required={}, outcome={}",
+                reply.current_mode,
+                reply.queued_mode,
+                reply.reboot_required,
+                reply.outcome
+            );
+        }
+        WorkerEvent::ProductGpuStatusRefresh(Err(e)) => {
+            // A failed read is not a mutation outcome and must not be shown as
+            // success or as a definitive hardware error; previous evidence stays.
+            tracing::warn!("product gpu status read failed; UI keeps previous evidence: {e:?}");
+        }
         WorkerEvent::ChargeLimit(result) => apply_charge_limit_result(state, result),
         WorkerEvent::PowerLimit {
             field,

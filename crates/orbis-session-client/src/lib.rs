@@ -926,6 +926,15 @@ pub trait HardwareProductGpuSource: Send + Sync {
         &self,
         requested_mode: u32,
     ) -> Result<orbis_hardwared::ProductGpuMutationResult, ProviderError>;
+
+    /// Read the authoritative product GPU status triple (no mutation).
+    ///
+    /// Wire semantics match the mutation read-back: `queued_mode == u32::MAX`
+    /// means no deferred target; `requested_mode` carries the decoded current
+    /// mode and `reboot_required` the firmware pending-reboot flag.
+    async fn product_gpu_status(
+        &self,
+    ) -> Result<orbis_hardwared::ProductGpuMutationResult, ProviderError>;
 }
 
 /// Testable direct system-bus source для Battery mutation через Hardware1.
@@ -1258,6 +1267,21 @@ impl HardwareProductGpuSource for ZbusHardwareProductGpuSource {
             .map_err(zbus_error_to_provider)?;
         proxy
             .set_product_gpu_mode(requested_mode)
+            .await
+            .map_err(zbus_error_to_provider)
+    }
+
+    async fn product_gpu_status(
+        &self,
+    ) -> Result<orbis_hardwared::ProductGpuMutationResult, ProviderError> {
+        let proxy = Hardware1Proxy::builder(&self.connection)
+            .path(DBUS_OBJECT_PATH)
+            .expect("valid hardware object path")
+            .build()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        proxy
+            .product_gpu_status()
             .await
             .map_err(zbus_error_to_provider)
     }

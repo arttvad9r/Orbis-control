@@ -16,6 +16,7 @@ struct FakeAttribute {
     setters: Arc<Mutex<Vec<i32>>>,
     setter_order: Arc<Mutex<Vec<&'static str>>>,
     failure: Arc<Mutex<Option<String>>>,
+    read_failure: Arc<Mutex<Option<String>>>,
     retain_queued_on_set: Arc<Mutex<bool>>,
 }
 
@@ -28,12 +29,17 @@ impl FakeAttribute {
             setters: Arc::new(Mutex::new(Vec::new())),
             setter_order: Arc::new(Mutex::new(Vec::new())),
             failure: Arc::new(Mutex::new(None)),
+            read_failure: Arc::new(Mutex::new(None)),
             retain_queued_on_set: Arc::new(Mutex::new(false)),
         }
     }
 
     fn set_failure(&self, message: &str) {
         *self.failure.lock().unwrap() = Some(message.to_owned());
+    }
+
+    fn set_read_failure(&self, message: &str) {
+        *self.read_failure.lock().unwrap() = Some(message.to_owned());
     }
 
     fn setters(&self) -> Vec<i32> {
@@ -57,6 +63,9 @@ impl FakeAttribute {
 impl FakeAttribute {
     #[zbus(property)]
     async fn current_value(&self) -> zbus::fdo::Result<i32> {
+        if let Some(message) = self.read_failure.lock().unwrap().clone() {
+            return Err(zbus::fdo::Error::Failed(message));
+        }
         Ok(*self.current.lock().unwrap())
     }
 
@@ -221,4 +230,92 @@ async fn unsupported_target_is_rejected_before_setters() {
     assert!(matches!(error, ProviderError::InvalidRequest(_)));
     assert!(dgpu_view.setters().is_empty());
     assert!(mux_view.setters().is_empty());
+}
+
+// --- read-only product GPU status (no mutation) ---
+
+#[tokio::test]
+async fn status_read_is_read_only_and_reports_complete_current_state() {
+    let dgpu = FakeAttribute::new("dgpu_disable", 0, None);
+    let mux = FakeAttribute::new("gpu_mux_mode", 1, None);
+    let dgpu_view = dgpu.clone();
+    let mux_view = mux.clone();
+    let (_connection, client) = client(dgpu, mux).await;
+
+    let result = operation(client).read_status().await.unwrap();
+
+    // Hybrid, nothing queued: the pair is complete and no reboot is pending.
+    assert_eq!(result.snapshot.current_mode, AsusGpuMode::Hybrid);
+    assert_eq!(result.snapshot.queued_mode, None);
+    assert!(!result.snapshot.reboot_required());
+    assert_eq!(result.outcome, ProductGpuOutcome::AlreadyActive);
+    // A status read is evidence only: it must never touch a setter.
+    assert!(dgpu_view.setters().is_empty());
+    assert!(mux_view.setters().is_empty());
+}
+
+#[tokio::test]
+async fn status_read_reports_queued_target_and_reboot_required() {
+    // Live hybrid machine with a queued Ultimate switch: current pair
+    // (dgpu=0, mux=1) = Hybrid, queued pair (dgpu=0, mux=0) = Ultimate.
+    let dgpu = FakeAttribute::new("dgpu_disable", 0, Some(0));
+    let mux = FakeAttribute::new("gpu_mux_mode", 1, Some(0));
+    let dgpu_view = dgpu.clone();
+    let mux_view = mux.clone();
+    let (_connection, client) = client(dgpu, mux).await;
+
+    let result = operation(client).read_status().await.unwrap();
+
+    // Current stays the observed value while the queued target is explicit:
+    // a queued transition is never reported as already applied (AC-050).
+    assert_eq!(result.snapshot.current_mode, AsusGpuMode::Hybrid);
+    assert_eq!(result.snapshot.queued_mode, Some(AsusGpuMode::Ultimate));
+    assert!(result.snapshot.reboot_required());
+    assert_eq!(result.outcome, ProductGpuOutcome::RebootRequired);
+    assert!(dgpu_view.setters().is_empty());
+    assert!(mux_view.setters().is_empty());
+}
+
+#[tokio::test]
+async fn status_read_with_partial_queue_is_unknown_not_fabricated() {
+    let dgpu = FakeAttribute::new("dgpu_disable", 0, Some(1));
+    let mux = FakeAttribute::new("gpu_mux_mode", 1, None);
+    let (_connection, client) = client(dgpu, mux).await;
+
+    let result = operation(client).read_status().await.unwrap();
+
+    // Only one attribute queued proves no complete target; report Unknown
+    // instead of inventing a queued mode or a reboot requirement.
+    assert_eq!(result.snapshot.queued_mode, None);
+    assert!(!result.snapshot.reboot_required());
+    assert_eq!(result.outcome, ProductGpuOutcome::Unknown);
+}
+
+#[tokio::test]
+async fn status_read_with_unreadable_current_pair_is_unknown() {
+    // dgpu_disable=2 is outside the known product encoding: the honest answer
+    // is Unknown, never a coerced Hybrid/Ultimate card.
+    let dgpu = FakeAttribute::new("dgpu_disable", 2, None);
+    let mux = FakeAttribute::new("gpu_mux_mode", 1, None);
+    let (_connection, client) = client(dgpu, mux).await;
+
+    let result = operation(client).read_status().await.unwrap();
+
+    assert_eq!(result.outcome, ProductGpuOutcome::Unknown);
+    assert!(!result.snapshot.reboot_required());
+}
+
+#[tokio::test]
+async fn status_read_propagates_attribute_read_failure() {
+    let dgpu = FakeAttribute::new("dgpu_disable", 0, None);
+    dgpu.set_read_failure("status read failed");
+    let mux = FakeAttribute::new("gpu_mux_mode", 1, None);
+    let dgpu_view = dgpu.clone();
+    let (_connection, client) = client(dgpu, mux).await;
+
+    let error = operation(client).read_status().await.unwrap_err();
+
+    // A read failure is surfaced as an error, not as a fabricated mode.
+    assert!(matches!(error, ProviderError::Dbus(_)));
+    assert!(dgpu_view.setters().is_empty());
 }
