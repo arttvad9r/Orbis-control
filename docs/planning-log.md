@@ -431,3 +431,17 @@ backend реально отдаёт). Причина: per-event round trip `from
 **Коммиты:** `c8910b3` (фикс + тест + evidence `docs/verification/ui-d-t44e24832/`);
 следующий — очистка случайно закоммиченных build-артефактов fixture-peer'а из индекса.
 
+
+## 2026-09-23 — workspace anchoring for kanban cards (planner)
+Decision: product-work cards (UI/INT/packaging/docs edits) now declare
+dir-workspaces anchored at /home/artt/Orbis-control-implementation instead of
+scratch dirs under ~/.hermes. Rationale: ~/.hermes is itself a git repo
+(hermes-config); a bare scratch dir has no .git, so any `git -C <scratch>
+rev-parse` falls through to hermes-config's HEAD — wrong candidate identity at
+the acceptance gate. UI-B2 run 56 lost ~50 min untangling this (timeout); two
+manual workspace rebuilds (UI-B1, UI-B2) masked the cause instead of removing it.
+QA/installed-package/release-verify cards stay scratch: they do not commit, and
+candidate identity arrives via the envelope, so the trap cannot bite them.
+Rejected: moving the product repo under ~/Projects (does not remove the
+fall-through mechanism; breaks live worktrees mid-run; user opted to keep
+layout as-is).
