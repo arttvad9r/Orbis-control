@@ -1,0 +1,6 @@
+[2m2026-09-22T20:06:35.019351Z[0m [33m WARN[0m [2mwinit::platform_impl::linux::x11::xdisplay[0m[2m:[0m error setting XSETTINGS; Xft options won't reload automatically
+[2m2026-09-22T20:06:35.107553Z[0m [33m WARN[0m [2morbis_control[0m[2m:[0m battery: refresh недоступен: Unsupported("no battery")
+[2m2026-09-22T20:06:35.107603Z[0m [33m WARN[0m [2morbis_control[0m[2m:[0m product gpu status read failed; UI keeps previous evidence: BackendUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable")
+[2m2026-09-22T20:06:35.107614Z[0m [33m WARN[0m [2morbis_control[0m[2m:[0m performance: refresh недоступен: Unsupported("session: Performance capability недоступна")
+[2m2026-09-22T20:06:35.107661Z[0m [33m WARN[0m [2morbis_control[0m[2m:[0m fan curve refresh failed: Unsupported("session: fan curve capability недоступна")
+[2m2026-09-22T20:06:40.035987Z[0m [33m WARN[0m [2morbis_control[0m[2m:[0m product gpu status read failed; UI keeps previous evidence: BackendUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable")

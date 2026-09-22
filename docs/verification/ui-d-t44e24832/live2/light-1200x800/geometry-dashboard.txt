@@ -1,0 +1,3 @@
+Window 16777219
+  Position: 40,40 (screen: 0)
+  Geometry: 1200x800

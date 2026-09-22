@@ -487,6 +487,13 @@ fn read_power_value(
     unit: &str,
     default: &str,
 ) -> Option<PowerLimitValue> {
+    if unit.is_empty() {
+        // An empty projected unit marks a field the backend did not report
+        // (the Slint contract renders no LimitRow for it). Reconstructing it
+        // from the projection defaults would resurrect "0 ?" rows for fields
+        // the authoritative snapshot never contained.
+        return None;
+    }
     PowerLimitValue::new(
         value,
         min,

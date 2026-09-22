@@ -263,6 +263,87 @@ fn production_initial_power_limits_are_unknown_not_fake_defaults() {
 }
 
 #[test]
+fn absent_power_limit_fields_do_not_resurrect_through_ui_round_trip() {
+    // The approved composition renders one LimitRow per field the backend
+    // actually reports (performance.slint: unit != "" gates). The per-event
+    // from_slint/to_slint round trip must not turn the projection defaults of
+    // absent fields (0/0/step 1/empty unit) back into authoritative entries —
+    // otherwise "0 ?" rows appear for backend-unreported fields after any
+    // unrelated worker event.
+    let mut state = base_state();
+    state.power_limits.fields.clear();
+    state.power_limits.fields.insert(
+        orbis_core::limits::PowerLimitField::Spl,
+        orbis_core::limits::PowerLimitValue::new(
+            45,
+            20,
+            80,
+            5,
+            Some(45),
+            orbis_core::limits::Unit::Watts,
+        )
+        .unwrap(),
+    );
+    state.power_limits_stale = false;
+
+    let rendered = to_slint(&state);
+    assert_eq!(
+        rendered.sppt_unit, "",
+        "absent SPPT must project an empty unit"
+    );
+    let round_tripped = from_slint(&rendered);
+    assert_eq!(
+        round_tripped.power_limits.fields.len(),
+        1,
+        "only backend-reported fields may exist after a round trip"
+    );
+    assert!(
+        round_tripped
+            .power_limits
+            .get(&PowerLimitField::Spl)
+            .is_some()
+    );
+    assert!(
+        round_tripped
+            .power_limits
+            .get(&PowerLimitField::Sppt)
+            .is_none()
+    );
+    assert!(
+        round_tripped
+            .power_limits
+            .get(&PowerLimitField::Fppt)
+            .is_none()
+    );
+    assert!(
+        round_tripped
+            .power_limits
+            .get(&PowerLimitField::CpuTempLimit)
+            .is_none()
+    );
+    assert!(
+        round_tripped
+            .power_limits
+            .get(&PowerLimitField::GpuDynamicBoost)
+            .is_none()
+    );
+    assert!(
+        round_tripped
+            .power_limits
+            .get(&PowerLimitField::GpuTempTarget)
+            .is_none()
+    );
+
+    // The reported field must survive the round trip unchanged.
+    let spl = round_tripped
+        .power_limits
+        .get(&PowerLimitField::Spl)
+        .expect("reported field survives");
+    assert_eq!(spl.value, 45);
+    assert_eq!(spl.unit, orbis_core::limits::Unit::Watts);
+}
+
+#[test]
 fn advanced_power_limits_render_authoritative_metadata_and_pending_bits() {
     let mut state = base_state();
     state.power_limits.fields.insert(

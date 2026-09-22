@@ -1,0 +1,9 @@
+schema_version = 1
+
+[appearance]
+theme = "light"
+
+[window]
+close_action = "hide_to_tray"
+start_minimized = false
+remember_position = false
