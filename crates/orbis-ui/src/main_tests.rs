@@ -2669,6 +2669,181 @@ fn product_gpu_command_error_marks_section_unconfirmed() {
     assert!(s.gpu_section_error);
 }
 
+// --- Read-only product GPU status presentation (D2, plan 2026 stage 5) ---
+
+fn product_status_result(
+    current_mode: u32,
+    queued_mode: u32,
+    outcome: u32,
+    reboot_required: bool,
+) -> ProductGpuMutationResult {
+    ProductGpuMutationResult {
+        requested_mode: current_mode,
+        current_mode,
+        queued_mode,
+        outcome,
+        reboot_required,
+    }
+}
+
+/// AC-050: the observed card follows the reported current mode, the queued
+/// target renders as pending, and the reboot hint shows — a queued Ultimate
+/// never replaces the observed Standard mode.
+#[test]
+fn product_gpu_status_queued_target_does_not_claim_applied_mode() {
+    let mut s = controller::UiState::production_initial();
+    s.gpu_mode_state = controller::GpuModeHwState::Loading;
+
+    apply_product_gpu_status(
+        &mut s,
+        product_status_result(1, 2, PRODUCT_GPU_OUTCOME_REBOOT_REQUIRED, true),
+    );
+
+    assert_eq!(s.gpu_selected, 1);
+    assert_eq!(s.gpu_queued, 2);
+    assert!(s.gpu_reboot_required);
+    assert_eq!(s.gpu_mode_state, controller::GpuModeHwState::Ready);
+    assert!(!s.gpu_section_error);
+    // A read proves evidence, not write permission.
+    assert!(!s.gpu_mode_writable);
+}
+
+/// A successful status read with no deferred target clears stale queued
+/// evidence (the sentinel is authoritative) without touching the mode.
+#[test]
+fn product_gpu_status_ready_state_clears_stale_queue_evidence() {
+    let mut s = controller::UiState::production_initial();
+    s.gpu_queued = 2;
+    s.gpu_reboot_required = true;
+    s.gpu_section_error = true;
+
+    apply_product_gpu_status(
+        &mut s,
+        product_status_result(1, u32::MAX, PRODUCT_GPU_OUTCOME_ALREADY_ACTIVE, false),
+    );
+
+    assert_eq!(s.gpu_selected, 1);
+    assert_eq!(s.gpu_queued, -1);
+    assert!(!s.gpu_reboot_required);
+    assert!(!s.gpu_section_error);
+    assert_eq!(s.gpu_mode_state, controller::GpuModeHwState::Ready);
+}
+
+/// A deferred target identical to the observed mode is no pending transition:
+/// it must not render a phantom pending badge or reboot hint.
+#[test]
+fn product_gpu_status_queue_equal_to_current_is_not_pending() {
+    let mut s = controller::UiState::production_initial();
+    s.gpu_queued = 2;
+    s.gpu_reboot_required = true;
+
+    apply_product_gpu_status(
+        &mut s,
+        product_status_result(0, 0, PRODUCT_GPU_OUTCOME_ALREADY_ACTIVE, false),
+    );
+
+    assert_eq!(s.gpu_selected, 0);
+    assert_eq!(s.gpu_queued, -1);
+    assert!(!s.gpu_reboot_required);
+    assert_eq!(s.gpu_mode_state, controller::GpuModeHwState::Ready);
+}
+
+/// AC-052 partial/unreadable state: `Unknown` keeps previous UI evidence and
+/// must not degrade the section or invent "nothing queued".
+#[test]
+fn product_gpu_status_unknown_keeps_previous_evidence() {
+    let mut s = controller::UiState::production_initial();
+    s.gpu_selected = 1;
+    s.gpu_queued = 2;
+    s.gpu_reboot_required = true;
+    s.gpu_mode_state = controller::GpuModeHwState::Ready;
+
+    apply_product_gpu_status(
+        &mut s,
+        product_status_result(u32::MAX, u32::MAX, PRODUCT_GPU_OUTCOME_UNKNOWN, false),
+    );
+
+    assert_eq!(s.gpu_selected, 1);
+    assert_eq!(s.gpu_queued, 2);
+    assert!(s.gpu_reboot_required);
+    assert_eq!(s.gpu_mode_state, controller::GpuModeHwState::Ready);
+    assert!(!s.gpu_section_error);
+}
+
+/// Authoritative contradiction (Conflicted attribute pair) degrades the
+/// section to honest Unavailable with a visible section error.
+#[test]
+fn product_gpu_status_inconsistent_degrades_section_honestly() {
+    let mut s = controller::UiState::production_initial();
+    s.gpu_mode_state = controller::GpuModeHwState::Ready;
+    s.gpu_section_error = false;
+
+    apply_product_gpu_status(
+        &mut s,
+        product_status_result(u32::MAX, u32::MAX, PRODUCT_GPU_OUTCOME_INCONSISTENT, false),
+    );
+
+    assert_eq!(s.gpu_mode_state, controller::GpuModeHwState::Unavailable);
+    assert!(!s.gpu_mode_writable);
+    assert!(s.gpu_section_error);
+}
+
+/// An outcome contradicting its own fields is protocol-level inconsistency,
+/// not hardware evidence: the section must not claim a coherent mode.
+#[test]
+fn product_gpu_status_outcome_field_mismatch_is_not_success() {
+    let mut s = controller::UiState::production_initial();
+    s.gpu_mode_state = controller::GpuModeHwState::Ready;
+
+    // AlreadyActive but with a real queued target and reboot flag.
+    apply_product_gpu_status(
+        &mut s,
+        product_status_result(1, 2, PRODUCT_GPU_OUTCOME_ALREADY_ACTIVE, true),
+    );
+
+    assert_eq!(s.gpu_mode_state, controller::GpuModeHwState::Unavailable);
+    assert!(s.gpu_section_error);
+    // No mode was invented from the contradictory read.
+    assert_ne!(s.gpu_queued, 2);
+}
+
+/// A definitively absent backend degrades the section to Unavailable without
+/// fabricating modes; a transient failure keeps previous evidence.
+#[test]
+fn product_gpu_status_read_failure_degrades_only_on_definitive_errors() {
+    let mut s = controller::UiState::production_initial();
+    s.gpu_mode_state = controller::GpuModeHwState::Ready;
+
+    handle_worker_event_gpu_status_error(&mut s, ProviderError::Unsupported("no backend".into()));
+    assert_eq!(s.gpu_mode_state, controller::GpuModeHwState::Unavailable);
+    assert!(!s.gpu_mode_writable);
+
+    let mut s = controller::UiState::production_initial();
+    s.gpu_mode_state = controller::GpuModeHwState::Ready;
+    s.gpu_selected = 2;
+    handle_worker_event_gpu_status_error(&mut s, ProviderError::Timeout("hung peer".into()));
+    assert_eq!(s.gpu_mode_state, controller::GpuModeHwState::Ready);
+    assert_eq!(s.gpu_selected, 2);
+    assert!(!s.gpu_section_error);
+}
+
+/// Test-only entry mirroring the `ProductGpuStatusRefresh(Err(..))` arm of
+/// `handle_worker_event` (which needs a live Slint window).
+fn handle_worker_event_gpu_status_error(state: &mut controller::UiState, error: ProviderError) {
+    match WorkerEvent::ProductGpuStatusRefresh(Err(error)) {
+        WorkerEvent::ProductGpuStatusRefresh(Err(e)) => {
+            if matches!(
+                e,
+                ProviderError::Unsupported(_) | ProviderError::BackendUnavailable(_)
+            ) {
+                state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
+                state.gpu_mode_writable = false;
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
 #[test]
 fn production_initial_has_no_queued_target_or_reboot_claim() {
     let s = controller::UiState::production_initial();

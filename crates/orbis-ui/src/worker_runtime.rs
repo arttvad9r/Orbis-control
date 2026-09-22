@@ -601,6 +601,31 @@ async fn bounded_fan_curve(
     .await
 }
 
+/// One bounded read-only ASUS product GPU status query.
+///
+/// `bounded_operation` is the deadline boundary for this non-`Provider`
+/// adapter: a hung asusd peer yields a timeout, never a fabricated mode. The
+/// result is published unchanged so the presentation boundary can distinguish
+/// a failed read from a mutation outcome.
+async fn product_gpu_status_read(
+    product_gpu: Option<&dyn HardwareProductGpuSource>,
+) -> Result<ProductGpuMutationResult, ProviderError> {
+    match product_gpu {
+        Some(source) => {
+            bounded_operation(
+                PRODUCT_GPU_STATUS_DEADLINE,
+                "hardware1.product_gpu_status",
+                "product_gpu_status",
+                source.product_gpu_status(),
+            )
+            .await
+        }
+        None => Err(ProviderError::Unsupported(
+            "ASUS product GPU status is not promoted on this build".into(),
+        )),
+    }
+}
+
 async fn run_worker_inner<G, B, R, F>(
     mut runtime: ApplicationRuntime<G, B, R>,
     mut receiver: UnboundedReceiver<WorkerCommand>,
@@ -634,8 +659,10 @@ async fn run_worker_inner<G, B, R, F>(
 
     const GPU_REFRESH_INTERVAL: u32 = 5;
     const CAPABILITY_REFRESH_INTERVAL: u32 = 30;
+    const PRODUCT_GPU_STATUS_REFRESH_INTERVAL: u32 = 5;
     let mut gpu_refresh_counter = 0_u32;
     let mut capability_refresh_counter = 0_u32;
+    let mut product_gpu_status_refresh_counter = 0_u32;
 
     loop {
         let command = match deferred_command.take() {
@@ -709,6 +736,16 @@ async fn run_worker_inner<G, B, R, F>(
                                     Err(error) => emit(WorkerEvent::RegistryChange(Err(error))),
                                 }
                             }
+
+                            product_gpu_status_refresh_counter += 1;
+                            if product_gpu_status_refresh_counter
+                                >= PRODUCT_GPU_STATUS_REFRESH_INTERVAL
+                            {
+                                product_gpu_status_refresh_counter = 0;
+                                emit(WorkerEvent::ProductGpuStatusRefresh(
+                                    product_gpu_status_read(product_gpu.as_deref()).await,
+                                ));
+                            }
                             continue;
                         }
                     }
@@ -749,6 +786,13 @@ async fn run_worker_inner<G, B, R, F>(
                 }
                 Err(error) => emit(WorkerEvent::RegistryChange(Err(error))),
             }
+            continue;
+        }
+
+        if matches!(command, WorkerCommand::RefreshProductGpuStatus) {
+            emit(WorkerEvent::ProductGpuStatusRefresh(
+                product_gpu_status_read(product_gpu.as_deref()).await,
+            ));
             continue;
         }
 
@@ -804,26 +848,13 @@ async fn run_worker_inner<G, B, R, F>(
                 WorkerEvent::ProductGpu(result)
             }
             WorkerCommand::RefreshProductGpuStatus => {
-                // Read-only authoritative status read. `bounded_operation` is the
-                // deadline boundary for this non-`Provider` adapter: a hung asusd
-                // peer yields a timeout, never a fabricated mode. The result is
-                // published unchanged so the presentation boundary can distinguish
-                // a failed read from a mutation outcome.
-                let result = match product_gpu.as_deref() {
-                    Some(source) => {
-                        bounded_operation(
-                            PRODUCT_GPU_STATUS_DEADLINE,
-                            "hardware1.product_gpu_status",
-                            "product_gpu_status",
-                            source.product_gpu_status(),
-                        )
-                        .await
-                    }
-                    None => Err(ProviderError::Unsupported(
-                        "ASUS product GPU status is not promoted on this build".into(),
-                    )),
-                };
-                WorkerEvent::ProductGpuStatusRefresh(result)
+                // Read-only authoritative status read, bounded by
+                // `product_gpu_status_read`; the result is published unchanged so
+                // the presentation boundary can distinguish a failed read from a
+                // mutation outcome.
+                WorkerEvent::ProductGpuStatusRefresh(
+                    product_gpu_status_read(product_gpu.as_deref()).await,
+                )
             }
             WorkerCommand::SetPowerLimit {
                 field,
@@ -1045,5 +1076,149 @@ mod tests {
             *slot = None;
         }
         assert!(!publish_prepare_for_sleep(false, SystemTime::UNIX_EPOCH));
+    }
+
+    // --- Read-only product GPU status: real worker-loop coverage (D2) ---
+
+    use crate::composition::GpuServices;
+    use orbis_application::AppService;
+    use orbis_providers::mock::MockProvider;
+    use orbis_session_client::HardwareProductGpuSource;
+    use orbis_test_support::devices::build_state_arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// Scripted Hardware1 peer: counts status reads, returns a fixed reply.
+    struct ScriptedProductGpu {
+        result: ProductGpuMutationResult,
+        status_calls: AtomicU32,
+    }
+
+    #[async_trait::async_trait]
+    impl HardwareProductGpuSource for ScriptedProductGpu {
+        async fn set_product_gpu_mode(
+            &self,
+            _requested_mode: u32,
+        ) -> Result<ProductGpuMutationResult, ProviderError> {
+            Err(ProviderError::Unsupported("not under test".into()))
+        }
+
+        async fn product_gpu_status(&self) -> Result<ProductGpuMutationResult, ProviderError> {
+            self.status_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.result)
+        }
+    }
+
+    fn mock_runtime() -> ApplicationRuntime<
+        GpuServices<MockProvider, MockProvider, MockProvider, MockProvider>,
+        AppService<MockProvider>,
+        AppService<MockProvider>,
+    > {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        ApplicationRuntime::empty_for_testing(
+            GpuServices::new(
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+            ),
+            AppService::new(provider.clone()),
+            AppService::new(provider.clone()),
+            AppService::new(provider.clone()),
+            AppService::new(provider),
+            orbis_core::capability::CapabilityStatus::Unsupported,
+            orbis_core::capability::CapabilityStatus::Unsupported,
+            orbis_core::capability::CapabilityStatus::Unsupported,
+        )
+    }
+
+    #[tokio::test]
+    async fn worker_loop_publishes_authoritative_product_gpu_status_event() {
+        let source = Arc::new(ScriptedProductGpu {
+            result: ProductGpuMutationResult {
+                requested_mode: 1,
+                current_mode: 1,
+                queued_mode: 2,
+                outcome: 1, // RebootRequired
+                reboot_required: true,
+            },
+            status_calls: AtomicU32::new(0),
+        });
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(run_worker_with_product_gpu(
+            mock_runtime(),
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            Some(source.clone()),
+        ));
+
+        tx.send(WorkerCommand::RefreshProductGpuStatus)
+            .expect("worker channel open");
+
+        let mut observed = None;
+        while let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_secs(5), event_rx.recv()).await
+        {
+            if let WorkerEvent::ProductGpuStatusRefresh(result) = event {
+                observed = Some(result.expect("scripted status read must succeed"));
+                break;
+            }
+        }
+        drop(tx);
+        worker.abort();
+
+        let reply = observed.expect("worker must publish ProductGpuStatusRefresh");
+        // The exact wire triple reaches the presentation boundary unchanged:
+        // current=1 (Standard observed), queued=2 (Ultimate deferred),
+        // reboot_required — the AC-050 evidence set.
+        assert_eq!(reply.current_mode, 1);
+        assert_eq!(reply.queued_mode, 2);
+        assert!(reply.reboot_required);
+        assert_eq!(
+            source.status_calls.load(Ordering::SeqCst),
+            1,
+            "one command must produce exactly one read-only status query"
+        );
+    }
+
+    #[tokio::test]
+    async fn worker_loop_reports_unsupported_status_fail_closed() {
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(run_worker_with_product_gpu(
+            mock_runtime(),
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            None,
+        ));
+
+        tx.send(WorkerCommand::RefreshProductGpuStatus)
+            .expect("worker channel open");
+
+        let mut observed = None;
+        while let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_secs(5), event_rx.recv()).await
+        {
+            if let WorkerEvent::ProductGpuStatusRefresh(result) = event {
+                observed = Some(result);
+                break;
+            }
+        }
+        drop(tx);
+        worker.abort();
+
+        let result = observed.expect("worker must publish ProductGpuStatusRefresh");
+        assert!(
+            matches!(result, Err(ProviderError::Unsupported(_))),
+            "absent promotion must be an honest Unsupported, got {result:?}"
+        );
     }
 }

@@ -1253,6 +1253,98 @@ fn apply_product_gpu_result(
     }
 }
 
+/// Wire outcome encoding of `Hardware1.ProductGpuStatus` (orbis-hardwared).
+const PRODUCT_STATUS_OUTCOME_ALREADY_ACTIVE: u32 = 0;
+const PRODUCT_STATUS_OUTCOME_REBOOT_REQUIRED: u32 = 1;
+const PRODUCT_STATUS_OUTCOME_UNKNOWN: u32 = 2;
+const PRODUCT_STATUS_OUTCOME_INCONSISTENT: u32 = 3;
+
+/// Apply one authoritative read-only product GPU status read to UI state.
+///
+/// Honesty rules (AC-050/051/052):
+/// - a successful read proves the read path and the reported current/queued/
+///   reboot triple — it never proves write permission, so `gpu_mode_writable`
+///   is never earned here (mutation promotion is a separate product decision);
+/// - `Unknown` is "backend answered but the state is unreadable right now":
+///   not evidence of "no queue", so previous UI evidence stays;
+/// - `Inconsistent` (or a wire outcome contradicting its own fields) is a
+///   definitive contradiction and degrades the section honestly;
+/// - a queued target equal to the observed mode is no pending transition and
+///   is normalised to "no deferred target" instead of a phantom pending badge.
+fn apply_product_gpu_status(state: &mut controller::UiState, reply: ProductGpuMutationResult) {
+    let current_index = controller::asus_product_gpu_index(reply.current_mode);
+    let queued_index = controller::asus_product_gpu_index(reply.queued_mode);
+    // The status read classifies without a requested target, so consistency is
+    // checked against the daemon's own semantics: AlreadyActive means "known
+    // current mode, no pending reboot transition"; RebootRequired means a
+    // complete deferred pair that differs from the current mode.
+    let wire_consistent = match reply.outcome {
+        PRODUCT_STATUS_OUTCOME_ALREADY_ACTIVE => {
+            !reply.reboot_required && (queued_index.is_none() || queued_index == current_index)
+        }
+        PRODUCT_STATUS_OUTCOME_REBOOT_REQUIRED => {
+            reply.reboot_required && queued_index.is_some() && queued_index != current_index
+        }
+        PRODUCT_STATUS_OUTCOME_INCONSISTENT => true,
+        _ => false,
+    };
+    match reply.outcome {
+        PRODUCT_STATUS_OUTCOME_ALREADY_ACTIVE | PRODUCT_STATUS_OUTCOME_REBOOT_REQUIRED
+            if wire_consistent =>
+        {
+            if let Some(index) = current_index {
+                state.gpu_selected = index;
+            }
+            state.gpu_queued = match (queued_index, current_index) {
+                // A deferred target identical to the observed mode applies no
+                // pending change; showing it as queued would fake a transition.
+                (Some(queued), Some(current)) if queued == current => -1,
+                (queued, _) => queued.unwrap_or(-1),
+            };
+            state.gpu_reboot_required = reply.reboot_required;
+            state.gpu_mode_state = controller::GpuModeHwState::Ready;
+            state.gpu_section_error = false;
+            tracing::debug!(
+                "product gpu status: current={}, queued={}, reboot_required={}",
+                reply.current_mode,
+                reply.queued_mode,
+                reply.reboot_required
+            );
+        }
+        PRODUCT_STATUS_OUTCOME_INCONSISTENT => {
+            // Authoritative contradiction (e.g. Conflicted attribute pair):
+            // the section must not claim a coherent mode; decodable evidence
+            // stays until the next successful read resolves it.
+            state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
+            state.gpu_mode_writable = false;
+            state.gpu_section_error = true;
+            tracing::warn!("product gpu status: inconsistent backend state: {reply:?}");
+        }
+        PRODUCT_STATUS_OUTCOME_ALREADY_ACTIVE | PRODUCT_STATUS_OUTCOME_REBOOT_REQUIRED => {
+            // Outcome contradicts its own fields: protocol-level inconsistency,
+            // not evidence about the hardware state.
+            state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
+            state.gpu_mode_writable = false;
+            state.gpu_section_error = true;
+            tracing::warn!("product gpu status: outcome/fields mismatch: {reply:?}");
+        }
+        PRODUCT_STATUS_OUTCOME_UNKNOWN => {
+            // Unreadable right now (incomplete attributes, half-written queue)
+            // is not evidence of "nothing queued": previous UI evidence stays.
+            tracing::warn!(
+                "product gpu status: unreadable backend state; UI keeps previous evidence: {reply:?}"
+            );
+        }
+        _ => {
+            // Unknown outcome is not a definitive failure and not a success:
+            // UI keeps previous section state.
+            tracing::warn!(
+                "product gpu status: outcome unknown; UI keeps previous evidence: {reply:?}"
+            );
+        }
+    }
+}
+
 fn apply_charge_limit_outcome(
     state: &mut controller::UiState,
     outcome: &ChargeLimitCommandOutcome,
@@ -1462,22 +1554,26 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         WorkerEvent::Gpu(result) => apply_gpu_result(state, result),
         WorkerEvent::ProductGpu(result) => apply_product_gpu_result(state, result),
         WorkerEvent::ProductGpuStatusRefresh(Ok(reply)) => {
-            // Read-only authoritative evidence. Presentation wiring (selecting the
-            // card from `current_mode`, marking the queued target and the reboot
-            // requirement) belongs to the follow-up UI card, so this arm only
-            // records what the backend reported and invents no mode.
-            tracing::debug!(
-                "product gpu status: current={}, queued={}, reboot_required={}, outcome={}",
-                reply.current_mode,
-                reply.queued_mode,
-                reply.reboot_required,
-                reply.outcome
-            );
+            // Read-only authoritative evidence; same honest rules as the
+            // mutation read-back (`apply_product_gpu_result`) but derived from
+            // an unprompted status read: current/queued/reboot are applied only
+            // from what the backend reported, a read never earns write access,
+            // and an unknown/inconsistent read never invents a mode.
+            apply_product_gpu_status(state, reply);
         }
         WorkerEvent::ProductGpuStatusRefresh(Err(e)) => {
             // A failed read is not a mutation outcome and must not be shown as
             // success or as a definitive hardware error; previous evidence stays.
+            // The section degrades to honest Unavailable only when the backend
+            // itself is definitively absent/unsupported (no fabricated modes).
             tracing::warn!("product gpu status read failed; UI keeps previous evidence: {e:?}");
+            if matches!(
+                e,
+                ProviderError::Unsupported(_) | ProviderError::BackendUnavailable(_)
+            ) {
+                state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
+                state.gpu_mode_writable = false;
+            }
         }
         WorkerEvent::ChargeLimit(result) => apply_charge_limit_result(state, result),
         WorkerEvent::PowerLimit {
@@ -2424,6 +2520,9 @@ fn main() -> anyhow::Result<()> {
     }
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshGpuCapabilities) {
         tracing::warn!("worker закрыт, initial gpu capabilities refresh не отправлен: {e:?}");
+    }
+    if let Err(e) = worker_tx.send(WorkerCommand::RefreshProductGpuStatus) {
+        tracing::warn!("worker закрыт, initial product gpu status refresh не отправлен: {e:?}");
     }
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshPerformance) {
         tracing::warn!("worker закрыт, initial performance refresh не отправлен: {e:?}");
