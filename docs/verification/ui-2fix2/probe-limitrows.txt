@@ -1,0 +1,6 @@
+--- target/ui-2fix2/after/perf-ready-980x680-dark.png card y=[312,627] page-bg=(23, 24, 28)
+    uniform-track clusters (>=300px wide) = 4
+      track1: y=[312,364] h=53 colour=(51, 54, 61) width=670px
+      track2: y=[371,482] h=112 colour=(35, 37, 41) width=551px
+      track3: y=[489,580] h=92 colour=(35, 37, 41) width=596px
+      track4: y=[587,627] h=41 colour=(35, 37, 41) width=608px

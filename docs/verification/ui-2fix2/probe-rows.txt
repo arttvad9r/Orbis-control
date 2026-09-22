@@ -1,0 +1,6 @@
+--- target/ui-2fix2/after/perf-ready-980x680-dark.png (980x680) page-bg=(23, 24, 28)
+    y=200: runs=[[229, 229], [258, 951]]
+    y=330: runs=[[229, 229], [258, 951]]
+    wide-run left edge: min=258 mode=(258, 458)
+    wide-run right edge: max=951 mode=(951, 458)
+    => card x=[258,951] width=694 left-inset=36px right-margin=28px

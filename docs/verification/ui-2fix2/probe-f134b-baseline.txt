@@ -1,0 +1,16 @@
+F1 dashboard card left-inset = 14px (/home/artt/.hermes/profiles/ui/cache/scratch/audit-baseline/dashboard-980x680-dark.png)
+F1 performance card left-inset = 28px (/home/artt/.hermes/profiles/ui/cache/scratch/audit-baseline/performance-980x680-dark.png)
+F1 match = False
+F3 about card right border x=None, deepest ink x=963, right padding = n/apx (/home/artt/.hermes/profiles/ui/cache/scratch/audit-baseline/about-980x680-dark.png)
+F4b nav icon left-x per row (/home/artt/.hermes/profiles/ui/cache/scratch/audit-baseline/settings-980x680-dark.png):
+      Главная                icon_x=73
+      Производительность     icon_x=34
+      Питание                icon_x=71
+      Охлаждение             icon_x=59
+      Графика                icon_x=72
+      Подсветка              icon_x=65
+      Экран                  icon_x=78
+      Система                icon_x=71
+      Настройки              icon_x=12
+      О программе            icon_x=14
+F4b icon column spread = 66px (9 distinct)

@@ -1,0 +1,30 @@
+ID: slint-conditional-pair
+METHOD: static_analysis
+REQUIRED: True
+EXPECTED: В ui/audited/sections/performance.slint карточка лимитов больше не использует visible: root.ui-state.power-limits-ready; вместо неё честная условная пара if (root.ui-state.power-limits-ready) : SectionCard {…} и if (!root.ui-state.power-limits-ready) : SectionCard {…}, так что скрытое состояние не резервирует высоту (аудит .worktrees/t_5fc90d28/UI_AUDIT_BASELINE.md строки 26-41)
+---
+ID: harness-nonready-state
+METHOD: build
+REQUIRED: True
+EXPECTED: Снимок crates/orbis-ui/examples/ui_snapshot.rs умеет рендерить состояние, где лимиты НЕ Ready (power_limits_ready=false для сценария реального старта), и это состояние действительно рендерится в артефакт
+---
+ID: band-gone-offscreen
+METHOD: visual_runtime
+REQUIRED: True
+EXPECTED: На offscreen-рендере «Производительность» в не-Ready состоянии между карточкой профиля и карточкой лимитов НЕТ пустой полосы: область между ними занята контентом, а не фоном (замер по пикселям прилагается)
+---
+ID: band-gone-live
+METHOD: runtime_interaction
+REQUIRED: True
+EXPECTED: На живом запуске приложения в состоянии старта (лимиты НЕ Ready) страница «Производительность» не содержит пустой полосы ~170px: замер по пикселям на живом скриншоте прилагается
+---
+ID: regression-perf
+METHOD: visual_runtime
+REQUIRED: True
+EXPECTED: Регрессия чиста: в Ready-состоянии карточка лимитов по-прежнему отображается и три строки помещаются внутри карточки на 980px; F1 (гуттер 28px), F3 и F4b не затронуты
+---
+ID: tests
+METHOD: unit_test
+REQUIRED: True
+EXPECTED: scripts/verify task PASS (exit 0) и cargo test --workspace --locked без падений на кандидате
+---

@@ -1,0 +1,16 @@
+F1 dashboard card left-inset = 28px (target/ui-2fix2/regress/dashboard-980x680-dark.png)
+F1 performance card left-inset = 28px (target/ui-2fix2/after/perf-ready-980x680-dark.png)
+F1 match = True
+F3 about card right border x=None, deepest ink x=951, right padding = n/apx (target/ui-2fix2/regress/about-980x680-dark.png)
+F4b nav icon left-x per row (target/ui-2fix2/regress/settings-980x680-dark.png):
+      Главная                icon_x=26
+      Производительность     icon_x=27
+      Питание                icon_x=26
+      Охлаждение             icon_x=27
+      Графика                icon_x=26
+      Подсветка              icon_x=25
+      Экран                  icon_x=26
+      Система                icon_x=26
+      Настройки              icon_x=12
+      О программе            icon_x=14
+F4b icon column spread = 15px (5 distinct)
