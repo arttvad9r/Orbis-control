@@ -1,0 +1,1830 @@
++ cargo fmt --all -- --check
++ cargo check --workspace --all-targets --locked
+    Checking orbis-hardwared v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-hardwared)
+    Checking orbis-session-client v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-session-client)
+    Checking orbis-ui v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-ui)
+    Checking orbis-cli v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.40s
++ git diff --check
++ cargo test --workspace --locked
+   Compiling orbis-providers v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-providers)
+   Compiling orbis-sessiond v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-sessiond)
+   Compiling orbis-hardwared v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-hardwared)
+   Compiling orbis-test-support v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-test-support)
+   Compiling orbis-application v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-application)
+   Compiling orbis-session-client v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-session-client)
+   Compiling orbis-ui v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-ui)
+   Compiling orbis-cli v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 50.76s
+     Running unittests src/lib.rs (target/debug/deps/orbis_application-c9fb9b83033a5a00)
+
+running 48 tests
+test diagnostics::tests::freezes_exact_generated_at_schema_and_source_metadata ... ok
+test diagnostics::tests::capability_local_failure_states_do_not_collapse_snapshot ... ok
+test diagnostics::tests::later_collection_cannot_mutate_an_earlier_snapshot ... ok
+test diagnostics::tests::successful_domain_unknown_remains_distinct_from_failed_read ... ok
+test tests::battery_readback_error_preserves_apply_result ... ok
+test tests::accepted_is_not_applied_through_battery_outcome ... ok
+test tests::fan_curve_mutation_preserves_provider_error ... ok
+test tests::gpu_confirmed_flag_passed_unmodified ... ok
+test tests::fan_curve_mutation_applies_through_mock ... ok
+test tests::gpu_readback_error_preserves_apply_result ... ok
+test tests::charge_backend_down_returns_command_error_without_mutation ... ok
+test tests::charge_limit_80_to_40 ... ok
+test tests::charge_snapshot_is_readback_not_cached ... ok
+test tests::charge_permission_denied_returns_command_error ... ok
+test tests::mux_access_capabilities_work_without_gpu_provider ... ok
+test tests::performance_readback_error_preserves_apply_result ... ok
+test tests::performance_state_timeout_is_bounded_at_application_boundary ... ok
+test tests::backend_down_returns_command_error_without_mutation ... ok
+test tests::balanced_to_silent ... ok
+test tests::initial_charge_limit ... ok
+test tests::charge_limit_40_to_100 ... ok
+test tests::performance_state_zephyrus ... ok
+test tests::post_dispatch_timeout_readback_refutes_desired_keeps_unknown ... ok
+test tests::power_capability_preserves_provider_error ... ok
+test tests::power_capability_works_without_gpu_provider ... ok
+test tests::pre_dispatch_failures_are_plain_command_errors_without_recovery_read ... ok
+test tests::applied_mode_optimized_readback ... ok
+test tests::eco_keeps_applied_and_returns_logout_pending ... ok
+test tests::platform_profile_backend_unavailable_is_temporarily_unavailable ... ok
+test tests::platform_profile_choices_do_not_prove_write_capability ... ok
+test tests::gpu_backend_down_returns_command_error_without_mutation ... ok
+test tests::platform_profile_desired_difference_is_pending ... ok
+test tests::permission_denied_returns_command_error ... ok
+test tests::timeout_after_dispatch_recovers_to_applied_when_readback_confirms ... ok
+test tests::timeout_after_dispatch_with_failed_readback_keeps_observation ... ok
+test tests::timeout_after_dispatch_with_mismatch_is_unconfirmed_not_success ... ok
+test tests::timeout_does_not_trigger_automatic_rollback_or_second_mutation ... ok
+test tests::initial_gpu_state_zephyrus ... ok
+test tests::platform_profile_read_is_observed_and_write_is_unknown ... ok
+test tests::gpu_permission_denied_returns_command_error ... ok
+test tests::gpu_snapshot_is_readback_not_cached ... ok
+test tests::value_83_follows_provider_semantics ... ok
+test tests::snapshot_is_readback_not_cached ... ok
+test tests::repeated_charge_limit_is_idempotent ... ok
+test tests::repeated_current_is_idempotent ... ok
+test tests::standard_to_ultimate_pending_keeps_applied ... ok
+test tests::silent_to_turbo ... ok
+test tests::repeated_ultimate_is_idempotent ... ok
+
+test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running unittests src/lib.rs (target/debug/deps/orbis_capabilities-ca34794c94b8390b)
+
+running 28 tests
+test diagnostics::tests::empty_registry_remains_empty_without_synthetic_entries ... ok
+test diagnostics::tests::adapting_does_not_mutate_the_registry_snapshot ... ok
+test engine::tests::requirement_mapping ... ok
+test diagnostics::tests::preserves_registry_metadata_and_canonical_capabilities_exactly ... ok
+test engine::tests::build_and_count ... ok
+test engine::tests::report_serde_roundtrip ... ok
+test engine::tests::with_reason_no_warning ... ok
+test fixture::tests::parse_status_all ... ok
+test probe::tests::classifications_map_to_canonical_statuses ... ok
+test probe::tests::dbus_classification_is_conservative_and_context_aware ... ok
+test probe::tests::probe_errors_are_not_operation_statuses ... ok
+test probe::tests::probe_result_converts_to_operation_without_observed_value ... ok
+test registry::tests::battery_constraints_do_not_store_observed_state ... ok
+test registry::tests::contradictory_status_is_rejected ... ok
+test registry::tests::duplicate_feature_is_rejected ... ok
+test registry::tests::empty_snapshot_builds ... ok
+test registry::tests::generation_and_timestamp_are_preserved ... ok
+test engine::tests::missing_reason_warns ... ok
+test registry::tests::gpu_primitives_are_independent_and_product_is_not_synthesized ... ok
+test fixture::tests::privacy_check_finds_and_passes ... ok
+test registry::tests::gpu_product_policy_requires_explicit_entry ... ok
+test registry::tests::ordering_and_lookup_are_deterministic ... ok
+test registry::tests::performance_constraints_exclude_current_profile ... ok
+test registry::tests::supported_read_and_permission_denied_write_are_valid ... ok
+test registry::tests::supported_read_and_unsupported_write_are_valid ... ok
+test registry::tests::unknown_constraints_are_preserved ... ok
+test registry::tests::unknown_operations_are_accepted_only_as_legacy_parts ... ok
+test fixture::tests::load_real_fixture ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/orbisctl-61afea35c8674b09)
+
+running 13 tests
+test tests::proven_validate_statuses_pass_through_without_coercion ... ok
+test tests::failed_write_does_not_claim_success ... ok
+test tests::json_status_is_versioned_and_preserves_typed_error_state ... ok
+test tests::hung_validate_status_resolves_unknown_within_deadline ... ok
+test tests::validation_apply_requires_explicit_apply_test_flag ... ok
+test tests::hung_bus_connect_surfaces_as_timeout_error_not_success ... ok
+test tests::parser_accepts_help_version_and_status_formats ... ok
+test tests::parser_rejects_unknown_or_extra_arguments ... ok
+test tests::validation_dry_run_does_not_mutate ... ok
+test tests::validate_status_timeout_is_never_success_and_never_retried ... ok
+test tests::provider_errors_are_classified_without_fake_values ... ok
+test tests::restore_failure_is_critical_and_separate ... ok
+test tests::unknown_write_capability_blocks_apply_without_mutation ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/service_absent.rs (target/debug/deps/service_absent-d2e87679b7e7525a)
+
+running 1 test
+test status_fails_closed_when_session_bus_is_absent ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/orbis_config-d7d88994c52c60ee)
+
+running 77 tests
+test automation_dry_run_preflight::tests::action_write_blockers_are_never_removed ... ok
+test automation_dry_run_preflight::tests::missing_automation_read_evidence_remains_blocked ... ok
+test automation_dry_run_preflight::tests::read_only_automation_can_prove_dry_run_but_not_execution ... ok
+test automation_policy::tests::ac_plan_is_typed_and_hardware_inert ... ok
+test automation_policy::tests::default_policy_is_hardware_inert ... ok
+test automation_policy::tests::planner_refuses_to_coerce_dim_or_normal_to_boolean_lighting ... ok
+test automation_policy::tests::transition_trigger_must_match_observed_power_source ... ok
+test automation_policy::tests::unsupported_lifecycle_trigger_never_reuses_another_policy ... ok
+test automation_preflight::tests::auto_requires_explicit_owner_auto_evidence ... ok
+test automation_preflight::tests::display_preset_must_be_exactly_advertised ... ok
+test automation_preflight::tests::display_target_role_must_be_proven_internal_panel ... ok
+test automation_preflight::tests::display_write_bit_alone_is_not_enough_for_unattended_target ... ok
+test automation_preflight::tests::gpu_requirement_or_missing_mode_blocks_whole_plan ... ok
+test automation_preflight::tests::non_product_refresh_policy_is_never_coerced_to_a_preset ... ok
+test automation_preflight::tests::supported_runtime_and_exact_performance_constraints_pass ... ok
+test automation_preflight::tests::supported_write_without_typed_target_evidence_stays_blocked ... ok
+test automation_preflight::tests::typed_internal_display_constraints_can_prove_exact_120_target ... ok
+test automation_preflight::tests::unknown_automation_runtime_blocks_even_supported_action ... ok
+test automation_store::tests::missing_file_is_inert_default_policy ... ok
+test autostart::tests::relative_explicit_xdg_config_home_is_rejected ... ok
+test automation_store::tests::fingerprint_debug_never_exposes_source_bytes ... ok
+test automation_store::tests::malformed_existing_source_is_preserved_and_rejected ... ok
+test automation_store::tests::exact_fingerprint_detects_same_length_content_change ... ok
+test autostart::tests::missing_owned_entry_is_disabled_without_creating_anything ... ok
+test desired_state::tests::future_schema_is_rejected_without_rewrite ... ok
+test desired_state::tests::missing_file_returns_typed_defaults_without_creating_file ... ok
+test autostart::tests::xdg_config_and_home_fallback_resolve_only_user_autostart ... ok
+test desired_state::tests::malformed_source_returns_defaults_and_is_preserved ... ok
+test autostart::tests::modified_owned_entry_is_invalid_not_enabled ... ok
+test paths::tests::checked_fallback_to_home ... ok
+test paths::tests::checked_paths_reject_missing_or_relative_bases ... ok
+test desired_state::tests::xdg_path_is_user_config_and_never_cwd ... ok
+test paths::tests::checked_paths_from_explicit_dirs ... ok
+test policy_desired::tests::exporting_intent_does_not_infer_observed_state ... ok
+test policy_desired::tests::preserve_policy_changes_only_fields_present_in_preset ... ok
+test policy_desired::tests::unset_policy_releases_omitted_fields_explicitly ... ok
+test policy_desired::tests::desired_state_can_be_stored_by_existing_generic_document ... ok
+test autostart::tests::disable_removes_only_owned_path_and_is_idempotent ... ok
+test preferences::tests::future_schema_version_is_error_and_never_rewritten ... ok
+test preferences::tests::invalid_current_schema_uses_defaults_and_preserves_source ... ok
+test automation_policy::tests::typed_policy_roundtrip_uses_hardened_desired_state_store ... ok
+test desired_state::tests::new_file_is_owner_only_and_temp_is_cleaned ... ok
+test preferences::tests::atomic_replace_preserves_existing_file_permissions ... ok
+test automation_store::tests::valid_typed_policy_roundtrips_through_shared_loader ... ok
+test desired_state::tests::typed_desired_values_roundtrip ... ok
+test preferences::tests::atomic_save_uses_unique_same_directory_temp ... ok
+test preferences::tests::relative_xdg_path_is_rejected ... ok
+test preferences::tests::missing_preferences_returns_defaults_without_creating_file ... ok
+test preferences::tests::warning_debug_redacts_embedded_diagnostics ... ok
+test desired_state::tests::load_is_inert_and_does_not_create_side_effect_files ... ok
+test autostart::tests::new_owned_entry_is_private_and_temp_files_are_cleaned ... ok
+test store::tests::bad_theme_rejected ... ok
+test store::tests::charge_limit_range ... ok
+test store::tests::checked_path_resolver_never_selects_cwd_without_home ... ok
+test autostart::tests::enable_writes_exact_canonical_entry_and_reports_enabled ... ok
+test store::tests::default_is_valid_and_hardware_inert ... ok
+test preferences::tests::xdg_and_home_fallback_paths ... ok
+test store::tests::missing_file_returns_inert_default ... ok
+test store::tests::wrong_version_rejected ... ok
+test autostart::tests::enable_repairs_only_owned_path_and_preserves_siblings ... ok
+test store::tests::roundtrip_toml ... ok
+test window_state::tests::missing_file_returns_safe_default_without_creating_state ... ok
+test preferences::tests::malformed_preferences_are_preserved_with_safe_defaults ... ok
+test window_state::tests::relative_explicit_xdg_state_home_is_rejected ... ok
+test preferences::tests::current_schema_roundtrip ... ok
+test window_state::tests::malformed_file_returns_default_and_preserves_source ... ok
+test window_state::tests::xdg_state_path_and_home_fallback_are_separate_from_config ... ok
+test window_state::tests::unsupported_version_returns_default_and_preserves_source ... ok
+test window_state::tests::unknown_fields_are_invalid_and_preserved ... ok
+test preferences::tests::legacy_non_preference_domains_are_not_imported ... ok
+test preferences::tests::new_preferences_file_is_owner_only ... ok
+test window_state::tests::new_state_file_is_owner_only_and_temp_is_cleaned ... ok
+test store::tests::save_load_atomic_and_cleans_temp ... ok
+test store::tests::backup_created ... ok
+test window_state::tests::position_roundtrip_preserves_signed_coordinates ... ok
+test preferences::tests::legacy_safe_fields_import_with_close_mapping ... ok
+test store::tests::new_file_is_private_and_existing_permissions_are_preserved ... ok
+
+test result: ok. 77 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/lib.rs (target/debug/deps/orbis_core-e413868dda5df0b1)
+
+running 227 tests
+test action::tests::apply_result_helpers ... ok
+test action::tests::accepted_is_not_hardware_applied ... ok
+test action::tests::apply_result_serde ... ok
+test aura::tests::brightness_wire_roundtrip ... ok
+test action::tests::requirement_names ... ok
+test aura::tests::mode_wire_roundtrip ... ok
+test aura::tests::speed_and_direction_strings ... ok
+test aura::tests::speed_and_direction_wire_roundtrip_is_lossless ... ok
+test aura::tests::serde_roundtrip_preserves_unknown ... ok
+test aura::tests::unknown_mode_preserved_not_coerced ... ok
+test aura::tests::zone_wire_roundtrip ... ok
+test automation::tests::default_rule ... ok
+test automation::tests::explicit_rebaseline_consumes_pending_edge_without_emitting_transition ... ok
+test automation::tests::first_power_sample_only_establishes_baseline ... ok
+test automation::tests::future_sample_never_creates_transition ... ok
+test automation::tests::power_transition_requires_consecutive_fresh_confirmations ... ok
+test automation::tests::rebaseline_does_not_emit_and_future_real_edge_still_debounces_normally ... ok
+test automation::tests::refresh_policy_serde ... ok
+test automation::tests::suspend_boundary_breaks_candidate_but_keeps_stable_source ... ok
+test automation::tests::unknown_or_stale_sample_breaks_candidate_continuity ... ok
+test automation_policy::tests::disabled_rule_never_matches ... ok
+test automation_policy::tests::equal_priority_tie_is_deterministic_by_rule_id ... ok
+test automation_policy::tests::highest_priority_matching_rule_selects_preset_only ... ok
+test automation_policy::tests::unknown_power_context_is_not_guessed ... ok
+test battery::tests::bounds_min_greater_than_max_rejected ... ok
+test battery::tests::bounds_zero_step_rejected ... ok
+test battery::tests::different_threshold_sources_are_conflicted ... ok
+test battery::tests::disabled_without_percent ... ok
+test battery::tests::equal_threshold_sources_are_confirmed ... ok
+test battery::tests::one_threshold_source_is_observed ... ok
+test battery::tests::percent_outside_range_rejected ... ok
+test battery::tests::percent_with_unknown_bounds_allowed ... ok
+test battery::tests::valid_limit ... ok
+test capability::tests::capability_status_semantics_roundtrip ... ok
+test capability::tests::feature_id_roundtrip ... ok
+test capability::tests::matrix_insert ... ok
+test capability::tests::old_capability_json_deserializes_with_default_metadata ... ok
+test capability::tests::operation_statuses_are_independent ... ok
+test capability::tests::status_roundtrip ... ok
+test capability::tests::unknown_by_default ... ok
+test capability::tests::unknown_constraints_are_not_none_constraints ... ok
+test desired_observed::tests::desired_transition_does_not_claim_observation_or_pending ... ok
+test desired_observed::tests::explicit_clear_operations_are_field_local ... ok
+test desired_observed::tests::observation_never_auto_clears_pending_even_when_values_match ... ok
+test desired_observed::tests::state_defaults_to_unset_unknown_and_not_pending ... ok
+test desired_observed::tests::serde_keeps_desired_observed_and_pending_distinct ... ok
+test diagnostics::tests::absent_optional_build_and_compositor_fields_remain_absent ... ok
+test diagnostics::tests::gpu_primitives_are_independent ... ok
+test diagnostics::tests::privacy_safe_hardware_identity_has_no_serial_field ... ok
+test diagnostics::tests::report_lookup ... ok
+test diagnostics::tests::service_state_variants_remain_distinct ... ok
+test diagnostics::tests::unknown_and_unavailable_require_no_fake_defaults ... ok
+test diagnostics::tests::telemetry_freshness_and_status_survive_roundtrip ... ok
+test display::tests::display_default ... ok
+test diagnostics::tests::snapshot_preserves_capability_generation_and_timestamp ... ok
+test display::tests::display_with_modes ... ok
+test display::tests::mini_led_current_outside_allowed_set_gets_no_label ... ok
+test display::tests::mini_led_interpretation_is_generation_gated_not_raw_global ... ok
+test display::tests::mini_led_interpretation_matches_documented_kernel_maps ... ok
+test display::tests::mini_led_raw_values_round_trip_losslessly ... ok
+test display::tests::mini_led_state_serialization_is_raw_preserving ... ok
+test display::tests::mini_led_unknown_future_value_round_trips ... ok
+test display::tests::mini_led_unknown_generation_gets_no_labels ... ok
+test display::tests::panel_overdrive_state_preserves_disabled_unknown_distinction ... ok
+test display::tests::screen_auto_brightness_state_preserves_disabled_unknown_distinction ... ok
+test display_output::tests::current_mode_preferred_does_not_imply_current ... ok
+test display_output::tests::output_id_roundtrip ... ok
+test display_output::tests::refresh_precision_preserved_in_mode ... ok
+test display_output::tests::output_state_serialization_roundtrip ... ok
+test display_output::tests::refresh_zero_is_not_meaningful_not_zero_hz ... ok
+test display_output::tests::snapshot_empty_has_no_fake_output ... ok
+test display_refresh::tests::auto_is_never_inferred_from_wl_output_mode_observation ... ok
+test display_refresh::tests::closest_observed_mode_wins_without_rounding_the_target ... ok
+test display_refresh::tests::constraints_drop_observed_current_state_but_preserve_target_evidence ... ok
+test display_refresh::tests::different_resolution_modes_never_become_refresh_only_targets ... ok
+test display_refresh::tests::exact_refresh_is_preserved_while_mapping_product_presets ... ok
+test display_refresh::tests::missing_non_current_modes_never_invents_unseen_preset ... ok
+test display_refresh::tests::unknown_or_external_target_is_never_writable_even_with_mode_evidence ... ok
+test display_refresh_identity::tests::disconnected_connector_never_proves_target ... ok
+test display_refresh_identity::tests::duplicate_complete_matches_fail_closed ... ok
+test display_refresh_identity::tests::exact_sink_without_matching_physical_size_is_not_link_evidence ... ok
+test display_refresh_identity::tests::sink_serial_is_mandatory_for_first_version_proof ... ok
+test display_refresh_identity::tests::unique_edp_match_proves_internal_panel ... ok
+test display_refresh_identity::tests::unique_hdmi_match_is_proven_external_not_internal ... ok
+test display_refresh_identity::tests::resolver_has_no_name_based_shortcut ... ok
+test display_refresh_identity::tests::virtual_or_unknown_connector_kind_never_proves_role ... ok
+test display_refresh_request::tests::absent_preset_cannot_be_invented ... ok
+test display_refresh_request::tests::external_or_unknown_target_cannot_construct_request ... ok
+test display_refresh_request::tests::request_preserves_opaque_target_and_exact_refresh ... ok
+test display_refresh_state::tests::applied_state_keeps_target_role_mode_and_policy_separate ... ok
+test display_refresh_state::tests::external_target_never_reports_internal_proof ... ok
+test display_refresh_state::tests::unknown_policy_is_distinct_from_auto_and_fixed ... ok
+test fan::tests::decreasing_pwm_rejected_by_default ... ok
+test fan::tests::decreasing_temps_rejected ... ok
+test fan::tests::empty_rejected ... ok
+test fan::tests::raw_pwm_above_100_is_valid ... ok
+test fan::tests::too_many_points_rejected ... ok
+test fan::tests::valid_curve ... ok
+test fan::tests::zero_fan_at_high_temp_rejected ... ok
+test fan::tests::zero_fan_below_critical_ok ... ok
+test fan_policy::tests::combined_policy_smooths_and_rate_limits ... ok
+test fan_policy::tests::deadband_keeps_previous_effective_temperature_for_small_changes ... ok
+test fan_policy::tests::duplicate_temperature_uses_right_point_without_division_by_zero ... ok
+test fan_policy::tests::interpolation_is_integer_and_bounded ... ok
+test firmware::tests::boot_sound_wire_is_total_only_for_boolean_values ... ok
+test gpu::tests::gpu_mode_parse ... ok
+test gpu::tests::gpu_mode_roundtrip ... ok
+test gpu::tests::serde_snake_case ... ok
+test identity::tests::backend_simple ... ok
+test identity::tests::display_name ... ok
+test keyboard_backlight::tests::level_roundtrip ... ok
+test keyboard_backlight::tests::level_zero_is_valid ... ok
+test keyboard_backlight::tests::state_serialization ... ok
+test lifecycle::tests::a_new_sleep_cycle_invalidates_an_older_pending_resume ... ok
+test lifecycle::tests::lifecycle_variants_are_typed_and_inert_values ... ok
+test lifecycle::tests::lifecycle_event_serde_preserves_payload_identity ... ok
+test lifecycle::tests::pending_resume_expires_instead_of_accepting_late_state ... ok
+test lifecycle::tests::resume_requires_paired_sleep_and_fresh_post_resume_telemetry ... ok
+test lifecycle::tests::unknown_and_stale_samples_do_not_consume_pending_resume ... ok
+test lighting::tests::parse_variants ... ok
+test lighting::tests::unknown_becomes_custom ... ok
+test limits::tests::limits_map ... ok
+test limits::tests::min_max_inverted_rejected ... ok
+test limits::tests::misaligned_detected ... ok
+test limits::tests::out_of_range_rejected ... ok
+test limits::tests::valid_value ... ok
+test limits::tests::zero_step_rejected ... ok
+test mutation_audit::tests::accepted_and_unknown_outcome_remain_distinct ... ok
+test mutation_audit::tests::awaiting_observation_is_not_audited_as_applied ... ok
+test mutation_audit::tests::latest_record_replaces_same_feature_only ... ok
+test newtypes::tests::display_format ... ok
+test newtypes::tests::fan_pwm_range ... ok
+test newtypes::tests::ordering_works ... ok
+test newtypes::tests::percent_rejects_out_of_range ... ok
+test newtypes::tests::percent_roundtrip ... ok
+test newtypes::tests::refresh_hz_roundtrip ... ok
+test newtypes::tests::refresh_milli_hz_preserves_fractional_precision_losslessly ... ok
+test newtypes::tests::refresh_milli_hz_zero_is_valid_not_meaningful ... ok
+test newtypes::tests::temperature_range ... ok
+test pending_transitions::tests::capability_change_only_reobserves_matching_feature ... ok
+test pending_transitions::tests::reboot_pending_is_reobserved_not_auto_resolved_on_startup ... ok
+test pending_transitions::tests::resume_does_not_claim_reboot_requirement_was_satisfied ... ok
+test platform_profile::tests::desired_difference_is_pending ... ok
+test platform_profile::tests::divergent_sources_are_conflicted ... ok
+test platform_profile::tests::matching_sources_are_observed_and_write_stays_unknown ... ok
+test power::tests::parse_variants ... ok
+test preset::tests::preset_roundtrip_keeps_intent_without_applying_it ... ok
+test preset::tests::unknown_power_source_does_not_guess_a_preset ... ok
+test preset_bundle::tests::duplicate_ids_are_rejected ... ok
+test preset_bundle::tests::future_version_is_rejected_fail_closed ... ok
+test preset_bundle::tests::parsing_does_not_apply_any_intent ... ok
+test profile::tests::mapping_to_platform ... ok
+test preset_bundle::tests::roundtrip_preserves_versioned_bundle ... ok
+test profile::tests::parse_rejects_unknown ... ok
+test profile::tests::parse_variants ... ok
+test profile::tests::reverse_mapping ... ok
+test profile::tests::roundtrip_str ... ok
+test provider::tests::names_cover_all_variants ... ok
+test provider::tests::serde_roundtrip_preserves_all_variants ... ok
+test readiness::tests::conflict_detector_is_read_only_and_deterministic ... ok
+test readiness::tests::not_relevant_with_no_permission_requirement_is_non_blocking ... ok
+test readiness::tests::permission_denial_blocks_even_when_dependency_is_ready ... ok
+test readiness::tests::unrelated_dependency_does_not_block_feature ... ok
+test reconcile_schedule::tests::blocked_or_observe_decisions_never_dispatch ... ok
+test reconcile_schedule::tests::direct_desired_change_can_dispatch_after_apply_decision ... ok
+test reconcile_schedule::tests::resume_can_converge_only_after_fresh_observation_phase ... ok
+test reconcile_schedule::tests::startup_and_initial_resume_never_write_just_because_config_exists ... ok
+test reconcile_schedule::tests::unknown_or_pending_transaction_suppresses_duplicate_write ... ok
+test reconciliation::tests::matching_values_are_converged ... ok
+test reconciliation::tests::mismatch_with_readonly_is_blocked_not_faked ... ok
+test reconciliation::tests::mismatch_with_supported_write_can_apply_once ... ok
+test reconciliation::tests::no_desired_means_no_action ... ok
+test reconciliation::tests::pending_requirement_has_priority_over_incidental_match ... ok
+test reconciliation::tests::unknown_observation_requires_read_before_write ... ok
+test restoration::tests::failed_restoration_remains_explicit ... ok
+test restoration::tests::only_authoritative_previous_value_clears_restoration_debt ... ok
+test restoration::tests::temporary_activation_creates_explicit_restoration_debt ... ok
+test system_telemetry::tests::system_memory_serde_preserves_optional_pressure ... ok
+test telemetry::tests::ac_online_false_roundtrip ... ok
+test telemetry::tests::ac_online_none_roundtrip ... ok
+test telemetry::tests::empty_snapshot_is_valid ... ok
+test telemetry::tests::battery_optional_metadata_none_roundtrip ... ok
+test telemetry::tests::cpu_temp_none_roundtrip ... ok
+test telemetry::tests::fan_rpm_zero_roundtrip ... ok
+test telemetry::tests::gpu_identity_matches_across_source_conventions ... ok
+test telemetry::tests::field_gap_evidence_survives_roundtrip_with_snake_case_shape ... ok
+test telemetry::tests::gpu_identity_requires_complete_and_equal_identity ... ok
+test telemetry::tests::gpu_power_none_roundtrip ... ok
+test telemetry::tests::malformed_json_does_not_become_valid_default ... ok
+test telemetry::tests::mixed_fans_preserve_identity ... ok
+test telemetry::tests::numeric_edge_values_roundtrip ... ok
+test telemetry::tests::partial_telemetry_survives_roundtrip ... ok
+test telemetry::tests::single_gpu_fan_identity_preserved ... ok
+test telemetry::tests::telemetry_empty ... ok
+test telemetry::tests::snapshot_serde_roundtrip ... ok
+test telemetry_export::tests::export_includes_freshness_and_quotes_fields ... ok
+test telemetry::tests::snapshot_roundtrip_preserves_partial_telemetry ... ok
+test telemetry::tests::telemetry_roundtrip_preserves_all_values ... ok
+test telemetry_export::tests::freshness_roundtrip_is_stable ... ok
+test telemetry_history::tests::csv_export_quotes_values_safely ... ok
+test telemetry_history::tests::ring_buffer_evicts_oldest ... ok
+test telemetry_history::tests::serde_preserves_capacity_and_samples ... ok
+test telemetry_history::tests::zero_capacity_is_rejected ... ok
+test telemetry_stats::tests::empty_input_has_no_statistics ... ok
+test telemetry_stats::tests::negative_values_are_supported ... ok
+test telemetry_stats::tests::statistics_preserve_fractional_mean_without_float ... ok
+test thermal_control::tests::delta_and_offset_are_explicit_derived_values ... ok
+test thermal_control::tests::ema_is_integer_and_deterministic ... ok
+test thermal_control::tests::hysteresis_arithmetic_is_safe_for_extreme_configuration ... ok
+test thermal_control::tests::hysteresis_prevents_threshold_chatter ... ok
+test thermal_control::tests::invalid_ema_ratio_is_rejected ... ok
+test thermal_control::tests::offset_does_not_clamp_out_of_range ... ok
+test thermal_control::tests::pwm_rate_limiter_bounds_both_directions ... ok
+test thermal_control::tests::virtual_temperature_helpers_are_explicit_about_missing_data ... ok
+test transaction::tests::accepted_is_never_treated_as_applied_without_observation ... ok
+test transaction::tests::applied_result_still_requires_authoritative_observation ... ok
+test transaction::tests::lifecycle_requirement_is_preserved ... ok
+test transaction::tests::only_prepared_transaction_is_automatically_retryable ... ok
+test transaction::tests::reported_failure_still_forbids_automatic_retry ... ok
+test transaction::tests::serde_roundtrip_preserves_unknown_outcome ... ok
+test transaction::tests::timeout_unknown_outcome_forbids_blind_retry ... ok
+test validation::tests::hard_failure_overrides_positive_evidence ... ok
+test validation::tests::model_never_jumps_from_discovery_to_write_eligible ... ok
+test validation::tests::read_only_validation_requires_discovery_and_valid_reads ... ok
+test validation::tests::write_eligibility_requires_correlation_and_independent_channels ... ok
+test validation::tests::write_validated_requires_all_prior_evidence_readback_and_restoration ... ok
+test warning::tests::constructors ... ok
+
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/orbis_hardwared-e0f46cc7d86e5fd1)
+
+running 150 tests
+test aura::tests::aura_mutation_wire_roundtrip_is_total ... ok
+test aura::tests::effect_wire_roundtrip_preserves_unknown ... ok
+test aura::tests::production_contract_is_typed_and_not_shell_based ... ok
+test battery::tests::accepts_20_with_exactly_one_setter_and_readbacks ... ok
+test aura::tests::readback_unavailable_is_not_optimistic_success ... ok
+test aura::tests::auth_denied_no_write ... ok
+test aura::tests::auth_failed_no_write ... ok
+test battery::tests::accepts_100_as_a_regular_threshold ... ok
+test aura::tests::static_unsupported_no_write ... ok
+test aura::tests::rgb_set_config_readback_match_is_accepted ... ok
+test battery::tests::backend_alive_degrades_to_owner_liveness_without_interface_probe ... ok
+test battery::tests::backend_alive_demotes_on_proven_interface_drift ... ok
+test aura::tests::tuple_fields_preserved_and_mode_is_static ... ok
+test aura::tests::readback_mismatch_is_error ... ok
+test battery::tests::backend_alive_keeps_inconclusive_contract_probe_typed ... ok
+test aura::tests::authorized_returns_config_confirmed_result ... ok
+test battery::tests::configured_getter_error_is_propagated_without_effective_read ... ok
+test aura::tests::setter_error_propagates ... ok
+test battery::tests::discovery_io_error_is_preserved ... ok
+test battery::tests::discovery_permission_error_is_preserved ... ok
+test battery::tests::configured_mismatch_is_an_error_without_retry ... ok
+test battery::tests::effective_divergence_is_reported_but_allowed ... ok
+test battery::tests::native_path_is_validated_without_bat1_assumption ... ok
+test battery::tests::production_contract_is_typed_and_not_shell_based ... ok
+test battery::tests::effective_read_failure_is_propagated_without_retry ... ok
+test battery::tests::discovery_broken_entry_without_candidate_is_not_unsupported ... ok
+test battery::tests::rejects_101_before_setter ... ok
+test battery::tests::rejects_19_before_setter ... ok
+test battery::tests::structural_absence_error_names_are_proven_contract_drift ... ok
+test battery::tests::setter_error_is_propagated_without_retry_or_reads ... ok
+test battery::tests::transport_and_authorization_errors_are_inconclusive_not_drift ... ok
+test battery::tests::typed_fdo_structural_absence_is_proven_drift ... ok
+test battery::tests::discovery_broken_entry_does_not_hide_later_valid_battery ... ok
+test fans::tests::custom_write_preserves_enabled_false ... ok
+test fans::tests::custom_write_preserves_enabled_true_from_authoritative_read ... ok
+test fans::tests::custom_write_readback_detects_enabled_drift ... ok
+test fans::tests::factory_reset_error_short_circuits_readback ... ok
+test battery::tests::discovery_structural_absence_is_unsupported ... ok
+test fans::tests::fan_curve_from_wire_pwm_above_100_roundtrip ... ok
+test battery::tests::sysfs_effective_reader_is_read_only_and_fresh ... ok
+test fans::tests::fan_mutation_wire_roundtrip_is_total ... ok
+test fans::tests::factory_reset_is_profile_wide_and_read_back ... ok
+test fans::tests::fan_mutation_backend_never_switches_profile_state ... ok
+test fans::tests::mutation_status_classifies_dbus_evidence ... ok
+test fans::tests::mutation_status_supported_without_setter_calls ... ok
+test fans::tests::mutation_success_with_readback_match ... ok
+test fans::tests::per_fan_wire_roundtrip_pwm_above_100 ... ok
+test fans::tests::readback_error_propagates ... ok
+test fans::tests::rejects_negative_temperature ... ok
+test fans::tests::rejects_temperature_above_wire_range ... ok
+test fans::tests::readback_mismatch_is_error ... ok
+test fans::tests::unknown_fan_wire_is_rejected ... ok
+test fans::tests::setter_called_only_for_selected_fan ... ok
+test fans::tests::unknown_profile_wire_is_rejected ... ok
+test fans::tests::setter_error_propagates ... ok
+test fans::tests::validate_accepts_raw_pwm_above_100 ... ok
+test fans::tests::validate_accepts_valid_curve ... ok
+test fans::tests::validate_rejects_decreasing_pwm ... ok
+test fans::tests::validate_rejects_decreasing_temps ... ok
+test fans::tests::validate_rejects_zero_fan_at_critical_temp ... ok
+test fans::tests::wire_curve_decode_rejects_out_of_range ... ok
+test fans::tests::wire_profile_roundtrip_is_lossless ... ok
+test fans::tests::validation_happens_before_setter ... ok
+test fans::tests::wire_roundtrip_pwm_above_100_preserves_arrays ... ok
+test keyboard_backlight::tests::auth_denied_zero_writes ... ok
+test keyboard_backlight::tests::auth_failed_zero_writes ... ok
+test keyboard_backlight::tests::auth_ok_applies_and_returns_observed ... ok
+test keyboard_backlight::tests::probe_brightness_above_max_is_rejected ... ok
+test keyboard_backlight::tests::mutation_status_wire_roundtrip ... ok
+test keyboard_backlight::tests::probe_malformed_values_fail_closed ... ok
+test keyboard_backlight::tests::probe_never_calls_write ... ok
+test keyboard_backlight::tests::probe_permission_error_is_preserved ... ok
+test keyboard_backlight::tests::probe_transient_io_is_temporarily_unavailable ... ok
+test keyboard_backlight::tests::probe_valid_brightness_and_max_is_supported ... ok
+test keyboard_backlight::tests::probe_zero_max_is_rejected ... ok
+test keyboard_backlight::tests::production_paths_are_fixed ... ok
+test keyboard_backlight::tests::readback_failure_propagates ... ok
+test keyboard_backlight::tests::readback_mismatch_is_not_applied ... ok
+test keyboard_backlight::tests::requested_exceeding_max_rejected ... ok
+test keyboard_backlight::tests::set_max_level_applied ... ok
+test keyboard_backlight::tests::set_zero_level_applied ... ok
+test keyboard_backlight::tests::probe_missing_brightness_or_max_is_unsupported ... ok
+test keyboard_backlight::tests::write_failure_propagates ... ok
+test panel::tests::asusd_getter_error_is_propagated ... ok
+test panel::tests::authorization_denied_means_backend_not_called ... ok
+test panel::tests::authorization_failed_means_backend_not_called ... ok
+test panel::tests::backend_wire_decode_strict ... ok
+test panel::tests::authorized_returns_confirmed_observed_value ... ok
+test panel::tests::panel_mutation_wire_roundtrip_is_total ... ok
+test panel::tests::production_contract_is_typed_and_not_shell_based ... ok
+test panel::tests::readback_mismatch_through_handler_is_failure ... ok
+test panel::tests::setter_error_is_propagated_without_reader_call ... ok
+test panel::tests::setter_success_disable_readback_match_is_applied ... ok
+test panel::tests::discovery_is_read_only_and_classifies_absence ... ok
+test panel::tests::setter_success_readback_match_is_applied ... ok
+test panel::tests::setter_success_readback_unavailable_is_not_optimistic_success ... ok
+test panel::tests::setter_success_readback_mismatch_is_error_without_retry ... ok
+test power_limits::tests::cpu_temperature_limit_is_not_wired_to_an_unrelated_backend ... ok
+test panel::tests::unsupported_backend_propagates_not_supported ... ok
+test power_limits::tests::only_kernel_armoury_attribute_names_are_accepted ... ok
+test tests::authorization_denied_zero_writer_calls ... ok
+test panel::tests::sysfs_reader_missing_attribute_is_unsupported ... ok
+test panel::tests::sysfs_reader_is_fresh_and_read_only ... ok
+test tests::authorization_failed_zero_writer_calls ... ok
+test tests::authorized_calls_writer_once_and_returns_confirmed ... ok
+test tests::battery_authorized_returns_configured_for_20_and_100 ... ok
+test tests::battery_backend_error_maps_to_failed_without_retry ... ok
+test tests::battery_denied_challenge_and_auth_failure_do_not_mutate ... ok
+test tests::battery_effective_divergence_is_not_boundary_failure ... ok
+test tests::battery_invalid_range_is_rejected_before_authorization_or_backend ... ok
+test aura::tests::malformed_current_tuple_is_error ... ok
+test tests::battery_mutation_status_demotes_stale_supported_on_owner_loss ... ok
+test tests::battery_mutation_status_inconclusive_liveness_probe_is_unknown ... ok
+test tests::dbus_names_are_stable ... ok
+test tests::empty_choices_are_internal ... ok
+test tests::battery_mutation_status_reflects_backend_presence ... ok
+test tests::exact_symbol_mapping_is_total ... ok
+test tests::fan_curve_backend_error_propagates ... ok
+test tests::fan_curve_invalid_curve_is_invalid_args_with_zero_calls ... ok
+test panel::tests::sysfs_reader_malformed_is_internal_not_fake_default ... ok
+test tests::fan_curve_success_returns_confirmed_profile ... ok
+test tests::fan_curve_unauthorized_does_not_reach_backend ... ok
+test tests::fan_curve_unknown_fan_is_invalid_args_with_zero_calls ... ok
+test tests::fan_curve_unknown_profile_is_invalid_args_with_zero_calls ... ok
+test tests::fan_defaults_denied_does_not_reach_backend ... ok
+test tests::fan_defaults_success_returns_lossless_profile ... ok
+test tests::fan_defaults_unknown_profile_is_rejected_before_auth ... ok
+test tests::missing_choice_is_unsupported_with_zero_writes ... ok
+test tests::fan_mutation_status_reflects_backend_evidence ... ok
+test tests::performance_mutation_status_classifies_read_evidence ... ok
+test tests::performance_mutation_wire_roundtrip_is_total ... ok
+test tests::polkit_policy_contains_all_mutation_actions ... ok
+test tests::present_choice_writes_once_and_reads_back ... ok
+test tests::product_gpu_authorization_happens_before_backend_call ... ok
+test tests::product_gpu_result_uses_typed_wire_fields ... ok
+test tests::product_gpu_status_maps_provider_error_to_dbus_failure ... ok
+test tests::product_gpu_status_reports_queued_and_reboot_without_auth ... ok
+test tests::product_gpu_status_without_backend_is_not_supported ... ok
+test tests::production_paths_are_fixed ... ok
+test tests::product_gpu_unknown_wire_is_invalid_args_before_authorization ... ok
+test tests::read_back_mismatch_is_not_applied ... ok
+test tests::reads_are_fresh_not_cached ... ok
+test tests::wire_decode_strict ... ok
+test tests::wire_roundtrip ... ok
+test tests::unknown_wire_is_invalid_args_with_zero_calls ... ok
+test tests::write_error_propagates ... ok
+test tests::writer_error_maps_to_dbus_error ... ok
+test tests::writer_failure_is_failed_not_unsupported ... ok
+test tests::writer_read_back_mismatch_is_error_not_success ... ok
+test keyboard_backlight::tests::delayed_readback_is_confirmed_without_second_write ... ok
+
+test result: ok. 150 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/main.rs (target/debug/deps/orbis_hardwared-5a5c6a2405cae47e)
+
+running 9 tests
+test product_preflight::tests::error_mapping_is_fail_closed ... ok
+test tests::disabled_battery_mutation_status_preserves_typed_reason ... ok
+test product_preflight::tests::source_has_no_mutation_or_process_surface ... ok
+test tests::battery_mutation_wire_roundtrip_is_total ... ok
+test tests::disabled_battery_maps_other_discovery_failures_to_unavailable ... ok
+test tests::disabled_battery_preserves_unsupported_discovery ... ok
+test tests::disabled_battery_preserves_permission_failure ... ok
+test tests::product_disabled_status_wire_values_remain_total ... ok
+test tests::unvalidated_product_mutations_are_hard_disabled ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/asus_gpu_mode_p2p.rs (target/debug/deps/asus_gpu_mode_p2p-727ad339e084521b)
+
+running 12 tests
+test unsupported_target_is_rejected_before_setters ... ok
+test already_active_does_not_set_attributes ... ok
+test status_read_with_partial_queue_is_unknown_not_fabricated ... ok
+test status_read_is_read_only_and_reports_complete_current_state ... ok
+test status_read_with_unreadable_current_pair_is_unknown ... ok
+test status_read_reports_queued_target_and_reboot_required ... ok
+test first_setter_failure_preserves_error_and_skips_second ... ok
+test second_setter_failure_is_unknown_and_is_not_retried ... ok
+test status_read_propagates_attribute_read_failure ... ok
+test stale_contradictory_queue_is_replaced_by_complete_target ... ok
+test partial_queued_readback_is_unknown ... ok
+test queues_integrated_in_deterministic_order_and_confirms_pair ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/hardware1_gpu_p2p.rs (target/debug/deps/hardware1_gpu_p2p-09d3b4f53e6890db)
+
+running 6 tests
+test invalid_wire_has_zero_auth_and_backend_calls ... ok
+test original_sender_reaches_authorizer ... ok
+test denied_and_auth_failure_do_not_call_backend ... ok
+test backend_error_maps_to_failed_without_retry ... ok
+test p2p_test_is_bounded ... ok
+test p2p_hardware1_returns_all_staged_observations ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/power_limits_p2p.rs (target/debug/deps/power_limits_p2p-ebf6fadbecbe9ef9)
+
+running 3 tests
+test private_hardware1_success_and_readback_mismatch ... ok
+test invalid_range_is_rejected_before_authorization_or_backend ... ok
+test authorization_failure_timeout_and_unsupported_are_honest ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.00s
+
+     Running tests/supergfxd_mutation_p2p.rs (target/debug/deps/supergfxd_mutation_p2p-430256d2dd5451cd)
+
+running 14 tests
+test future_requested_mode_is_rejected_without_set_mode ... ok
+test readback_failure_is_not_retried_or_reported_as_applied ... ok
+test future_wire_values_are_not_applied ... ok
+test set_mode_failure_is_not_retried ... ok
+test immediate_applied_is_classified_from_fresh_snapshot ... ok
+test contradictory_readback_is_inconsistent ... ok
+test unsupported_request_is_rejected_before_set_mode ... ok
+test read_snapshot_reads_all_fields_once_in_order ... ok
+test action_without_pending_is_inconsistent ... ok
+test p2p_test_is_bounded ... ok
+test reboot_is_staged ... ok
+test logout_is_staged ... ok
+test returned_action_mismatch_is_inconsistent ... ok
+test nothing_return_does_not_hide_pending_state ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/lib.rs (target/debug/deps/orbis_providers-c37993d318a58ce6)
+
+running 311 tests
+test asus_armoury::tests::mini_led_backend_missing_is_backend_unavailable ... ok
+test asus_armoury::tests::mini_led_current_2_allowed_0_1_2 ... ok
+test asus_armoury::tests::mini_led_missing_attribute_is_unsupported ... ok
+test asus_armoury::tests::mini_led_permission_denied_is_preserved ... ok
+test asus_armoury::tests::disabled_is_not_unknown ... ok
+test asus_armoury::tests::mini_led_current_1_allowed_0_1 ... ok
+test asus_armoury::tests::mini_led_transient_io_error_is_preserved ... ok
+test asus_armoury::tests::mini_led_current_missing_after_possible_values_is_internal ... ok
+test asus_armoury::tests::mini_led_failure_does_not_corrupt_panel_overdrive ... ok
+test asus_armoury::tests::parse_current_value_accepts_known_and_future_values ... ok
+test asus_armoury::tests::mini_led_current_0_allowed_0_1 ... ok
+test asus_armoury::tests::parse_current_value_rejects_malformed ... ok
+test asus_armoury::tests::parse_possible_values_preserves_upstream_order ... ok
+test asus_armoury::tests::parse_possible_values_rejects_duplicates_deterministically ... ok
+test asus_armoury::tests::parse_possible_values_rejects_empty_list ... ok
+test asus_armoury::tests::parse_possible_values_rejects_malformed_token ... ok
+test asus_armoury::tests::parse_possible_values_tolerates_whitespace_newlines ... ok
+test asus_armoury::tests::mini_led_current_outside_allowed_set_is_rejected_explicitly ... ok
+test asus_armoury::tests::mini_led_current_1_allowed_0_1_2 ... ok
+test asus_armoury::tests::parse_possible_values_two_and_three_generation ... ok
+test asus_armoury::tests::production_relative_path_is_fixed ... ok
+test asus_armoury::tests::mini_led_current_0_allowed_0_1_2 ... ok
+test asus_armoury::tests::missing_attribute_is_unsupported ... ok
+test asus_armoury::tests::permission_denied_is_preserved_separate_from_unsupported ... ok
+test asus_armoury::tests::other_io_errors_stay_io ... ok
+test asus_armoury::tests::mini_led_unknown_future_value_round_trips ... ok
+test asus_armoury::tests::sab_backend_missing_is_backend_unavailable ... ok
+test asus_armoury::tests::reads_one_as_enabled ... ok
+test asus_armoury::tests::mini_led_zero_is_not_absent ... ok
+test asus_armoury::tests::reads_are_fresh_not_cached ... ok
+test asus_armoury::tests::sab_production_relative_path_is_fixed ... ok
+test asus_armoury::tests::sab_attribute_missing_is_unsupported ... ok
+test asus_armoury::tests::reads_zero_as_disabled ... ok
+test asus_armoury::tests::sab_permission_denied_is_preserved ... ok
+test asus_armoury::tests::sab_transient_io_error_is_preserved ... ok
+test asus_armoury::tests::sab_failure_does_not_corrupt_mini_led ... ok
+test asus_armoury::tests::sab_false_is_not_none ... ok
+test asus_boot_sound::tests::provider_has_no_write_surface ... ok
+test asus_armoury::tests::mini_led_malformed_current_is_internal_not_unsupported ... ok
+test asus_diagnostics::tests::aggregate_returns_exact_canonical_asus_feature_set_in_order ... ok
+test asus_armoury::tests::sab_failure_does_not_corrupt_panel_overdrive ... ok
+test asus_diagnostics::tests::aura_probe_preserves_backend_missing_without_fake_supported_write ... ok
+test asus_diagnostics::tests::denied_keyboard_read_does_not_infer_write_denial_or_support ... ok
+test asus_boot_sound::tests::missing_attribute_is_unsupported_not_disabled ... ok
+test asus_diagnostics::tests::keyboard_probe_preserves_read_and_typed_write_evidence ... ok
+test asus_gpu_mode::tests::decodes_upstream_asus_three_mode_mapping ... ok
+test asus_armoury::tests::sab_valid_enabled_state ... ok
+test asus_diagnostics::tests::missing_optional_aura_only_changes_aura_capability ... ok
+test asus_diagnostics::tests::unsupported_optional_panel_is_capability_local ... ok
+test asus_gpu_mode::tests::future_values_are_not_coerced ... ok
+test asus_gpu_mode::tests::impossible_pair_is_conflicted ... ok
+test asus_gpu_mode::tests::known_current_mode_differing_from_target_is_inconsistent_without_queue ... ok
+test asus_gpu_mode::tests::missing_attribute_is_incomplete ... ok
+test asus_gpu_mode::tests::partial_queue_is_not_presented_as_a_mode ... ok
+test asus_armoury::tests::sab_reads_are_fresh_not_cached ... ok
+test asus_gpu_mode::tests::product_modes_have_exact_attribute_targets ... ok
+test asus_gpu_mode::tests::queued_pair_requires_reboot_and_decodes_independently ... ok
+test asus_gpu_mode::tests::queued_target_requires_both_attributes_to_match ... ok
+test asus_legacy_power::tests::production_path_is_fixed ... ok
+test asus_armoury::tests::sab_valid_disabled_state ... ok
+test asus_legacy_power::tests::current_without_metadata_is_not_advertised ... ok
+test aura::tests::production_constants_are_fixed ... ok
+test asus_boot_sound::tests::reads_boolean_kernel_state_strictly ... ok
+test asus_armoury::tests::mini_led_malformed_possible_values_is_internal_not_unsupported ... ok
+test asus_armoury::tests::sab_unexpected_numeric_value_is_rejected ... ok
+test asus_armoury::tests::sab_empty_current_is_internal_not_false ... ok
+test asus_gpu_mode::tests::provider_reads_the_two_attributes_without_writing ... ok
+test asus_armoury::tests::malformed_value_is_internal_not_fake_default ... ok
+test aura::tests::missing_aura_interface_is_unsupported ... ok
+test asus_legacy_power::tests::complete_metadata_is_typed ... ok
+test bounded_probes::tests::performance_timeout_is_per_read_and_classified_locally ... ok
+test display_diagnostics::tests::caller_owned_timestamp_can_remain_absent ... ok
+test display_diagnostics::tests::caller_owned_timestamp_is_preserved_exactly ... ok
+test bounded_probes::tests::timed_out_single_read_probe_is_temporarily_unavailable_not_unsupported ... ok
+test bounded_probes::tests::timed_out_probe_can_recover_to_supported_on_next_generation ... ok
+test display_diagnostics::tests::transport_or_internal_failures_remain_unknown ... ok
+test aura::tests::malformed_led_mode_is_error ... ok
+test display_diagnostics::tests::unavailable_provider_failures_are_not_fake_output_snapshots ... ok
+test display_diagnostics::tests::permission_denied_is_preserved ... ok
+test display_refresh_owner::tests::auto_readback_requires_explicit_auto_policy_not_matching_mode ... ok
+test display_refresh_owner::tests::lost_internal_panel_identity_blocks_old_request ... ok
+test display_refresh_owner::tests::request_must_match_fresh_target_and_exact_preset_evidence ... ok
+test display_refresh_owner::tests::fixed_readback_requires_exact_policy_refresh_and_resolution ... ok
+test error::tests::operation_id_unique ... ok
+test error::tests::provider_dbus_error_mapping_preserves_distinctions ... ok
+test display_refresh_owner::tests::target_or_role_change_never_confirms_readback ... ok
+test display_diagnostics::tests::successful_empty_snapshot_is_still_a_successful_observation ... ok
+test error::tests::provider_errors_have_normative_probe_classification ... ok
+test error::tests::provider_internal_and_invalid_request_are_probe_errors ... ok
+test error::tests::validation_helpers ... ok
+test execution::tests::provider_error_is_preserved ... ok
+test execution::tests::never_completing_operation_becomes_timeout ... ok
+test execution::tests::successful_value_is_preserved ... ok
+test gpu_diagnostics::tests::primitive_failures_are_classified_independently ... ok
+test gpu_diagnostics::tests::successful_domain_unknown_values_remain_successful_observations ... ok
+test hardware_identity::tests::blank_required_field_keeps_identity_absent ... ok
+test gpu_diagnostics::tests::successful_primitives_are_preserved_without_product_mode_inference ... ok
+test gpu_diagnostics::tests::unavailable_and_transport_failures_are_not_fake_domain_values ... ok
+test hardware_identity::tests::complete_identity_is_preserved_after_trimming ... ok
+test hardware_identity::tests::lookup_is_strictly_limited_to_privacy_safe_paths ... ok
+test hardware_identity::tests::serial_number_is_never_requested ... ok
+test hardware_identity::tests::missing_required_field_keeps_identity_absent ... ok
+test hardware_identity::tests::snapshot_shape_keeps_identity_optional ... ok
+test asus_armoury::tests::sab_malformed_current_is_internal_not_unsupported ... ok
+test keyboard_backlight::tests::device_missing_is_unsupported ... ok
+test keyboard_backlight::tests::production_path_is_fixed ... ok
+test keyboard_backlight::tests::permission_denied_is_preserved ... ok
+test keyboard_backlight::tests::empty_brightness_is_internal ... ok
+test keyboard_backlight::tests::current_exceeding_max_is_internal ... ok
+test keyboard_backlight::tests::malformed_brightness_is_internal ... ok
+test keyboard_backlight::tests::malformed_max_is_internal ... ok
+test keyboard_backlight::tests::transient_io_error_is_preserved ... ok
+test keyboard_backlight::tests::fresh_reads_not_cached ... ok
+test lact_telemetry::tests::merge_different_slot_never_merges ... ok
+test keyboard_backlight::tests::reads_zero_level ... ok
+test lact_telemetry::tests::merge_cross_source_identity_conventions_match ... ok
+test lact_telemetry::tests::merge_missing_identity_is_conservative ... ok
+test keyboard_backlight::tests::reads_valid_level ... ok
+test lact_telemetry::tests::merge_keeps_integrated_and_discrete_separate_and_projects_discrete ... ok
+test lact_telemetry::tests::merge_same_complete_identity_keeps_primary_values_without_conflict ... ok
+test lact_telemetry::tests::pci_slot_extraction_from_lact_device_id ... ok
+test lact_telemetry::tests::unavailable_lact_does_not_break_primary ... ok
+test linux_memory::tests::kernel_bool_parser_is_strict ... ok
+test linux_memory::tests::malformed_psi_is_fail_closed ... ok
+test linux_memory::tests::meminfo_missing_required_field_is_error ... ok
+test linux_memory::tests::meminfo_parser_preserves_kib_values_and_optional_available ... ok
+test linux_memory::tests::psi_parser_uses_integer_basis_points ... ok
+test lact_telemetry::tests::fixture_socket_maps_known_fields_and_never_sends_mutation_commands ... ok
+test mock::tests::initial_gpu_applied_state ... ok
+test mock::tests::fan_curve_validate ... ok
+test aura::tests::empty_zones_is_valid_single_zone_tuf ... ok
+test aura::tests::rgb_preserved_losslessly ... ok
+test aura::tests::provider_never_calls_setters ... ok
+test mock::tests::applied_mode_still_changes_state ... ok
+test mock::tests::backend_down_errors ... ok
+test mock::tests::charge_limit_validation ... ok
+test native_asus_eco::tests::absent_modules_allow_immediate_ready ... ok
+test native_asus_eco::tests::card_release_does_not_imply_compositor_release ... ok
+test native_asus_eco::tests::loaded_modules_require_unload_even_with_zero_refcount ... ok
+test native_asus_eco::tests::library_and_module_evidence_are_not_hard_blockers ... ok
+test aura::tests::static_mode_read_correctly ... ok
+test native_asus_eco::tests::module_mux_display_pending_and_conflict_block_or_inconsistent ... ok
+test native_asus_eco::tests::ready ... ok
+test mock::tests::provider_error_preserves_all_state ... ok
+test native_asus_eco::tests::remaining_render_and_core_users_stay_fail_closed_without_logout_claim ... ok
+test mock::tests::refresh_rate_validate ... ok
+test native_asus_eco::tests::unknown_compositor_release_is_not_immediate_ready ... ok
+test native_asus_eco::tests::unload_feasibility_unknown_is_fail_closed ... ok
+test native_asus_eco::tests::unsupported_and_unknown_are_conservative ... ok
+test native_asus_eco::tests::users_require_release ... ok
+test aura::tests::supported_modes_zero_only ... ok
+test native_asus_eco::tests::verified_compositor_release_still_requires_module_lifecycle ... ok
+test probes::tests::backend_presence_without_mutation_evidence_never_promotes_write ... ok
+test probes::tests::battery_backend_missing_does_not_corrupt_performance_in_registry ... ok
+test probes::tests::battery_permission_denied_does_not_affect_gpu_in_registry ... ok
+test probes::tests::battery_probe_preserves_backend_and_permission_errors ... ok
+test probes::tests::battery_source_conflict_never_promotes_support_or_write ... ok
+test probes::tests::battery_probe_preserves_known_and_unknown_bounds ... ok
+test probes::tests::charge_limit_probe_reports_write_supported_when_mutation_path_proven ... ok
+test probes::tests::charge_limit_probe_reports_write_unsupported_when_mutation_path_not_proven ... ok
+test probes::tests::charge_limit_probe_write_status_matches_runtime_evidence ... ok
+test probes::tests::fan_curve_probe_reports_write_supported_when_hardware_backend_proven ... ok
+test probes::tests::fan_curve_probe_reports_write_unsupported_without_hardware_backend ... ok
+test probes::tests::fan_curve_probe_validation_alone_does_not_make_write_supported ... ok
+test probes::tests::fan_curve_probe_write_mirrors_backend_missing_when_read_fails ... ok
+test probes::tests::fan_curve_probe_write_status_matches_runtime_evidence ... ok
+test probes::tests::gpu_access_probe_supported_and_writes_remain_unsupported ... ok
+test probes::tests::gpu_mux_probe_supported_for_proven_values_and_unsupported_when_absent ... ok
+test probes::tests::gpu_power_probe_propagates_backend_missing_for_power_read ... ok
+test probes::tests::gpu_power_probe_reports_supported_without_storing_state ... ok
+test probes::tests::gpu_primitive_probes_fail_independently_without_dropping_others ... ok
+test probes::tests::mini_led_probe_read_permission_denied_does_not_invent_denied_write ... ok
+test probes::tests::mini_led_failure_does_not_corrupt_panel_overdrive_in_registry ... ok
+test probes::tests::mini_led_probe_malformed_backend_error_is_not_unsupported ... ok
+test probes::tests::mini_led_probe_reports_supported_with_readonly_write ... ok
+test probes::tests::mini_led_probe_preserves_backend_missing_and_unsupported ... ok
+test probes::tests::no_optimistic_available_without_evidence ... ok
+test probes::tests::panel_overdrive_failure_does_not_corrupt_performance_in_registry ... ok
+test probes::tests::panel_overdrive_probe_malformed_backend_error_is_not_unsupported ... ok
+test probes::tests::panel_overdrive_probe_preserves_backend_missing_and_unsupported ... ok
+test probes::tests::panel_overdrive_probe_read_permission_denied_does_not_invent_denied_write ... ok
+test probes::tests::panel_overdrive_probe_reports_supported_without_storing_state ... ok
+test probes::tests::panel_overdrive_probe_write_status_matches_runtime_evidence ... ok
+test probes::tests::performance_probe_preserves_backend_missing_and_unsupported ... ok
+test probes::tests::performance_probe_reports_profiles_without_current_value ... ok
+test probes::tests::performance_probe_reports_write_supported_when_mutation_path_proven ... ok
+test probes::tests::performance_probe_validation_alone_does_not_make_write_supported ... ok
+test probes::tests::performance_probe_write_status_matches_runtime_evidence ... ok
+test probes::tests::probes_assemble_through_registry_builder ... ok
+test probes::tests::probes_never_call_mutation_methods ... ok
+test probes::tests::registry_does_not_synthesise_gpu_product_policy ... ok
+test probes::tests::sab_probe_malformed_backend_error_is_not_unsupported ... ok
+test probes::tests::sab_failure_does_not_corrupt_mini_led_in_registry ... ok
+test probes::tests::sab_probe_preserves_backend_missing_and_unsupported ... ok
+test probes::tests::sab_probe_read_permission_denied_does_not_make_write_denied ... ok
+test probes::tests::sab_probe_reports_supported_with_readonly_write ... ok
+test probes::tests::write_operation_does_not_invent_permission_denied ... ok
+test readiness::tests::independent_probes_can_run_concurrently ... ok
+test probes::tests::write_operation_mirrors_backend_missing_when_read_fails ... ok
+test readiness::tests::internal_contract_failure_is_unknown_not_unreachable ... ok
+test readiness::tests::permission_is_separate_from_dependency_state ... ok
+test ryzenadj_diagnostics::tests::contract_diagnostics_are_specific_and_fail_closed ... ok
+test ryzenadj_diagnostics::tests::failed_info_preserves_version_module_and_failure_without_fake_values ... ok
+test readiness::tests::timeout_becomes_unreachable_not_unsupported ... ok
+test ryzenadj_diagnostics::tests::malformed_and_header_rows_are_ignored ... ok
+test ryzenadj_diagnostics::tests::successful_table_is_structured_but_not_promoted_to_write_support ... ok
+test service_presence::tests::absent_owner_classifies_activatable_or_unavailable ... ok
+test service_presence::tests::only_fdo_access_denied_maps_to_permission_denied ... ok
+test service_presence::tests::caller_owned_metadata_is_preserved_without_inference ... ok
+test service_presence::tests::denied_queries_remain_permission_denied ... ok
+test service_presence::tests::service_targets_have_exact_names_and_scopes ... ok
+test service_presence::tests::other_query_failures_remain_unknown ... ok
+test service_presence::tests::running_owner_skips_activatable_query ... ok
+test service_readiness::tests::activatable_service_is_inactive_and_never_auto_started ... ok
+test service_readiness::tests::permission_denial_remains_separate_evidence ... ok
+test service_readiness::tests::running_service_is_ready ... ok
+test supergfxd::tests::power_wire_mapping_preserves_unknown_states ... ok
+test supergfxd::tests::staged_invariants_are_preserved ... ok
+test supergfxd::tests::wire_mappings_are_exact_and_future_safe ... ok
+test sysfs_telemetry::tests::ac_online_zero_is_some_false ... ok
+test sysfs_telemetry::tests::ac_online_parses_zero_and_one ... ok
+test sysfs_telemetry::tests::battery_health_zero_design_is_none ... ok
+test sysfs_telemetry::tests::battery_health_clamps_to_100 ... ok
+test mock::tests::three_fan_support ... ok
+test mock::tests::ultimate_pending_keeps_applied_state ... ok
+test sysfs_telemetry::tests::all_fans_malformed_snapshot_succeeds ... ok
+test mock::tests::profile_set_roundtrip ... ok
+test mock::tests::repeated_ultimate_is_idempotent ... ok
+test sysfs_telemetry::tests::empty_sysfs_root_yields_empty_snapshot ... ok
+test sysfs_telemetry::tests::disappearing_selected_source_does_not_kill_snapshot ... ok
+test sysfs_telemetry::tests::empty_cpu_temp_file_degrades_to_none ... ok
+test sysfs_telemetry::tests::fan_rpm_zero_is_some_not_none ... ok
+test sysfs_telemetry::tests::fan_overflow_preserves_valid_neighbor ... ok
+test sysfs_telemetry::tests::malformed_cpu_temp_degrades_to_none ... ok
+test sysfs_telemetry::tests::fan_rpm_zero_with_malformed_neighbor ... ok
+test sysfs_telemetry::tests::malformed_battery_cycle_count_does_not_kill_percent ... ok
+test sysfs_telemetry::tests::malformed_battery_capacity_kills_group_with_gap_evidence ... ok
+test sysfs_telemetry::tests::discovery_works_with_different_hwmon_indices ... ok
+test sysfs_telemetry::tests::discovery_skips_unclassifiable_entries ... ok
+test sysfs_telemetry::tests::malformed_fan1_preserves_fan0 ... ok
+test sysfs_telemetry::tests::malformed_fan0_label_preserves_fan1 ... ok
+test mock::tests::requested_and_applied_independently_readable ... ok
+test sysfs_telemetry::tests::malformed_fan_rpm_degrades_to_empty ... ok
+test sysfs_telemetry::tests::malformed_fan_rpm_is_not_zero ... ok
+test sysfs_telemetry::tests::missing_ac_is_none ... ok
+test sysfs_telemetry::tests::all_discovered_sources_failing_yields_ok_empty_snapshot ... ok
+test sysfs_telemetry::tests::malformed_unrelated_discovery_entry_still_skipped ... ok
+test sysfs_telemetry::tests::missing_fan_input_preserves_valid_neighbor ... ok
+test sysfs_telemetry::tests::malformed_fan_does_not_break_cpu_battery_ac ... ok
+test system_metadata::tests::blank_values_become_absent_or_unknown ... ok
+test sysfs_telemetry::tests::out_of_range_cpu_temp_degrades_to_none ... ok
+test system_metadata::tests::compositor_remains_unknown_without_reliable_source ... ok
+test system_metadata::tests::display_protocol_prefers_explicit_wayland_display_evidence ... ok
+test system_metadata::tests::environment_access_is_strictly_allowlisted ... ok
+test system_metadata::tests::exact_kernel_and_architecture_values_are_preserved_after_trimming ... ok
+test system_metadata::tests::missing_session_type_uses_display_evidence ... ok
+test system_metadata::tests::recognized_session_types_are_normalized ... ok
+test system_metadata::tests::unrecognized_session_type_is_not_relabelled ... ok
+test telemetry_diagnostics::tests::clock_regression_keeps_freshness_unknown ... ok
+test telemetry_diagnostics::tests::complete_sample_is_fresh_and_complete ... ok
+test telemetry_diagnostics::tests::failed_refresh_preserves_last_good_sample_and_marks_it_stale ... ok
+test telemetry_diagnostics::tests::initial_failure_does_not_create_synthetic_sample ... ok
+test telemetry_diagnostics::tests::partial_success_is_not_downgraded_or_filled_with_fake_values ... ok
+test telemetry_diagnostics::tests::provider_failures_map_without_fake_telemetry_status ... ok
+test telemetry_diagnostics::tests::successful_sample_is_preserved_exactly_and_marked_fresh_inside_threshold ... ok
+test telemetry_diagnostics::tests::successful_sample_becomes_stale_only_by_caller_owned_threshold ... ok
+test sysfs_telemetry::tests::overflow_metric_does_not_wrap_truncate ... ok
+test wayland_output::tests::contradictory_multiple_current_modes_handled_deterministically ... ok
+test wayland_output::tests::current_flag_determines_current_mode ... ok
+test wayland_output::tests::exact_60000_mhz_preserved ... ok
+test wayland_output::tests::done_boundary_produces_coherent_snapshot ... ok
+test wayland_output::tests::fractional_59940_mhz_preserved_losslessly ... ok
+test wayland_output::tests::generic_provider_does_not_require_available_mode_enumeration ... ok
+test wayland_output::tests::hotplug_adds_output_without_corrupting_existing ... ok
+test wayland_output::tests::multiple_outputs_isolated ... ok
+test wayland_output::tests::named_output_identity_preserved ... ok
+test wayland_output::tests::no_outputs_does_not_create_fake_output ... ok
+test wayland_output::tests::non_current_modes_absent_is_valid ... ok
+test wayland_output::tests::non_current_modes_present_is_valid_observation ... ok
+test wayland_output::tests::old_current_state_correctly_replaced ... ok
+test wayland_output::tests::one_hundred_twenty_thousand_mhz_preserved ... ok
+test wayland_output::tests::one_output_changes_current_mode ... ok
+test wayland_output::tests::one_output_one_current_mode ... ok
+test wayland_output::tests::output_removal_removes_only_that_output ... ok
+test wayland_output::tests::output_without_current_mode_is_not_published ... ok
+test wayland_output::tests::output_without_optional_name_still_represented ... ok
+test sysfs_telemetry::tests::full_fixture_reads_all_fields ... ok
+test wayland_output::tests::preferred_flag_does_not_imply_current ... ok
+test wayland_output::tests::refresh_zero_handled_as_not_meaningful ... ok
+test wayland_output::tests::width_height_preserved ... ok
+test wayland_output_management::tests::advertised_version_is_preserved_and_compatible_version_is_bounded ... ok
+test wayland_output_management::tests::duplicate_manager_globals_are_not_selected_arbitrarily ... ok
+test wayland_output_management::tests::missing_manager_is_explicitly_unsupported ... ok
+test wayland_output_management::tests::older_nonzero_manager_version_remains_transport_evidence ... ok
+test wayland_output_management::tests::zero_version_fails_closed ... ok
+test wlr_output_head::tests::auto_is_never_inferred_without_owner_evidence ... ok
+test wlr_output_head::tests::disabled_or_unknown_current_mode_blocks_refresh_evidence ... ok
+test wlr_output_head::tests::exact_fractional_modes_feed_product_evidence_losslessly ... ok
+test wlr_output_head::tests::identity_uses_sink_metadata_not_head_name ... ok
+test wlr_output_head::tests::incomplete_serial_never_produces_complete_sink_identity ... ok
+test wayland_output_management::tests::production_probe_has_no_configuration_or_process_surface ... ok
+test sysfs_telemetry::tests::missing_files_yield_none_without_breaking_snapshot ... ok
+test wlr_output_head::tests::removed_current_mode_invalidates_evidence ... ok
+test wlr_output_head::tests::source_contains_no_configuration_surface ... ok
+test sysfs_telemetry::tests::no_mock_telemetry_values_are_used ... ok
+test sysfs_telemetry::tests::unreadable_source_class_is_unavailable_for_other_io_errors ... ok
+test sysfs_telemetry::tests::malformed_cpu_temp_does_not_break_battery_ac_fans ... ok
+test sysfs_telemetry::tests::power_supply_discovery_requires_explicit_type ... ok
+test sysfs_telemetry::tests::units_are_converted_correctly ... ok
+test sysfs_telemetry::tests::malformed_gpu_power_does_not_break_cpu ... ok
+test sysfs_telemetry::tests::unreadable_source_degrades_field_locally ... ok
+
+test result: ok. 311 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running unittests src/lib.rs (target/debug/deps/orbis_session_client-02933d96549a54db)
+
+running 56 tests
+test tests::battery_mutation_status_wire_maps_to_capability_status ... ok
+test tests::composed_provider_preserves_backend_unavailable_error ... ok
+test tests::composed_provider_rejects_mismatched_or_unknown_confirmation ... ok
+test tests::composed_provider_preserves_hardware_error ... ok
+test tests::composed_provider_reads_through_session_source ... ok
+test tests::composed_provider_writes_direct_hardware_and_confirms_all_profiles ... ok
+test tests::fan_curve_wire_preserves_lossless_profile ... ok
+test tests::fan_curve_wire_rejects_profile_mismatch ... ok
+test tests::fan_curve_wire_rejects_unknown_fan ... ok
+test tests::fan_curve_wire_is_lossless_roundtrip ... ok
+test tests::fan_curve_enabled_state_survives_session1_conversion ... ok
+test tests::fan_curve_wire_rejects_unknown_profile ... ok
+test tests::fan_curve_wire_rejects_unknown_profile_probe ... ok
+test tests::dynamic_boost_readback_mismatch_is_conflict_not_applied ... ok
+test tests::fan_curve_wire_rejects_wrong_point_count ... ok
+test tests::fan_mutation_preserves_hardware_error ... ok
+test tests::dynamic_boost_and_temp_target_apply_through_typed_hardware_path ... ok
+test tests::fan_mutation_rejects_mismatched_confirmation ... ok
+test tests::generic_zbus_error_maps_to_dbus ... ok
+test tests::gpu_mux_wire_decode_maps_all_values ... ok
+test tests::fan_read_delegates_to_session_provider ... ok
+test tests::gpu_power_wire_decode_maps_all_values ... ok
+test tests::gpu_access_wire_decode_maps_all_values ... ok
+test tests::fan_mutation_rejects_non_cpu_gpu_fan ... ok
+test tests::listener_sentinel_regression_capability_probe_sees_active_curve_a ... ok
+test tests::fan_mutation_rejects_unknown_confirmation_wire ... ok
+test tests::maps_wire_unknown_bounds_to_domain ... ok
+test tests::maps_wire_with_percent_to_domain ... ok
+test tests::maps_wire_without_percent_to_domain ... ok
+test tests::listener_sentinel_regression_refresh_balanced_cpu_returns_b ... ok
+test tests::mutations_are_unsupported_without_source_access ... ok
+test tests::fan_mutation_status_wire_maps_to_capability_status ... ok
+test tests::listener_sentinel_regression_refresh_quiet_cpu_returns_c ... ok
+test tests::performance_mask_unknown_bit_is_internal_error ... ok
+test tests::performance_mask_wire_decode_maps_all_values ... ok
+test tests::performance_mutation_status_wire_maps_to_capability_status ... ok
+test tests::performance_ac_battery_profiles_are_none ... ok
+test tests::performance_current_unknown_wire_is_internal_error ... ok
+test tests::gpu_wire_unknown_value_is_internal_error ... ok
+test tests::performance_current_wire_decode_maps_all_values ... ok
+test tests::performance_provider_does_not_cache_wire_state ... ok
+test tests::fan_mutation_writes_direct_hardware_and_confirms_profile ... ok
+test tests::listener_sentinel_regression_cpu_gpu_not_mixed ... ok
+test tests::preserves_disabled_state_with_known_percent ... ok
+test tests::performance_provider_error_is_preserved ... ok
+test tests::performance_provider_reads_source_once ... ok
+test tests::provider_does_not_cache_wire_state ... ok
+test tests::provider_reads_source_once ... ok
+test tests::rejects_invalid_remote_bounds ... ok
+test tests::read_only_performance_mutation_is_unsupported ... ok
+test tests::rejects_noncanonical_absent_bounds ... ok
+test tests::rejects_noncanonical_missing_percent ... ok
+test tests::remote_fdo_errors_map_to_provider_classes ... ok
+test tests::unknown_bounds_roundtrip_preserves_none ... ok
+test tests::validation_does_not_claim_write_support ... ok
+test tests::source_error_is_preserved ... ok
+
+test result: ok. 56 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/battery_hardware_p2p.rs (target/debug/deps/battery_hardware_p2p-85fed6d41cb6be6a)
+
+running 3 tests
+test composed_provider_validates_range_and_keeps_session_reads ... ok
+test hardware_source_sends_exact_request_once_and_returns_confirmation ... ok
+test hardware_source_propagates_dbus_error ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/gpu_capabilities_p2p.rs (target/debug/deps/gpu_capabilities_p2p-845459e14556f1b6)
+
+running 2 tests
+test power_limits_roundtrip_over_p2p_and_writes_stay_unsupported ... ok
+test gpu_capabilities_roundtrip_over_p2p ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/performance_p2p.rs (target/debug/deps/performance_p2p-82e886e01594c743)
+
+running 1 test
+test performance_roundtrip_over_p2p ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/product_gpu_hardware_p2p.rs (target/debug/deps/product_gpu_hardware_p2p-448085790ab3334b)
+
+running 2 tests
+test product_gpu_source_sends_exact_target_and_preserves_result_fields ... ok
+test product_gpu_source_maps_remote_failure_without_retry ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/session_provider_p2p.rs (target/debug/deps/session_provider_p2p-d5adce1a2a5b82f3)
+
+running 6 tests
+test full_provider_path_reads_charge_limit ... ok
+test full_provider_path_preserves_missing_threshold ... ok
+test full_provider_path_preserves_disabled_known_threshold ... ok
+test full_provider_path_preserves_permission_denied ... ok
+test full_provider_path_preserves_unsupported_error ... ok
+test full_provider_path_reads_fresh_values ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/orbis_session_protocol-54906e87f10409d1)
+
+running 13 tests
+test tests::charge_limit_dbus_signature_is_stable ... ok
+test tests::charge_limit_without_percent ... ok
+test tests::dbus_names_are_stable ... ok
+test tests::charge_limit_with_percent ... ok
+test tests::fan_curve_roundtrip_preserves_sentinel_curves ... ok
+test tests::charge_limit_serde_roundtrip ... ok
+test tests::gpu_wire_constants_are_stable ... ok
+test tests::charge_limit_with_percent_unknown_bounds ... ok
+test tests::fan_wire_constants_are_stable ... ok
+test tests::fan_dbus_signature_is_stable ... ok
+test tests::performance_dbus_signature_is_stable ... ok
+test tests::performance_serde_roundtrip ... ok
+test tests::charge_limit_without_percent_unknown_bounds ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/orbis_sessiond-66f27e66a4cffe03)
+
+running 89 tests
+test armoury::tests::maps_proven_mux_values ... ok
+test armoury::tests::missing_file_is_unsupported ... ok
+test armoury::tests::reads_are_fresh_not_cached ... ok
+test armoury::tests::malformed_value_is_internal ... ok
+test armoury::tests::future_raw_is_unknown_without_guess ... ok
+test armoury::tests::maps_proven_access_values ... ok
+test fans::tests::asusd_curve_set_matches_sysfs_active_curve ... ok
+test fans::tests::asusd_fan_profile_unknown_wire_is_internal_error ... ok
+test fans::tests::asusd_fan_profile_wire_mapping_is_exact ... ok
+test fans::tests::asusd_fan_profile_wire_roundtrip_is_lossless ... ok
+test fans::tests::asusd_fan_profile_maps_to_performance_profile ... ok
+test armoury::tests::source_error_propagates ... ok
+test fans::tests::parse_curve_entry_parses_cpu_and_gpu ... ok
+test fans::tests::parse_curve_entry_rejects_malformed_vendor_ordering ... ok
+test fans::tests::parse_curve_entry_rejects_out_of_range_pwm ... ok
+test fans::tests::parse_curve_entry_rejects_out_of_range_temp ... ok
+test fans::tests::parse_curve_entry_rejects_unknown_fan ... ok
+test fans::tests::parse_curve_entry_rejects_zero_cooling_at_critical_temperature ... ok
+test fans::tests::quiet_and_lowpower_remain_distinct ... ok
+test fans::tests::silent_does_not_auto_select_quiet_or_lowpower ... ok
+test performance::tests::ac_battery_profiles_are_none ... ok
+test performance::tests::maps_known_choices ... ok
+test performance::tests::maps_known_current_values ... ok
+test fans::tests::empty_file_is_internal_error ... ok
+test performance::tests::reads_are_fresh_not_cached ... ok
+test performance::tests::source_error_propagates ... ok
+test performance::tests::unknown_choice_is_unsupported ... ok
+test performance::tests::unknown_current_is_unsupported_without_guess ... ok
+test power_limits::tests::cpu_temperature_limit_and_cpu_boost_have_no_kernel_armoury_field ... ok
+test power_limits::tests::current_host_does_not_promote_enodev_armoury_fields ... ok
+test power_limits::tests::unavailable_diagnostic_names_all_checked_backend_candidates ... ok
+test service::tests::backend_errors_map_to_dbus_failed ... ok
+test fans::tests::missing_fan_is_unsupported ... ok
+test service::tests::dbus_property_preserves_authoritative_wire_value ... ok
+test service::tests::gpu_properties_route_to_own_capability ... ok
+test service::tests::gpu_unsupported_when_provider_absent ... ok
+test service::tests::invalid_request_maps_to_dbus_invalid_args ... ok
+test service::tests::maps_domain_charge_limit_with_percent_to_wire ... ok
+test service::tests::maps_domain_charge_limit_without_percent_to_canonical_wire ... ok
+test service::tests::maps_domain_performance_to_wire ... ok
+test service::tests::missing_gpu_capability_is_not_supported ... ok
+test service::tests::missing_performance_capability_is_not_supported ... ok
+test fans::tests::fan_curve_profile_is_unsupported_not_faked ... ok
+test service::tests::mutation_methods_return_unsupported ... ok
+test service::tests::performance_property_returns_wire_current_and_mask ... ok
+test service::tests::permission_denied_maps_to_dbus_access_denied ... ok
+test service::tests::performance_unsupported_when_provider_absent ... ok
+test service::tests::server_interface_name_matches_protocol ... ok
+test service::tests::read_only_service_produces_consistent_charge_limit ... ok
+test service::tests::service_cpu_gpu_not_mixed ... ok
+test service::tests::service_does_not_cache_charge_limit ... ok
+test service::tests::service_fan_curve_method_rejects_unknown_wire ... ok
+test service::tests::service_fan_curve_method_wire_roundtrip ... ok
+test service::tests::service_fan_curve_unsupported_when_source_absent ... ok
+test service::tests::service_reads_profile_specific_curve_from_own_source ... ok
+test service::tests::service_reads_provider_once ... ok
+test service::tests::service_reads_quiet_pair_returns_own_curve ... ok
+test service::tests::unsupported_maps_to_dbus_not_supported ... ok
+test supergfxd::tests::maps_proven_power_values ... ok
+test supergfxd::tests::reads_are_fresh_not_cached ... ok
+test supergfxd::tests::unknown_raw_is_unknown_without_guess ... ok
+test supergfxd::tests::source_error_propagates ... ok
+test upower::tests::asusd_configured_read_error_does_not_fallback_to_upower ... ok
+test upower::tests::asusd_configured_value_supports_mutation_and_rollback_reads ... ok
+test upower::tests::invalid_backend_threshold_is_rejected ... ok
+test upower::tests::lazy_discovery_permission_denied_is_preserved ... ok
+test upower::tests::lazy_discovery_transient_error_is_preserved ... ok
+test upower::tests::lazy_discovery_unsupported_stays_unsupported_not_transient ... ok
+test upower::tests::lazy_mutations_unsupported_no_io ... ok
+test upower::tests::lazy_rediscovers_after_later_availability ... ok
+test upower::tests::maps_supported_enabled_charge_limit ... ok
+test upower::tests::matching_asus_and_sysfs_thresholds_override_stale_upower_threshold ... ok
+test upower::tests::preserves_disabled_state_with_known_threshold ... ok
+test upower::tests::mutations_are_unsupported_without_source_access ... ok
+test upower::tests::source_error_is_preserved ... ok
+test performance::tests::mutations_are_unsupported_without_source_access ... ok
+test service::tests::dbus_property_maps_unsupported_to_not_supported ... ok
+test upower::tests::threshold_evidence_retains_all_conflicting_sources ... ok
+test upower::tests::validation_does_not_claim_write_support ... ok
+test upower::tests::unsupported_threshold_is_reported ... ok
+test upower::tests::sysfs_effective_source_reads_fresh_and_rejects_malformed ... ok
+test fans::tests::missing_device_is_unsupported ... ok
+test fans::tests::malformed_value_is_internal_error ... ok
+test fans::tests::discovery_works_with_different_hwmon_indices ... ok
+test fans::tests::raw_pwm_above_100_is_preserved ... ok
+test fans::tests::fan_ids_reports_available_fans ... ok
+test fans::tests::reads_cpu_and_gpu_independently ... ok
+test fans::tests::writes_are_unsupported ... ok
+test fans::tests::oversized_sysfs_values_do_not_wrap ... ok
+
+test result: ok. 89 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/main.rs (target/debug/deps/orbis_sessiond-c9c428dc85f2a7b6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_gpu_mux_access.rs (target/debug/deps/live_gpu_mux_access-d0b161a696792f5d)
+
+running 1 test
+test live_gpu_mux_access_provider_matches_sysfs ... ignored, requires live asus-armoury firmware-attributes sysfs (opt-in)
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_gpu_power.rs (target/debug/deps/live_gpu_power-bc20c5f646f6a88c)
+
+running 1 test
+test live_gpu_power_provider_matches_supergfxd ... ignored, requires live supergfxd system D-Bus (opt-in)
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_performance.rs (target/debug/deps/live_performance-a7f6188cde759ef3)
+
+running 1 test
+test live_performance_provider_matches_kernel_sysfs ... ignored, requires live kernel platform_profile sysfs (opt-in)
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/session_fan_curve_p2p.rs (target/debug/deps/session_fan_curve_p2p-9b382c132c72a5e6)
+
+running 3 tests
+test session1_fan_curve_error_class_is_preserved ... ok
+test session1_fan_curve_reads_profile_specific_sentinel_over_p2p ... ok
+test session1_fan_curve_cpu_gpu_not_mixed ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/session_protocol_p2p.rs (target/debug/deps/session_protocol_p2p-812484df8b63b13b)
+
+running 4 tests
+test protocol_proxy_deserializes_server_tuple ... ok
+test protocol_proxy_receives_not_supported_error ... ok
+test protocol_proxy_preserves_canonical_missing_percent ... ok
+test protocol_proxy_reads_fresh_authoritative_values ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/session_server_p2p.rs (target/debug/deps/session_server_p2p-fbe189aa49644f08)
+
+running 6 tests
+test power_limits_keeps_missing_service_distinct_as_typed_unavailable ... ok
+test server_helper_registers_typed_power_limits_method ... ok
+test power_limits_maps_unreadable_current_value_to_not_supported_without_write ... ok
+test server_helper_reads_fresh_values ... ok
+test server_helper_registers_protocol_service ... ok
+test server_helper_preserves_remote_error ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/supergfxd_snapshot_p2p.rs (target/debug/deps/supergfxd_snapshot_p2p-436d38c0e25c7c4d)
+
+running 1 test
+test staged_snapshot_contract_roundtrips_over_private_p2p ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/upower_discovery_p2p.rs (target/debug/deps/upower_discovery_p2p-c3019287926dac01)
+
+running 5 tests
+test maps_device_property_error_to_dbus ... ok
+test rejects_missing_system_battery ... ok
+test reads_fresh_device_state ... ok
+test rejects_multiple_system_batteries ... ok
+test discovers_single_system_battery ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/upower_resilience_p2p.rs (target/debug/deps/upower_resilience_p2p-346e6040d7beea3f)
+
+running 4 tests
+test mutations_never_reach_lazy_battery_path ... ok
+test unsupported_is_distinct_from_transient_unavailable ... ok
+test session_starts_without_upower_and_battery_is_capability_local ... ok
+test battery_unavailable_then_later_available_without_restart ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/upower_session_composition_p2p.rs (target/debug/deps/upower_session_composition_p2p-606720c04121903a)
+
+running 4 tests
+test composition_maps_upower_failure_to_session_failed ... ok
+test composition_maps_unsupported_device_to_not_supported ... ok
+test composition_serves_upower_charge_limit ... ok
+test composition_reads_fresh_upower_values ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/upower_source_p2p.rs (target/debug/deps/upower_source_p2p-f101aa48a686aa7c)
+
+running 4 tests
+test upower_source_stops_after_first_property_error ... ok
+test upower_source_maps_middle_property_error_to_dbus ... ok
+test upower_source_reads_snapshot_over_p2p ... ok
+test upower_source_reads_fresh_snapshot ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/orbis_test_support-dd3707a36fe8356b)
+
+running 9 tests
+test devices::tests::all_names_parse_roundtrip ... ok
+test devices::tests::pending_reboot_has_action ... ok
+test devices::tests::backend_failure_sets_error ... ok
+test devices::tests::unknown_profile_none ... ok
+test devices::tests::tuf_realistic_has_two_fans ... ok
+test devices::tests::every_profile_builds ... ok
+test devices::tests::all_profiles_are_deterministic ... ok
+test devices::tests::permission_denied_profile ... ok
+test devices::tests::three_fans_profile ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/privacy.rs (target/debug/deps/privacy-57ad4f9a6f4d65fc)
+
+running 3 tests
+test expected_capabilities_parses ... ok
+test fixture_has_no_forbidden_patterns_in_raw_files ... ok
+test fixtures_are_anonymized ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/orbis_ui-0c85382fb1d6ac85)
+
+running 154 tests
+test automation_capability::tests::augmentation_never_overwrites_existing_automation_evidence ... ok
+test automation_capability::tests::duplicate_entry_is_rejected_instead_of_overwritten ... ok
+test automation_capability::tests::augmentation_preserves_generation_time_and_existing_entries ... ok
+test automation_capability::tests::complete_evidence_only_passes_assessment_and_does_not_build_write_capability ... ok
+test automation_capability::tests::default_promotion_evidence_fails_every_gate ... ok
+test automation_capability::tests::executable_validation_is_independent_and_mandatory ... ok
+test automation_capability::tests::registry_accepts_shadow_capability_without_write_support ... ok
+test automation_capability::tests::shadow_capability_is_explicitly_read_only ... ok
+test automation_execution_guard::tests::action_write_evidence_regression_blocks_second_preflight ... ok
+test automation_execution_guard::tests::read_only_runtime_can_revalidate_dry_run_but_not_strict_execution ... ok
+test automation_execution_guard::tests::policy_change_blocks_even_when_capability_generation_is_unchanged ... ok
+test automation_execution_guard::tests::stale_or_future_capability_metadata_never_produces_handoff ... ok
+test automation_execution_guard::tests::unchanged_policy_and_generation_produce_only_hardware_inert_handoff ... ok
+test automation_execution_promotion::tests::read_only_automation_never_gets_execution_permit ... ok
+test automation_execution_promotion::tests::requirement_bearing_runtime_is_not_direct_execution_authority ... ok
+test automation_execution_promotion::tests::supported_runtime_under_same_generation_can_get_permit ... ok
+test automation_execution_scope::tests::duplicate_performance_actions_fail_closed ... ok
+test automation_execution_guard::tests::generation_change_blocks_whole_batch_before_second_preflight ... ok
+test automation_execution_scope::tests::empty_batch_is_explicit_noop ... ok
+test automation_execution_scope::tests::exactly_one_performance_action_is_the_only_mutating_v1_scope ... ok
+test automation_lifecycle_revision::tests::clock_is_monotonic_and_never_uses_zero_for_an_event ... ok
+test automation_lifecycle_revision::tests::initial_revision_cannot_be_bound_to_a_candidate ... ok
+test automation_lifecycle_revision::tests::matching_revision_and_generation_produce_only_hardware_inert_handoff ... ok
+test automation_execution_promotion::tests::generation_or_freshness_drift_blocks ... ok
+test automation_lifecycle_revision::tests::newer_lifecycle_event_supersedes_candidate_before_base_guard ... ok
+test automation_policy_sync::tests::source_uses_exact_before_after_fingerprints_and_hardened_loader ... ok
+test automation_performance_executor::tests::exact_applied_readback_is_the_only_success ... ok
+test automation_performance_executor::tests::identity_drift_blocks_before_owner_call ... ok
+test automation_execution_scope::tests::every_unproven_owner_blocks_the_whole_batch ... ok
+test automation_capability::tests::source_cannot_accidentally_advertise_supported_write ... ok
+test automation_policy_sync::tests::synchronizer_has_no_mutation_or_slint_surface ... ok
+test automation_recovery::tests::lifecycle_or_capability_changes_cannot_clear_pending_record ... ok
+test automation_policy_sync::tests::unstable_or_unreadable_source_clears_cached_intent ... ok
+test automation_recovery::tests::mismatching_authoritative_state_clears_unknown_but_reports_difference ... ok
+test automation_performance_executor::tests::unknown_mutation_outcome_enters_recovery_barrier_not_failure_or_success ... ok
+test automation_performance_executor::tests::executor_source_has_only_performance_owner_surface ... ok
+test automation_execution_scope::tests::source_contains_no_mutation_or_process_surface ... ok
+test automation_lifecycle_revision::tests::source_contains_no_execution_surface ... ok
+test automation_execution_guard::tests::guard_source_has_no_execution_surface ... ok
+test automation_policy_sync::tests::synchronizer_is_non_clone_unique_source_owner ... ok
+test automation_performance_executor::tests::readback_failure_enters_recovery_classification ... ok
+test automation_recovery::tests::unknown_outcome_blocks_until_authoritative_state_is_read ... ok
+test automation_recovery::tests::second_unknown_cannot_overwrite_first_record ... ok
+test automation_registry::tests::decoration_preserves_snapshot_identity_and_existing_entries ... ok
+test automation_registry::tests::duplicate_automation_evidence_is_rejected_not_overwritten ... ok
+test automation_registry::tests::decorator_cannot_advertise_automation_write ... ok
+test automation_retry::tests::one_terminal_block_makes_entire_batch_terminal ... ok
+test automation_retry::tests::permission_and_requirement_are_never_background_retry_reasons ... ok
+test automation_retry::tests::stale_capability_snapshot_is_retryable_only_after_refresh ... ok
+test automation_retry::tests::transient_runtime_and_action_evidence_can_retry_as_whole_batch ... ok
+test automation_retry::tests::source_is_hardware_inert ... ok
+test automation_recovery::tests::recovery_source_has_no_mutation_or_generic_clear_surface ... ok
+test automation_serialization::tests::finished_revision_cannot_be_replayed ... ok
+test automation_serialization::tests::generation_drift_blocks_before_slot_ownership ... ok
+test automation_serialization::tests::lifecycle_revision_drift_blocks_before_slot_ownership ... ok
+test automation_serialization::tests::matching_identities_admit_only_one_hardware_inert_lease ... ok
+test automation_serialization::tests::occupied_slot_rejects_second_batch_without_consuming_new_revision ... ok
+test automation_shadow_runtime::tests::confirmed_transition_stops_at_execution_disabled_boundary ... ok
+test automation_shadow_runtime::tests::disabled_resume_does_not_consume_sleeping_power_change ... ok
+test automation_shadow_runtime::tests::enabled_resume_rebaselines_sleeping_power_change ... ok
+test automation_shadow_runtime::tests::first_sample_only_establishes_baseline ... ok
+test automation_shadow_runtime::tests::read_only_runtime_can_be_dry_run_ready_but_strict_execution_stays_blocked ... ok
+test automation_shadow_runtime::tests::resume_rejects_unknown_stale_and_future_telemetry ... ok
+test automation_shadow_runtime::tests::stale_capabilities_block_handoff ... ok
+test automation_serialization::tests::source_has_no_execution_surface ... ok
+test automation_shadow_runtime::tests::suspend_breaks_candidate_continuity_without_losing_stable_source ... ok
+test automation_worker_coordinator::tests::known_finish_releases_slot_without_creating_recovery ... ok
+test automation_worker_coordinator::tests::newer_lifecycle_event_does_not_clear_recovery_barrier ... ok
+test automation_worker_coordinator::tests::successful_authoritative_read_clears_unknown_even_on_target_mismatch ... ok
+test automation_worker_coordinator::tests::unknown_performance_outcome_releases_slot_but_blocks_next_admission ... ok
+test automation_worker_driver::tests::clear_policy_advances_revision_and_blocks_new_observation ... ok
+test automation_worker_driver::tests::no_policy_never_advances_lifecycle_or_policy_revision ... ok
+test automation_worker_driver::tests::prepared_envelope_is_invalidated_by_authoritative_policy_replacement ... ok
+test automation_worker_driver::tests::read_only_runtime_can_prepare_dry_run_but_never_execute ... ok
+test automation_worker_coordinator::tests::source_is_hardware_inert_and_has_no_generic_recovery_clear ... ok
+test automation_worker_runtime::tests::confirmed_event_gets_revision_and_ready_candidate ... ok
+test automation_worker_runtime::tests::latest_candidate_prepares_once_and_is_consumed ... ok
+test automation_worker_runtime::tests::newer_blocked_event_clears_older_ready_candidate ... ok
+test automation_worker_runtime::tests::prepared_old_lease_is_revision_stale_after_new_event ... ok
+test automation_worker_runtime::tests::suspend_breaks_pre_sleep_candidate_continuity_when_resume_trigger_is_disabled ... ok
+test automation_worker_driver::tests::source_is_worker_facing_and_hardware_inert ... ok
+test composition::tests::fan_curve_aggregate_suppression_preserves_origin_error_class ... ok
+test automation_worker_runtime::tests::source_is_hardware_inert ... ok
+test composition::tests::fan_curve_capability_does_not_infer_gpu_support_from_cpu_alone ... ok
+test composition::tests::fan_curve_capability_requires_cpu_and_gpu_curve_reads ... ok
+test composition::tests::hardware1_status_timeout_is_never_success_and_never_retried ... ok
+test composition::tests::hung_hardware1_status_requery_resolves_unknown_within_deadline ... ok
+test composition::tests::hung_telemetry_provider_times_out_with_identity_and_never_retries ... ok
+test composition::tests::dynamic_boost_and_temp_target_capabilities_carry_real_metadata ... ok
+test composition::tests::gpu_power_internal_error_aborts_refresh ... ok
+test composition::tests::gpu_mux_contract_violation_aborts_refresh ... ok
+test composition::tests::battery_write_evidence_flows_through_registry_assembly ... ok
+test composition::tests::battery_write_permission_denied_preserved_through_registry ... ok
+test composition::tests::fan_curve_capability_is_read_only ... ok
+test composition::tests::fan_curve_write_is_supported_when_hardware_backend_proven ... ok
+test composition::tests::fan_write_evidence_flows_through_registry_assembly ... ok
+test composition::tests::primitive_gpu_services_do_not_claim_product_mode_support ... ok
+test composition::tests::probe_primitives_propagates_probe_error ... ok
+test composition::tests::proven_hardware1_status_passes_through_without_coercion ... ok
+test composition::tests::initial_runtime_snapshot_contains_all_capabilities ... ok
+test composition::tests::power_limit_read_only_and_unsupported_are_distinct ... ok
+test composition::tests::ordinary_gpu_unsupported_stays_as_entry ... ok
+test composition::tests::failed_gpu_probe_preserves_previous_snapshot_and_generation ... ok
+test composition::tests::power_limit_snapshot_identity_remains_authoritative_across_augmentation ... ok
+test composition::tests::probe_primitives_returns_all_three_on_success ... ok
+test composition::tests::power_limit_read_errors_preserve_typed_status_and_never_advertise_write ... ok
+test composition::tests::performance_write_evidence_flows_through_registry_assembly ... ok
+test composition::tests::telemetry_error_classes_pass_through_without_coercion ... ok
+test composition::tests::telemetry_service_exposes_canonical_provider_identity_and_deadline ... ok
+test diagnostics_dto::tests::capability_rows_preserve_overall_read_and_write_statuses_separately ... ok
+test diagnostics_dto::tests::missing_optional_source_values_remain_none ... ok
+test diagnostics_dto::tests::projection_is_owned_and_does_not_mutate_source_snapshot ... ok
+test diagnostics_dto::tests::projects_real_summary_values_without_preview_fallbacks ... ok
+test diagnostics_dto::tests::service_rows_preserve_snapshot_order_and_distinct_availability ... ok
+test diagnostics_dto::tests::typed_gpu_telemetry_and_display_states_are_not_collapsed_to_labels ... ok
+test diagnostics_export::tests::json_export_is_versioned_and_omits_raw_collection_surfaces ... ok
+test diagnostics_export::tests::telemetry_gap_absence_and_evidence_are_exported ... ok
+test diagnostics_export::tests::text_export_has_stable_allowlisted_sections ... ok
+test diagnostics_export::tests::unknown_and_permission_states_survive_export ... ok
+test diagnostics_metadata::tests::absent_optional_build_metadata_remains_absent ... ok
+test diagnostics_metadata::tests::explicitly_embedded_optional_build_metadata_is_preserved ... ok
+test diagnostics_metadata::tests::package_version_is_exact_cargo_package_version ... ok
+test diagnostics_metadata::tests::production_source_matches_optional_compile_time_metadata ... ok
+test diagnostics_window_model::tests::absent_identity_never_synthesizes_asus ... ok
+test diagnostics_window_model::tests::capability_and_service_states_are_not_collapsed ... ok
+test diagnostics_window_model::tests::production_values_replace_preview_literals ... ok
+test diagnostics_window_model::tests::telemetry_field_gaps_are_rendered_field_by_field ... ok
+test diagnostics_window_model::tests::telemetry_without_sample_reports_explicit_gap_absence ... ok
+test display_refresh_service::tests::auto_requires_authoritative_auto_policy ... ok
+test display_refresh_service::tests::command_failure_has_no_readback_success_claim ... ok
+test display_refresh_service::tests::exact_fixed_readback_produces_outcome ... ok
+test display_refresh_service::tests::mismatching_readback_is_not_success_even_after_applied_result ... ok
+test display_refresh_service::tests::post_mutation_read_failure_is_unknown_outcome ... ok
+test display_refresh_service::tests::stale_preflight_blocks_before_owner_mutation ... ok
+test product_mutation_promotion::tests::aura_config_readback_can_never_satisfy_unattended_hardware_confirmation ... ok
+test product_mutation_promotion::tests::current_interactive_paths_have_source_preflight_but_remain_release_blocked ... ok
+test product_mutation_promotion::tests::fully_proven_interactive_path_is_promotable ... ok
+test product_mutation_promotion::tests::module_has_no_runtime_mutation_or_capability_upgrade_surface ... ok
+test worker::tests::execution_promotion_is_fail_closed_on_this_revision ... ok
+test worker::tests::lifecycle_publish_fails_closed_without_registered_worker ... ok
+test worker::tests::capability_refresh_has_one_canonical_status_requery_path ... ok
+test worker::tests::product_gpu_request_is_fifo_only_and_never_automated ... ok
+test worker::tests::worker_authoritative_reads_use_bounded_helpers_where_provider_identity_exists ... ok
+test worker::tests::worker_source_owns_automation_and_only_performance_executor ... ok
+test composition::tests::initial_and_refresh_contain_same_six_feature_ids ... ok
+test composition::tests::runtime_with_registry_exposes_performance_and_charge_limit ... ok
+test composition::tests::refresh_contains_all_six_canonical_capabilities ... ok
+test composition::tests::explicit_refresh_publishes_freshly_requeried_mutation_statuses ... ok
+test composition::tests::refresh_does_not_synthesise_gpu_product_policy ... ok
+test composition::tests::refresh_failure_preserves_previous_snapshot_and_generation ... ok
+test composition::tests::refresh_preserves_fan_curves ... ok
+test composition::tests::backend_disappearance_and_recovery_publish_new_generations ... ok
+test composition::tests::refresh_fan_curves_write_status_matches_evidence ... ok
+test composition::tests::refresh_replaces_snapshot_with_monotonic_generation ... ok
+
+test result: ok. 154 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running unittests src/main.rs (target/debug/deps/orbis_control-21674b992b834c77)
+
+running 235 tests
+test controller::tests::battery_backend_missing_maps_to_controller ... ok
+test controller::tests::battery_permission_denied_maps_to_controller ... ok
+test controller::tests::ac_online_false_differs_from_unavailable ... ok
+test controller::tests::absent_telemetry_shows_unknown_not_zero ... ok
+test controller::tests::balanced_to_silent ... ok
+test controller::tests::battery_read_supported_write_unsupported_maps_to_controller ... ok
+test controller::tests::battery_reasons_distinguish_statuses ... ok
+test controller::tests::battery_write_temporarily_unavailable_does_not_enable_mutation ... ok
+test controller::tests::charge_100_to_75 ... ok
+test controller::tests::battery_read_write_supported_maps_to_controller ... ok
+test controller::tests::charge_80_to_20 ... ok
+test controller::tests::charge_20_to_100 ... ok
+test controller::tests::charge_above_maximum_rejected ... ok
+test controller::tests::charge_below_minimum_rejected ... ok
+test controller::tests::charge_does_not_affect_other_sections ... ok
+test controller::tests::charge_integer_values_are_accepted ... ok
+test controller::tests::charge_disabled_does_not_block_mutation ... ok
+test controller::tests::disabled_by_mask_is_rejected ... ok
+test controller::tests::empty_snapshot_is_absence_evidence_not_freshness ... ok
+test controller::tests::eco_to_standard ... ok
+test controller::tests::fan_curve_points_reject_integer_narrowing_overflow ... ok
+test controller::tests::fan_curve_reasons_distinguish_statuses ... ok
+test controller::tests::fan_curve_writable_matches_write_operation_status ... ok
+test controller::tests::fan_curve_write_permission_denied_does_not_enable_mutation ... ok
+test controller::tests::gpu_bit_mapping ... ok
+test controller::tests::fan_curve_write_temporarily_unavailable_does_not_enable_mutation ... ok
+test controller::tests::fan_rpm_zero_is_valid_not_no_data ... ok
+test controller::tests::gpu_error_banner_preserved_after_rejected_action ... ok
+test controller::tests::initial_charge_is_80 ... ok
+test controller::tests::initial_gpu_zephyrus_is_standard ... ok
+test controller::tests::initial_state_from_zephyrus ... ok
+test controller::tests::initial_state_battery_is_ready ... ok
+test controller::tests::initial_zephyrus_is_balanced ... ok
+test controller::tests::load_fan_curve_clears_dirty_and_error ... ok
+test controller::tests::load_fan_curve_sets_profile_from_asusd_profile ... ok
+test controller::tests::missing_telemetry_fields_do_not_break_others ... ok
+test controller::tests::mutation_unavailable_reason_maps_each_availability ... ok
+test controller::tests::mock_profile_formats_telemetry ... ok
+test controller::tests::one_unavailable_domain_does_not_affect_others ... ok
+test controller::tests::perf_switch_local ... ok
+test controller::tests::performance_read_write_supported_maps_to_controller ... ok
+test controller::tests::performance_write_permission_denied_does_not_enable_mutation ... ok
+test controller::tests::performance_reasons_distinguish_statuses ... ok
+test controller::tests::performance_write_temporarily_unavailable_does_not_enable_mutation ... ok
+test controller::tests::platform_profile_ui_keeps_unvalidated_write_disabled_and_shows_pending ... ok
+test controller::tests::profile_bit_mapping ... ok
+test controller::tests::quiet_and_low_power_are_distinguishable ... ok
+test controller::tests::repeated_charge_is_idempotent ... ok
+test controller::tests::repeated_gpu_selection_is_idempotent ... ok
+test controller::tests::repeated_selection_is_idempotent ... ok
+test controller::tests::repeated_ultimate_selection_is_idempotent ... ok
+test controller::tests::silent_to_turbo ... ok
+test controller::tests::standard_to_eco ... ok
+test controller::tests::rust_to_slint_preserves_gpu_state ... ok
+test controller::tests::telemetry_does_not_touch_gpu_capability_state ... ok
+test controller::tests::reset_telemetry_clears_mock_values ... ok
+test controller::tests::telemetry_freshness_tracks_refresh_success ... ok
+test controller::tests::rust_to_slint_preserves_charge ... ok
+test controller::tests::standard_to_optimized ... ok
+test controller::tests::rust_to_slint_preserves_mask ... ok
+test controller::tests::turbo_to_balanced ... ok
+test controller::tests::ultimate_sets_pending ... ok
+test controller::tests::ultimate_disabled_is_rejected ... ok
+test controller::tests::unavailable_write_does_not_disable_independent_read_domains ... ok
+test controller::tests::unsupported_gpu_mode_is_rejected ... ok
+test controller::tests::unsupported_profile_is_rejected ... ok
+test controller::tests::update_telemetry_formats_authoritative_values ... ok
+test diagnostics_backend::tests::current_capabilities_is_read_only_snapshot_sharing ... ok
+test diagnostics_backend::tests::export_failure_stays_fail_closed_until_refresh ... ok
+test diagnostics_backend::tests::bridge_source_contains_no_hardware_mutation_commands ... ok
+test diagnostics_backend::tests::export_host_path_is_fixed_under_checked_xdg_state ... ok
+test diagnostics_backend::tests::refresh_and_export_are_mutually_exclusive_in_host_bridge ... ok
+test launch_context::tests::interactive_root_launch_is_rejected ... ok
+test launch_context::tests::normal_user_interactive_launch_is_allowed ... ok
+test launch_context::tests::root_screenshot_and_offscreen_launches_are_allowed ... ok
+test diagnostics_backend::tests::successful_refresh_fills_summary_for_in_section_copy ... ok
+test main_tests::accepted_is_not_applied_for_factory_reset ... ok
+test main_tests::ac_023_dirty_fan_selection_requires_explicit_stay_or_discard ... ok
+test main_tests::all_open_theme_targets_receive_same_runtime_theme ... ok
+test main_tests::advanced_power_limits_render_authoritative_metadata_and_pending_bits ... ok
+test main_tests::applied_factory_reset_clears_dirty_until_authoritative_refresh ... ok
+test main_tests::authoritative_charge_limit_updates_ui ... ok
+test main_tests::authoritative_gpu_applied_updates_ui ... ok
+test main_tests::authoritative_charge_value_is_not_sent_value ... ok
+test main_tests::battery_writable_requires_owner_ready_and_both_values ... ok
+test main_tests::authoritative_performance_result_updates_ui ... ok
+test main_tests::charge_limit_command_error_does_not_mutate_ui ... ok
+test main_tests::charge_limit_none_preserves_ui ... ok
+test main_tests::charge_limit_ui_mapping ... ok
+test main_tests::charge_limit_readback_error_does_not_mutate_ui ... ok
+test main_tests::charge_limit_unconfirmed_error_preserves_ui ... ok
+test main_tests::charge_mutation_allowed_requires_writable_and_ready ... ok
+test main_tests::dbus_failure_after_possible_dispatch_is_unconfirmed ... ok
+test main_tests::disabled_charge_control_does_not_emit_mutation_command ... ok
+test main_tests::eco_logout_pending_does_not_set_ultimate_flag ... ok
+test main_tests::dynamic_boost_draft_apply_and_failure_lifecycle_is_field_independent ... ok
+test main_tests::dynamic_boost_rendering_shows_real_unit_and_no_invented_cpu_boost_field ... ok
+test main_tests::factory_reset_and_custom_fan_write_serialized_in_worker ... ok
+test main_tests::factory_reset_accepted_not_rendered_as_applied ... ok
+test main_tests::factory_reset_available_requires_proven_read_and_write_capability ... ok
+test main_tests::factory_reset_mutation_called_exactly_once ... ok
+test main_tests::factory_reset_no_retry_on_timeout ... ok
+test main_tests::factory_reset_unavailable_when_capability_absent_from_registry ... ok
+test main_tests::factory_reset_no_rollback ... ok
+test main_tests::factory_reset_unconfirmed_does_not_set_fan_curve_error ... ok
+test main_tests::fan_curve_can_mutate_requires_writable_dirty_and_valid ... ok
+test main_tests::fan_curve_can_mutate_valid_curve_returns_true ... ok
+test main_tests::fan_curve_capabilities_gating_from_registry ... ok
+test main_tests::fan_curve_fan_id_mapping ... ok
+test main_tests::fan_curve_initial_state_is_loading_and_not_writable ... ok
+test main_tests::fan_curve_load_fan_curve_sets_ready_and_populates_points ... ok
+test main_tests::fan_curve_mutation_ok_clears_dirty_and_error ... ok
+test main_tests::fan_curve_mutation_error_sets_error_preserves_dirty ... ok
+test main_tests::fan_curve_profile_index_mapping ... ok
+test main_tests::fan_curve_load_preserves_stored_enabled_evidence ... ok
+test main_tests::fan_curve_enabled_roundtrips_through_slint_state ... ok
+test main_tests::fan_curve_pwm_above_100_is_valid ... ok
+test main_tests::fan_curve_refresh_ok_loads_curve_and_clears_error ... ok
+test main_tests::gpu_click_allowed_mock_is_true ... ok
+test main_tests::gpu_click_allowed_production_is_false ... ok
+test main_tests::gpu_index_mapping ... ok
+test main_tests::gpu_command_error_preserves_state_and_sets_error ... ok
+test main_tests::gpu_hw_states_default_loading ... ok
+test main_tests::gpu_mux_and_access_values_mapped ... ok
+test main_tests::gpu_power_error_is_unavailable ... ok
+test main_tests::gpu_power_unknown_is_ready_not_unavailable ... ok
+test main_tests::gpu_readback_error_preserves_state_and_sets_error ... ok
+test main_tests::gpu_unconfirmed_error_preserves_state_and_does_not_set_error ... ok
+test main_tests::interactive_initial_state_has_no_fixture_values_or_write_access ... ok
+test main_tests::invalid_fan_curve_draft_sets_visible_validation_reason ... ok
+test main_tests::main_window_renders_queued_target_and_reboot_state ... ok
+test main_tests::new_window_theme_is_derived_from_current_runtime_theme ... ok
+test main_tests::mock_gpu_mode_stays_interactive ... ok
+test main_tests::missing_preferences_initialize_dark_before_first_render ... ok
+test main_tests::perf_hw_state_default_ready_writable_in_mock ... ok
+test main_tests::perf_refresh_available_partial_mask ... ok
+test main_tests::missing_start_minimized_defaults_to_visible_startup ... ok
+test main_tests::perf_refresh_error_is_unavailable_without_mock_fallback ... ok
+test main_tests::perf_refresh_success_sets_ready_and_authoritative_state ... ok
+test main_tests::performance_available_mask_ignores_order ... ok
+test main_tests::performance_click_guard_emits_only_authorized_command ... ok
+test main_tests::performance_click_guard_requires_ready_writable_available_state ... ok
+test main_tests::performance_index_mapping ... ok
+test main_tests::performance_command_error_does_not_mutate_ui ... ok
+test main_tests::performance_result_preserves_other_sections ... ok
+test main_tests::performance_readback_error_does_not_mutate_ui ... ok
+test main_tests::performance_unconfirmed_error_preserves_ui ... ok
+test main_tests::performance_write_probe_requires_owned_hardware_name ... ok
+test main_tests::platform_profile_disappearance_rejects_pending_request_and_ignores_stale_support ... ok
+test main_tests::platform_profile_lifecycle_promotes_only_after_new_supported_evidence ... ok
+test main_tests::power_limit_denial_shows_error_until_user_edits_draft ... ok
+test main_tests::power_limit_draft_rejected_when_backend_is_read_only ... ok
+test main_tests::power_limit_draft_reverts_to_observed_without_mutation_marker ... ok
+test main_tests::power_limit_fixture_preserves_independent_backend_metadata ... ok
+test main_tests::power_limit_slider_change_is_dirty_draft_only_and_range_rejected ... ok
+test main_tests::power_limit_in_flight_field_keeps_pending_across_unrelated_refresh ... ok
+test main_tests::power_limit_timeout_unknown_outcome_resolves_on_fresh_read ... ok
+test main_tests::pre_dispatch_failure_does_not_trigger_recovery_read ... ok
+test main_tests::product_gpu_command_error_marks_section_unconfirmed ... ok
+test main_tests::product_gpu_current_mode_without_queue_is_a_local_noop ... ok
+test main_tests::product_gpu_current_read_back_selects_the_card ... ok
+test main_tests::product_gpu_definitive_outcomes_drive_section_error_honestly ... ok
+test main_tests::product_gpu_observed_mode_can_clear_a_deferred_queue ... ok
+test main_tests::product_gpu_optimized_current_is_never_applied_to_ui ... ok
+test main_tests::product_gpu_outcome_mismatch_is_not_presented_as_success ... ok
+test main_tests::product_gpu_queued_target_is_carried_and_reboot_required ... ok
+test main_tests::product_gpu_unknown_values_keep_previous_ui_evidence ... ok
+test main_tests::product_gpu_wire_index_maps_only_three_product_modes ... ok
+test main_tests::production_gpu_mode_is_disabled_and_not_selected ... ok
+test main_tests::production_gpu_mode_mock_selected_is_hidden ... ok
+test main_tests::production_initial_has_no_queued_target_or_reboot_claim ... ok
+test main_tests::production_gpu_mode_setup_preserves_hardware_status ... ok
+test main_tests::production_initial_power_limits_are_unknown_not_fake_defaults ... ok
+test main_tests::real_read_only_gpu_states_are_rendered_without_write_access ... ok
+test main_tests::refresh_disabled_keeps_configured_value_but_marks_limit_off ... ok
+test main_tests::refresh_error_is_unavailable_without_fixture ... ok
+test main_tests::refresh_percent_none_is_unavailable_without_fixture ... ok
+test main_tests::refresh_success_sets_ready_and_value ... ok
+test main_tests::requested_profile_captured_in_worker_command ... ok
+test main_tests::registry_change_updates_gating_without_touching_observed ... ok
+test main_tests::selecting_already_observed_profile_stays_balanced_without_false_pending ... ok
+test main_tests::start_minimized_window_state_is_applied_only_when_enabled ... ok
+test main_tests::successful_factory_reset_is_accepted_not_applied ... ok
+test main_tests::sidebar_nav_items_have_focus_and_keyboard_activation_route ... ok
+test main_tests::successful_gpu_result_clears_previous_error ... ok
+test main_tests::theme_save_error_preserves_runtime_theme_and_is_diagnosable ... ok
+test main_tests::telemetry_refresh_updates_ui_and_error_keeps_previous_state ... ok
+test main_tests::shell_hosts_four_sections_and_frameless_chrome ... ok
+test main_tests::timeout_after_possible_dispatch_is_unconfirmed ... ok
+test main_tests::timeout_with_failed_observation_preserves_observation_error ... ok
+test main_tests::timeout_with_successful_observation_remains_unconfirmed ... ok
+test main_tests::ultimate_pending_updates_existing_ui ... ok
+test preferences_backend::tests::autostart_mapping_never_claims_invalid_entry_is_enabled ... ok
+test preferences_backend::tests::healthy_preferences_allow_safe_close_action_persistence_without_tray_evidence ... ok
+test preferences_backend::tests::warning_preserves_preferences_and_disables_editing ... ok
+test quick_controls_backend::hardware_controls_backend::tests::aura_semantics_remain_config_confirmed_only ... ok
+test main_tests::write_status_gating_derives_from_registry ... ok
+test quick_controls_backend::hardware_controls_backend::tests::only_supported_status_passes_mutation_gate ... ok
+test quick_controls_backend::hardware_controls_backend::tests::stable_status_wire_is_strict ... ok
+test quick_controls_backend::hardware_controls_backend::tests::client_has_no_generic_process_filesystem_gpu_or_fan_surface ... ok
+test quick_controls_backend::resume_observer::tests::reconnect_delay_is_bounded_and_nonzero ... ok
+test quick_controls_backend::resume_observer::tests::observer_is_read_only_and_targets_only_prepare_for_sleep ... ok
+test quick_controls_backend::secondary_windows_backend::action_dialog_backend::tests::executable_context_is_closed_and_explicit ... ok
+test quick_controls_backend::secondary_windows_backend::action_dialog_backend::tests::legacy_kinds_never_map_to_executable_actions ... ok
+test quick_controls_backend::secondary_windows_backend::action_dialog_backend::tests::backend_has_no_hardware_process_or_login1_surface ... ok
+test quick_controls_backend::secondary_windows_backend::automation_backend::tests::observation_only_outcomes_do_not_replace_policy_status ... ok
+test quick_controls_backend::secondary_windows_backend::automation_backend::tests::ready_shadow_notice_explicitly_says_execution_disabled ... ok
+test quick_controls_backend::secondary_windows_backend::automation_backend::tests::resume_block_notice_is_explicit_and_never_claims_execution ... ok
+test quick_controls_backend::secondary_windows_backend::extra_backend::tests::aura_mapping_never_coerces_unsupported_modes ... ok
+test quick_controls_backend::secondary_windows_backend::automation_backend::tests::persistence_backend_contains_no_reconciliation_or_provider_commands ... ok
+test quick_controls_backend::secondary_windows_backend::extra_backend::tests::boot_sound_observation_preserves_false_as_known_state ... ok
+test quick_controls_backend::secondary_windows_backend::extra_backend::tests::unknown_aura_speed_has_no_selected_ui_preset ... ok
+test quick_controls_backend::secondary_windows_backend::extra_backend::tests::direct_controls_are_hardware1_gated_and_request_only ... ok
+test quick_controls_backend::secondary_windows_backend::extra_backend::tests::boot_sound_is_observation_only_and_unrelated_draft_stays_disabled ... ok
+test quick_controls_backend::secondary_windows_backend::tests::coordinator_contains_no_hardware_mutation_surface ... ok
+test quick_controls_backend::secondary_windows_backend::tests::shadow_bridge_is_observation_only_revision_bound_and_explicitly_read_only ... ok
+test quick_controls_backend::secondary_windows_backend::tray_backend::tests::service_matches_status_notifier_contract_and_is_host_gated ... ok
+test quick_controls_backend::secondary_windows_backend::tray_backend::tests::tray_has_no_hardware_process_or_generic_dbus_surface ... ok
+test quick_controls_backend::secondary_windows_backend::window_lifecycle_backend::tests::position_and_tray_lifecycle_fail_closed ... ok
+test quick_controls_backend::secondary_windows_backend::window_position_preferences_bridge::tests::bridge_is_request_only_and_gates_only_tray_specific_action ... ok
+test quick_controls_backend::secondary_windows_backend::tests::coordinator_wires_only_surviving_surfaces ... ok
+test quick_controls_backend::tests::keyboard_mapping_preserves_hardware_max_and_effective_write_status ... ok
+test quick_controls_backend::tests::automation_forwarders_are_observation_only ... ok
+test quick_controls_backend::tests::maps_common_refresh_rates_without_rounding_source_state ... ok
+test quick_controls_backend::tests::multiple_outputs_never_guess_quick_control_target ... ok
+test quick_controls_backend::tests::keyboard_mutation_is_status_gated_and_readback_driven ... ok
+test quick_controls_backend::tests::single_output_publishes_authoritative_observed_mode ... ok
+test main_tests::persisted_dark_initializes_dark_before_first_render ... ok
+test main_tests::persisted_start_minimized_is_loaded_before_first_render ... ok
+test main_tests::persisted_light_initializes_light_before_first_render ... ok
+test diagnostics_backend::tests::report_files_are_private_unique_and_never_overwrite ... ok
+test preferences_backend::tests::close_action_mutation_preserves_other_preferences ... ok
+test preferences_backend::tests::start_minimized_update_preserves_other_fields ... ok
+test preferences_backend::tests::remember_position_mutation_preserves_unrelated_preferences ... ok
+test main_tests::theme_toggle_persists_only_theme_field ... ok
+
+test result: ok. 235 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/diagnostics_pipeline.rs (target/debug/deps/diagnostics_pipeline-99129e38e1e68fd7)
+
+running 1 test
+test typed_snapshot_projects_through_privacy_bounded_exports ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests orbis_application
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests orbis_capabilities
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests orbis_config
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests orbis_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests orbis_hardwared
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests orbis_providers
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests orbis_session_client
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests orbis_session_protocol
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests orbis_sessiond
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests orbis_test_support
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests orbis_ui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
++ cargo clippy --workspace --all-targets --locked -- -D warnings
+    Checking orbis-providers v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-providers)
+    Checking orbis-sessiond v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-sessiond)
+    Checking orbis-hardwared v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-hardwared)
+    Checking orbis-application v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-application)
+    Checking orbis-test-support v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-test-support)
+    Checking orbis-session-client v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-session-client)
+    Checking orbis-ui v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-ui)
+    Checking orbis-cli v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.60s
+verification passed

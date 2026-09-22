@@ -1,0 +1,52 @@
+Orbis D1 (t_74fd490a) — AC evidence: SC-GPU-MODE / SC-GPU-PARTIAL
+candidate: fe740681b76054cf19d42966ae7e5745829c2e44
+branch: implementation/current-plan
+
+check-crates
+  command : cargo check -p orbis-hardwared -p orbis-providers -p orbis-session-client --locked --all-targets
+  result  : EXIT=0            (docs/verification/check-crates-fe74068.txt)
+
+verify-task
+  command : scripts/verify task   (fmt + check + test + clippy -D warnings)
+  result  : EXIT=0, "verification passed", 49 test binaries all "ok", 0 failures
+            (docs/verification/verify-task-fe74068.txt)
+
+ac-evidence
+  SC-GPU-MODE / AC-050 (reboot requirement), AC-051 (honest no-op),
+  AC-052 (partial capability). Command + actual PASS:
+
+  cargo test -p orbis-hardwared --locked --test asus_gpu_mode_p2p
+    test result: ok. 12 passed; 0 failed
+    - status_read_reports_queued_target_and_reboot_required
+        current pair stays observed Hybrid; queued_mode = Some(Ultimate);
+        reboot_required = true; outcome = RebootRequired. A queued transition is
+        never reported as applied.                                  [AC-050]
+    - status_read_is_read_only_and_reports_complete_current_state
+        complete current pair, nothing queued -> AlreadyActive; both fakes assert
+        ZERO setter calls (a status read mutates nothing).           [AC-050/051]
+    - already_active_does_not_set_attributes                        [AC-051]
+    - status_read_with_partial_queue_is_unknown_not_fabricated
+        only one attribute queued -> queued_mode None, reboot_required false,
+        outcome Unknown (no invented target).                        [AC-052]
+    - status_read_with_unreadable_current_pair_is_unknown            [AC-052]
+    - status_read_propagates_attribute_read_failure
+        read failure surfaces as ProviderError::Dbus, not a fabricated mode.
+
+  cargo test -p orbis-hardwared --locked --lib product_gpu_status
+    test result: ok. 3 passed; 0 failed
+    - product_gpu_status_reports_queued_and_reboot_without_auth
+        wire triple: requested_mode/current_mode 0 (Hybrid), queued_mode 2
+        (Ultimate), outcome 1 (RebootRequired), reboot_required true; no auth.
+    - product_gpu_status_without_backend_is_not_supported -> fdo NotSupported.
+    - product_gpu_status_maps_provider_error_to_dbus_failure -> fdo Failed.
+
+  cargo test -p orbis-providers --locked gpu_primitive_probes_fail_independently
+    test result: ok. 1 passed; 0 failed
+    - gpu_primitive_probes_fail_independently_without_dropping_others
+        power Supported + mux BackendMissing + access Supported in ONE probe pass:
+        independent states, no shared fake.                          [AC-052]
+
+  cargo test -p orbis-ui --locked real_read_only_gpu_states_are_rendered_without_write_access
+    test result: ok. 1 passed; 0 failed
+    - mux Integrated renders while gpu_power read fails -> GpuHwState::Unavailable;
+      the missing power provider neither hides nor breaks MUX controls. [AC-052]
