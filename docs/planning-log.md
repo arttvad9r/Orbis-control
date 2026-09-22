@@ -248,3 +248,53 @@ defective candidate) and now waits on the re-verification instead of the FAIL ve
 not a fix — the harness edit and the product fix are separate claims and must be evidenced separately.
 (2) When a verdict card is narrowed, the criteria it drops must be named as explicitly uncovered and
 routed to another verifier.
+
+---
+
+## 2026-09-22 — SELF-CAUGHT: we were working on the wrong line. Lineage recon.
+
+**Trigger.** The user reported that the running application has RGB *sliders* — which our
+line does not have. Investigation confirmed the report and found the structural cause.
+
+**Finding.** There are three divergent lines from a common base `e72bbb3` (2026-09-05):
+
+- `origin/agent/finish-v01` (`e1a409c`, 2026-09-09) — **100 commits ahead**. Carries the
+  Arch `PKGBUILD`, the RGB slider page (7 `ValueSlider` + 12 Aura effects), clamshell,
+  POST sound, CPU package limits, EPP diagnostics. This is the line that produced the
+  **installed** `orbis-control 0.1.0-2` package (its PKGBUILD is pinned to `4ce963c`);
+  the installed binary contains `Красный`/`Зелёный`/`Синий`/`Вторичный цвет`/
+  `Быстрый статичный RGB`, which exist only on that line.
+- `origin/feature/control-surfaces-v1` (`11d03ce`, 2026-09-13) — 2 commits, thin.
+- `implementation/current-plan` (ours) — 33 commits, docs-heavy (only 15 non-docs).
+
+**Why this happened.** `DECISIONS.md` (~line 120) recorded a judgement that PR #130
+(`agent/finish-v01`) was closed as obsolete and that work continues on
+`implementation/current-plan`. That judgement was wrong and was never re-validated
+against evidence: `finish-v01` is not the older line, it is the *more complete* one.
+Acting on it, we built a second, narrower line and re-derived work that already existed —
+including an RGB surface that had been reduced from sliders back to 3 colour presets.
+
+**Cost of not catching it earlier.** 13 cards of functional/UI/QA work were spent
+reaching a v0.1 candidate that lacks features the already-shipped package has.
+
+**What the two lines are not.** They are not cheaply mergeable: `git merge-tree` dry run
+gives **36 real content conflicts** (125 file-level touches), including
+`orbis-hardwared/src/{fans,lib,main}.rs`, `sessiond/src/{composition,service}.rs`,
+`orbis-ui/src/{controller,main,worker_runtime}.rs` and 13 `ui/**` slint files;
+`finish-v01`'s first commit `0c8e37b` deleted 22 `automation_*` modules we still carry.
+A "just merge them" plan is a fiction.
+
+**Decision (pending user confirmation).** Hold all execution. Do not resume the
+`implementation/current-plan` pipeline, do not re-derive RGB or the package, do not
+discard the `finish-v01` line. The line to build on is a user decision, and the options
+are not equivalent — this is `DECISION_REQUIRED`, not a planner-judgement call.
+
+**Rule recorded.** A line declared obsolete must be re-validated against *content*
+evidence (what features the artifacts actually contain, what the installed/shipped
+artifact was built from) before work continues on a competing line — not against the
+prose of an earlier decision entry. "Closed as obsolete" in a DECISIONS.md is a claim,
+not a fact; the claim decays and the artifacts do not.
+
+**Also recorded.** Recon was non-destructive: no checkout, no branch switch, no merge.
+`git merge-tree` was used for the conflict count, and all source/history inspection went
+through `git show`/`git grep`/`git cat-file`.
