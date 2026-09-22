@@ -142,3 +142,35 @@
 Собран feature-инвентарь G-Helper (36 групп), сравнён с Orbis: ~16 YES/PART,
 ~20 NO. Разбит на волны P1..P6 (после v0.1). Матрица: docs/parity/g-helper-parity.md.
 SPEC-запреты, конфликтующие с D-012, сняты; инварианты архитектуры сохранены.
+
+## 2026-09-22 — INT merge accepted; QA-card splitting pattern
+
+**Decision:** INT merged candidate `5f0d3da` accepted as the v0.1 candidate identity; packaging (E) now
+gated on INT as well as on QA-verdict.
+
+**Context:** INT merged the QA-PASSed UI line (`f45f55d`) into the functional line (`5ca36ab`) with
+`--no-ff`, no conflicts. Because a merge can silently drop a fix, I did not accept the worker's report:
+I verified G03 survival directly (`git diff f45f55d HEAD -- ui/audited/sections/about.slint` -> identical;
+`width: parent.width` -> 0 matches, while base `5ca36ab` still had both lines) and ran a calibrated pixel
+probe on the merged renders (0 px outside the card on all 4 About variants; the defect state measured
++12..+14 px). All 29 merged renders are byte-identical to the QA-PASSed renders, so the merge introduced
+no visual drift.
+
+**Options considered:** (a) accept the INT worker's verdict as-is; (b) re-run the whole QA matrix on the
+merged candidate (~1h, previously timed out twice); (c) targeted planner spot-check of the merge-invariant
+properties. Chose (c): the merge touched no UI logic beyond wiring, and the one risky property (fix survival)
+is directly observable and cheap to prove.
+
+**Pattern recorded (used twice, worked twice):** QA cards on this board repeatedly exhaust their iteration
+budget *after* collecting evidence but *before* writing the typed verdict (UI-QA2: 82 renders; functional QA:
+38 live shots + probes + verify logs). The repair is not a re-run but a small `*-verdict` card scoped to
+analysis-only (explicit ban on re-render/re-build/re-launch), with artifact paths pre-injected in the contract.
+Both times the evidence was real and the verdict landed on the first run.
+
+**Gate-contract lessons (durable):** the completion gate reads the RUN envelope and requires (1) `expected`
+text byte-equal to the card's `expected_observable`, (2) evidence references to FILES, never directories,
+(3) run_id/task_id present, (4) every referenced path to exist at gate time. Backfills that paraphrase
+`expected` are rejected as `CHECK_EXPECTED_REWRITTEN`; directory refs as `EVIDENCE_NOT_FOUND`.
+
+**Forecloses:** nothing about scope. It does establish that merge-invariant acceptance evidence must be
+produced by the planner, not inherited from the branch that was merged.
