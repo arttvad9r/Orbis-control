@@ -1,0 +1,62 @@
+== pre-drag asusd ==
+2026-09-22T14:39:12+03:00
+(uu(yyy)(yyy)ss) 0 0 0 246 255 0 0 0 "Med" "Right"
+== post-red-drag asusd ==
+2026-09-22T14:39:27+03:00
+(uu(yyy)(yyy)ss) 0 0 0 246 255 0 0 0 "Med" "Right"
+u 0
+== after preset click ==
+2026-09-22T14:40:15+03:00
+(uu(yyy)(yyy)ss) 0 0 0 246 255 0 0 0 "Med" "Right"
+== step1: click Красный preset (window rx=737 ry=783) ==
+(uu(yyy)(yyy)ss) 0 0 0 246 255 0 0 0 "Med" "Right"
+2026-09-22T14:40:32+03:00
+(uu(yyy)(yyy)ss) 0 0 255 65 77 0 0 0 "Med" "Right"
+u 0
+== stepA: drag КРАСНЫЙ slider track x 820->900 (wr y=437) ==
+(uu(yyy)(yyy)ss) 0 0 255 65 77 0 0 0 "Med" "Right"
+2026-09-22T14:42:24+03:00
+(uu(yyy)(yyy)ss) 0 0 130 65 77 0 0 0 "Med" "Right"
+== drag ЗЕЛЁНЫЙ (wr 820,495 -> 900,495) ==
+2026-09-22T14:42:43+03:00
+(uu(yyy)(yyy)ss) 0 0 130 129 77 0 0 0 "Med" "Right"
+== drag СИНИЙ (wr 820,558 -> 900,558) ==
+2026-09-22T14:42:53+03:00
+(uu(yyy)(yyy)ss) 0 0 130 129 139 0 0 0 "Med" "Right"
+== drag ВТОРИЧНЫЙ-КРАСНЫЙ (wr 820,630 -> 900,630) ==
+2026-09-22T14:43:00+03:00
+(uu(yyy)(yyy)ss) 0 0 130 129 139 0 0 0 "Med" "Right"
+== drag ВТОРИЧНЫЙ-ЗЕЛЁНЫЙ (wr 820,677 -> 900,677) ==
+2026-09-22T14:43:08+03:00
+(uu(yyy)(yyy)ss) 0 0 130 129 139 0 130 0 "Med" "Right"
+== stepB: click скорость Fast (wr 568,605) ==
+(uu(yyy)(yyy)ss) 0 0 130 129 139 0 130 0 "Med" "Right"
+2026-09-22T14:43:57+03:00
+(uu(yyy)(yyy)ss) 0 0 130 129 139 0 130 0 "High" "Right"
+== probe: click disabled effect 'Breathe' (wr 389,479) ==
+2026-09-22T14:44:05+03:00
+(uu(yyy)(yyy)ss) 0 0 130 129 139 0 130 0 "High" "Right"
+== stepC: secondary-blue slider wr 820,724 -> 900,724 ==
+2026-09-22T14:46:18+03:00
+(uu(yyy)(yyy)ss) 0 0 130 129 139 0 130 135 "High" "Right"
+== stepD: mid-drag capture red 900->960 at wr y=437 ==
+(uu(yyy)(yyy)ss) 0 0 130 129 139 0 130 135 "High" "Right"
+2026-09-22T14:46:56+03:00
+(uu(yyy)(yyy)ss) 0 0 229 129 139 0 130 135 "High" "Right"
+--- pre-secondary-red 2026-09-22T14:49:27+03:00
+u 0
+(uu(yyy)(yyy)ss) 0 0 229 129 139 0 130 135 "High" "Right"
+u 3
+--- live-16-secondary-red 2026-09-22T14:49:37+03:00
+u 0
+(uu(yyy)(yyy)ss) 0 0 229 129 139 133 130 135 "High" "Right"
+u 3
+== RESTORE to pre-probe baseline (colour1 0,246,255 / colour2 0,0,0 / speed Med / LedMode 0) ==
+--- restore-readback 2026-09-22T14:49:44+03:00
+u 0
+(uu(yyy)(yyy)ss) 0 0 0 246 255 0 0 0 "Med" "Right"
+u 3
+--- live-17-resynced 2026-09-22T14:50:12+03:00
+u 0
+(uu(yyy)(yyy)ss) 0 0 0 246 255 0 0 0 "Med" "Right"
+u 3

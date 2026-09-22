@@ -322,6 +322,8 @@ export component AppWindow inherits Window {
                     if (root.active-section == Section.Performance) : PerformanceSection {
                         ui-state <=> root.ui-state;
                         perf-clicked(i) => { root.perf-clicked(i); }
+                        power-limit-changed(f, v) => { root.power-limit-changed(f, v); }
+                        power-limit-apply-clicked => { root.power-limit-apply-clicked(); }
                         graphics-open-requested => { root.open-section(Section.Graphics); }
                     }
                     if (root.active-section == Section.Power) : PowerSection {

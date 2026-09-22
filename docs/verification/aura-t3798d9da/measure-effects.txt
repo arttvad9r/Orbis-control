@@ -1,0 +1,17 @@
+== docs/verification/aura-t3798d9da/live-17-resynced.png (1240x820)
+  Static        SELECTED       bg=#172a45 accent_px=58 border_px=0
+  Breathe       disabled       bg=#181d22 accent_px=0 border_px=71
+  Rainbow       disabled       bg=#181d22 accent_px=0 border_px=74
+  Star          disabled       bg=#181d22 accent_px=0 border_px=51
+  Rainbow Wave  disabled       bg=#181d22 accent_px=0 border_px=95
+  Rain          disabled       bg=#181d22 accent_px=0 border_px=43
+  Highlight     disabled       bg=#181d22 accent_px=0 border_px=68
+  Laser         disabled       bg=#181d22 accent_px=0 border_px=48
+  Ripple        disabled       bg=#181d22 accent_px=0 border_px=65
+  Pulse         disabled       bg=#181d22 accent_px=0 border_px=61
+  Comet         disabled       bg=#181d22 accent_px=0 border_px=67
+  Flash         disabled       bg=#181d22 accent_px=0 border_px=61
+  Slow          enabled        bg=#1e242b accent_px=0 border_px=91
+  Normal        enabled        bg=#1e242b accent_px=0 border_px=104
+  Fast          SELECTED       bg=#172a45 accent_px=88 border_px=0
+  totals: {'SELECTED': 2, 'disabled': 11, 'enabled': 2}

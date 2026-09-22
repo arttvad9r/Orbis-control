@@ -1,0 +1,63 @@
+### live-01-backlight
+== docs/verification/aura-t3798d9da/live-01-backlight.png (1240x820)
+  rgb-red              y=437: fill=None track=(834, 974)
+  rgb-green            y=497: fill=(817, 952) track=None
+  rgb-blue             y=560: fill=(817, 957) track=None
+  secondary-red        y=630: fill=None track=(834, 974)
+  secondary-green      y=677: fill=None track=(834, 974)
+  secondary-blue       y=724: fill=None track=(834, 974)
+  keyboard-brightness  y=239: fill=(986, 1054) track=(790, 953)  implied=412.0/255
+### live-04-preset-red
+== docs/verification/aura-t3798d9da/live-04-preset-red.png (1240x820)
+  rgb-red              y=437: no track/ fill colour found
+  rgb-green            y=497: no track/ fill colour found
+  rgb-blue             y=560: no track/ fill colour found
+  secondary-red        y=630: no track/ fill colour found
+  secondary-green      y=677: no track/ fill colour found
+  secondary-blue       y=724: no track/ fill colour found
+  keyboard-brightness  y=239: fill=None track=(790, 953)
+### live-06-red-drag
+== docs/verification/aura-t3798d9da/live-06-red-drag.png (1240x820)
+  rgb-red              y=437: fill=(817, 887) track=(906, 974)  implied=-66.5/255
+  rgb-green            y=497: fill=(817, 851) track=(870, 974)  implied=-43.7/255
+  rgb-blue             y=560: fill=(817, 858) track=(877, 974)  implied=-46.8/255
+  secondary-red        y=630: fill=None track=(834, 974)
+  secondary-green      y=677: fill=None track=(834, 974)
+  secondary-blue       y=724: fill=None track=(834, 974)
+  keyboard-brightness  y=239: fill=(986, 1054) track=(790, 953)  implied=412.0/255
+### live-07-color-sliders
+== docs/verification/aura-t3798d9da/live-07-color-sliders.png (1240x820)
+  rgb-red              y=437: no track/ fill colour found
+  rgb-green            y=497: no track/ fill colour found
+  rgb-blue             y=560: no track/ fill colour found
+  secondary-red        y=630: no track/ fill colour found
+  secondary-green      y=677: no track/ fill colour found
+  secondary-blue       y=724: no track/ fill colour found
+  keyboard-brightness  y=239: fill=None track=(790, 953)
+### live-09-speed-fast
+== docs/verification/aura-t3798d9da/live-09-speed-fast.png (1240x820)
+  rgb-red              y=437: no track/ fill colour found
+  rgb-green            y=497: no track/ fill colour found
+  rgb-blue             y=560: no track/ fill colour found
+  secondary-red        y=630: no track/ fill colour found
+  secondary-green      y=677: no track/ fill colour found
+  secondary-blue       y=724: no track/ fill colour found
+  keyboard-brightness  y=239: fill=None track=(790, 953)
+### live-11-secondary-blue
+== docs/verification/aura-t3798d9da/live-11-secondary-blue.png (1240x820)
+  rgb-red              y=437: fill=(817, 887) track=(906, 974)  implied=-66.5/255
+  rgb-green            y=497: fill=(817, 887) track=(906, 974)  implied=-66.5/255
+  rgb-blue             y=560: fill=(817, 892) track=(911, 974)  implied=-71.7/255
+  secondary-red        y=630: fill=None track=(834, 974)
+  secondary-green      y=677: fill=(817, 887) track=(906, 974)  implied=-66.5/255
+  secondary-blue       y=724: fill=(817, 890) track=(909, 974)  implied=-69.5/255
+  keyboard-brightness  y=239: fill=(986, 1054) track=(790, 953)  implied=412.0/255
+### live-16-secondary-red
+== docs/verification/aura-t3798d9da/live-16-secondary-red.png (1240x820)
+  rgb-red              y=437: no track/ fill colour found
+  rgb-green            y=497: no track/ fill colour found
+  rgb-blue             y=560: no track/ fill colour found
+  secondary-red        y=630: no track/ fill colour found
+  secondary-green      y=677: no track/ fill colour found
+  secondary-blue       y=724: no track/ fill colour found
+  keyboard-brightness  y=239: fill=None track=(790, 953)

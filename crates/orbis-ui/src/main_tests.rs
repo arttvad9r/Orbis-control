@@ -3074,7 +3074,9 @@ fn sidebar_nav_items_route_to_their_sections() {
 fn shell_hosts_four_sections_and_frameless_chrome() {
     let shell = include_str!("../../../ui/audited/main-window.slint");
     assert!(shell.contains("no-frame: true"));
-    assert!(shell.contains("preferred-width: 1240px"));
+    // Window size contract (user decision): 980x680 minimum, 1200x800 comfort.
+    assert!(shell.contains("preferred-width: 1200px"));
+    assert!(shell.contains("min-width: 980px"));
     assert!(shell.contains("Section.Dashboard"));
     assert!(shell.contains("Section.Performance"));
     assert!(shell.contains("Section.Power"));
@@ -3115,4 +3117,41 @@ fn backlight_exposes_editable_rgb_channels() {
     ] {
         assert!(source.contains(label), "missing Aura mode label: {label}");
     }
+}
+
+/// REQ-BOOST / SC-BOOST: the performance page hosts the backend-metadata
+/// limits card, the Dynamic Boost row is driven by the authoritative
+/// gpu-dynamic-boost-* fields (real backend unit, draft-aware), and no
+/// invented CPU-boost control exists anywhere in the UI surface.
+#[test]
+fn performance_page_renders_dynamic_boost_with_real_unit_gating() {
+    let source = include_str!("../../../ui/audited/sections/performance.slint");
+
+    assert!(source.contains("Лимиты мощности и температуры"));
+    // Boost row: exists only when the backend reports the field, headline
+    // carries the backend unit, and edits route through the typed pipeline.
+    assert!(source.contains("gpu-dynamic-boost-unit"));
+    assert!(source.contains("NVIDIA Dynamic Boost"));
+    assert!(
+        source.contains("gpu-dynamic-boost-draft"),
+        "boost row must show the dirty draft while one is pending"
+    );
+    assert!(source.contains("power-limit-changed"));
+    assert!(source.contains("power-limit-apply-clicked"));
+    // The card is capability-gated, and an unavailable backend still gets an
+    // honest card (reason text), not a silently missing surface.
+    assert!(source.contains("visible: root.ui-state.power-limits-ready;"));
+    assert!(source.contains("!root.ui-state.power-limits-ready"));
+    // No invented CPU boost field: the authoritative field map (Rust) has no
+    // such key, so no section may render one.
+    assert!(
+        !source.contains("cpu-boost") && !source.contains("CPU Boost"),
+        "invented CPU boost control must not exist"
+    );
+
+    let shell = include_str!("../../../ui/audited/main-window.slint");
+    assert!(
+        shell.contains("power-limit-changed(f, v) => { root.power-limit-changed(f, v); }"),
+        "shell must route the performance limits callbacks to the Rust pipeline"
+    );
 }
