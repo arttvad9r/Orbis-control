@@ -155,10 +155,52 @@ fn demo_state(component: &AppWindow) {
     component.set_ui_state(state);
 }
 
+/// Honest non-Ready power-limit shape, as the production startup path leaves it
+/// before any authoritative read arrives (`UiState::production_initial`).
+///
+/// Audit F5 / D-AUD-G02: the offscreen matrix previously could not render this
+/// state at all, so the Performance page's phantom band was invisible to it
+/// while the live application showed it on every start.
+fn clear_power_limits(state: &mut UiState, reason: &str) {
+    state.power_limits_ready = false;
+    state.power_limits_writable = false;
+    state.power_limits_reason = reason.into();
+    state.power_limits_stale = true;
+    state.spl_value = 0;
+    state.spl_unit = "".into();
+    state.spl_draft = 0;
+    state.sppt_value = 0;
+    state.sppt_unit = "".into();
+    state.sppt_draft = 0;
+    state.fppt_value = 0;
+    state.fppt_unit = "".into();
+    state.fppt_draft = 0;
+    state.cpu_temp_limit_value = 0;
+    state.cpu_temp_limit_unit = "".into();
+    state.cpu_temp_limit_draft = 0;
+    state.gpu_dynamic_boost_value = 0;
+    state.gpu_dynamic_boost_unit = "".into();
+    state.gpu_dynamic_boost_draft = 0;
+    state.gpu_temp_target_value = 0;
+    state.gpu_temp_target_unit = "".into();
+    state.gpu_temp_target_draft = 0;
+    state.power_limit_dirty_mask = 0;
+    state.power_limit_pending_mask = 0;
+}
+
 fn apply_scenario(component: &AppWindow, name: &str) -> anyhow::Result<()> {
     let mut state = component.get_ui_state();
     match name {
         "normal" => {}
+        // The real startup shape: the backend has not produced power-limit
+        // metadata yet, so the limits card must render as the honest fallback
+        // and must not reserve the height of the full card.
+        "limits-notready" | "limits-loading" => {
+            clear_power_limits(
+                &mut state,
+                "Лимиты мощности недоступны: backend не отвечает",
+            );
+        }
         "dirty" => {
             state.fan_curve_state = FanCurveHwState::Ready;
             state.fan_curve_writable = true;

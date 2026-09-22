@@ -115,16 +115,18 @@ export component CoolingSection inherits Rectangle {
                             height: 32px;
                             spacing: 10px;
                             alignment: end;
-                            ActionButton {
+                            // Same defect class as D-AUD-G02: `visible: false`
+                            // hides without collapsing, so these two buttons
+                            // still occupy their width in the action row. A
+                            // conditional element reserves nothing.
+                            if (root.selection-change-pending) : ActionButton {
                                 label: "Остаться";
                                 min-width: Grid.button-min-width;
-                                visible: root.selection-change-pending;
                                 clicked => { root.selection-change-pending = false; }
                             }
-                            ActionButton {
+                            if (root.selection-change-pending) : ActionButton {
                                 label: "Отбросить";
                                 min-width: Grid.button-min-width;
-                                visible: root.selection-change-pending;
                                 accent: true;
                                 clicked => {
                                     let fan = root.pending-fan;

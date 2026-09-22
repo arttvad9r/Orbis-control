@@ -129,8 +129,13 @@ export component PerformanceSection inherits Rectangle {
                     }
                 }
             }
-            SectionCard {
-                visible: root.ui-state.power-limits-ready;
+            // D-AUD-G02 (audit t_5fc90d28): the limits card used to be hidden
+            // with `visible:` next to a trailing `if (!ready)` fallback. Slint
+            // `visible: false` hides without collapsing, so the card kept its
+            // full height and the fallback rendered below a ~170px hole. A
+            // conditional pair reserves no space, so the not-Ready startup
+            // state has no phantom band (audit fix F2, lines 39-41).
+            if (root.ui-state.power-limits-ready) : SectionCard {
                 VerticalLayout {
                     padding: 16px;
                     spacing: 10px;
