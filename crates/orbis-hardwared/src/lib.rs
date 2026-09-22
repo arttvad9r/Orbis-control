@@ -1400,6 +1400,29 @@ impl HardwareService {
         battery_mutation_wire::to_wire(status)
     }
 
+    /// Read-only typed evidence about power-limit mutation backend
+    /// availability.
+    ///
+    /// This is capability metadata, not a mutation: no authorization is
+    /// required and no hardware write occurs. The returned wire value is one
+    /// of `power_limits::power_limit_mutation_wire::*` so the GUI can
+    /// honestly gate its SPL/SPPT/FPPT apply controls.
+    ///
+    /// When no power-limit backend is configured, the honest answer is
+    /// `UNKNOWN` (not configured ≠ proven Unsupported); a configured backend
+    /// is re-probed read-only on every query, so a kernel ABI that appears
+    /// or disappears at runtime is reflected without a daemon restart.
+    fn power_limit_mutation_status(&self) -> u8 {
+        use power_limits::{
+            PowerLimitMutationStatus, classify_mutation_probe, power_limit_mutation_wire,
+        };
+        let status = match self.power_limit_backend.as_deref() {
+            Some(backend) => classify_mutation_probe(&backend.set_power_limit_probe()),
+            None => PowerLimitMutationStatus::Unknown,
+        };
+        power_limit_mutation_wire::to_wire(status)
+    }
+
     /// Установить одну fan curve (profile wire 0..3, fan 0/1, ровно 8 точек);
     /// возвращает подтверждённый profile после asusd setter + read-back.
     async fn set_fan_curve(
@@ -1725,6 +1748,8 @@ pub trait Hardware1 {
     fn set_charge_limit(&self, percent: u8) -> zbus::Result<u8>;
     /// Set one of SPL/SPPT/FPPT and return authoritative read-back.
     fn set_power_limit(&self, field: u8, value: i32) -> zbus::Result<i32>;
+    /// Read-only typed power-limit mutation backend availability (wire enum).
+    fn power_limit_mutation_status(&self) -> zbus::Result<u8>;
     fn set_gpu_mode(&self, requested_mode: u32) -> zbus::Result<GpuMutationResult>;
     fn set_product_gpu_mode(&self, requested_mode: u32) -> zbus::Result<ProductGpuMutationResult>;
     /// Read-only authoritative product GPU status (no auth, no mutation).
