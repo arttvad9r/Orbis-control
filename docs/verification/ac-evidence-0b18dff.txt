@@ -1,0 +1,181 @@
+candidate HEAD: 0b18dffc302c83697df9bc02b3e23bbf300cb199
+date: 2026-09-21T23:37:19Z
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.32s
+     Running unittests src/lib.rs (target/debug/deps/orbis_ui-78b5eb84a8ba8bf0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 153 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/orbis_control-358509cf8d0f6759)
+
+running 3 tests
+test main_tests::fan_curve_can_mutate_valid_curve_returns_true ... ok
+test main_tests::fan_curve_can_mutate_requires_writable_dirty_and_valid ... ok
+test main_tests::fan_curve_mutation_ok_clears_dirty_and_error ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 0.00s
+
+     Running tests/diagnostics_pipeline.rs (target/debug/deps/diagnostics_pipeline-5cb64b1b0c90d3fc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+   Doc-tests orbis_ui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+ac020-ui EXIT=0
+
+== AC-020 session p2p (profile-specific sentinel read) ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running tests/session_fan_curve_p2p.rs (target/debug/deps/session_fan_curve_p2p-5d5ba94c97e37315)
+
+running 1 test
+test session1_fan_curve_reads_profile_specific_sentinel_over_p2p ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.01s
+
+ac020-p2p EXIT=0
+
+== AC-022 invalid draft (no mutation, visible reason, observed unchanged, draft editable) ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.32s
+     Running unittests src/lib.rs (target/debug/deps/orbis_ui-78b5eb84a8ba8bf0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 153 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/orbis_control-358509cf8d0f6759)
+
+running 1 test
+test main_tests::invalid_fan_curve_draft_sets_visible_validation_reason ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 232 filtered out; finished in 0.00s
+
+     Running tests/diagnostics_pipeline.rs (target/debug/deps/diagnostics_pipeline-5cb64b1b0c90d3fc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+   Doc-tests orbis_ui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+ac022 EXIT=0
+
+== AC-021 GPU independent (session p2p: CPU/GPU not mixed) ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running tests/session_fan_curve_p2p.rs (target/debug/deps/session_fan_curve_p2p-5d5ba94c97e37315)
+
+running 1 test
+test session1_fan_curve_cpu_gpu_not_mixed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+ac021-p2p EXIT=0
+
+== AC-021 fan id mapping (UI) ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running unittests src/lib.rs (target/debug/deps/orbis_ui-78b5eb84a8ba8bf0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 153 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/orbis_control-358509cf8d0f6759)
+
+running 1 test
+test main_tests::fan_curve_fan_id_mapping ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 232 filtered out; finished in 0.00s
+
+     Running tests/diagnostics_pipeline.rs (target/debug/deps/diagnostics_pipeline-5cb64b1b0c90d3fc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+   Doc-tests orbis_ui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+ac021-ui EXIT=0
+
+== AC-023 dirty curve on fan/profile switch: explicit stay or discard, no silent loss ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.32s
+     Running unittests src/lib.rs (target/debug/deps/orbis_ui-78b5eb84a8ba8bf0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 153 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/orbis_control-358509cf8d0f6759)
+
+running 1 test
+test main_tests::ac_023_dirty_fan_selection_requires_explicit_stay_or_discard ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 232 filtered out; finished in 0.00s
+
+     Running tests/diagnostics_pipeline.rs (target/debug/deps/diagnostics_pipeline-5cb64b1b0c90d3fc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+   Doc-tests orbis_ui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+ac023 EXIT=0
+
+== AC-024 reset gate: proven capability required (UI) ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running unittests src/lib.rs (target/debug/deps/orbis_ui-78b5eb84a8ba8bf0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 153 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/orbis_control-358509cf8d0f6759)
+
+running 2 tests
+test main_tests::factory_reset_unavailable_when_capability_absent_from_registry ... ok
+test main_tests::factory_reset_available_requires_proven_read_and_write_capability ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 231 filtered out; finished in 0.00s
+
+     Running tests/diagnostics_pipeline.rs (target/debug/deps/diagnostics_pipeline-5cb64b1b0c90d3fc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+   Doc-tests orbis_ui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+ac024-gate EXIT=0
+
+== AC-024 typed factory reset + read-back (hardwared, no real hardware) ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running unittests src/lib.rs (target/debug/deps/orbis_hardwared-467f5648cc74a271)
+
+running 1 test
+test fans::tests::factory_reset_is_profile_wide_and_read_back ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.00s
+
+ac024-hardwared EXIT=0

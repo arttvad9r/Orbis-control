@@ -1,0 +1,114 @@
+# Per-AC evidence — re-run at candidate 80efa1f675f61b3e22312ee463558a70dfa49af4
+# Branch: implementation/current-plan | workspace: /home/artt/Orbis-control-implementation
+# Date: 2026-09-21T23:14:11Z
+
+==============================================================
+== SC-PROFILE-SET / AC-010 + AC-011 (authoritative profile set-back; no false Pending on already-active profile)
+$ cargo test -p orbis-ui --bin orbis-control -- selecting_already_observed_profile_stays_balanced_without_false_pending authoritative_performance_result_updates_ui
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.32s
+     Running unittests src/main.rs (target/debug/deps/orbis_control-358509cf8d0f6759)
+
+running 2 tests
+test main_tests::authoritative_performance_result_updates_ui ... ok
+test main_tests::selecting_already_observed_profile_stays_balanced_without_false_pending ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 229 filtered out; finished in 0.00s
+
+--> exit code: 0
+
+
+==============================================================
+== SC-FAN-CPU / AC-020 + AC-022 (CPU curve profile-specific sentinel read; error-class preserved; invalid draft rejected with visible reason)
+$ cargo test -p orbis-sessiond --test session_fan_curve_p2p -- session1_fan_curve_reads_profile_specific_sentinel_over_p2p session1_fan_curve_error_class_is_preserved
+   Compiling orbis-providers v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-providers)
+   Compiling orbis-session-protocol v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-session-protocol)
+   Compiling orbis-sessiond v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-sessiond)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.55s
+     Running tests/session_fan_curve_p2p.rs (target/debug/deps/session_fan_curve_p2p-5d5ba94c97e37315)
+
+running 2 tests
+test session1_fan_curve_error_class_is_preserved ... ok
+test session1_fan_curve_reads_profile_specific_sentinel_over_p2p ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+--> exit code: 0
+
+$ cargo test -p orbis-ui --bin orbis-control -- invalid_fan_curve_draft_sets_visible_validation_reason
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/main.rs (target/debug/deps/orbis_control-358509cf8d0f6759)
+
+running 1 test
+test main_tests::invalid_fan_curve_draft_sets_visible_validation_reason ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 0.00s
+
+--> exit code: 0
+
+==============================================================
+== SC-FAN-GPU / AC-021 (GPU curve independent; CPU/GPU not mixed)
+$ cargo test -p orbis-sessiond --test session_fan_curve_p2p -- session1_fan_curve_cpu_gpu_not_mixed
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running tests/session_fan_curve_p2p.rs (target/debug/deps/session_fan_curve_p2p-5d5ba94c97e37315)
+
+running 1 test
+test session1_fan_curve_cpu_gpu_not_mixed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+--> exit code: 0
+
+==============================================================
+== SC-POWER-VIEW / AC-030 (SPL/SPPT/FPPT independent fields with authoritative metadata; honest unknown initial state)
+$ cargo test -p orbis-ui --bin orbis-control -- power_limit_fixture_preserves_independent_backend_metadata advanced_power_limits_render_authoritative_metadata_and_pending_bits production_initial_power_limits_are_unknown_not_fake_defaults
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running unittests src/main.rs (target/debug/deps/orbis_control-358509cf8d0f6759)
+
+running 3 tests
+test main_tests::power_limit_fixture_preserves_independent_backend_metadata ... ok
+test main_tests::production_initial_power_limits_are_unknown_not_fake_defaults ... ok
+test main_tests::advanced_power_limits_render_authoritative_metadata_and_pending_bits ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 228 filtered out; finished in 0.00s
+
+--> exit code: 0
+
+==============================================================
+== SC-POWER-APPLY / AC-031 + AC-032 + AC-034 + AC-035 (typed mutation + read-back; range rejected pre-mutation; authorization failure honest)
+$ cargo test -p orbis-hardwared --test power_limits_p2p -- private_hardware1_success_and_readback_mismatch invalid_range_is_rejected_before_authorization_or_backend authorization_failure_timeout_and_unsupported_are_honest
+   Compiling tracing-core v0.1.36
+   Compiling tracing v0.1.44
+   Compiling tracing-log v0.2.0
+   Compiling zbus v5.13.2
+   Compiling tracing-subscriber v0.3.23
+   Compiling orbis-providers v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-providers)
+   Compiling zbus_polkit v5.0.0
+   Compiling orbis-hardwared v0.1.0 (/home/artt/Orbis-control-implementation/crates/orbis-hardwared)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.13s
+     Running tests/power_limits_p2p.rs (target/debug/deps/power_limits_p2p-e7895e52e32024e8)
+
+running 3 tests
+test invalid_range_is_rejected_before_authorization_or_backend ... ok
+test private_hardware1_success_and_readback_mismatch ... ok
+test authorization_failure_timeout_and_unsupported_are_honest ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.00s
+
+--> exit code: 0
+
+$ cargo test -p orbis-ui --bin orbis-control -- power_limit_slider_change_is_dirty_draft_only_and_range_rejected power_limit_denial_shows_error_until_user_edits_draft power_limit_timeout_unknown_outcome_resolves_on_fresh_read power_limit_in_flight_field_keeps_pending_across_unrelated_refresh
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running unittests src/main.rs (target/debug/deps/orbis_control-358509cf8d0f6759)
+
+running 4 tests
+test main_tests::power_limit_slider_change_is_dirty_draft_only_and_range_rejected ... ok
+test main_tests::power_limit_denial_shows_error_until_user_edits_draft ... ok
+test main_tests::power_limit_in_flight_field_keeps_pending_across_unrelated_refresh ... ok
+test main_tests::power_limit_timeout_unknown_outcome_resolves_on_fresh_read ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 227 filtered out; finished in 0.00s
+
+--> exit code: 0
+
+==============================================================
+== Summary

@@ -1,0 +1,113 @@
+candidate HEAD: a95ac90e705e4d9504f6b6cc928340dcecc1f77b
+date: 2026-09-22T00:32:20Z
+parent: ad20ff4cb3613c197486a62f6139d10e41cb0314
+
+== SC-POWER-VIEW|ac030-ui ==
+test main_tests::power_limit_fixture_preserves_independent_backend_metadata ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 234 filtered out; finished in 0.00s
+
+ac030-ui EXIT=0
+
+== SC-POWER-VIEW|ac030-no-fake-defaults ==
+test main_tests::production_initial_power_limits_are_unknown_not_fake_defaults ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 234 filtered out; finished in 0.00s
+
+ac030-no-fake-defaults EXIT=0
+
+== SC-POWER-VIEW|ac040-ui-render ==
+test main_tests::dynamic_boost_rendering_shows_real_unit_and_no_invented_cpu_boost_field ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 234 filtered out; finished in 0.00s
+
+ac040-ui-render EXIT=0
+
+== SC-POWER-VIEW|ac040-capabilities ==
+test composition::tests::dynamic_boost_and_temp_target_capabilities_carry_real_metadata ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 153 filtered out; finished in 0.01s
+
+ac040-capabilities EXIT=0
+
+== SC-POWER-APPLY|ac031-hardwared ==
+test private_hardware1_success_and_readback_mismatch ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+ac031-hardwared EXIT=0
+
+== SC-POWER-APPLY|ac031-boost-compose ==
+test tests::dynamic_boost_and_temp_target_apply_through_typed_hardware_path ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 55 filtered out; finished in 0.00s
+
+ac031-boost-compose EXIT=0
+
+== SC-POWER-APPLY|ac032-hardwared ==
+test invalid_range_is_rejected_before_authorization_or_backend ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+ac032-hardwared EXIT=0
+
+== SC-POWER-APPLY|ac032-ui ==
+test main_tests::power_limit_slider_change_is_dirty_draft_only_and_range_rejected ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 234 filtered out; finished in 0.00s
+
+ac032-ui EXIT=0
+
+== SC-POWER-APPLY|ac032-boost-ui ==
+test main_tests::dynamic_boost_draft_apply_and_failure_lifecycle_is_field_independent ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 234 filtered out; finished in 0.00s
+
+ac032-boost-ui EXIT=0
+
+== SC-POWER-APPLY|ac034-ui ==
+test main_tests::power_limit_denial_shows_error_until_user_edits_draft ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 234 filtered out; finished in 0.00s
+
+ac034-ui EXIT=0
+
+== SC-POWER-APPLY|ac035-ui ==
+test main_tests::power_limit_timeout_unknown_outcome_resolves_on_fresh_read ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 234 filtered out; finished in 0.00s
+
+ac035-ui EXIT=0
+
+== SC-POWER-APPLY|ac035-isolation ==
+test main_tests::power_limit_in_flight_field_keeps_pending_across_unrelated_refresh ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 234 filtered out; finished in 0.00s
+
+ac035-isolation EXIT=0
+
+== SC-BOOST|ac040-boost-apply ==
+test tests::dynamic_boost_and_temp_target_apply_through_typed_hardware_path ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 54 filtered out; finished in 0.00s
+
+ac040-boost-apply EXIT=0
+
+== SC-BOOST|ac041-sessiond ==
+test power_limits::tests::cpu_temperature_limit_and_cpu_boost_have_no_kernel_armoury_field ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 88 filtered out; finished in 0.00s
+
+ac041-sessiond EXIT=0
+
+== SC-BOOST|ac041-ui ==
+test main_tests::dynamic_boost_rendering_shows_real_unit_and_no_invented_cpu_boost_field ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 234 filtered out; finished in 0.00s
+
+ac041-ui EXIT=0
+
+== workspace totals ==
+WORKSPACE_TEST_EXIT=0
+TOTAL_PASSED=1496
+SUITES_WITH_ZERO_FAILED= 49
