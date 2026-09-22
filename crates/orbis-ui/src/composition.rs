@@ -583,6 +583,12 @@ pub struct ApplicationRuntime<G, B, R> {
     /// (e.g., asusd daemon starts or stops). Read-only D-Bus queries; no
     /// mutations or authorization required.
     mutation_status_connection: Option<zbus::Connection>,
+    /// Typed Hardware1 power-limit mutation backend evidence (last probe).
+    ///
+    /// Re-queried by `requery_power_limit_write_status`; controls the
+    /// SPL/SPPT/FPPT apply gate with the same honest status distinctions as
+    /// the other mutation evidence. Unknown until the first successful probe.
+    power_limit_write_status: orbis_core::capability::CapabilityStatus,
 }
 
 impl<G, B, R> ApplicationRuntime<G, B, R> {
@@ -620,6 +626,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             battery_mutation_status,
             performance_mutation_status,
             mutation_status_connection,
+            power_limit_write_status: orbis_core::capability::CapabilityStatus::Unknown,
         }
     }
 
@@ -692,6 +699,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             battery_mutation_status,
             performance_mutation_status,
             mutation_status_connection: None,
+            power_limit_write_status: orbis_core::capability::CapabilityStatus::Unknown,
         }
     }
 
@@ -740,12 +748,27 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
 
     /// Return the current power-limit write evidence.
     ///
-    /// No supported typed writer is selected on the current platform. In
-    /// particular, Hardware1 name ownership is not power-limit evidence.
+    /// Read-only Hardware1 probe of the typed power-limit mutation backend;
+    /// performs no mutation and requires no authorization. With no
+    /// connection (test mode) the last-known value stands.
     pub async fn requery_power_limit_write_status(
-        &self,
+        &mut self,
     ) -> orbis_core::capability::CapabilityStatus {
-        orbis_core::capability::CapabilityStatus::Unsupported
+        match &self.mutation_status_connection {
+            Some(connection) => {
+                self.power_limit_write_status = bounded_hardware1_status(
+                    "power_limit_mutation_status",
+                    orbis_session_client::hardware1_power_limit_mutation_status(connection),
+                )
+                .await;
+            }
+            None => {
+                tracing::debug!(
+                    "no Hardware1 connection; keeping power-limit write status unchanged"
+                );
+            }
+        }
+        self.power_limit_write_status
     }
 }
 

@@ -725,6 +725,13 @@ impl UiState {
                 CapabilityAvailability::from_status(cap.operations.write.status),
             );
         }
+        if let Some(cap) = snapshot.capability(FeatureId::PptPl1Spl) {
+            // The SPL feature entry is the power-limit write gate: its
+            // `operations.write.status` carries the typed Hardware1
+            // power_limit_mutation_status probe, so the apply button unlocks
+            // only on proven backend evidence (never on read availability).
+            self.power_limits_writable = write_allows_mutation(cap.operations.write.status);
+        }
         if let Some(cap) = snapshot.capability(FeatureId::GpuPower) {
             self.gpu_power_capability = CapabilityAvailability::from_status(cap.status);
         }
