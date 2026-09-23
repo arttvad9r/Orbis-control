@@ -1934,12 +1934,7 @@ fn handle_worker_event(
     let refresh_charge_limit = matches!(&event, WorkerEvent::ChargeLimit(Err(_)));
 
     let refresh_quick_controls = matches!(&event, WorkerEvent::TelemetryRefresh(_));
-    let factory_reset_available = match &event {
-        WorkerEvent::RegistryChange(Ok((_generation, snapshot))) => {
-            Some(controller::fan_factory_reset_available(snapshot))
-        }
-        _ => None,
-    };
+    let factory_reset_available = factory_reset_availability_for_registry_event(&event);
     if let WorkerEvent::RegistryChange(Ok((_generation, snapshot))) = &event {
         diagnostics_backend::replace_capabilities(snapshot.clone());
     }
@@ -1974,6 +1969,16 @@ fn handle_worker_event(
         if let Err(e) = worker_tx.send(WorkerCommand::RefreshChargeLimit) {
             tracing::warn!("charge-limit resolution refresh enqueue failed: {e:?}");
         }
+    }
+}
+
+fn factory_reset_availability_for_registry_event(event: &WorkerEvent) -> Option<bool> {
+    match event {
+        WorkerEvent::RegistryChange(Ok((_generation, snapshot))) => {
+            Some(controller::fan_factory_reset_available(snapshot))
+        }
+        WorkerEvent::RegistryChange(Err(_)) => Some(false),
+        _ => None,
     }
 }
 

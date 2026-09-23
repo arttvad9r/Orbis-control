@@ -1086,6 +1086,40 @@ fn registry_change_updates_gating_without_touching_observed() {
 }
 
 #[test]
+fn registry_error_disables_factory_reset_until_fresh_supported_capability() {
+    use orbis_core::capability::CapabilityStatus::Supported;
+
+    let supported =
+        WorkerEvent::RegistryChange(Ok((1, snapshot_with_fan_curves(Supported, Supported))));
+    let unavailable = WorkerEvent::RegistryChange(Err(orbis_capabilities::ProbeError::Internal(
+        "registry unavailable".into(),
+    )));
+    let refreshed =
+        WorkerEvent::RegistryChange(Ok((2, snapshot_with_fan_curves(Supported, Supported))));
+
+    assert_eq!(
+        factory_reset_availability_for_registry_event(&supported),
+        Some(true)
+    );
+    assert_eq!(
+        factory_reset_availability_for_registry_event(&unavailable),
+        Some(false)
+    );
+    assert_eq!(
+        factory_reset_availability_for_registry_event(&refreshed),
+        Some(true)
+    );
+
+    let mut state = base_state();
+    state.fan_curve_state = controller::FanCurveHwState::Ready;
+    state.fan_curve_pwms = [15, 25, 35, 45, 55, 65, 75, 85];
+    let observed_curve = state.fan_curve_pwms;
+    apply_performance_event(&mut state, unavailable);
+    assert_eq!(state.fan_curve_state, controller::FanCurveHwState::Ready);
+    assert_eq!(state.fan_curve_pwms, observed_curve);
+}
+
+#[test]
 fn platform_profile_lifecycle_promotes_only_after_new_supported_evidence() {
     use orbis_core::capability::CapabilityStatus;
 
