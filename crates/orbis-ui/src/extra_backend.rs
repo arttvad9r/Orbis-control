@@ -1266,6 +1266,7 @@ mod tests {
     fn production_refresh_publishes_injected_reads_to_app_window() {
         i_slint_backend_testing::init_integration_test_with_mock_time();
         let app = AppWindow::new().expect("construct headless AppWindow");
+        app.set_status("before callback".into());
         app.set_advanced_apply_ready(true);
 
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -1332,6 +1333,7 @@ mod tests {
         refresh_started_rx
             .recv_timeout(std::time::Duration::from_secs(2))
             .expect("production refresh reaches injected read source");
+
         let (cancel_watchdog, watchdog_cancelled) = std::sync::mpsc::channel();
         let watchdog = std::thread::spawn(move || {
             if watchdog_cancelled
@@ -1343,6 +1345,8 @@ mod tests {
         });
         let (observed, observed_rx) = std::sync::mpsc::channel();
         let observed = Arc::new(Mutex::new(Some(observed)));
+        let (refreshed, refreshed_rx) = std::sync::mpsc::channel();
+        let refreshed = Arc::new(Mutex::new(Some(refreshed)));
         let poll_weak = app.as_weak();
         let poll_deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
         let poll = Arc::new(Mutex::new(None::<Box<dyn FnMut() + Send>>));
@@ -1359,7 +1363,22 @@ mod tests {
                     .expect("observation sender available")
                     .send(())
                     .expect("signal published getter");
-                slint::quit_event_loop().expect("quit after owner-thread getter observation");
+                refreshed
+                    .lock()
+                    .expect("refresh observation sender lock")
+                    .take()
+                    .expect("refresh observation sender available")
+                    .send(())
+                    .expect("signal refresh getter");
+                let callback_weak = poll_weak.clone();
+                slint::invoke_from_event_loop(move || {
+                    let window = callback_weak
+                        .upgrade()
+                        .expect("AppWindow stays alive through status callback");
+                    window.set_status("callback delivered".into());
+                    slint::quit_event_loop().expect("quit after callback status update");
+                })
+                .expect("schedule status callback after refresh publication");
             } else if std::time::Instant::now() >= poll_deadline {
                 observed.lock().expect("observation sender lock").take();
                 slint::quit_event_loop().expect("quit after getter watchdog deadline");
@@ -1385,6 +1404,10 @@ mod tests {
         observed_rx
             .recv_timeout(std::time::Duration::from_secs(1))
             .expect("event loop quit after bounded getter check");
+        refreshed_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("event loop published refreshed getters");
+        assert_eq!(app.get_status(), "callback delivered");
         cancel_watchdog
             .send(())
             .expect("cancel event-loop watchdog");
@@ -1401,6 +1424,7 @@ mod tests {
         assert!(app.get_disable_aspm());
         assert_eq!(app.get_auto_clamshell_state(), ClamshellState::Active);
         assert!(!app.get_advanced_apply_ready());
+        assert_eq!(app.get_status(), "callback delivered");
 
         CONTEXT.with(|slot| slot.borrow_mut().take());
         drop(runtime);
