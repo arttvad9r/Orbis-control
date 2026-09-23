@@ -29,8 +29,18 @@ struct ExtraContext {
     advanced_unresolved: Arc<AtomicBool>,
     advanced_draft: Arc<Mutex<Option<AdvancedApplyDraft>>>,
     clamshell: Arc<dyn SessionClamshellSource>,
+    refresh_reads: Arc<dyn Fn() -> RefreshReadsFuture + Send + Sync>,
     write_statuses: Arc<dyn Fn() -> WriteStatusFuture + Send + Sync>,
 }
+
+type RefreshReads = (
+    Result<orbis_core::aura::AuraState, ProviderError>,
+    Result<PanelOverdriveState, ProviderError>,
+    Result<BootSoundState, ProviderError>,
+    Result<u8, ProviderError>,
+    Result<(bool, ProductWriteStatus), ProviderError>,
+);
+type RefreshReadsFuture = std::pin::Pin<Box<dyn std::future::Future<Output = RefreshReads> + Send>>;
 
 type WriteStatuses = Result<
     (
@@ -225,6 +235,7 @@ pub(crate) fn initialize(runtime: tokio::runtime::Handle, session_connection: zb
             advanced_unresolved: Arc::new(AtomicBool::new(false)),
             advanced_draft: Arc::new(Mutex::new(None)),
             clamshell: Arc::new(ZbusSessionClamshellSource::new(session_connection)),
+            refresh_reads: Arc::new(|| Box::pin(bounded_refresh_reads())),
             write_statuses: Arc::new(|| Box::pin(bounded_write_statuses())),
         });
     });
@@ -792,9 +803,8 @@ fn refresh_with_status(
     let weak = window.as_weak();
     let completion = context.refreshing.clone();
     context.runtime.spawn(async move {
-        let refresh_reads = Box::pin(bounded_refresh_reads());
         let (refresh_results, write_statuses, clamshell_result) = tokio::join!(
-            refresh_reads,
+            (context.refresh_reads)(),
             (context.write_statuses)(),
             context.clamshell.read_clamshell(),
         );
@@ -990,13 +1000,7 @@ async fn bounded_aspm_read() -> Result<(bool, ProductWriteStatus), ProviderError
         .map_err(|_| ProviderError::Timeout("Extra ASPM read timed out".into()))?
 }
 
-async fn bounded_refresh_reads() -> (
-    Result<orbis_core::aura::AuraState, ProviderError>,
-    Result<PanelOverdriveState, ProviderError>,
-    Result<BootSoundState, ProviderError>,
-    Result<u8, ProviderError>,
-    Result<(bool, ProductWriteStatus), ProviderError>,
-) {
+async fn bounded_refresh_reads() -> RefreshReads {
     let panel_provider = AsusArmouryPanelOverdriveProvider::default();
     let boot_sound_provider = AsusBootSoundProvider::default();
     tokio::join!(
@@ -1234,6 +1238,7 @@ fn advanced_apply_control_label(control: AdvancedApplyControl) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicUsize;
     use std::sync::{Arc, Mutex};
 
     use super::*;
@@ -1243,6 +1248,163 @@ mod tests {
     };
 
     const OBJECT_PATH: &str = "/io/github/orbiscontrol/Hardware";
+
+    struct FakeClamshell;
+
+    #[async_trait::async_trait]
+    impl SessionClamshellSource for FakeClamshell {
+        async fn read_clamshell(&self) -> Result<u8, ProviderError> {
+            Ok(clamshell::ACTIVE)
+        }
+
+        async fn set_clamshell(&self, _enabled: bool) -> Result<u8, ProviderError> {
+            Ok(clamshell::ACTIVE)
+        }
+    }
+
+    #[test]
+    fn production_refresh_publishes_injected_reads_to_app_window() {
+        i_slint_backend_testing::init_integration_test_with_mock_time();
+        let app = AppWindow::new().expect("construct headless AppWindow");
+        app.set_advanced_apply_ready(true);
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("build fixture runtime");
+        let (refresh_started, refresh_started_rx) = std::sync::mpsc::channel();
+        let injected = Arc::new(AtomicUsize::new(0));
+        let calls = injected.clone();
+        let context = ExtraContext {
+            runtime: runtime.handle().clone(),
+            refreshing: Arc::new(AtomicBool::new(false)),
+            mutating: Arc::new(AtomicBool::new(false)),
+            advanced_dirty: Arc::new(AtomicBool::new(false)),
+            advanced_unresolved: Arc::new(AtomicBool::new(false)),
+            advanced_draft: Arc::new(Mutex::new(None)),
+            clamshell: Arc::new(FakeClamshell),
+            refresh_reads: Arc::new(move || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                refresh_started.send(()).expect("signal refresh read start");
+                Box::pin(async {
+                    (
+                        Ok(AuraState {
+                            current_mode: AuraMode::Static,
+                            current_effect: AuraEffect {
+                                mode: AuraMode::Static,
+                                zone: AuraZone::None,
+                                colour1: AuraRgb {
+                                    r: 12,
+                                    g: 34,
+                                    b: 56,
+                                },
+                                colour2: AuraRgb { r: 0, g: 0, b: 0 },
+                                speed: AuraSpeed::Med,
+                                direction: AuraDirection::Right,
+                            },
+                            brightness: AuraBrightness::Med,
+                            supported_modes: vec![AuraMode::Static],
+                            supported_zones: Vec::new(),
+                            supported_brightness: vec![AuraBrightness::Med],
+                        }),
+                        Ok(PanelOverdriveState::Enabled),
+                        Ok(BootSoundState::Enabled),
+                        Ok(6),
+                        Ok((true, ProductWriteStatus::Supported)),
+                    )
+                })
+            }),
+            write_statuses: Arc::new(|| {
+                Box::pin(async {
+                    Ok((
+                        ProductWriteStatus::Supported,
+                        ProductWriteStatus::Supported,
+                        ProductWriteStatus::Supported,
+                        ProductWriteStatus::Supported,
+                    ))
+                })
+            }),
+        };
+        CONTEXT.with(|slot| *slot.borrow_mut() = Some(context));
+
+        refresh_with_status(&app, None, None, true);
+        refresh_started_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("production refresh reaches injected read source");
+        let (cancel_watchdog, watchdog_cancelled) = std::sync::mpsc::channel();
+        let watchdog = std::thread::spawn(move || {
+            if watchdog_cancelled
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .is_err()
+            {
+                let _ = slint::quit_event_loop();
+            }
+        });
+        let (observed, observed_rx) = std::sync::mpsc::channel();
+        let observed = Arc::new(Mutex::new(Some(observed)));
+        let poll_weak = app.as_weak();
+        let poll_deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
+        let poll = Arc::new(Mutex::new(None::<Box<dyn FnMut() + Send>>));
+        let poll_again = poll.clone();
+        let poll_once: Box<dyn FnMut() + Send> = Box::new(move || {
+            let published = poll_weak
+                .upgrade()
+                .is_some_and(|window| window.get_aura_state_ready() && window.get_rgb_red() == 12);
+            if published {
+                observed
+                    .lock()
+                    .expect("observation sender lock")
+                    .take()
+                    .expect("observation sender available")
+                    .send(())
+                    .expect("signal published getter");
+                slint::quit_event_loop().expect("quit after owner-thread getter observation");
+            } else if std::time::Instant::now() >= poll_deadline {
+                observed.lock().expect("observation sender lock").take();
+                slint::quit_event_loop().expect("quit after getter watchdog deadline");
+            } else {
+                let next = poll_again.clone();
+                slint::invoke_from_event_loop(move || {
+                    if let Some(poll) = next.lock().expect("poll callback lock").as_mut() {
+                        poll();
+                    }
+                })
+                .expect("requeue owner-thread getter check");
+            }
+        });
+        *poll.lock().expect("poll callback lock") = Some(poll_once);
+        let first_poll = poll.clone();
+        slint::invoke_from_event_loop(move || {
+            if let Some(poll) = first_poll.lock().expect("poll callback lock").as_mut() {
+                poll();
+            }
+        })
+        .expect("queue first owner-thread getter check");
+        slint::run_event_loop().expect("pump bounded Slint event loop");
+        observed_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("event loop quit after bounded getter check");
+        cancel_watchdog
+            .send(())
+            .expect("cancel event-loop watchdog");
+        watchdog.join().expect("event-loop watchdog completes");
+
+        assert_eq!(injected.load(Ordering::SeqCst), 1);
+        assert!(app.get_aura_state_ready());
+        assert_eq!(app.get_rgb_red(), 12);
+        assert_eq!(app.get_rgb_green(), 34);
+        assert_eq!(app.get_rgb_blue(), 56);
+        assert!(app.get_panel_overdrive());
+        assert!(app.get_boot_sound());
+        assert_eq!(app.get_igpu_memory(), 6);
+        assert!(app.get_disable_aspm());
+        assert_eq!(app.get_auto_clamshell_state(), ClamshellState::Active);
+        assert!(!app.get_advanced_apply_ready());
+
+        CONTEXT.with(|slot| slot.borrow_mut().take());
+        drop(runtime);
+    }
 
     #[derive(Clone)]
     struct FakeAdvancedHardware {
