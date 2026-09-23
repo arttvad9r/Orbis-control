@@ -1277,6 +1277,8 @@ mod tests {
         let (refresh_started, refresh_started_rx) = std::sync::mpsc::channel();
         let injected = Arc::new(AtomicUsize::new(0));
         let calls = injected.clone();
+        let status_mode = Arc::new(AtomicUsize::new(0));
+        let status_calls = status_mode.clone();
         let context = ExtraContext {
             runtime: runtime.handle().clone(),
             refreshing: Arc::new(AtomicBool::new(false)),
@@ -1316,14 +1318,19 @@ mod tests {
                     )
                 })
             }),
-            write_statuses: Arc::new(|| {
-                Box::pin(async {
-                    Ok((
-                        ProductWriteStatus::Supported,
-                        ProductWriteStatus::Supported,
-                        ProductWriteStatus::Supported,
-                        ProductWriteStatus::Supported,
-                    ))
+            write_statuses: Arc::new(move || {
+                let mode = status_calls.load(Ordering::SeqCst);
+                Box::pin(async move {
+                    if mode == 1 {
+                        Err(ProviderError::BackendUnavailable("owner vanished".into()))
+                    } else {
+                        Ok((
+                            ProductWriteStatus::Supported,
+                            ProductWriteStatus::Supported,
+                            ProductWriteStatus::Supported,
+                            ProductWriteStatus::Supported,
+                        ))
+                    }
                 })
             }),
         };
@@ -1345,40 +1352,53 @@ mod tests {
         });
         let (observed, observed_rx) = std::sync::mpsc::channel();
         let observed = Arc::new(Mutex::new(Some(observed)));
-        let (refreshed, refreshed_rx) = std::sync::mpsc::channel();
-        let refreshed = Arc::new(Mutex::new(Some(refreshed)));
         let poll_weak = app.as_weak();
         let poll_deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
         let poll = Arc::new(Mutex::new(None::<Box<dyn FnMut() + Send>>));
         let poll_again = poll.clone();
+        let phase = Arc::new(AtomicUsize::new(0));
+        let poll_phase = phase.clone();
         let poll_once: Box<dyn FnMut() + Send> = Box::new(move || {
-            let published = poll_weak
-                .upgrade()
-                .is_some_and(|window| window.get_aura_state_ready() && window.get_rgb_red() == 12);
-            if published {
+            let current_phase = poll_phase.load(Ordering::SeqCst);
+            let ready = poll_weak.upgrade().is_some_and(|window| {
+                window.get_aura_state_ready()
+                    && window.get_rgb_red() == 12
+                    && window.get_boot_sound_control_ready() == (current_phase != 1)
+                    && window.get_igpu_memory_control_ready() == (current_phase != 1)
+                    && window.get_aspm_control_ready()
+            });
+            if ready && current_phase < 2 {
+                let next_phase = current_phase + 1;
+                poll_phase.store(next_phase, Ordering::SeqCst);
+                status_mode.store(usize::from(next_phase == 1), Ordering::SeqCst);
+                let weak = poll_weak.clone();
+                slint::invoke_from_event_loop(move || {
+                    let window = weak.upgrade().expect("AppWindow remains alive");
+                    refresh_with_status(&window, None, None, true);
+                })
+                .expect("schedule next production refresh after publication");
+                let next = poll_again.clone();
+                slint::invoke_from_event_loop(move || {
+                    if let Some(poll) = next.lock().expect("poll callback lock").as_mut() {
+                        poll();
+                    }
+                })
+                .expect("requeue owner-thread getter check");
+            } else if ready {
                 observed
                     .lock()
                     .expect("observation sender lock")
                     .take()
                     .expect("observation sender available")
                     .send(())
-                    .expect("signal published getter");
-                refreshed
-                    .lock()
-                    .expect("refresh observation sender lock")
-                    .take()
-                    .expect("refresh observation sender available")
-                    .send(())
-                    .expect("signal refresh getter");
+                    .expect("signal final publication");
                 let callback_weak = poll_weak.clone();
                 slint::invoke_from_event_loop(move || {
-                    let window = callback_weak
-                        .upgrade()
-                        .expect("AppWindow stays alive through status callback");
+                    let window = callback_weak.upgrade().expect("AppWindow stays alive");
                     window.set_status("callback delivered".into());
-                    slint::quit_event_loop().expect("quit after callback status update");
+                    slint::quit_event_loop().expect("quit after final callback status update");
                 })
-                .expect("schedule status callback after refresh publication");
+                .expect("schedule H1 callback after recovery publication");
             } else if std::time::Instant::now() >= poll_deadline {
                 observed.lock().expect("observation sender lock").take();
                 slint::quit_event_loop().expect("quit after getter watchdog deadline");
@@ -1404,16 +1424,12 @@ mod tests {
         observed_rx
             .recv_timeout(std::time::Duration::from_secs(1))
             .expect("event loop quit after bounded getter check");
-        refreshed_rx
-            .recv_timeout(std::time::Duration::from_secs(1))
-            .expect("event loop published refreshed getters");
         assert_eq!(app.get_status(), "callback delivered");
         cancel_watchdog
             .send(())
             .expect("cancel event-loop watchdog");
         watchdog.join().expect("event-loop watchdog completes");
-
-        assert_eq!(injected.load(Ordering::SeqCst), 1);
+        assert_eq!(injected.load(Ordering::SeqCst), 3);
         assert!(app.get_aura_state_ready());
         assert_eq!(app.get_rgb_red(), 12);
         assert_eq!(app.get_rgb_green(), 34);
@@ -1424,8 +1440,6 @@ mod tests {
         assert!(app.get_disable_aspm());
         assert_eq!(app.get_auto_clamshell_state(), ClamshellState::Active);
         assert!(!app.get_advanced_apply_ready());
-        assert_eq!(app.get_status(), "callback delivered");
-
         CONTEXT.with(|slot| slot.borrow_mut().take());
         drop(runtime);
     }
