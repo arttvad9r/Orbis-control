@@ -1637,6 +1637,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "i-slint-backend-testing"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "849f3bfdd82ec0174ddffeb0b32988c68821b1dc32849058f965a0078bf562b8"
+dependencies = [
+ "i-slint-core",
+ "vtable",
+]
+
+[[package]]
 name = "i-slint-backend-winit"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3147,6 +3157,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures-util",
+ "i-slint-backend-testing",
  "image",
  "orbis-application",
  "orbis-capabilities",

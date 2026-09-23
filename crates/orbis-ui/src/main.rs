@@ -2775,3 +2775,44 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod main_tests;
+
+#[cfg(test)]
+mod event_loop_harness_tests {
+    use slint::ComponentHandle;
+
+    #[test]
+    fn invoke_from_event_loop_updates_app_window_property() {
+        // This backend owns process-global Slint initialization, so this test
+        // must remain the sole Slint event-loop initializer in its test process.
+        i_slint_backend_testing::init_integration_test_with_mock_time();
+
+        let app = crate::AppWindow::new().expect("construct headless AppWindow");
+        app.set_status("before callback".into());
+        let weak = app.as_weak();
+        slint::invoke_from_event_loop(move || {
+            let app = weak
+                .upgrade()
+                .expect("AppWindow stays alive through callback");
+            app.set_status("callback delivered".into());
+            slint::quit_event_loop().expect("quit after callback");
+        })
+        .expect("schedule callback on Slint event loop");
+
+        let (cancel_watchdog, watchdog_cancelled) = std::sync::mpsc::channel();
+        let watchdog = std::thread::spawn(move || {
+            if watchdog_cancelled
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .is_err()
+            {
+                let _ = slint::quit_event_loop();
+            }
+        });
+        slint::run_event_loop().expect("pump headless Slint event loop");
+        cancel_watchdog
+            .send(())
+            .expect("cancel event-loop watchdog");
+        watchdog.join().expect("watchdog thread completes");
+
+        assert_eq!(app.get_status(), "callback delivered");
+    }
+}

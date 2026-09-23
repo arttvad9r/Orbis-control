@@ -44,6 +44,7 @@ slint-build = "1"
 [dev-dependencies]
 async-trait = { workspace = true }
 tempfile = { workspace = true }
+i-slint-backend-testing = "=1.13.1"
 orbis-test-support = { workspace = true }
 orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }
 
