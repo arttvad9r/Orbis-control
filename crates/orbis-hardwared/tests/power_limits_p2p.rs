@@ -42,6 +42,13 @@ struct FakeBackend {
 
 #[async_trait]
 impl PowerLimitMutationBackend for FakeBackend {
+    /// Read-only availability metadata for the fake. The fake models a device
+    /// whose typed write ABI is present, so the probe reports `Supported`; the
+    /// p2p test exercises `handle_set_power_limit` and never consumes it.
+    fn set_power_limit_probe(&self) -> Result<(), ProviderError> {
+        Ok(())
+    }
+
     async fn set_power_limit(
         &self,
         _field: PowerLimitField,
