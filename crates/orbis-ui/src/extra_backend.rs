@@ -125,6 +125,39 @@ fn advanced_control_writable(unresolved: bool, ready: bool, supported: bool) -> 
     !unresolved && ready && supported
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AdvancedReadiness {
+    boot_sound: bool,
+    igpu_memory: bool,
+    aspm: bool,
+    apply: bool,
+}
+
+fn advanced_readiness(
+    unresolved: bool,
+    dirty: bool,
+    boot_observed: bool,
+    boot_write: ProductWriteStatus,
+    apu_observed: bool,
+    apu_write: ProductWriteStatus,
+    aspm_write: ProductWriteStatus,
+) -> AdvancedReadiness {
+    let boot_sound =
+        advanced_control_writable(unresolved, boot_observed, boot_write.is_supported());
+    let igpu_memory = advanced_control_writable(unresolved, apu_observed, apu_write.is_supported());
+    let aspm = advanced_control_writable(
+        unresolved,
+        aspm_write != ProductWriteStatus::Unknown,
+        aspm_write.is_supported(),
+    );
+    AdvancedReadiness {
+        boot_sound,
+        igpu_memory,
+        aspm,
+        apply: advanced_apply_ready(dirty, boot_sound, igpu_memory, aspm),
+    }
+}
+
 fn advanced_apply_draft(
     boot_sound: bool,
     igpu_memory: i32,
@@ -829,27 +862,19 @@ fn refresh_with_status(
                 if !unresolved {
                     *context.advanced_draft.lock().unwrap() = None;
                 }
-                let boot_writable = advanced_control_writable(
+                let readiness = advanced_readiness(
                     unresolved,
-                    boot_sound.ready,
-                    boot_sound_write.is_supported(),
-                );
-                let igpu_writable =
-                    advanced_control_writable(unresolved, apu.ready, apu_write.is_supported());
-                let aspm_writable = advanced_control_writable(
-                    unresolved,
-                    aspm_write != ProductWriteStatus::Unknown,
-                    aspm_write.is_supported(),
-                );
-                window.set_boot_sound_control_ready(boot_writable);
-                window.set_igpu_memory_control_ready(igpu_writable);
-                window.set_aspm_control_ready(aspm_writable);
-                window.set_advanced_apply_ready(advanced_apply_ready(
                     dirty,
-                    boot_writable,
-                    igpu_writable,
-                    aspm_writable,
-                ));
+                    boot_sound.ready,
+                    boot_sound_write,
+                    apu.ready,
+                    apu_write,
+                    aspm_write,
+                );
+                window.set_boot_sound_control_ready(readiness.boot_sound);
+                window.set_igpu_memory_control_ready(readiness.igpu_memory);
+                window.set_aspm_control_ready(readiness.aspm);
+                window.set_advanced_apply_ready(readiness.apply);
             } else {
                 window.set_advanced_apply_ready(false);
             }
@@ -974,6 +999,20 @@ async fn bounded_write_statuses() -> Result<
     ProviderError,
 > {
     let client = HardwareProductControlClient::connect_system().await?;
+    bounded_write_statuses_with(&client).await
+}
+
+async fn bounded_write_statuses_with(
+    client: &HardwareProductControlClient,
+) -> Result<
+    (
+        ProductWriteStatus,
+        ProductWriteStatus,
+        ProductWriteStatus,
+        ProductWriteStatus,
+    ),
+    ProviderError,
+> {
     let (keyboard, panel, boot_sound, apu) = tokio::join!(
         client.keyboard_status(),
         client.panel_status(),
@@ -1195,6 +1234,14 @@ mod tests {
 
     #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
     impl FakeAdvancedHardware {
+        async fn keyboard_backlight_mutation_status(&self) -> u8 {
+            0
+        }
+
+        async fn panel_mutation_status(&self) -> u8 {
+            0
+        }
+
         async fn boot_sound_mutation_status(&self) -> u8 {
             self.boot_status
         }
@@ -1319,6 +1366,45 @@ mod tests {
         .unwrap();
 
         assert_eq!(*state.lock().unwrap(), (true, 6, true));
+    }
+
+    #[tokio::test]
+    async fn hardware_owner_loss_produces_disabled_advanced_readiness() {
+        let hardware = FakeAdvancedHardware {
+            state: Arc::new(Mutex::new((false, 2, false))),
+            boot_status: 0,
+            fail_on: None,
+        };
+        let (server, connection) = private_advanced_peer(hardware).await;
+        let client = HardwareProductControlClient::new(connection);
+        let statuses = bounded_write_statuses_with(&client).await.unwrap();
+        let ready = advanced_readiness(
+            false,
+            true,
+            true,
+            statuses.2,
+            true,
+            statuses.3,
+            ProductWriteStatus::Supported,
+        );
+        assert!(ready.boot_sound && ready.igpu_memory && ready.aspm && ready.apply);
+
+        drop(server);
+        let unavailable = bounded_write_statuses_with(&client).await;
+        assert!(unavailable.is_err());
+        let readiness = advanced_readiness(
+            false,
+            true,
+            true,
+            ProductWriteStatus::Unknown,
+            true,
+            ProductWriteStatus::Unknown,
+            ProductWriteStatus::Unknown,
+        );
+        assert!(!readiness.boot_sound);
+        assert!(!readiness.igpu_memory);
+        assert!(!readiness.aspm);
+        assert!(!readiness.apply);
     }
 
     #[tokio::test]
