@@ -29,7 +29,19 @@ struct ExtraContext {
     advanced_unresolved: Arc<AtomicBool>,
     advanced_draft: Arc<Mutex<Option<AdvancedApplyDraft>>>,
     clamshell: Arc<dyn SessionClamshellSource>,
+    write_statuses: Arc<dyn Fn() -> WriteStatusFuture + Send + Sync>,
 }
+
+type WriteStatuses = Result<
+    (
+        ProductWriteStatus,
+        ProductWriteStatus,
+        ProductWriteStatus,
+        ProductWriteStatus,
+    ),
+    ProviderError,
+>;
+type WriteStatusFuture = std::pin::Pin<Box<dyn std::future::Future<Output = WriteStatuses> + Send>>;
 
 thread_local! {
     static CONTEXT: RefCell<Option<ExtraContext>> = const { RefCell::new(None) };
@@ -213,6 +225,7 @@ pub(crate) fn initialize(runtime: tokio::runtime::Handle, session_connection: zb
             advanced_unresolved: Arc::new(AtomicBool::new(false)),
             advanced_draft: Arc::new(Mutex::new(None)),
             clamshell: Arc::new(ZbusSessionClamshellSource::new(session_connection)),
+            write_statuses: Arc::new(|| Box::pin(bounded_write_statuses())),
         });
     });
 }
@@ -779,26 +792,14 @@ fn refresh_with_status(
     let weak = window.as_weak();
     let completion = context.refreshing.clone();
     context.runtime.spawn(async move {
-        let panel_provider = AsusArmouryPanelOverdriveProvider::default();
-        let boot_sound_provider = AsusBootSoundProvider::default();
-
-        let (
-            aura_result,
-            panel_result,
-            boot_sound_result,
-            apu_result,
-            aspm_result,
-            write_statuses,
-            clamshell_result,
-        ) = tokio::join!(
-            bounded_aura_read(),
-            bounded_panel_read(&panel_provider),
-            bounded_boot_sound_read(&boot_sound_provider),
-            bounded_apu_memory_read(),
-            bounded_aspm_read(),
-            bounded_write_statuses(),
+        let refresh_reads = Box::pin(bounded_refresh_reads());
+        let (refresh_results, write_statuses, clamshell_result) = tokio::join!(
+            refresh_reads,
+            (context.write_statuses)(),
             context.clamshell.read_clamshell(),
         );
+        let (aura_result, panel_result, boot_sound_result, apu_result, aspm_result) =
+            refresh_results;
 
         let aura = aura_observed(aura_result);
         let panel = panel_observed(panel_result);
@@ -987,6 +988,24 @@ async fn bounded_aspm_read() -> Result<(bool, ProductWriteStatus), ProviderError
     tokio::time::timeout(READ_TIMEOUT, client.aspm_state())
         .await
         .map_err(|_| ProviderError::Timeout("Extra ASPM read timed out".into()))?
+}
+
+async fn bounded_refresh_reads() -> (
+    Result<orbis_core::aura::AuraState, ProviderError>,
+    Result<PanelOverdriveState, ProviderError>,
+    Result<BootSoundState, ProviderError>,
+    Result<u8, ProviderError>,
+    Result<(bool, ProductWriteStatus), ProviderError>,
+) {
+    let panel_provider = AsusArmouryPanelOverdriveProvider::default();
+    let boot_sound_provider = AsusBootSoundProvider::default();
+    tokio::join!(
+        bounded_aura_read(),
+        bounded_panel_read(&panel_provider),
+        bounded_boot_sound_read(&boot_sound_provider),
+        bounded_apu_memory_read(),
+        bounded_aspm_read(),
+    )
 }
 
 async fn bounded_write_statuses() -> Result<
