@@ -69,7 +69,7 @@ fn demo_state(component: &AppWindow) {
     state.gpu_mode_state = GpuModeHwState::Ready;
     state.gpu_mode_writable = true;
     state.gpu_selected = 1;
-    state.available_gpu_mask = 0b1111;
+    state.available_gpu_mask = 0b0111;
     state.gpu_queued = -1;
     state.gpu_reboot_required = false;
 

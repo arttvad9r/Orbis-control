@@ -168,13 +168,15 @@ export component GraphicsSection inherits Rectangle {
                              disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4);
                             clicked => { root.gpu-clicked(2); }
                         }
-                        if (root.bit-set(root.ui-state.available-gpu-mask, 8)) : ModeCard {
+                        // Keep the fourth approved mode visible, but unavailable
+                        // until the runtime exposes a typed write path.
+                        ModeCard {
                             title: "Optimized";
-                            description: "Автоматическое переключение";
+                            description: "Автоматическое переключение · недоступно";
                             icon-kind: 4;
                             accent: Palette.optimized;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3;
-                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
+                            disabled: true;
                             clicked => { root.gpu-clicked(3); }
                         }
                     }

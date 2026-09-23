@@ -541,11 +541,11 @@ impl UiState {
 
         let gpu_selected = gpu_index(state.gpu_mode);
 
-        // Доступность GPU-режимов из mock-состояния: Standard доступен всегда
-        // (гибрид), Eco/Ultimate/Optimized — только при наличии физического MUX.
+        // Mock mode actions mirror the typed product API: Standard, Eco and
+        // Ultimate have targets; Optimized has no typed write path yet.
         let mut available_gpu_mask = 0b0010; // Standard
         if state.mux != orbis_core::gpu::GpuMuxState::Unknown {
-            available_gpu_mask |= 0b1101; // Eco | Ultimate | Optimized
+            available_gpu_mask |= 0b0101; // Eco | Ultimate
         }
 
         let charge_limit = state
@@ -1280,7 +1280,7 @@ mod tests {
     fn initial_gpu_zephyrus_is_standard() {
         let s = UiState::from_mock_profile("zephyrus-full");
         assert_eq!(s.gpu_selected, 1); // Standard из mock-состояния
-        assert_eq!(s.available_gpu_mask, 0b1111);
+        assert_eq!(s.available_gpu_mask, 0b0111);
     }
 
     #[test]
@@ -1301,11 +1301,11 @@ mod tests {
     }
 
     #[test]
-    fn standard_to_optimized() {
+    fn optimized_mock_action_is_rejected_without_typed_target() {
         let mut s = UiState::from_mock_profile("zephyrus-full");
+        let before = s.clone();
         apply(&mut s, UiAction::Gpu(3));
-        assert_eq!(s.gpu_selected, 3);
-        assert!(!s.gpu_ultimate_pending);
+        assert_eq!(s, before);
     }
 
     #[test]
@@ -1370,7 +1370,7 @@ mod tests {
         apply(&mut s, UiAction::Gpu(2)); // Ultimate pending
         let slint_state = crate::to_slint(&s);
         assert_eq!(slint_state.gpu_selected, 2);
-        assert_eq!(slint_state.available_gpu_mask, 0b1111);
+        assert_eq!(slint_state.available_gpu_mask, 0b0111);
         assert!(slint_state.gpu_ultimate_pending);
     }
 

@@ -780,6 +780,27 @@ fn gpu_index_mapping() {
     assert_eq!(gpu_mode_from_index(9), None);
 }
 
+#[test]
+fn optimized_gpu_mode_is_not_advertised_without_typed_write_target() {
+    let mut state = base_state();
+    assert_eq!(state.available_gpu_mask & 0b1000, 0);
+    assert_eq!(gpu_mode_from_index(3), None);
+    assert_eq!(gpu_mode_card_disabled(&state, 3, 0b1000), true);
+
+    state.gpu_mode_state = controller::GpuModeHwState::Ready;
+    state.gpu_mode_writable = true;
+    state.available_gpu_mask |= 0b1000;
+    assert!(gpu_mode_card_disabled(&state, 3, 0b1000));
+}
+
+#[test]
+fn mock_gpu_mask_never_infers_optimized_support_from_mux() {
+    for profile in ["zephyrus-full", "tuf-fa707nv-realistic"] {
+        let state = controller::UiState::from_mock_profile(profile);
+        assert_eq!(state.available_gpu_mask & 0b1000, 0, "{profile}");
+    }
+}
+
 fn applied_outcome(requested: GpuMode) -> GpuCommandOutcome {
     GpuCommandOutcome {
         result: ApplyResult::Applied,
@@ -798,7 +819,7 @@ fn authoritative_gpu_applied_updates_ui() {
     let mut s = base_state();
     s.perf_selected = 0;
     s.charge_limit = 65;
-    s.available_gpu_mask = 0b1111;
+    s.available_gpu_mask = 0b0111;
     s.gpu_ultimate_disabled = false;
     s.gpu_section_error = true;
 
@@ -807,7 +828,7 @@ fn authoritative_gpu_applied_updates_ui() {
     assert_eq!(s.gpu_selected, 3);
     assert!(!s.gpu_ultimate_pending);
     assert!(!s.gpu_section_error);
-    assert_eq!(s.available_gpu_mask, 0b1111);
+    assert_eq!(s.available_gpu_mask, 0b0111);
     assert!(!s.gpu_ultimate_disabled);
     assert_eq!(s.perf_selected, 0);
     assert_eq!(s.charge_limit, 65);
@@ -2078,7 +2099,7 @@ fn mock_gpu_mode_stays_interactive() {
     assert_eq!(s.gpu_mode_state, controller::GpuModeHwState::Ready);
     assert!(s.gpu_mode_writable);
     assert!(gpu_mode_card_selected(&s, 1));
-    for idx in 0..4 {
+    for idx in 0..3 {
         assert!(!gpu_mode_card_disabled(&s, idx, 1 << idx));
     }
 }

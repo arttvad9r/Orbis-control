@@ -1136,10 +1136,11 @@ fn gpu_mode_card_selected(state: &controller::UiState, index: i32) -> bool {
 }
 
 #[cfg(test)]
-fn gpu_mode_card_disabled(state: &controller::UiState, _index: i32, mask_bit: i32) -> bool {
+fn gpu_mode_card_disabled(state: &controller::UiState, index: i32, mask_bit: i32) -> bool {
     state.gpu_mode_state != controller::GpuModeHwState::Ready
         || !state.gpu_mode_writable
         || state.available_gpu_mask & mask_bit == 0
+        || gpu_mode_from_index(index).is_none()
 }
 
 fn gpu_mode_from_index(index: i32) -> Option<u32> {
