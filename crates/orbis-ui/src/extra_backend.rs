@@ -1267,7 +1267,6 @@ mod tests {
         i_slint_backend_testing::init_integration_test_with_mock_time();
         let app = AppWindow::new().expect("construct headless AppWindow");
         app.set_status("before callback".into());
-        app.set_advanced_apply_ready(true);
 
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -1335,6 +1334,7 @@ mod tests {
             }),
         };
         CONTEXT.with(|slot| *slot.borrow_mut() = Some(context));
+        wire_window(&app);
 
         refresh_with_status(&app, None, None, true);
         refresh_started_rx
@@ -1353,6 +1353,8 @@ mod tests {
         let (observed, observed_rx) = std::sync::mpsc::channel();
         let observed = Arc::new(Mutex::new(Some(observed)));
         let poll_weak = app.as_weak();
+        let apply_phase = Arc::new(AtomicUsize::new(0));
+        let poll_apply_phase = apply_phase.clone();
         let poll_deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
         let poll = Arc::new(Mutex::new(None::<Box<dyn FnMut() + Send>>));
         let poll_again = poll.clone();
@@ -1367,6 +1369,16 @@ mod tests {
                     && window.get_igpu_memory_control_ready() == (current_phase != 1)
                     && window.get_aspm_control_ready()
             });
+            if ready && current_phase == 0 && poll_apply_phase.load(Ordering::SeqCst) == 0 {
+                let window = poll_weak.upgrade().expect("AppWindow remains alive");
+                window.invoke_boot_sound_requested(!window.get_boot_sound());
+                assert!(window.get_advanced_apply_ready());
+                poll_apply_phase.store(1, Ordering::SeqCst);
+            }
+            let ready = ready
+                && poll_weak.upgrade().is_some_and(|window| {
+                    window.get_advanced_apply_ready() == (current_phase == 0)
+                });
             if ready && current_phase < 2 {
                 let next_phase = current_phase + 1;
                 poll_phase.store(next_phase, Ordering::SeqCst);
