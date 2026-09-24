@@ -136,9 +136,10 @@ export component GraphicsSection inherits Rectangle {
                     }
 
                     HorizontalLayout {
-                        height: 88px;
                         spacing: 12px;
                         ModeCard {
+                            min-width: (parent.width - 36px) / 4;
+                            max-width: (parent.width - 36px) / 4;
                             title: "Eco";
                             description: "Только интегрированная графика";
                             icon-kind: 4;
@@ -149,6 +150,8 @@ export component GraphicsSection inherits Rectangle {
                             clicked => { root.gpu-clicked(0); }
                         }
                         ModeCard {
+                            min-width: (parent.width - 36px) / 4;
+                            max-width: (parent.width - 36px) / 4;
                             title: "Standard";
                             description: "Гибридный режим";
                             icon-kind: 4;
@@ -159,6 +162,8 @@ export component GraphicsSection inherits Rectangle {
                             clicked => { root.gpu-clicked(1); }
                         }
                         ModeCard {
+                            min-width: (parent.width - 36px) / 4;
+                            max-width: (parent.width - 36px) / 4;
                             title: "Ultimate";
                             description: "Прямой вывод через dGPU";
                             icon-kind: 4;
@@ -171,6 +176,8 @@ export component GraphicsSection inherits Rectangle {
                         // Keep the fourth approved mode visible, but unavailable
                         // until the runtime exposes a typed write path.
                         ModeCard {
+                            min-width: (parent.width - 36px) / 4;
+                            max-width: (parent.width - 36px) / 4;
                             title: "Optimized";
                             description: "Автоматическое переключение · недоступно";
                             icon-kind: 4;

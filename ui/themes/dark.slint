@@ -21,6 +21,10 @@ export global Palette {
     in property <color> surface-selected: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-selected : #172A45;
     in property <color> surface-disabled: ThemeState.mode == ThemeMode.Light ? LightPalette.surface-disabled : #181D22;
     in property <color> accent-soft: ThemeState.mode == ThemeMode.Light ? LightPalette.accent-soft : #172A45;
+    // Full-fill accent for the selected navigation pill (TARGET_DESIGN sidebar):
+    // the reference marks the active destination with a solid blue row rather
+    // than a soft tint, at both themes.
+    in property <color> accent-fill: ThemeState.mode == ThemeMode.Light ? LightPalette.accent-fill : #2F6FE4;
     in property <color> border-default: ThemeState.mode == ThemeMode.Light ? LightPalette.border-default : #2B333C;
     in property <color> border-strong: ThemeState.mode == ThemeMode.Light ? LightPalette.border-strong : #414B57;
 

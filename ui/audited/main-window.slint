@@ -208,63 +208,75 @@ export component AppWindow inherits Window {
                         padding-right: 10px;
                         padding-top: 12px;
                         padding-bottom: 12px;
-                        spacing: 3px;
+                        spacing: 2px;
 
+                        // TARGET_DESIGN: two-line rows with the reference's
+                        // per-destination descriptors. Sublabels describe only
+                        // real Orbis surfaces; nothing reference-only is added.
                         NavItem {
                             label: "Главная";
+                            sublabel: "Обзор и быстрые действия";
                             icon-kind: 0;
                             selected: root.active-section == Section.Dashboard;
                             clicked => { root.open-section(Section.Dashboard); }
                         }
 
-                        Rectangle { height: 12px; background: transparent; }
+                        Rectangle { height: 10px; background: transparent; }
                         Text {
-                            height: 22px;
+                            height: 20px;
                             text: "УПРАВЛЕНИЕ";
                             font-size: 10px;
                             font-weight: 650;
+                            letter-spacing: 0.6px;
                             color: Palette.text-disabled;
                             vertical-alignment: center;
                         }
 
                         NavItem {
                             label: "Производительность";
+                            sublabel: "Лимиты мощности CPU/GPU";
                             icon-kind: 1;
                             selected: root.active-section == Section.Performance;
                             clicked => { root.open-section(Section.Performance); }
                         }
                         NavItem {
                             label: "Питание";
+                            sublabel: "Заряд, лимит, расход";
                             icon-kind: 2;
                             selected: root.active-section == Section.Power;
                             clicked => { root.open-section(Section.Power); }
                         }
                         NavItem {
                             label: "Охлаждение";
+                            sublabel: "Профили и кривые";
                             icon-kind: 3;
                             selected: root.active-section == Section.Cooling;
                             clicked => { root.open-section(Section.Cooling); }
                         }
                         NavItem {
                             label: "Графика";
+                            sublabel: "Режим GPU и графика";
                             icon-kind: 4;
                             selected: root.active-section == Section.Graphics;
                             clicked => { root.open-section(Section.Graphics); }
                         }
                         NavItem {
                             label: "Подсветка";
+                            sublabel: "Подсветка и эффекты Aura";
                             icon-kind: 5;
                             selected: root.active-section == Section.Backlight;
                             clicked => { root.open-section(Section.Backlight); }
                         }
                         NavItem {
                             label: "Экран";
+                            sublabel: "Яркость и герцовка";
                             icon-kind: 6;
                             selected: root.active-section == Section.Display;
                             clicked => { root.open-section(Section.Display); }
                         }
                         NavItem {
                             label: "Система";
+                            sublabel: "О системе, датчики, логи";
                             icon-kind: 7;
                             selected: root.active-section == Section.System;
                             clicked => { root.open-section(Section.System); }
@@ -272,21 +284,24 @@ export component AppWindow inherits Window {
 
                         Rectangle { vertical-stretch: 1; background: transparent; }
                         Text {
-                            height: 22px;
+                            height: 20px;
                             text: "ПРИЛОЖЕНИЕ";
                             font-size: 10px;
                             font-weight: 650;
+                            letter-spacing: 0.6px;
                             color: Palette.text-disabled;
                             vertical-alignment: center;
                         }
                         NavItem {
                             label: "Настройки";
+                            sublabel: "Внешний вид и поведение";
                             icon-kind: 8;
                             selected: root.active-section == Section.Settings;
                             clicked => { root.open-section(Section.Settings); }
                         }
                         NavItem {
                             label: "О программе";
+                            sublabel: "Версия и сведения";
                             icon-kind: 9;
                             selected: root.active-section == Section.About;
                             clicked => { root.open-section(Section.About); }

@@ -15,6 +15,10 @@ export component ModeCard inherits Rectangle {
     in property <bool> icon-visible: true;
     callback clicked;
 
+    // Mode selectors are arranged in equal-width rows. Explicitly permit the
+    // card to shrink beneath its text's natural width so one long translated
+    // label cannot starve the selected sibling at the 980 px minimum window.
+    min-width: 0px;
     horizontal-stretch: 1;
     min-height: 82px;
     border-radius: 12px;

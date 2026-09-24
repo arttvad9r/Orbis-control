@@ -1,48 +1,43 @@
-// Sidebar navigation item. Selected state uses both a quiet surface and a slim
-// accent rail so navigation remains obvious without turning the whole row blue.
+// Sidebar navigation item.
 //
-// F4a/F4b (re-implemented on the consolidated layout): row content is placed by
-// absolute geometry — a fixed 18×18 icon box at a constant inset and a label
-// starting at a constant x — not by layout balancing. The previous
-// centered HorizontalLayout shifted the whole group with label length
-// (measured: icon-column spread ≈45px, 9 distinct positions), so the icon
-// column zigzagged. Constant-x construction cannot zigzag and is deterministic
-// in both the femtovg and software renderers (LocalStatus/ModeCard precedent).
+// TARGET_DESIGN (docs/references/orbis-visual-2026-09-24/): the reference
+// sidebar uses two-line rows — a main label with a smaller secondary
+// description underneath — and marks the active destination with a full-width
+// blue pill rather than a slim accent rail. Measured from the reference
+// (1448px capture): the active pill spans the whole row inset-to-inset with a
+// ~8px radius, an accent fill, an accent-tinted icon and light body text.
+//
+// Geometry stays absolute (constant icon column, constant label x) so the icon
+// column cannot zigzag with label length — the F4a/F4b property preserved from
+// the previous implementation.
 import { Icon } from "icon.slint";
 import { Palette } from "../themes/dark.slint";
 
 export component NavItem inherits Rectangle {
     in property <string> label;
+    in property <string> sublabel: "";
     in property <int> icon-kind: 0;
     in property <bool> selected: false;
     callback clicked;
 
-    // Constant column geometry (F4b): 12px row inset + fixed 18×18 icon box
-    // (F4a) + 11px gap; the label starts at the same x on every row.
+    // Constant column geometry: 12px row inset + fixed 18×18 icon box + 11px
+    // gap; the label starts at the same x on every row.
     out property <length> row-inset: 12px;
     out property <length> icon-size: 18px;
     out property <length> spacing-icon-label: 11px;
 
-    height: 42px;
-    border-radius: 10px;
-    background: root.selected ? Palette.surface-selected
+    height: root.sublabel == "" ? 40px : 48px;
+    border-radius: 9px;
+    background: root.selected ? Palette.accent-fill
         : touch.has-hover ? Palette.surface-hover
         : transparent;
 
-    if (root.selected) : Rectangle {
-        x: 0px;
-        y: 9px;
-        width: 3px;
-        height: parent.height - 18px;
-        border-radius: 1.5px;
-        background: Palette.accent-default;
-    }
-
-    // Fixed 18×18 box: all icons share one left edge and optical center
-    // regardless of individual glyph geometry (F4a).
+    // Icon sits on the first text line, as in the reference, so the two-line
+    // block stays optically centered while the icon tracks the label.
     icon-box := Rectangle {
         x: root.row-inset;
-        y: (parent.height - self.height) / 2;
+        y: root.sublabel == "" ? (parent.height - self.height) / 2
+            : 11px;
         width: root.icon-size;
         height: root.icon-size;
         background: transparent;
@@ -53,22 +48,34 @@ export component NavItem inherits Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             kind: root.icon-kind;
-            tint: root.selected ? Palette.accent-default : Palette.text-secondary;
+            tint: root.selected ? Palette.text-on-accent : Palette.text-secondary;
         }
     }
 
-    // Constant label column (F4b); fills the remaining width and elides at the
-    // row edge, so no label can push or pull the row content horizontally.
-    Text {
+    // Label column: fills the remaining width and elides at the row edge, so no
+    // label can push or pull the row content horizontally.
+    VerticalLayout {
         x: root.row-inset + root.icon-size + root.spacing-icon-label;
         width: parent.width - self.x - 10px;
-        height: parent.height;
-        text: root.label;
-        font-size: 13.5px;
-        font-weight: root.selected ? 650 : 500;
-        color: root.selected ? Palette.text-primary : Palette.text-secondary;
-        vertical-alignment: center;
-        overflow: elide;
+        y: root.sublabel == "" ? 0px : 8px;
+        height: root.sublabel == "" ? parent.height : parent.height - 12px;
+        spacing: 1px;
+        alignment: center;
+
+        Text {
+            text: root.label;
+            font-size: 13px;
+            font-weight: root.selected ? 650 : 550;
+            color: root.selected ? Palette.text-on-accent : Palette.text-primary;
+            overflow: elide;
+        }
+        if (root.sublabel != "") : Text {
+            text: root.sublabel;
+            font-size: 10.5px;
+            font-weight: 500;
+            color: root.selected ? Palette.text-on-accent.transparentize(0.22) : Palette.text-disabled;
+            overflow: elide;
+        }
     }
 
     touch := TouchArea { clicked => { root.clicked(); } }

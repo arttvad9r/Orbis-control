@@ -3,13 +3,19 @@ import { Palette, ThemeState, ThemeMode } from "../themes/dark.slint";
 
 // Canonical geometry for the product UI. Pages may still compose differently,
 // but they share one rhythm instead of carrying per-screen magic numbers.
+//
+// TARGET_DESIGN (docs/references/orbis-visual-2026-09-24/): the reference uses
+// a ~16px gutter between cards, 18-20px card padding and ~12px card radius at a
+// 1448px-wide capture. Scaled to Orbis's 980-1200px window these become the
+// values below; the earlier 12px gutter / 14px padding / 14px radius rhythm was
+// visibly tighter than the target.
 export global LayoutMetrics {
-    in property <length> sidebar-width: 224px;
+    in property <length> sidebar-width: 232px;
     in property <length> titlebar-height: 48px;
     in property <length> page-margin: 24px;
-    in property <length> page-gap: 12px;
-    in property <length> card-padding: 14px;
-    in property <length> card-radius: 14px;
+    in property <length> page-gap: 16px;
+    in property <length> card-padding: 18px;
+    in property <length> card-radius: 12px;
     in property <length> control-height: 40px;
     in property <length> compact-control-height: 36px;
     in property <length> page-bottom-padding: 24px;
@@ -45,14 +51,14 @@ export component SectionTitle inherits Rectangle {
     in property <string> title;
     in property <string> detail: "";
     in property <color> detail-color: Palette.text-secondary;
-    height: 28px;
+    height: 30px;
     background: transparent;
 
     HorizontalLayout {
         spacing: 10px;
         Text {
             text: root.title;
-            font-size: 15px;
+            font-size: 16px;
             font-weight: 650;
             color: Palette.text-primary;
             vertical-alignment: center;
@@ -74,15 +80,18 @@ export component SectionTitle inherits Rectangle {
 export component PageHeader inherits Rectangle {
     in property <string> title;
     in property <string> description: "";
-    height: root.description == "" ? 38px : 62px;
+    // TARGET_DESIGN: the reference page header is a large page title with a
+    // full-width description line below it, separated from the first card by the
+    // page gutter. Orbis keeps the same composition at its own window scale.
+    height: root.description == "" ? 40px : 66px;
     background: transparent;
 
     VerticalLayout {
         alignment: center;
-        spacing: 5px;
+        spacing: 6px;
         Text {
             text: root.title;
-            font-size: 25px;
+            font-size: 27px;
             font-weight: 700;
             color: Palette.text-primary;
             overflow: elide;
