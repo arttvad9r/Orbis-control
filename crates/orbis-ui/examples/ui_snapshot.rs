@@ -1,8 +1,9 @@
 //! Offscreen section snapshots for the single-window UI (ui-review companion).
 //!
-//! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme]`
+//! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme] [width] [height] [state]`
 //! Sections: dashboard | performance | power | cooling | graphics | backlight
-//! | display | system | settings | about | dialog.
+//! | display | system | settings | about | dialog. States: normal | readonly |
+//! pending | error | unsupported | dirty.
 
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
@@ -178,6 +179,61 @@ fn demo_state(component: &AppWindow) {
     component.set_diagnostics_status("Диагностика актуальна".into());
 }
 
+/// Apply a visual-review state to the otherwise fully populated fixture. These
+/// projections deliberately use the same UI state fields production renders;
+/// they never invoke a hardware callback or imply a mutation result.
+fn review_state(component: &AppWindow, state_name: &str) -> anyhow::Result<()> {
+    let mut state = component.get_ui_state();
+    match state_name {
+        "normal" => {}
+        "readonly" => {
+            state.perf_writable = false;
+            state.charge_limit_writable = false;
+            state.fan_curve_writable = false;
+        }
+        "pending" => {
+            state.performance_delegated_pending = true;
+            state.fan_curve_pending = true;
+            state.charge_limit_pending = true;
+        }
+        "error" => {
+            state.performance_delegated_error = "Не удалось подтвердить профиль".into();
+            state.fan_curve_error = true;
+            state.charge_limit_error = "Не удалось записать порог".into();
+        }
+        "unsupported" => {
+            state.perf_state = PerformanceHwState::Unavailable;
+            state.perf_writable = false;
+            state.perf_unavailable_reason = "Режимы производительности не поддерживаются".into();
+            state.charge_limit_state = ChargeLimitState::Unavailable;
+            state.charge_limit_writable = false;
+            state.charge_limit_unavailable_reason = "Порог заряда не поддерживается".into();
+            state.fan_curve_state = FanCurveHwState::Unavailable;
+            state.fan_curve_writable = false;
+            state.fan_curve_unavailable_reason = "Пользовательская кривая не поддерживается".into();
+        }
+        "dirty" => {
+            state.fan_curve_dirty = true;
+        }
+        other => anyhow::bail!("unknown review state: {other}"),
+    }
+    component.set_ui_state(state);
+    Ok(())
+}
+
+fn parse_dimension(value: Option<String>, name: &str, default: u32) -> anyhow::Result<u32> {
+    match value {
+        Some(value) => {
+            let parsed: u32 = value.parse()?;
+            if parsed == 0 {
+                anyhow::bail!("{name} must be greater than zero");
+            }
+            Ok(parsed)
+        }
+        None => Ok(default),
+    }
+}
+
 fn setup(width: u32, height: u32) -> Rc<slint::platform::software_renderer::SoftwareRenderer> {
     let renderer = Rc::new(slint::platform::software_renderer::SoftwareRenderer::new());
     let adapter = Rc::new(SoftwareWindowAdapter {
@@ -224,16 +280,21 @@ fn main() -> anyhow::Result<()> {
     let kind = args.next().unwrap_or_else(|| "dashboard".to_string());
     let path = args.next().unwrap_or_else(|| format!("{kind}.png"));
     let theme = args.next().unwrap_or_else(|| "dark".to_string());
+    let requested_width = args.next();
+    let requested_height = args.next();
+    let state_name = args.next().unwrap_or_else(|| "normal".to_string());
     let light = match theme.as_str() {
         "dark" => false,
         "light" => true,
         other => anyhow::bail!("unknown theme: {other}"),
     };
 
-    let (width, height) = match kind.as_str() {
+    let (default_width, default_height) = match kind.as_str() {
         "dialog" => (470, 228),
-        _ => (1240, 820),
+        _ => (1200, 800),
     };
+    let width = parse_dimension(requested_width, "width", default_width)?;
+    let height = parse_dimension(requested_height, "height", default_height)?;
 
     let renderer = setup(width, height);
 
@@ -247,6 +308,7 @@ fn main() -> anyhow::Result<()> {
                 ThemeMode::Dark
             });
             demo_state(&component);
+            review_state(&component, &state_name)?;
             let section = match kind.as_str() {
                 "performance" => Section::Performance,
                 "power" => Section::Power,
