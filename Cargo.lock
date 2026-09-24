@@ -3163,6 +3163,7 @@ dependencies = [
  "orbis-capabilities",
  "orbis-config",
  "orbis-core",
+ "orbis-hardwared",
  "orbis-providers",
  "orbis-session-client",
  "orbis-session-protocol",

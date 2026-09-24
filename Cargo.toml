@@ -72,6 +72,7 @@ orbis-sessiond = { path = "crates/orbis-sessiond", version = "0.1.0", default-fe
 orbis-ui = { path = "crates/orbis-ui", version = "0.1.0" }
 orbis-cli = { path = "crates/orbis-cli", version = "0.1.0" }
 orbis-test-support = { path = "crates/orbis-test-support", version = "0.1.0" }
+orbis-hardwared = { path = "crates/orbis-hardwared", version = "0.1.0" }
 
 [profile.release]
 lto = "thin"

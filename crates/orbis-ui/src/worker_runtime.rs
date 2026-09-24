@@ -1084,9 +1084,11 @@ mod tests {
     use crate::composition::GpuServices;
     use orbis_application::AppService;
     use orbis_core::profile::PerformanceProfile;
+    use orbis_hardwared::fans::FanCurveWire;
     use orbis_providers::mock::MockProvider;
     use orbis_session_client::HardwarePerformanceSource;
-    use orbis_session_client::HardwareProductGpuSource;
+    use orbis_session_client::ZbusHardwareFanCurveSource;
+    use orbis_session_client::{HardwareFanCurveSource, HardwareProductGpuSource};
     use orbis_test_support::devices::build_state_arc;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -1520,5 +1522,218 @@ mod tests {
         let fresh = replacement.product_gpu_status().await.unwrap();
         assert_eq!(fresh, initial);
         assert_eq!(*replacement_state.lock().unwrap(), initial);
+    }
+
+    #[derive(Clone)]
+    struct PrivateFanHardware {
+        state: Arc<StdMutex<std::collections::BTreeMap<(u32, u8), FanCurveWire>>>,
+        calls: Arc<StdMutex<Vec<(u32, u8, FanCurveWire)>>>,
+        defaults: Arc<StdMutex<Vec<u32>>>,
+    }
+
+    #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
+    impl PrivateFanHardware {
+        async fn set_fan_curve(
+            &self,
+            profile: u32,
+            fan: u8,
+            curve: FanCurveWire,
+        ) -> zbus::fdo::Result<u32> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((profile, fan, curve.clone()));
+            self.state.lock().unwrap().insert((profile, fan), curve);
+            Ok(profile)
+        }
+
+        async fn reset_fan_curves_to_defaults(&self, profile: u32) -> zbus::fdo::Result<u32> {
+            self.defaults.lock().unwrap().push(profile);
+            self.state
+                .lock()
+                .unwrap()
+                .retain(|(stored_profile, _), _| *stored_profile != profile);
+            Ok(profile)
+        }
+    }
+
+    async fn private_fan_peer(
+        hardware: PrivateFanHardware,
+    ) -> (zbus::Connection, zbus::Connection) {
+        let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        let server = zbus::connection::Builder::unix_stream(server_stream)
+            .server(zbus::Guid::generate())
+            .unwrap()
+            .p2p()
+            .serve_at("/io/github/orbiscontrol/Hardware", hardware)
+            .unwrap();
+        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        tokio::try_join!(server.build(), client.build()).unwrap()
+    }
+
+    fn fan_runtime(
+        source: ZbusHardwareFanCurveSource,
+    ) -> ApplicationRuntime<
+        GpuServices<MockProvider, MockProvider, MockProvider, MockProvider>,
+        AppService<MockProvider>,
+        AppService<MockProvider>,
+    > {
+        let provider = MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists"));
+        let fan = Arc::new(orbis_session_client::SessionHardwareFanCurveProvider::new(
+            MockProvider::new(provider.state()),
+            source,
+        ));
+        ApplicationRuntime::empty_for_testing(
+            GpuServices::new(
+                AppService::new(Arc::new(MockProvider::new(provider.state()))),
+                AppService::new(Arc::new(MockProvider::new(provider.state()))),
+                AppService::new(Arc::new(MockProvider::new(provider.state()))),
+                AppService::new(Arc::new(MockProvider::new(provider.state()))),
+            ),
+            AppService::new(Arc::new(MockProvider::new(provider.state()))),
+            AppService::new(Arc::new(MockProvider::new(provider.state()))),
+            AppService::new(fan),
+            AppService::new(Arc::new(provider)),
+            orbis_core::capability::CapabilityStatus::Unsupported,
+            orbis_core::capability::CapabilityStatus::Unsupported,
+            orbis_core::capability::CapabilityStatus::Unsupported,
+        )
+    }
+
+    fn test_fan_curve() -> FanCurvePoints {
+        FanCurvePoints {
+            temps: [45, 50, 55, 60, 65, 70, 75, 80]
+                .map(|v| orbis_core::newtypes::TemperatureC::new(v).unwrap()),
+            pwms: [10, 20, 30, 40, 50, 60, 70, 80]
+                .map(|v| orbis_core::newtypes::FanPwm::new(v).unwrap()),
+        }
+    }
+
+    #[tokio::test]
+    async fn worker_loop_private_peer_fan_cpu_gpu_reset_owner_loss_and_recovery() {
+        use orbis_core::profile::AsusdFanProfile;
+        let hardware = PrivateFanHardware {
+            state: Arc::new(StdMutex::new(Default::default())),
+            calls: Arc::new(StdMutex::new(Vec::new())),
+            defaults: Arc::new(StdMutex::new(Vec::new())),
+        };
+        let owner_state = hardware.state.clone();
+        let calls = hardware.calls.clone();
+        let defaults = hardware.defaults.clone();
+        let (server, connection) = private_fan_peer(hardware).await;
+        let source = orbis_session_client::ZbusHardwareFanCurveSource::new(connection);
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(run_worker(fan_runtime(source), rx, move |event| {
+            let _ = event_tx.send(event);
+        }));
+
+        for (fan, wire_id) in [(FanId::Cpu, 0), (FanId::Gpu, 1)] {
+            tx.send(WorkerCommand::SetFanCurve {
+                profile: AsusdFanProfile::Balanced,
+                fan: fan.clone(),
+                curve: test_fan_curve(),
+            })
+            .unwrap();
+            let result = loop {
+                if let WorkerEvent::FanCurve(result) =
+                    tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                {
+                    break result;
+                }
+            };
+            assert!(result.is_ok(), "fan worker outcome: {result:?}");
+            let independently_read = owner_state
+                .lock()
+                .unwrap()
+                .get(&(0, wire_id))
+                .cloned()
+                .expect("owner state written");
+            assert_eq!(
+                independently_read.temps,
+                vec![45, 50, 55, 60, 65, 70, 75, 80]
+            );
+            assert_eq!(
+                independently_read.pwms,
+                vec![10, 20, 30, 40, 50, 60, 70, 80]
+            );
+        }
+        assert_eq!(calls.lock().unwrap().len(), 2);
+
+        tx.send(WorkerCommand::ResetFanCurvesToDefaults {
+            profile: AsusdFanProfile::Balanced,
+        })
+        .unwrap();
+        let reset = loop {
+            if let WorkerEvent::FanCurveDefaults { result, .. } =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result;
+            }
+        };
+        assert!(reset.is_ok(), "reset worker outcome: {reset:?}");
+        assert_eq!(*defaults.lock().unwrap(), vec![0]);
+        assert!(
+            owner_state.lock().unwrap().is_empty(),
+            "reset state must be independently visible at owner"
+        );
+
+        let removed = server
+            .object_server()
+            .remove::<PrivateFanHardware, _>("/io/github/orbiscontrol/Hardware")
+            .await
+            .unwrap();
+        assert!(removed);
+        tx.send(WorkerCommand::SetFanCurve {
+            profile: AsusdFanProfile::Balanced,
+            fan: FanId::Cpu,
+            curve: test_fan_curve(),
+        })
+        .unwrap();
+        let lost = loop {
+            if let WorkerEvent::FanCurve(result) =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result;
+            }
+        };
+        assert!(lost.is_err(), "owner loss must be honest: {lost:?}");
+        drop(tx);
+        worker.abort();
+
+        let fresh_hardware = PrivateFanHardware {
+            state: Arc::new(StdMutex::new(Default::default())),
+            calls: Arc::new(StdMutex::new(Vec::new())),
+            defaults: Arc::new(StdMutex::new(Vec::new())),
+        };
+        let fresh_state = fresh_hardware.state.clone();
+        let (_fresh_server, connection) = private_fan_peer(fresh_hardware).await;
+        let fresh = orbis_session_client::ZbusHardwareFanCurveSource::new(connection);
+        assert!(
+            fresh
+                .set_fan_curve(
+                    0,
+                    0,
+                    FanCurveWire {
+                        temps: vec![45, 50, 55, 60, 65, 70, 75, 80],
+                        pwms: vec![10, 20, 30, 40, 50, 60, 70, 80]
+                    }
+                )
+                .await
+                .is_ok()
+        );
+        assert!(
+            fresh_state.lock().unwrap().contains_key(&(0, 0)),
+            "fresh owner works without implicit restore"
+        );
     }
 }
