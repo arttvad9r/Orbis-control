@@ -3,6 +3,7 @@
 from pathlib import Path
 import struct
 import subprocess
+import hashlib
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "tests/screenshots/artifacts/stage6"
@@ -31,6 +32,13 @@ def main() -> int:
             for theme in THEMES:
                 for width, height in SIZES:
                     path = OUT / f"{section}-{state}-{theme}-{width}x{height}.png"
+                    applicable = state == "normal" or (state == "dirty" and section == "cooling") or (
+                        state in {"pending", "error", "unsupported", "readonly"}
+                        and section in {"dashboard", "performance", "cooling", "graphics"}
+                    )
+                    if not applicable:
+                        print(f"excluded (not applicable): {section}/{state}")
+                        continue
                     subprocess.run(
                         [
                             "cargo", "run", "-p", "orbis-ui", "--example", "ui_snapshot",
@@ -43,6 +51,11 @@ def main() -> int:
                     if png_size(path) != (width, height):
                         raise RuntimeError(f"wrong screenshot size: {path}")
                     total += 1
+    normal = OUT / "dashboard-normal-dark-980x680.png"
+    error = OUT / "dashboard-error-dark-980x680.png"
+    if hashlib.sha256(normal.read_bytes()).digest() == hashlib.sha256(error.read_bytes()).digest():
+        raise RuntimeError("snapshot state oracle failed: dashboard normal/error renders are identical")
+    print("snapshot-state-oracle passed: dashboard normal/error differ at 980x680 dark")
     print(f"generated and validated {total} screenshots in {OUT}")
     return 0
 
