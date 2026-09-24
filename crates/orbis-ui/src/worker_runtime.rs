@@ -1083,10 +1083,18 @@ mod tests {
 
     use crate::composition::GpuServices;
     use orbis_application::AppService;
+    use orbis_core::diagnostics::DiagnosticEntry;
+    use orbis_core::identity::BackendIdentity;
+    use orbis_core::limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
     use orbis_core::profile::PerformanceProfile;
     use orbis_hardwared::fans::FanCurveWire;
+    use orbis_providers::error::ValidationResult;
     use orbis_providers::mock::MockProvider;
+    use orbis_providers::traits::ProviderHealth;
+    use orbis_providers::traits::{PowerLimitProvider, Provider};
     use orbis_session_client::HardwarePerformanceSource;
+    use orbis_session_client::HardwarePowerLimitSource;
+    use orbis_session_client::SessionHardwarePowerLimitProvider;
     use orbis_session_client::ZbusHardwareFanCurveSource;
     use orbis_session_client::{HardwareFanCurveSource, HardwareProductGpuSource};
     use orbis_test_support::devices::build_state_arc;
@@ -1735,5 +1743,319 @@ mod tests {
             fresh_state.lock().unwrap().contains_key(&(0, 0)),
             "fresh owner works without implicit restore"
         );
+    }
+
+    #[derive(Clone)]
+    struct PrivatePowerLimitHardware {
+        values: Arc<StdMutex<std::collections::BTreeMap<u8, i32>>>,
+        calls: Arc<StdMutex<Vec<(u8, i32)>>>,
+    }
+
+    #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
+    impl PrivatePowerLimitHardware {
+        async fn set_power_limit(&self, field: u8, value: i32) -> zbus::fdo::Result<i32> {
+            self.calls.lock().unwrap().push((field, value));
+            self.values.lock().unwrap().insert(field, value);
+            Ok(value)
+        }
+    }
+
+    async fn private_power_limit_peer(
+        hardware: PrivatePowerLimitHardware,
+    ) -> (zbus::Connection, zbus::Connection) {
+        let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        let server = zbus::connection::Builder::unix_stream(server_stream)
+            .server(zbus::Guid::generate())
+            .unwrap()
+            .p2p()
+            .serve_at("/io/github/orbiscontrol/Hardware", hardware)
+            .unwrap();
+        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        tokio::try_join!(server.build(), client.build()).unwrap()
+    }
+
+    struct DeterministicPowerLimitReads {
+        values: Arc<StdMutex<std::collections::BTreeMap<PowerLimitField, i32>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for DeterministicPowerLimitReads {
+        fn id(&self) -> &'static str {
+            "test-power-limit-reads"
+        }
+        fn backend(&self) -> BackendIdentity {
+            BackendIdentity::simple("deterministic test reads")
+        }
+        fn timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+        fn explain_unsupported(&self, feature: &str) -> String {
+            format!("missing {feature}")
+        }
+        fn health(&self) -> ProviderHealth {
+            ProviderHealth::Healthy
+        }
+        fn diagnostics(&self) -> Vec<DiagnosticEntry> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PowerLimitProvider for DeterministicPowerLimitReads {
+        async fn power_limits(&self) -> Result<PowerLimits, ProviderError> {
+            let mut values = self.values.lock().unwrap();
+            let fields = [
+                (PowerLimitField::Spl, Unit::Watts),
+                (PowerLimitField::GpuDynamicBoost, Unit::Watts),
+            ]
+            .into_iter()
+            .map(|(field, unit)| {
+                let value = *values.entry(field.clone()).or_insert(0);
+                (
+                    field,
+                    PowerLimitValue::new(value, 0, 200, 1, Some(value), unit).unwrap(),
+                )
+            })
+            .collect();
+            Ok(PowerLimits { fields })
+        }
+        async fn set_power_limit(
+            &self,
+            _field: PowerLimitField,
+            _value: i32,
+        ) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported(
+                "test read provider is read-only".into(),
+            ))
+        }
+        async fn restore_defaults(&self) -> Result<ApplyResult, ProviderError> {
+            Err(ProviderError::Unsupported(
+                "test read provider is read-only".into(),
+            ))
+        }
+        fn validate_power_limit(&self, _field: &PowerLimitField, _value: i32) -> ValidationResult {
+            ValidationResult::invalid("test read provider is read-only")
+        }
+    }
+
+    fn power_limit_runtime(
+        source: orbis_session_client::ZbusHardwarePowerLimitSource,
+        read_values: Arc<StdMutex<std::collections::BTreeMap<PowerLimitField, i32>>>,
+    ) -> ApplicationRuntime<
+        GpuServices<MockProvider, MockProvider, MockProvider, MockProvider>,
+        AppService<MockProvider>,
+        AppService<MockProvider>,
+    > {
+        let provider = MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists"));
+        let values = read_values;
+        let limits = Arc::new(SessionHardwarePowerLimitProvider::new(
+            DeterministicPowerLimitReads {
+                values: values.clone(),
+            },
+            TestHardwarePowerLimitSource { source, values },
+        ));
+        ApplicationRuntime::empty_for_testing(
+            GpuServices::new(
+                AppService::new(Arc::new(MockProvider::new(provider.state()))),
+                AppService::new(Arc::new(MockProvider::new(provider.state()))),
+                AppService::new(Arc::new(MockProvider::new(provider.state()))),
+                AppService::new(Arc::new(MockProvider::new(provider.state()))),
+            ),
+            AppService::new(Arc::new(MockProvider::new(provider.state()))),
+            AppService::new(Arc::new(MockProvider::new(provider.state()))),
+            AppService::new(Arc::new(MockProvider::new(provider.state()))),
+            AppService::new(Arc::new(provider)),
+            orbis_core::capability::CapabilityStatus::Unsupported,
+            orbis_core::capability::CapabilityStatus::Unsupported,
+            orbis_core::capability::CapabilityStatus::Unsupported,
+        )
+        .with_power_limits(limits)
+    }
+
+    struct TestHardwarePowerLimitSource {
+        source: orbis_session_client::ZbusHardwarePowerLimitSource,
+        values: Arc<StdMutex<std::collections::BTreeMap<PowerLimitField, i32>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl HardwarePowerLimitSource for TestHardwarePowerLimitSource {
+        async fn set_power_limit(&self, field: u8, value: i32) -> Result<i32, ProviderError> {
+            let observed = self.source.set_power_limit(field, value).await?;
+            let domain_field = match field {
+                0 => PowerLimitField::Spl,
+                4 => PowerLimitField::GpuDynamicBoost,
+                _ => {
+                    return Err(ProviderError::Unsupported(
+                        "unexpected test wire field".into(),
+                    ));
+                }
+            };
+            self.values.lock().unwrap().insert(domain_field, observed);
+            Ok(observed)
+        }
+    }
+
+    #[tokio::test]
+    async fn worker_loop_private_peer_power_spl_and_boost_owner_loss_and_recovery() {
+        use orbis_core::limits::PowerLimitField::{GpuDynamicBoost, Spl};
+        let owner = PrivatePowerLimitHardware {
+            values: Arc::new(StdMutex::new(Default::default())),
+            calls: Arc::new(StdMutex::new(Vec::new())),
+        };
+        let owner_values = owner.values.clone();
+        let calls = owner.calls.clone();
+        let (server, connection) = private_power_limit_peer(owner).await;
+        let reads = Arc::new(StdMutex::new([(Spl, 30), (GpuDynamicBoost, 0)].into()));
+        let runtime = power_limit_runtime(
+            orbis_session_client::ZbusHardwarePowerLimitSource::new(connection),
+            reads.clone(),
+        );
+        let initial = runtime
+            .power_limits
+            .as_ref()
+            .unwrap()
+            .power_limit_snapshot()
+            .await
+            .unwrap();
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(run_worker(runtime, rx, move |event| {
+            let _ = event_tx.send(event);
+        }));
+
+        let mut snapshot = initial.clone();
+        for (field, value, wire) in [(Spl, 45, 0), (GpuDynamicBoost, 25, 4)] {
+            tx.send(WorkerCommand::SetPowerLimit {
+                field: field.clone(),
+                value,
+                snapshot_identity: snapshot.identity,
+            })
+            .unwrap();
+            let refresh = tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let refreshed = match refresh {
+                WorkerEvent::PowerLimitsRefresh(Ok(snapshot)) => snapshot,
+                other => panic!("expected successful authoritative read-back first, got {other:?}"),
+            };
+            assert_eq!(refreshed.limits.get(&field).unwrap().value, value);
+            assert_ne!(refreshed.identity, snapshot.identity);
+            snapshot = refreshed;
+            let applied = tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                matches!(applied, WorkerEvent::PowerLimit { field: ref f, result: Ok(ApplyResult::Applied) } if *f == field),
+                "apply event: {applied:?}"
+            );
+            assert_eq!(owner_values.lock().unwrap().get(&wire), Some(&value));
+        }
+        assert_eq!(*calls.lock().unwrap(), vec![(0, 45), (4, 25)]);
+
+        let before = calls.lock().unwrap().len();
+        tx.send(WorkerCommand::SetPowerLimit {
+            field: Spl,
+            value: 50,
+            snapshot_identity: initial.identity,
+        })
+        .unwrap();
+        let stale = loop {
+            if let WorkerEvent::PowerLimit { result, .. } =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result;
+            }
+        };
+        assert!(
+            matches!(stale, Err(ProviderError::Conflict(_))),
+            "stale identity: {stale:?}"
+        );
+        assert_eq!(
+            calls.lock().unwrap().len(),
+            before,
+            "stale snapshot must not mutate Hardware1"
+        );
+        assert!(
+            event_rx.try_recv().is_err(),
+            "stale identity must not publish a refresh"
+        );
+
+        let removed = server
+            .object_server()
+            .remove::<PrivatePowerLimitHardware, _>("/io/github/orbiscontrol/Hardware")
+            .await
+            .unwrap();
+        assert!(removed);
+        tx.send(WorkerCommand::SetPowerLimit {
+            field: Spl,
+            value: 55,
+            snapshot_identity: snapshot.identity,
+        })
+        .unwrap();
+        let lost = loop {
+            if let WorkerEvent::PowerLimit { result, .. } =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result;
+            }
+        };
+        assert!(lost.is_err(), "removed owner must fail honestly: {lost:?}");
+
+        drop(tx);
+        worker.abort();
+        let fresh = PrivatePowerLimitHardware {
+            values: Arc::new(StdMutex::new(Default::default())),
+            calls: Arc::new(StdMutex::new(Vec::new())),
+        };
+        let fresh_values = fresh.values.clone();
+        let fresh_calls = fresh.calls.clone();
+        let (_fresh_server, connection) = private_power_limit_peer(fresh).await;
+        let fresh_source = orbis_session_client::ZbusHardwarePowerLimitSource::new(connection);
+        let fresh_runtime = power_limit_runtime(fresh_source, reads);
+        let fresh_snapshot = fresh_runtime
+            .power_limits
+            .as_ref()
+            .unwrap()
+            .power_limit_snapshot()
+            .await
+            .unwrap();
+        let (fresh_tx, fresh_rx) = command_channel();
+        let (fresh_event_tx, mut fresh_event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let fresh_worker = tokio::spawn(run_worker(fresh_runtime, fresh_rx, move |event| {
+            let _ = fresh_event_tx.send(event);
+        }));
+        fresh_tx
+            .send(WorkerCommand::SetPowerLimit {
+                field: GpuDynamicBoost,
+                value: 35,
+                snapshot_identity: fresh_snapshot.identity,
+            })
+            .unwrap();
+        loop {
+            if let WorkerEvent::PowerLimit { result, .. } =
+                tokio::time::timeout(Duration::from_secs(5), fresh_event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                assert!(
+                    result.is_ok(),
+                    "fresh owner should apply only requested field: {result:?}"
+                );
+                break;
+            }
+        }
+        assert_eq!(*fresh_calls.lock().unwrap(), vec![(4, 35)]);
+        assert_eq!(*fresh_values.lock().unwrap(), [(4, 35)].into());
+        drop(fresh_tx);
+        fresh_worker.abort();
     }
 }
