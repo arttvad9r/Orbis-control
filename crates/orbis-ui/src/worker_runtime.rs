@@ -2058,4 +2058,440 @@ mod tests {
         drop(fresh_tx);
         fresh_worker.abort();
     }
+
+    // --- M2D: remaining ordinary-worker GPU-mode outcomes + restart/no-restore ---
+
+    fn initial_product_gpu_state() -> ProductGpuMutationResult {
+        ProductGpuMutationResult {
+            requested_mode: 0,
+            current_mode: 0,
+            queued_mode: u32::MAX,
+            outcome: 0,
+            reboot_required: false,
+        }
+    }
+
+    /// Scripted failure a private Hardware1 owner can return from one call.
+    #[derive(Clone, Copy)]
+    enum ScriptedGpuFailure {
+        /// Authorization refusal (`org.freedesktop.DBus.Error.AccessDenied`).
+        Denied,
+        /// Half-applied write: the daemon reports a failure after a partial
+        /// queue, leaving the authoritative state untouched.
+        PartialWrite,
+    }
+
+    impl ScriptedGpuFailure {
+        fn into_fdo(self, operation: &str) -> zbus::fdo::Error {
+            match self {
+                ScriptedGpuFailure::Denied => {
+                    zbus::fdo::Error::AccessDenied(format!("scripted denial for {operation}"))
+                }
+                ScriptedGpuFailure::PartialWrite => zbus::fdo::Error::Failed(format!(
+                    "ASUS GPU mode queue is partial after dgpu_disable was accepted: scripted for {operation}"
+                )),
+            }
+        }
+    }
+
+    /// Private Hardware1 owner with scriptable write/read behaviour.
+    #[derive(Clone)]
+    struct ScriptedGpuHardware {
+        state: Arc<StdMutex<ProductGpuMutationResult>>,
+        set_calls: Arc<StdMutex<Vec<u32>>>,
+        status_calls: Arc<AtomicU32>,
+        set_failure: Option<ScriptedGpuFailure>,
+        status_failure: Option<ScriptedGpuFailure>,
+        /// Whether an accepted write queues the requested mode (reboot-required
+        /// semantics) or leaves the authoritative state untouched (partial).
+        queue_on_write: bool,
+        /// Artificial latency injected before the read-only status reply.
+        status_delay: Option<Duration>,
+    }
+
+    #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
+    impl ScriptedGpuHardware {
+        async fn set_product_gpu_mode(
+            &self,
+            requested_mode: u32,
+        ) -> zbus::fdo::Result<ProductGpuMutationResult> {
+            self.set_calls.lock().unwrap().push(requested_mode);
+            if let Some(failure) = self.set_failure {
+                return Err(failure.into_fdo("SetProductGpuMode"));
+            }
+            let mut state = self.state.lock().unwrap();
+            if self.queue_on_write {
+                *state = ProductGpuMutationResult {
+                    requested_mode,
+                    current_mode: state.current_mode,
+                    queued_mode: requested_mode,
+                    outcome: 1,
+                    reboot_required: true,
+                };
+            }
+            Ok(*state)
+        }
+
+        async fn product_gpu_status(&self) -> zbus::fdo::Result<ProductGpuMutationResult> {
+            self.status_calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(delay) = self.status_delay {
+                tokio::time::sleep(delay).await;
+            }
+            if let Some(failure) = self.status_failure {
+                return Err(failure.into_fdo("ProductGpuStatus"));
+            }
+            Ok(*self.state.lock().unwrap())
+        }
+    }
+
+    async fn scripted_gpu_peer(
+        hardware: ScriptedGpuHardware,
+    ) -> (zbus::Connection, zbus::Connection) {
+        let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        let server = zbus::connection::Builder::unix_stream(server_stream)
+            .server(zbus::Guid::generate())
+            .unwrap()
+            .p2p()
+            .serve_at("/io/github/orbiscontrol/Hardware", hardware)
+            .unwrap();
+        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        tokio::try_join!(server.build(), client.build()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn worker_loop_private_peer_gpu_denial_and_partial_write_are_honest_without_mutation() {
+        // 1) The Hardware1 authorization evidence denies the queue request.
+        let owner = ScriptedGpuHardware {
+            state: Arc::new(StdMutex::new(initial_product_gpu_state())),
+            set_calls: Arc::new(StdMutex::new(Vec::new())),
+            status_calls: Arc::new(AtomicU32::new(0)),
+            set_failure: Some(ScriptedGpuFailure::Denied),
+            status_failure: None,
+            queue_on_write: false,
+            status_delay: None,
+        };
+        let owner_state = owner.state.clone();
+        let set_calls = owner.set_calls.clone();
+        let (_server, connection) = scripted_gpu_peer(owner).await;
+        let client = connection.clone();
+        let source: Arc<dyn HardwareProductGpuSource> = Arc::new(
+            orbis_session_client::ZbusHardwareProductGpuSource::new(connection),
+        );
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(run_worker_with_product_gpu(
+            mock_runtime(),
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            Some(source),
+        ));
+
+        tx.send(WorkerCommand::SetProductGpuMode { raw: 2 })
+            .unwrap();
+        let denied = loop {
+            if let WorkerEvent::ProductGpu(result) =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result;
+            }
+        };
+        assert!(
+            matches!(denied, Err(ProviderError::PermissionDenied(_))),
+            "denied write must not be presented as success: {denied:?}"
+        );
+        assert_eq!(*set_calls.lock().unwrap(), vec![2]);
+
+        // Independent owner read-back: the denied write queued nothing.
+        let read_back = orbis_session_client::ZbusHardwareProductGpuSource::new(client)
+            .product_gpu_status()
+            .await
+            .unwrap();
+        assert_eq!(read_back, initial_product_gpu_state());
+        assert_eq!(*owner_state.lock().unwrap(), initial_product_gpu_state());
+        drop(tx);
+        worker.abort();
+
+        // 2) A half-applied write: the daemon fails after recording the request
+        //    but leaves the authoritative queue untouched, so the ordinary
+        //    worker must publish an honest error and invent no queued mode.
+        let partial = ScriptedGpuHardware {
+            state: Arc::new(StdMutex::new(initial_product_gpu_state())),
+            set_calls: Arc::new(StdMutex::new(Vec::new())),
+            status_calls: Arc::new(AtomicU32::new(0)),
+            set_failure: Some(ScriptedGpuFailure::PartialWrite),
+            status_failure: None,
+            queue_on_write: false,
+            status_delay: None,
+        };
+        let partial_state = partial.state.clone();
+        let partial_calls = partial.set_calls.clone();
+        let (_partial_server, partial_connection) = scripted_gpu_peer(partial).await;
+        let partial_client = partial_connection.clone();
+        let partial_source: Arc<dyn HardwareProductGpuSource> = Arc::new(
+            orbis_session_client::ZbusHardwareProductGpuSource::new(partial_connection),
+        );
+        let (partial_tx, partial_rx) = command_channel();
+        let (partial_event_tx, mut partial_event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let partial_worker = tokio::spawn(run_worker_with_product_gpu(
+            mock_runtime(),
+            partial_rx,
+            move |event| {
+                let _ = partial_event_tx.send(event);
+            },
+            None,
+            Some(partial_source),
+        ));
+        partial_tx
+            .send(WorkerCommand::SetProductGpuMode { raw: 2 })
+            .unwrap();
+        let partial_result = loop {
+            if let WorkerEvent::ProductGpu(result) =
+                tokio::time::timeout(Duration::from_secs(5), partial_event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result;
+            }
+        };
+        assert!(
+            matches!(partial_result, Err(ProviderError::Dbus(_))),
+            "partial write must surface as an honest error: {partial_result:?}"
+        );
+        assert_eq!(*partial_calls.lock().unwrap(), vec![2]);
+        let partial_read_back =
+            orbis_session_client::ZbusHardwareProductGpuSource::new(partial_client)
+                .product_gpu_status()
+                .await
+                .unwrap();
+        assert_eq!(partial_read_back, initial_product_gpu_state());
+        assert_eq!(*partial_state.lock().unwrap(), initial_product_gpu_state());
+        drop(partial_tx);
+        partial_worker.abort();
+    }
+
+    #[tokio::test]
+    async fn worker_loop_private_peer_gpu_status_denial_and_timeout_are_honest() {
+        // Read-only status denied by the backend evidence.
+        let denied = ScriptedGpuHardware {
+            state: Arc::new(StdMutex::new(initial_product_gpu_state())),
+            set_calls: Arc::new(StdMutex::new(Vec::new())),
+            status_calls: Arc::new(AtomicU32::new(0)),
+            set_failure: None,
+            status_failure: Some(ScriptedGpuFailure::Denied),
+            queue_on_write: true,
+            status_delay: None,
+        };
+        let denied_calls = denied.status_calls.clone();
+        let (_denied_server, denied_connection) = scripted_gpu_peer(denied).await;
+        let denied_source: Arc<dyn HardwareProductGpuSource> = Arc::new(
+            orbis_session_client::ZbusHardwareProductGpuSource::new(denied_connection),
+        );
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(run_worker_with_product_gpu(
+            mock_runtime(),
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            Some(denied_source),
+        ));
+        tx.send(WorkerCommand::RefreshProductGpuStatus).unwrap();
+        let denied_result = loop {
+            if let WorkerEvent::ProductGpuStatusRefresh(result) =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result;
+            }
+        };
+        assert!(
+            matches!(denied_result, Err(ProviderError::PermissionDenied(_))),
+            "denied status read must be honest: {denied_result:?}"
+        );
+        assert_eq!(denied_calls.load(Ordering::SeqCst), 1);
+        drop(tx);
+        worker.abort();
+
+        // A hung owner: the production read deadline must fail closed instead of
+        // stalling the sequential worker or fabricating a mode.
+        let hung = ScriptedGpuHardware {
+            state: Arc::new(StdMutex::new(initial_product_gpu_state())),
+            set_calls: Arc::new(StdMutex::new(Vec::new())),
+            status_calls: Arc::new(AtomicU32::new(0)),
+            set_failure: None,
+            status_failure: None,
+            queue_on_write: true,
+            status_delay: Some(PRODUCT_GPU_STATUS_DEADLINE + Duration::from_secs(1)),
+        };
+        let hung_calls = hung.status_calls.clone();
+        let (_hung_server, hung_connection) = scripted_gpu_peer(hung).await;
+        let hung_source: Arc<dyn HardwareProductGpuSource> = Arc::new(
+            orbis_session_client::ZbusHardwareProductGpuSource::new(hung_connection),
+        );
+        let (hung_tx, hung_rx) = command_channel();
+        let (hung_event_tx, mut hung_event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let hung_worker = tokio::spawn(run_worker_with_product_gpu(
+            mock_runtime(),
+            hung_rx,
+            move |event| {
+                let _ = hung_event_tx.send(event);
+            },
+            None,
+            Some(hung_source),
+        ));
+        hung_tx
+            .send(WorkerCommand::RefreshProductGpuStatus)
+            .unwrap();
+        let timed_out = loop {
+            if let WorkerEvent::ProductGpuStatusRefresh(result) =
+                tokio::time::timeout(Duration::from_secs(10), hung_event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result;
+            }
+        };
+        assert!(
+            matches!(timed_out, Err(ProviderError::Timeout(_))),
+            "hung owner must time out, never fabricate a mode: {timed_out:?}"
+        );
+        assert_eq!(hung_calls.load(Ordering::SeqCst), 1);
+        drop(hung_tx);
+        hung_worker.abort();
+    }
+
+    #[tokio::test]
+    async fn worker_loop_private_peer_gpu_reboot_queue_then_replacement_owner_has_no_restore() {
+        // First owner: an accepted queued mode (reboot-required) must round-trip
+        // through the ordinary worker and match the owner's read-back exactly.
+        let owner = ScriptedGpuHardware {
+            state: Arc::new(StdMutex::new(initial_product_gpu_state())),
+            set_calls: Arc::new(StdMutex::new(Vec::new())),
+            status_calls: Arc::new(AtomicU32::new(0)),
+            set_failure: None,
+            status_failure: None,
+            queue_on_write: true,
+            status_delay: None,
+        };
+        let owner_state = owner.state.clone();
+        let owner_set_calls = owner.set_calls.clone();
+        let (server, connection) = scripted_gpu_peer(owner).await;
+        let client = connection.clone();
+        let source: Arc<dyn HardwareProductGpuSource> = Arc::new(
+            orbis_session_client::ZbusHardwareProductGpuSource::new(connection),
+        );
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(run_worker_with_product_gpu(
+            mock_runtime(),
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            Some(source),
+        ));
+        tx.send(WorkerCommand::SetProductGpuMode { raw: 2 })
+            .unwrap();
+        let reply = loop {
+            if let WorkerEvent::ProductGpu(result) =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result.unwrap();
+            }
+        };
+        assert_eq!(reply.queued_mode, 2);
+        assert_eq!(reply.current_mode, 0);
+        assert!(reply.reboot_required);
+        assert_eq!(*owner_set_calls.lock().unwrap(), vec![2]);
+        let read_back = orbis_session_client::ZbusHardwareProductGpuSource::new(client)
+            .product_gpu_status()
+            .await
+            .unwrap();
+        assert_eq!(read_back, reply);
+        assert_eq!(*owner_state.lock().unwrap(), reply);
+
+        // Restart: the original owner is gone and a brand-new Hardware1 owner
+        // starts from its own authoritative state. No restore/replay write may
+        // be issued, and the old queued state must not survive the restart.
+        drop(server);
+        drop(tx);
+        worker.abort();
+
+        let replacement = ScriptedGpuHardware {
+            state: Arc::new(StdMutex::new(initial_product_gpu_state())),
+            set_calls: Arc::new(StdMutex::new(Vec::new())),
+            status_calls: Arc::new(AtomicU32::new(0)),
+            set_failure: None,
+            status_failure: None,
+            queue_on_write: true,
+            status_delay: None,
+        };
+        let replacement_state = replacement.state.clone();
+        let replacement_set_calls = replacement.set_calls.clone();
+        let (_replacement_server, replacement_connection) = scripted_gpu_peer(replacement).await;
+        let replacement_client = replacement_connection.clone();
+        let replacement_source: Arc<dyn HardwareProductGpuSource> = Arc::new(
+            orbis_session_client::ZbusHardwareProductGpuSource::new(replacement_connection),
+        );
+        let (replacement_tx, replacement_rx) = command_channel();
+        let (replacement_event_tx, mut replacement_event_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+        let replacement_worker = tokio::spawn(run_worker_with_product_gpu(
+            mock_runtime(),
+            replacement_rx,
+            move |event| {
+                let _ = replacement_event_tx.send(event);
+            },
+            None,
+            Some(replacement_source),
+        ));
+        replacement_tx
+            .send(WorkerCommand::RefreshProductGpuStatus)
+            .unwrap();
+        let fresh = loop {
+            if let WorkerEvent::ProductGpuStatusRefresh(result) =
+                tokio::time::timeout(Duration::from_secs(5), replacement_event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result.unwrap();
+            }
+        };
+        assert_eq!(fresh, initial_product_gpu_state());
+        assert_eq!(fresh.queued_mode, u32::MAX);
+        assert!(!fresh.reboot_required);
+        assert!(
+            replacement_set_calls.lock().unwrap().is_empty(),
+            "startup must not replay a persisted mode into the replacement owner"
+        );
+        let fresh_direct =
+            orbis_session_client::ZbusHardwareProductGpuSource::new(replacement_client)
+                .product_gpu_status()
+                .await
+                .unwrap();
+        assert_eq!(fresh_direct, initial_product_gpu_state());
+        assert_eq!(
+            *replacement_state.lock().unwrap(),
+            initial_product_gpu_state()
+        );
+        drop(replacement_tx);
+        replacement_worker.abort();
+    }
 }
