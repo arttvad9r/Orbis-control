@@ -1246,6 +1246,7 @@ mod tests {
     use orbis_core::aura::{
         AuraBrightness, AuraDirection, AuraEffect, AuraRgb, AuraState, AuraZone,
     };
+    use orbis_session_client::{HardwareProductGpuSource, ProductGpuMutationResult};
 
     const OBJECT_PATH: &str = "/io/github/orbiscontrol/Hardware";
 
@@ -1534,6 +1535,88 @@ mod tests {
             self.state.lock().unwrap().2 = disabled;
             Ok(disabled)
         }
+    }
+
+    #[derive(Clone)]
+    struct FakeProductGpuHardware {
+        state: Arc<Mutex<ProductGpuMutationResult>>,
+    }
+
+    #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
+    impl FakeProductGpuHardware {
+        async fn set_product_gpu_mode(
+            &self,
+            requested_mode: u32,
+        ) -> zbus::fdo::Result<ProductGpuMutationResult> {
+            let mut state = self.state.lock().unwrap();
+            *state = ProductGpuMutationResult {
+                requested_mode,
+                current_mode: state.current_mode,
+                queued_mode: requested_mode,
+                outcome: 1,
+                reboot_required: true,
+            };
+            Ok(*state)
+        }
+
+        async fn product_gpu_status(&self) -> zbus::fdo::Result<ProductGpuMutationResult> {
+            Ok(*self.state.lock().unwrap())
+        }
+    }
+
+    async fn private_product_gpu_peer(
+        hardware: FakeProductGpuHardware,
+    ) -> (zbus::Connection, zbus::Connection) {
+        let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        let server = zbus::connection::Builder::unix_stream(server_stream)
+            .server(zbus::Guid::generate())
+            .unwrap()
+            .p2p()
+            .serve_at(OBJECT_PATH, hardware)
+            .unwrap();
+        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        tokio::try_join!(server.build(), client.build()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn private_product_gpu_peer_mutates_reads_back_and_recovers_owner() {
+        let initial = ProductGpuMutationResult {
+            requested_mode: 0,
+            current_mode: 0,
+            queued_mode: u32::MAX,
+            outcome: 0,
+            reboot_required: false,
+        };
+        let first_hardware = FakeProductGpuHardware {
+            state: Arc::new(Mutex::new(initial)),
+        };
+        let first_state = first_hardware.state.clone();
+        let (first_server, first_connection) = private_product_gpu_peer(first_hardware).await;
+        let first_client =
+            orbis_session_client::ZbusHardwareProductGpuSource::new(first_connection);
+
+        let mutation = first_client.set_product_gpu_mode(2).await.unwrap();
+        assert_eq!(mutation.queued_mode, 2);
+        assert!(mutation.reboot_required);
+        let read_back = first_client.product_gpu_status().await.unwrap();
+        assert_eq!(read_back.current_mode, 0);
+        assert_eq!(read_back.queued_mode, 2);
+        assert_eq!(*first_state.lock().unwrap(), read_back);
+
+        drop(first_server);
+        assert!(first_client.product_gpu_status().await.is_err());
+
+        let recovered_hardware = FakeProductGpuHardware {
+            state: Arc::new(Mutex::new(initial)),
+        };
+        let recovered_state = recovered_hardware.state.clone();
+        let (_recovered_server, recovered_connection) =
+            private_product_gpu_peer(recovered_hardware).await;
+        let recovered_client =
+            orbis_session_client::ZbusHardwareProductGpuSource::new(recovered_connection);
+        let recovered = recovered_client.product_gpu_status().await.unwrap();
+        assert_eq!(recovered.queued_mode, u32::MAX);
+        assert_eq!(*recovered_state.lock().unwrap(), initial);
     }
 
     async fn private_advanced_peer(

@@ -1083,10 +1083,169 @@ mod tests {
 
     use crate::composition::GpuServices;
     use orbis_application::AppService;
+    use orbis_core::profile::PerformanceProfile;
     use orbis_providers::mock::MockProvider;
+    use orbis_session_client::HardwarePerformanceSource;
     use orbis_session_client::HardwareProductGpuSource;
     use orbis_test_support::devices::build_state_arc;
+    use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicU32, Ordering};
+
+    #[derive(Clone)]
+    struct PrivatePerformanceHardware {
+        state: Arc<StdMutex<u8>>,
+        calls: Arc<AtomicU32>,
+    }
+
+    #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
+    impl PrivatePerformanceHardware {
+        async fn set_performance_profile(&self, profile: u8) -> zbus::fdo::Result<u8> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.state.lock().unwrap() = profile;
+            Ok(profile)
+        }
+    }
+
+    async fn private_performance_peer(
+        hardware: PrivatePerformanceHardware,
+    ) -> (zbus::Connection, zbus::Connection) {
+        let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        let server = zbus::connection::Builder::unix_stream(server_stream)
+            .server(zbus::Guid::generate())
+            .unwrap()
+            .p2p()
+            .serve_at("/io/github/orbiscontrol/Hardware", hardware)
+            .unwrap();
+        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        tokio::try_join!(server.build(), client.build()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn worker_loop_private_performance_write_owner_loss_and_recovery() {
+        let first_state = Arc::new(StdMutex::new(0u8));
+        let first_calls = Arc::new(AtomicU32::new(0));
+        let (server, connection) = private_performance_peer(PrivatePerformanceHardware {
+            state: first_state.clone(),
+            calls: first_calls.clone(),
+        })
+        .await;
+        let source = orbis_session_client::ZbusHardwarePerformanceSource::new(connection);
+        let performance = orbis_session_client::SessionHardwarePerformanceProvider::new(
+            PrivatePerformanceSession {
+                state: first_state.clone(),
+            },
+            source,
+        );
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(run_worker_with_product_gpu(
+            mock_runtime_with_performance(Arc::new(performance)),
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            None,
+        ));
+        tx.send(WorkerCommand::SetPerformance(PerformanceProfile::Turbo))
+            .unwrap();
+        let result = loop {
+            if let WorkerEvent::Performance(result) =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result;
+            }
+        };
+        assert!(
+            result.is_ok(),
+            "profile write must be acknowledged: {result:?}"
+        );
+        assert_eq!(*first_state.lock().unwrap(), 2);
+        assert_eq!(first_calls.load(Ordering::SeqCst), 1);
+        let removed = server
+            .object_server()
+            .remove::<PrivatePerformanceHardware, _>("/io/github/orbiscontrol/Hardware")
+            .await
+            .unwrap();
+        assert!(removed, "the Hardware1 object must really be removed");
+        tx.send(WorkerCommand::SetPerformance(PerformanceProfile::Silent))
+            .unwrap();
+        let lost = loop {
+            if let WorkerEvent::Performance(result) =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result;
+            }
+        };
+        assert_eq!(
+            first_calls.load(Ordering::SeqCst),
+            1,
+            "a missing Hardware1 object must not receive the write"
+        );
+        assert!(lost.is_err(), "owner loss must report unavailable/error");
+        drop(tx);
+        worker.abort();
+        let fresh_state = Arc::new(StdMutex::new(0u8));
+        let fresh_calls = Arc::new(AtomicU32::new(0));
+        let (_fresh_server, connection) = private_performance_peer(PrivatePerformanceHardware {
+            state: fresh_state.clone(),
+            calls: fresh_calls.clone(),
+        })
+        .await;
+        let fresh = orbis_session_client::ZbusHardwarePerformanceSource::new(connection);
+        assert!(fresh.set_performance(1).await.is_ok());
+        assert_eq!(*fresh_state.lock().unwrap(), 1);
+        assert_eq!(fresh_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[derive(Clone)]
+    struct PrivateProductGpuHardware {
+        state: Arc<StdMutex<ProductGpuMutationResult>>,
+        calls: Arc<StdMutex<Vec<u32>>>,
+    }
+
+    #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
+    impl PrivateProductGpuHardware {
+        async fn set_product_gpu_mode(
+            &self,
+            requested_mode: u32,
+        ) -> zbus::fdo::Result<ProductGpuMutationResult> {
+            self.calls.lock().unwrap().push(requested_mode);
+            let mut state = self.state.lock().unwrap();
+            *state = ProductGpuMutationResult {
+                requested_mode,
+                current_mode: state.current_mode,
+                queued_mode: requested_mode,
+                outcome: 1,
+                reboot_required: true,
+            };
+            Ok(*state)
+        }
+
+        async fn product_gpu_status(&self) -> zbus::fdo::Result<ProductGpuMutationResult> {
+            Ok(*self.state.lock().unwrap())
+        }
+    }
+
+    async fn private_product_gpu_peer(
+        hardware: PrivateProductGpuHardware,
+    ) -> (zbus::Connection, zbus::Connection) {
+        let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        let server = zbus::connection::Builder::unix_stream(server_stream)
+            .server(zbus::Guid::generate())
+            .unwrap()
+            .p2p()
+            .serve_at("/io/github/orbiscontrol/Hardware", hardware)
+            .unwrap();
+        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        tokio::try_join!(server.build(), client.build()).unwrap()
+    }
 
     /// Scripted Hardware1 peer: counts status reads, returns a fixed reply.
     struct ScriptedProductGpu {
@@ -1126,6 +1285,52 @@ mod tests {
             ),
             AppService::new(provider.clone()),
             AppService::new(provider.clone()),
+            AppService::new(provider.clone()),
+            AppService::new(provider),
+            orbis_core::capability::CapabilityStatus::Unsupported,
+            orbis_core::capability::CapabilityStatus::Unsupported,
+            orbis_core::capability::CapabilityStatus::Unsupported,
+        )
+    }
+
+    struct PrivatePerformanceSession {
+        state: Arc<StdMutex<u8>>,
+    }
+
+    #[async_trait::async_trait]
+    impl orbis_session_client::SessionPerformanceSource for PrivatePerformanceSession {
+        async fn read_performance(
+            &self,
+        ) -> Result<orbis_session_protocol::PerformanceInfo, ProviderError> {
+            Ok(orbis_session_protocol::PerformanceInfo {
+                current: *self.state.lock().unwrap(),
+                available_mask: 0b111,
+            })
+        }
+    }
+
+    fn mock_runtime_with_performance<P>(
+        performance: Arc<P>,
+    ) -> ApplicationRuntime<
+        GpuServices<MockProvider, MockProvider, MockProvider, MockProvider>,
+        AppService<MockProvider>,
+        AppService<P>,
+    >
+    where
+        P: orbis_providers::traits::PerformanceProvider + Send + Sync + 'static,
+    {
+        let provider = Arc::new(MockProvider::new(
+            build_state_arc("zephyrus-full").expect("profile exists"),
+        ));
+        ApplicationRuntime::empty_for_testing(
+            GpuServices::new(
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+                AppService::new(provider.clone()),
+            ),
+            AppService::new(provider.clone()),
+            AppService::new(performance),
             AppService::new(provider.clone()),
             AppService::new(provider),
             orbis_core::capability::CapabilityStatus::Unsupported,
@@ -1221,5 +1426,99 @@ mod tests {
             matches!(result, Err(ProviderError::Unsupported(_))),
             "absent promotion must be an honest Unsupported, got {result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn worker_loop_private_peer_mutation_readback_owner_loss_and_recovery() {
+        let initial = ProductGpuMutationResult {
+            requested_mode: 0,
+            current_mode: 0,
+            queued_mode: u32::MAX,
+            outcome: 0,
+            reboot_required: false,
+        };
+        let hardware = PrivateProductGpuHardware {
+            state: Arc::new(StdMutex::new(initial)),
+            calls: Arc::new(StdMutex::new(Vec::new())),
+        };
+        let peer_state = hardware.state.clone();
+        let peer_calls = hardware.calls.clone();
+        let (server, connection) = private_product_gpu_peer(hardware).await;
+        let source: Arc<dyn HardwareProductGpuSource> = Arc::new(
+            orbis_session_client::ZbusHardwareProductGpuSource::new(connection),
+        );
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(run_worker_with_product_gpu(
+            mock_runtime(),
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            Some(source.clone()),
+        ));
+
+        tx.send(WorkerCommand::SetProductGpuMode { raw: 2 })
+            .unwrap();
+        let mutation = loop {
+            if let WorkerEvent::ProductGpu(result) =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result.unwrap();
+            }
+        };
+        assert_eq!(mutation.queued_mode, 2);
+        assert!(mutation.reboot_required);
+        assert_eq!(*peer_calls.lock().unwrap(), vec![2]);
+
+        tx.send(WorkerCommand::RefreshProductGpuStatus).unwrap();
+        let read_back = loop {
+            if let WorkerEvent::ProductGpuStatusRefresh(result) =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result.unwrap();
+            }
+        };
+        assert_eq!(read_back.current_mode, 0);
+        assert_eq!(read_back.queued_mode, 2);
+        assert!(read_back.reboot_required);
+        assert_eq!(*peer_state.lock().unwrap(), read_back);
+
+        drop(server);
+        tx.send(WorkerCommand::RefreshProductGpuStatus).unwrap();
+        let lost = loop {
+            if let WorkerEvent::ProductGpuStatusRefresh(result) =
+                tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+            {
+                break result;
+            }
+        };
+        assert!(
+            lost.is_err(),
+            "owner loss must not report success: {lost:?}"
+        );
+
+        drop(tx);
+        worker.abort();
+        let replacement = PrivateProductGpuHardware {
+            state: Arc::new(StdMutex::new(initial)),
+            calls: Arc::new(StdMutex::new(Vec::new())),
+        };
+        let replacement_state = replacement.state.clone();
+        let (_replacement_server, connection) = private_product_gpu_peer(replacement).await;
+        let replacement = orbis_session_client::ZbusHardwareProductGpuSource::new(connection);
+        let fresh = replacement.product_gpu_status().await.unwrap();
+        assert_eq!(fresh, initial);
+        assert_eq!(*replacement_state.lock().unwrap(), initial);
     }
 }
