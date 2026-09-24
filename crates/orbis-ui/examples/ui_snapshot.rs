@@ -1,6 +1,6 @@
 //! Offscreen section snapshots for the single-window UI (ui-review companion).
 //!
-//! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme]`
+//! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme] [width] [height]`
 //! Sections: dashboard | performance | power | cooling | graphics | backlight
 //! | display | system | settings | about | dialog.
 
@@ -224,16 +224,21 @@ fn main() -> anyhow::Result<()> {
     let kind = args.next().unwrap_or_else(|| "dashboard".to_string());
     let path = args.next().unwrap_or_else(|| format!("{kind}.png"));
     let theme = args.next().unwrap_or_else(|| "dark".to_string());
+    let requested_width = args.next().map(|value| value.parse()).transpose()?;
+    let requested_height = args.next().map(|value| value.parse()).transpose()?;
     let light = match theme.as_str() {
         "dark" => false,
         "light" => true,
         other => anyhow::bail!("unknown theme: {other}"),
     };
 
-    let (width, height) = match kind.as_str() {
-        "dialog" => (470, 228),
-        _ => (1240, 820),
+    let (default_width, default_height) = if kind == "dialog" {
+        (470, 228)
+    } else {
+        (1240, 820)
     };
+    let width = requested_width.unwrap_or(default_width);
+    let height = requested_height.unwrap_or(default_height);
 
     let renderer = setup(width, height);
 
