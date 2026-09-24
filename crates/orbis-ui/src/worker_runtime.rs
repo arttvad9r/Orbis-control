@@ -2105,8 +2105,11 @@ mod tests {
         /// Whether an accepted write queues the requested mode (reboot-required
         /// semantics) or leaves the authoritative state untouched (partial).
         queue_on_write: bool,
-        /// Artificial latency injected before the read-only status reply.
-        status_delay: Option<Duration>,
+        /// Whether the read-only status handler never replies (a hung peer).
+        ///
+        /// Models a stuck asusd without needing a Tokio reactor on the zbus
+        /// executor thread: the client-side read deadline must fail closed.
+        hang_status: bool,
     }
 
     #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
@@ -2134,8 +2137,8 @@ mod tests {
 
         async fn product_gpu_status(&self) -> zbus::fdo::Result<ProductGpuMutationResult> {
             self.status_calls.fetch_add(1, Ordering::SeqCst);
-            if let Some(delay) = self.status_delay {
-                tokio::time::sleep(delay).await;
+            if self.hang_status {
+                std::future::pending::<()>().await;
             }
             if let Some(failure) = self.status_failure {
                 return Err(failure.into_fdo("ProductGpuStatus"));
@@ -2168,7 +2171,7 @@ mod tests {
             set_failure: Some(ScriptedGpuFailure::Denied),
             status_failure: None,
             queue_on_write: false,
-            status_delay: None,
+            hang_status: false,
         };
         let owner_state = owner.state.clone();
         let set_calls = owner.set_calls.clone();
@@ -2227,7 +2230,7 @@ mod tests {
             set_failure: Some(ScriptedGpuFailure::PartialWrite),
             status_failure: None,
             queue_on_write: false,
-            status_delay: None,
+            hang_status: false,
         };
         let partial_state = partial.state.clone();
         let partial_calls = partial.set_calls.clone();
@@ -2286,7 +2289,7 @@ mod tests {
             set_failure: None,
             status_failure: Some(ScriptedGpuFailure::Denied),
             queue_on_write: true,
-            status_delay: None,
+            hang_status: false,
         };
         let denied_calls = denied.status_calls.clone();
         let (_denied_server, denied_connection) = scripted_gpu_peer(denied).await;
@@ -2332,7 +2335,7 @@ mod tests {
             set_failure: None,
             status_failure: None,
             queue_on_write: true,
-            status_delay: Some(PRODUCT_GPU_STATUS_DEADLINE + Duration::from_secs(1)),
+            hang_status: true,
         };
         let hung_calls = hung.status_calls.clone();
         let (_hung_server, hung_connection) = scripted_gpu_peer(hung).await;
@@ -2383,7 +2386,7 @@ mod tests {
             set_failure: None,
             status_failure: None,
             queue_on_write: true,
-            status_delay: None,
+            hang_status: false,
         };
         let owner_state = owner.state.clone();
         let owner_set_calls = owner.set_calls.clone();
@@ -2440,7 +2443,7 @@ mod tests {
             set_failure: None,
             status_failure: None,
             queue_on_write: true,
-            status_delay: None,
+            hang_status: false,
         };
         let replacement_state = replacement.state.clone();
         let replacement_set_calls = replacement.set_calls.clone();
