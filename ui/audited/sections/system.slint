@@ -1,11 +1,7 @@
-// System page — device identity, firmware, full ASUS advanced surface and
-// diagnostics. Upcoming controls remain present but use product-grade
-// availability states instead of looking like unfinished placeholders.
+// System page — device identity and diagnostics.
 import { ScrollView } from "std-widgets.slint";
-import { NumberStepper, OptionStepper } from "../../components/steppers.slint";
 import { UiState, ClamshellState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, InfoRow, LocalStatus, ActionButton, StatusPill, SubsectionLabel, LayoutMetrics } from "../common.slint";
-import { RequestToggleRow } from "../../components/request-toggle-row.slint";
+import { PageHeader, SectionCard, SectionTitle, InfoRow, LocalStatus, ActionButton, StatusPill, LayoutMetrics } from "../common.slint";
 import { Palette } from "../../themes/dark.slint";
 
 export component SystemSection inherits Rectangle {
@@ -135,189 +131,18 @@ export component SystemSection inherits Rectangle {
 
             PageHeader {
                 title: "Система";
-                description: "Сведения об устройстве, расширенные параметры и диагностика.";
-            }
-
-            HorizontalLayout {
-                spacing: 12px;
-                SectionCard {
-                    horizontal-stretch: 1;
-                    VerticalLayout {
-                        padding: LayoutMetrics.card-padding;
-                        spacing: 4px;
-                        SectionTitle { title: "Устройство"; }
-                        InfoRow { label: "Модель"; value: root.device-label(); }
-                        InfoRow { label: "Плата"; value: root.board-label(); }
-                        InfoRow { label: "BIOS"; value: root.bios-label(); }
-                        InfoRow { label: "Orbis Control"; value: root.ui-state.version; }
-                    }
-                }
-
-                SectionCard {
-                    horizontal-stretch: 1;
-                    VerticalLayout {
-                        padding: LayoutMetrics.card-padding;
-                        spacing: 8px;
-                        HorizontalLayout {
-                            height: 30px;
-                            SectionTitle { horizontal-stretch: 1; title: "Прошивка"; }
-                            StatusPill {
-                                text: root.boot-sound-state-ready ? "Обнаружено" : "Определяется";
-                                accent: root.boot-sound-state-ready ? Palette.success : Palette.warning;
-                            }
-                        }
-                        RequestToggleRow {
-                            label: "Звук при включении";
-                            description: root.boot-sound-state-ready ? "Текущее состояние firmware-параметра" : "Параметр будет показан после обнаружения поддержки";
-                            checked: root.boot-sound-state-ready && root.boot-sound;
-                            disabled: !root.boot-sound-control-ready;
-                            toggled(value) => { root.boot-sound-requested(value); }
-                        }
-                    }
-                }
+                description: "Сведения об устройстве и диагностика.";
             }
 
             SectionCard {
                 VerticalLayout {
                     padding: LayoutMetrics.card-padding;
-                    spacing: 8px;
-
-                    HorizontalLayout {
-                        height: 30px;
-                        SectionTitle { horizontal-stretch: 1; title: "Расширенные параметры ASUS"; }
-                        StatusPill {
-                             text: root.backend-ready ? (root.applying ? "Применение" : "Доступно") : "Есть ограничения";
-                            accent: root.backend-ready ? Palette.success : Palette.warning;
-                        }
-                    }
-
-                    LocalStatus {
-                        text: root.backend-ready
-                            ? root.status
-                             : "Недоступные параметры останутся заблокированными до появления поддержки устройства.";
-                        accent: root.backend-ready ? Palette.text-secondary : Palette.warning;
-                    }
-
-                    SubsectionLabel { text: "ПОВЕДЕНИЕ И ЭНЕРГОСБЕРЕЖЕНИЕ"; }
-                    RequestToggleRow {
-                        label: "Светодиоды состояния";
-                         description: root.status-led-state-ready ? "Управление системными индикаторами ноутбука" : "Недоступно: поддержка функции не обнаружена";
-                         checked: root.status-led-state-ready && root.status-led;
-                          disabled: true; // no typed owner yet
-                         toggled(value) => { root.status-led = value; }
-                    }
-                     HorizontalLayout {
-                         spacing: 10px;
-                         RequestToggleRow {
-                             horizontal-stretch: 1;
-                             label: "Автоматический режим при закрытой крышке";
-                             description: root.auto-clamshell-state == ClamshellState.Loading ? "Проверяем поддержку и состояние компонента сессии" :
-                                 (root.auto-clamshell-state == ClamshellState.Inactive || root.auto-clamshell-state == ClamshellState.Active) ? "Управляет запретом сна при закрытой крышке" :
-                                 root.auto-clamshell-state == ClamshellState.Unavailable ? "Компонент сессии не поддерживает эту функцию" :
-                                 root.auto-clamshell-state == ClamshellState.PermissionDenied ? "Компонент сессии отклонил доступ" :
-                                 root.auto-clamshell-state == ClamshellState.StartFailed ? "Не удалось включить режим; изменение недоступно" :
-                                 root.auto-clamshell-state == ClamshellState.ExitFailed ? "Не удалось выключить режим; изменение недоступно" :
-                                 "Состояние компонента сессии не определено";
-                             checked: root.auto-clamshell-state == ClamshellState.Active;
-                             disabled: (root.auto-clamshell-state != ClamshellState.Inactive && root.auto-clamshell-state != ClamshellState.Active) || root.applying;
-                             toggled(value) => { root.auto-clamshell-requested(value); }
-                         }
-                         StatusPill {
-                             text: root.clamshell-state-label();
-                             accent: root.clamshell-state-accent();
-                         }
-                     }
-                    RequestToggleRow {
-                         label: "Отключать PCIe ASPM при работе от сети";
-                          description: root.aspm-state-ready ? "Профиль энергосбережения PCIe при питании от адаптера" : "Недоступно: поддержка функции не обнаружена";
-                         checked: root.aspm-state-ready && root.disable-aspm;
-                         disabled: !root.aspm-control-ready || root.applying;
-                         toggled(value) => { root.disable-aspm = value; root.aspm-requested(value); }
-                    }
-                    RequestToggleRow {
-                         label: "Отключать сеть в современном режиме ожидания";
-                          description: root.standby-networking-control-ready ? "Сетевое поведение во время современного режима ожидания" : "Недоступно: поддержка функции не обнаружена";
-                         checked: root.standby-networking-control-ready && root.disable-standby-networking;
-                          disabled: true; // no typed owner yet
-                        toggled(value) => { root.disable-standby-networking = value; }
-                    }
-
-                    SubsectionLabel { text: "РЕСУРСЫ И ПИТАНИЕ"; }
-                    HorizontalLayout {
-                        height: 40px;
-                        spacing: 12px;
-                         Text { width: 176px; text: "Память iGPU"; font-size: 13.5px; font-weight: 550; color: root.igpu-memory-state-ready ? Palette.text-primary : Palette.text-secondary; vertical-alignment: center; }
-                         OptionStepper {
-                             label: root.igpu-memory-pending ? root.igpu-label(root.igpu-memory) + " · Перезагрузка" : root.igpu-label(root.igpu-memory);
-                             disabled: !root.igpu-memory-control-ready || root.applying;
-                             can-previous: root.igpu-memory > 0;
-                             can-next: root.igpu-memory < 8;
-                             previous => { root.igpu-memory = Math.max(0, root.igpu-memory - 1); root.igpu-memory-requested(root.igpu-memory); }
-                             next => { root.igpu-memory = Math.min(8, root.igpu-memory + 1); root.igpu-memory-requested(root.igpu-memory); }
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-                    HorizontalLayout {
-                        height: 40px;
-                        spacing: 12px;
-                         Text { width: 176px; text: "Гибернация через"; font-size: 13.5px; font-weight: 550; color: root.hibernate-control-ready ? Palette.text-primary : Palette.text-secondary; vertical-alignment: center; }
-                         NumberStepper { value <=> root.hibernate-after; minimum: 0; maximum: 1440; step: 5; disabled: true; /* no typed owner yet */ }
-                        Text { text: "мин"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-                    HorizontalLayout {
-                        height: 40px;
-                        spacing: 12px;
-                         Text { width: 176px; text: "Активные ядра CPU"; font-size: 13.5px; font-weight: 550; color: root.core-count-control-ready ? Palette.text-primary : Palette.text-secondary; vertical-alignment: center; }
-                        Text { text: "P"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
-                          NumberStepper { value <=> root.p-cores; minimum: 1; maximum: 32; disabled: true; /* no typed owner yet */ }
-                        Text { text: "E"; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
-                          NumberStepper { value <=> root.e-cores; minimum: 0; maximum: 32; disabled: true; /* no typed owner yet */ }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-
-                    SubsectionLabel { text: "КЛАВИШИ M1–M5"; }
-                    HorizontalLayout {
-                        height: 40px;
-                        spacing: 8px;
-                        Text { width: 28px; text: "M1"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
-                          OptionStepper { label: root.binding-label(root.m1-action); disabled: true; /* no typed owner yet */ can-previous: root.m1-action > 0; can-next: root.m1-action < root.binding-action-count - 1; previous => { root.m1-action = root.clamp-index(root.m1-action, -1); } next => { root.m1-action = root.clamp-index(root.m1-action, 1); } }
-                        Text { width: 28px; text: "M2"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
-                          OptionStepper { label: root.binding-label(root.m2-action); disabled: true; /* no typed owner yet */ can-previous: root.m2-action > 0; can-next: root.m2-action < root.binding-action-count - 1; previous => { root.m2-action = root.clamp-index(root.m2-action, -1); } next => { root.m2-action = root.clamp-index(root.m2-action, 1); } }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-                    HorizontalLayout {
-                        height: 40px;
-                        spacing: 8px;
-                        Text { width: 28px; text: "M3"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
-                          OptionStepper { label: root.binding-label(root.m3-action); disabled: true; /* no typed owner yet */ can-previous: root.m3-action > 0; can-next: root.m3-action < root.binding-action-count - 1; previous => { root.m3-action = root.clamp-index(root.m3-action, -1); } next => { root.m3-action = root.clamp-index(root.m3-action, 1); } }
-                        Text { width: 28px; text: "M4"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
-                          OptionStepper { label: root.binding-label(root.m4-action); disabled: true; /* no typed owner yet */ can-previous: root.m4-action > 0; can-next: root.m4-action < root.binding-action-count - 1; previous => { root.m4-action = root.clamp-index(root.m4-action, -1); } next => { root.m4-action = root.clamp-index(root.m4-action, 1); } }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-                    HorizontalLayout {
-                        height: 40px;
-                        spacing: 8px;
-                        Text { width: 28px; text: "M5"; font-size: 13px; font-weight: 650; color: Palette.text-secondary; vertical-alignment: center; }
-                          OptionStepper { label: root.binding-label(root.m5-action); disabled: true; /* no typed owner yet */ can-previous: root.m5-action > 0; can-next: root.m5-action < root.binding-action-count - 1; previous => { root.m5-action = root.clamp-index(root.m5-action, -1); } next => { root.m5-action = root.clamp-index(root.m5-action, 1); } }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-
-                     Rectangle { height: 1px; background: Palette.border-default; }
-                     VerticalLayout {
-                         spacing: 8px;
-                         LocalStatus {
-                             text: root.backend-ready ? "Поддержанные параметры применяются сразу после изменения." : "Параметры станут редактируемыми после подтверждения поддержки устройства.";
-                             accent: root.backend-ready ? Palette.text-secondary : Palette.warning;
-                         }
-                         HorizontalLayout {
-                             height: 40px;
-                             spacing: 8px;
-                             Rectangle { horizontal-stretch: 1; background: transparent; }
-                             ActionButton { label: "Обновить"; disabled: !root.backend-ready || root.applying; clicked => { root.reload-requested(); } }
-                             ActionButton { label: root.advanced-apply-ready ? (root.applying ? "Применение…" : "Применить") : "Нет доступных изменений"; accent: root.advanced-apply-ready; disabled: !root.advanced-apply-ready || root.applying; clicked => { root.apply-requested(); } }
-                         }
-                     }
+                    spacing: 4px;
+                    SectionTitle { title: "Устройство"; }
+                    InfoRow { label: "Модель"; value: root.device-label(); }
+                    InfoRow { label: "Плата"; value: root.board-label(); }
+                    InfoRow { label: "BIOS"; value: root.bios-label(); }
+                    InfoRow { label: "Orbis Control"; value: root.ui-state.version; }
                 }
             }
 

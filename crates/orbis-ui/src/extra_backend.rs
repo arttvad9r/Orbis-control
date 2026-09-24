@@ -1630,21 +1630,26 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_advanced_controls_are_explicitly_unavailable() {
+    fn unsupported_advanced_controls_are_omitted_from_the_system_ui() {
         let source = include_str!("../../../ui/audited/sections/system.slint");
-        assert!(source.contains("Недоступно: поддержка функции не обнаружена"));
-        assert!(source.contains("disabled: true; // no typed owner yet"));
-        assert!(source.contains("status-led-control-ready"));
-        assert!(source.contains("standby-networking-control-ready"));
-        assert!(source.contains("hibernate-control-ready"));
-        assert!(source.contains("core-count-control-ready"));
-        assert!(source.contains("binding-control-ready"));
-        assert!(source.contains("advanced-apply-ready"));
-        assert!(
-            source.contains(
-                "Параметры станут редактируемыми после подтверждения поддержки устройства."
-            )
-        );
+        for omitted_control in [
+            "Светодиоды состояния",
+            "Автоматический режим при закрытой крышке",
+            "Отключать PCIe ASPM при работе от сети",
+            "Отключать сеть в современном режиме ожидания",
+            "Память iGPU",
+            "Гибернация через",
+            "Активные ядра CPU",
+            "КЛАВИШИ M1–M5",
+            "Звук при включении",
+        ] {
+            assert!(
+                !source.contains(omitted_control),
+                "unsupported System control must be omitted: {omitted_control}"
+            );
+        }
+        assert!(source.contains("title: \"Устройство\""));
+        assert!(source.contains("title: \"Диагностика\""));
     }
 
     #[test]
@@ -1687,15 +1692,10 @@ mod tests {
             ClamshellState::Unknown
         );
         let source = include_str!("../../../ui/audited/sections/system.slint");
-        assert!(source.contains("ClamshellState"));
-        assert!(source.contains("auto-clamshell-state == ClamshellState.Loading"));
-        assert!(source.contains("auto-clamshell-state == ClamshellState.Inactive"));
-        assert!(source.contains("auto-clamshell-state == ClamshellState.Active"));
-        assert!(source.contains("auto-clamshell-state == ClamshellState.Unavailable"));
-        assert!(source.contains("auto-clamshell-state == ClamshellState.PermissionDenied"));
-        assert!(source.contains("auto-clamshell-state == ClamshellState.StartFailed"));
-        assert!(source.contains("auto-clamshell-state == ClamshellState.ExitFailed"));
-        assert!(source.contains("disabled: (root.auto-clamshell-state != ClamshellState.Inactive"));
+        assert!(
+            !source.contains("Автоматический режим при закрытой крышке"),
+            "the unsupported session control must not be rendered"
+        );
     }
 
     #[test]

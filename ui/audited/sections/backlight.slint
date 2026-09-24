@@ -122,23 +122,6 @@ export component BacklightSection inherits Rectangle {
             root.aura-secondary-red, root.aura-secondary-green, root.aura-secondary-blue);
     }
 
-    function mode-supported(mode: int) -> bool {
-        if (!root.aura-state-ready || !root.aura-control-ready) { return false; }
-        if (mode == 0) { return root.aura-static-supported; }
-        if (mode == 1) { return root.aura-breathe-supported; }
-        if (mode == 2) { return root.aura-rainbow-supported; }
-        if (mode == 3) { return root.aura-rainbow-wave-supported; }
-        if (mode == 4) { return root.aura-star-supported; }
-        if (mode == 5) { return root.aura-rain-supported; }
-        if (mode == 6) { return root.aura-highlight-supported; }
-        if (mode == 7) { return root.aura-laser-supported; }
-        if (mode == 8) { return root.aura-ripple-supported; }
-        if (mode == 10) { return root.aura-pulse-supported; }
-        if (mode == 11) { return root.aura-comet-supported; }
-        if (mode == 12) { return root.aura-flash-supported; }
-        return false;
-    }
-
     function keyboard-status() -> string {
         if (root.keyboard-mutation-error != "") { return root.keyboard-mutation-error; }
         if (!root.keyboard-state-ready) { return "Получение состояния подсветки"; }
@@ -264,26 +247,26 @@ export component BacklightSection inherits Rectangle {
                                 spacing: 4px;
                                 InfoRow { label: "Эффект"; value: root.aura-effect-label(); }
                                 InfoRow { label: "Скорость"; value: root.aura-speed-label(); }
-                                HorizontalLayout {
+                                if (root.aura-static-supported || root.aura-breathe-supported || root.aura-rainbow-supported || root.aura-star-supported) : HorizontalLayout {
                                     spacing: 5px;
-                                    AuraChoice { label: "Static"; selected: root.keyboard-effect == 0; disabled: !root.mode-supported(0); clicked => { root.request-effect(0, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
-                                    AuraChoice { label: "Breathe"; selected: root.keyboard-effect == 1; disabled: !root.mode-supported(1); clicked => { root.request-effect(1, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
-                                    AuraChoice { label: "Rainbow"; selected: root.keyboard-effect == 2; disabled: !root.mode-supported(2); clicked => { root.request-effect(2, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
-                                    AuraChoice { label: "Star"; selected: root.keyboard-effect == 4; disabled: !root.mode-supported(4); clicked => { root.request-effect(4, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-static-supported) : AuraChoice { label: "Static"; selected: root.keyboard-effect == 0; disabled: !root.aura-control-ready; clicked => { root.request-effect(0, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-breathe-supported) : AuraChoice { label: "Breathe"; selected: root.keyboard-effect == 1; disabled: !root.aura-control-ready; clicked => { root.request-effect(1, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-rainbow-supported) : AuraChoice { label: "Rainbow"; selected: root.keyboard-effect == 2; disabled: !root.aura-control-ready; clicked => { root.request-effect(2, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-star-supported) : AuraChoice { label: "Star"; selected: root.keyboard-effect == 4; disabled: !root.aura-control-ready; clicked => { root.request-effect(4, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
                                 }
-                                HorizontalLayout {
+                                if (root.aura-rainbow-wave-supported || root.aura-rain-supported || root.aura-highlight-supported || root.aura-laser-supported) : HorizontalLayout {
                                     spacing: 5px;
-                                    AuraChoice { label: "Rainbow Wave"; selected: root.keyboard-effect == 3; disabled: !root.mode-supported(3); clicked => { root.request-effect(3, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
-                                    AuraChoice { label: "Rain"; selected: root.keyboard-effect == 5; disabled: !root.mode-supported(5); clicked => { root.request-effect(5, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
-                                    AuraChoice { label: "Highlight"; selected: root.keyboard-effect == 6; disabled: !root.mode-supported(6); clicked => { root.request-effect(6, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
-                                    AuraChoice { label: "Laser"; selected: root.keyboard-effect == 7; disabled: !root.mode-supported(7); clicked => { root.request-effect(7, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-rainbow-wave-supported) : AuraChoice { label: "Rainbow Wave"; selected: root.keyboard-effect == 3; disabled: !root.aura-control-ready; clicked => { root.request-effect(3, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-rain-supported) : AuraChoice { label: "Rain"; selected: root.keyboard-effect == 5; disabled: !root.aura-control-ready; clicked => { root.request-effect(5, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-highlight-supported) : AuraChoice { label: "Highlight"; selected: root.keyboard-effect == 6; disabled: !root.aura-control-ready; clicked => { root.request-effect(6, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-laser-supported) : AuraChoice { label: "Laser"; selected: root.keyboard-effect == 7; disabled: !root.aura-control-ready; clicked => { root.request-effect(7, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
                                 }
-                                HorizontalLayout {
+                                if (root.aura-ripple-supported || root.aura-pulse-supported || root.aura-comet-supported || root.aura-flash-supported) : HorizontalLayout {
                                     spacing: 5px;
-                                    AuraChoice { label: "Ripple"; selected: root.keyboard-effect == 8; disabled: !root.mode-supported(8); clicked => { root.request-effect(8, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
-                                    AuraChoice { label: "Pulse"; selected: root.keyboard-effect == 10; disabled: !root.mode-supported(10); clicked => { root.request-effect(10, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
-                                    AuraChoice { label: "Comet"; selected: root.keyboard-effect == 11; disabled: !root.mode-supported(11); clicked => { root.request-effect(11, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
-                                    AuraChoice { label: "Flash"; selected: root.keyboard-effect == 12; disabled: !root.mode-supported(12); clicked => { root.request-effect(12, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-ripple-supported) : AuraChoice { label: "Ripple"; selected: root.keyboard-effect == 8; disabled: !root.aura-control-ready; clicked => { root.request-effect(8, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-pulse-supported) : AuraChoice { label: "Pulse"; selected: root.keyboard-effect == 10; disabled: !root.aura-control-ready; clicked => { root.request-effect(10, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-comet-supported) : AuraChoice { label: "Comet"; selected: root.keyboard-effect == 11; disabled: !root.aura-control-ready; clicked => { root.request-effect(11, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
+                                    if (root.aura-flash-supported) : AuraChoice { label: "Flash"; selected: root.keyboard-effect == 12; disabled: !root.aura-control-ready; clicked => { root.request-effect(12, root.keyboard-speed < 0 ? 1 : root.keyboard-speed); } }
                                 }
                                 HorizontalLayout {
                                     spacing: 5px;

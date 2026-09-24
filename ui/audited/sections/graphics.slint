@@ -1,8 +1,8 @@
 // Graphics page — product GPU mode with explicit current/queued semantics and
 // observed dGPU hardware state.
 import { ScrollView } from "std-widgets.slint";
-import { UiState, GpuHwState, GpuModeHwState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, InfoRow, StatusPill, LocalStatus, LayoutMetrics } from "../common.slint";
+import { UiState, GpuModeHwState } from "../model.slint";
+import { PageHeader, SectionCard, SectionTitle, StatusPill, LocalStatus, LayoutMetrics } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -29,34 +29,7 @@ export component GraphicsSection inherits Rectangle {
         if (index == 0) { return "Eco"; }
         if (index == 1) { return "Standard"; }
         if (index == 2) { return "Ultimate"; }
-        if (index == 3) { return "Optimized"; }
         return "—";
-    }
-
-    function power-label() -> string {
-        if (root.ui-state.gpu-power-state == GpuHwState.Loading) { return "—"; }
-        if (root.ui-state.gpu-power-state == GpuHwState.Unavailable) { return "Недоступно"; }
-        if (root.ui-state.gpu-power-value == 0) { return "Активна"; }
-        if (root.ui-state.gpu-power-value == 1) { return "Приостановлена"; }
-        if (root.ui-state.gpu-power-value == 2) { return "Выключена"; }
-        return "Неизвестно";
-    }
-
-    function mux-label() -> string {
-        if (root.ui-state.gpu-mux-state == GpuHwState.Loading) { return "—"; }
-        if (root.ui-state.gpu-mux-state == GpuHwState.Unavailable) { return "Недоступно"; }
-        if (root.ui-state.gpu-mux-value == 0) { return "Гибрид (iGPU)"; }
-        if (root.ui-state.gpu-mux-value == 1) { return "Дискретный"; }
-        return "Неизвестно";
-    }
-
-    function access-label() -> string {
-        if (root.ui-state.gpu-access-state == GpuHwState.Loading) { return "—"; }
-        if (root.ui-state.gpu-access-state == GpuHwState.Unavailable) { return "Недоступно"; }
-        if (root.ui-state.gpu-access-value == 0) { return "Не заблокирована"; }
-        if (root.ui-state.gpu-access-value == 1) { return "Заблокирована"; }
-        if (root.ui-state.gpu-access-value == 2) { return "Ожидает"; }
-        return "Неизвестно";
     }
 
     ScrollView {
@@ -137,54 +110,38 @@ export component GraphicsSection inherits Rectangle {
 
                     HorizontalLayout {
                         spacing: 12px;
-                        ModeCard {
-                            min-width: (parent.width - 36px) / 4;
-                            max-width: (parent.width - 36px) / 4;
+                        if (root.bit-set(root.ui-state.available-gpu-mask, 1)) : ModeCard {
+                            horizontal-stretch: 1;
                             title: "Eco";
                             description: "Только интегрированная графика";
                             icon-kind: 4;
                             accent: Palette.eco;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0;
                             pending: root.ui-state.gpu-queued == 0;
-                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || !root.bit-set(root.ui-state.available-gpu-mask, 1);
+                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
                             clicked => { root.gpu-clicked(0); }
                         }
-                        ModeCard {
-                            min-width: (parent.width - 36px) / 4;
-                            max-width: (parent.width - 36px) / 4;
+                        if (root.bit-set(root.ui-state.available-gpu-mask, 2)) : ModeCard {
+                            horizontal-stretch: 1;
                             title: "Standard";
                             description: "Гибридный режим";
                             icon-kind: 4;
                             accent: Palette.standard;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1;
                             pending: root.ui-state.gpu-queued == 1;
-                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || !root.bit-set(root.ui-state.available-gpu-mask, 2);
+                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
                             clicked => { root.gpu-clicked(1); }
                         }
-                        ModeCard {
-                            min-width: (parent.width - 36px) / 4;
-                            max-width: (parent.width - 36px) / 4;
+                        if (root.bit-set(root.ui-state.available-gpu-mask, 4)) : ModeCard {
+                            horizontal-stretch: 1;
                             title: "Ultimate";
                             description: "Прямой вывод через dGPU";
                             icon-kind: 4;
                             accent: Palette.ultimate;
                             selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2;
                             pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2;
-                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || root.ui-state.gpu-ultimate-disabled || !root.bit-set(root.ui-state.available-gpu-mask, 4);
+                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || root.ui-state.gpu-ultimate-disabled;
                             clicked => { root.gpu-clicked(2); }
-                        }
-                        // Keep the fourth approved mode visible, but unavailable
-                        // until the runtime exposes a typed write path.
-                        ModeCard {
-                            min-width: (parent.width - 36px) / 4;
-                            max-width: (parent.width - 36px) / 4;
-                            title: "Optimized";
-                            description: "Автоматическое переключение · недоступно";
-                            icon-kind: 4;
-                            accent: Palette.optimized;
-                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 3;
-                            disabled: true;
-                            clicked => { root.gpu-clicked(3); }
                         }
                     }
 
@@ -200,17 +157,6 @@ export component GraphicsSection inherits Rectangle {
                         text: "Переключение поставлено в очередь и завершится после перезагрузки или выключения";
                         accent: Palette.warning;
                     }
-                }
-            }
-
-            SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 4px;
-                    SectionTitle { title: "Состояние оборудования"; }
-                    InfoRow { label: "Питание dGPU"; value: root.power-label(); }
-                    InfoRow { label: "Физический MUX"; value: root.mux-label(); }
-                    InfoRow { label: "Доступ к dGPU"; value: root.access-label(); }
                 }
             }
 

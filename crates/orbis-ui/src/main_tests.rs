@@ -3161,18 +3161,9 @@ fn main_window_renders_queued_target_and_reboot_state() {
     assert!(source.contains("gpu-queued == 0"));
     assert!(source.contains("gpu-queued == 1"));
     assert!(source.contains("gpu-queued == 2"));
-    // Reboot-required status line exists; Optimized never gains a queued binding.
+    // Reboot-required status remains, while unsupported product modes are omitted.
     assert!(source.contains("gpu-reboot-required"));
-    let optimized_line_start = source.find("title: \"Optimized\"").expect("Optimized tile");
-    let optimized_line_end = source[optimized_line_start..]
-        .find('\n')
-        .map(|end| optimized_line_start + end)
-        .expect("Optimized tile line ends");
-    let optimized_line = &source[optimized_line_start..optimized_line_end];
-    assert!(
-        !optimized_line.contains("pending:"),
-        "Optimized must never render a product-queue pending state"
-    );
+    assert!(!source.contains("title: \"Optimized\""));
 }
 
 /// The merged shell (their line's layout, per TRANSFER-PLAN §4/§5) wires every
