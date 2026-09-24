@@ -1276,8 +1276,19 @@ mod tests {
         let (refresh_started, refresh_started_rx) = std::sync::mpsc::channel();
         let injected = Arc::new(AtomicUsize::new(0));
         let calls = injected.clone();
-        let status_mode = Arc::new(AtomicUsize::new(0));
-        let status_calls = status_mode.clone();
+        let hardware = FakeAdvancedHardware {
+            state: Arc::new(Mutex::new((false, 2, false))),
+            boot_status: 0,
+            fail_on: None,
+        };
+        let (initial_server, initial_connection) =
+            runtime.block_on(private_advanced_peer(hardware));
+        let peer = Arc::new(Mutex::new(HardwareProductControlClient::new(
+            initial_connection,
+        )));
+        let peer_for_status = peer.clone();
+        let server = Arc::new(Mutex::new(Some(initial_server)));
+        let fixture_runtime = runtime.handle().clone();
         let context = ExtraContext {
             runtime: runtime.handle().clone(),
             refreshing: Arc::new(AtomicBool::new(false)),
@@ -1318,19 +1329,8 @@ mod tests {
                 })
             }),
             write_statuses: Arc::new(move || {
-                let mode = status_calls.load(Ordering::SeqCst);
-                Box::pin(async move {
-                    if mode == 1 {
-                        Err(ProviderError::BackendUnavailable("owner vanished".into()))
-                    } else {
-                        Ok((
-                            ProductWriteStatus::Supported,
-                            ProductWriteStatus::Supported,
-                            ProductWriteStatus::Supported,
-                            ProductWriteStatus::Supported,
-                        ))
-                    }
-                })
+                let client = peer_for_status.lock().expect("peer client lock").clone();
+                Box::pin(async move { bounded_write_statuses_with(&client).await })
             }),
         };
         CONTEXT.with(|slot| *slot.borrow_mut() = Some(context));
@@ -1360,6 +1360,9 @@ mod tests {
         let poll_again = poll.clone();
         let phase = Arc::new(AtomicUsize::new(0));
         let poll_phase = phase.clone();
+        let poll_peer = peer.clone();
+        let poll_server = server.clone();
+        let poll_runtime = fixture_runtime.clone();
         let poll_once: Box<dyn FnMut() + Send> = Box::new(move || {
             let current_phase = poll_phase.load(Ordering::SeqCst);
             let ready = poll_weak.upgrade().is_some_and(|window| {
@@ -1382,7 +1385,26 @@ mod tests {
             if ready && current_phase < 2 {
                 let next_phase = current_phase + 1;
                 poll_phase.store(next_phase, Ordering::SeqCst);
-                status_mode.store(usize::from(next_phase == 1), Ordering::SeqCst);
+                if next_phase == 1 {
+                    drop(poll_server.lock().expect("peer server lock").take());
+                    let client = poll_peer.lock().expect("peer client lock").clone();
+                    assert!(
+                        poll_runtime
+                            .block_on(bounded_write_statuses_with(&client))
+                            .is_err()
+                    );
+                } else {
+                    let hardware = FakeAdvancedHardware {
+                        state: Arc::new(Mutex::new((false, 2, false))),
+                        boot_status: 0,
+                        fail_on: None,
+                    };
+                    let (new_server, new_connection) =
+                        poll_runtime.block_on(private_advanced_peer(hardware));
+                    *poll_peer.lock().expect("peer client lock") =
+                        HardwareProductControlClient::new(new_connection);
+                    *poll_server.lock().expect("peer server lock") = Some(new_server);
+                }
                 let weak = poll_weak.clone();
                 slint::invoke_from_event_loop(move || {
                     let window = weak.upgrade().expect("AppWindow remains alive");
