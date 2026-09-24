@@ -26,6 +26,26 @@ def png_size(path: Path) -> tuple[int, int]:
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
+    expected = {
+        f"{section}-{state}-{theme}-{width}x{height}.png"
+        for section in SECTIONS
+        for state in STATES
+        for theme in THEMES
+        for width, height in SIZES
+        if state == "normal" or (state == "dirty" and section == "cooling") or (
+            state in {"pending", "error", "unsupported", "readonly"}
+            and section in {"dashboard", "performance", "cooling", "graphics"}
+        )
+    }
+    managed = {
+        f"{section}-{state}-{theme}-{width}x{height}.png"
+        for section in SECTIONS
+        for state in STATES
+        for theme in THEMES
+        for width, height in SIZES
+    }
+    for stale in managed - expected:
+        (OUT / stale).unlink(missing_ok=True)
     total = 0
     for section in SECTIONS:
         for state in STATES:
@@ -56,6 +76,12 @@ def main() -> int:
     if hashlib.sha256(normal.read_bytes()).digest() == hashlib.sha256(error.read_bytes()).digest():
         raise RuntimeError("snapshot state oracle failed: dashboard normal/error renders are identical")
     print("snapshot-state-oracle passed: dashboard normal/error differ at 980x680 dark")
+    actual = {path.name for path in OUT.glob("*.png")}
+    if actual != expected or total != len(expected):
+        raise RuntimeError(
+            f"snapshot matrix set mismatch: generated={total}, expected={len(expected)}, "
+            f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
+        )
     print(f"generated and validated {total} screenshots in {OUT}")
     return 0
 
