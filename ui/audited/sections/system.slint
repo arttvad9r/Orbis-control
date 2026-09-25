@@ -1,5 +1,5 @@
 // System page — device identity and diagnostics.
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, TextEdit } from "std-widgets.slint";
 import { UiState, ClamshellState } from "../model.slint";
 import { PageHeader, SectionCard, SectionTitle, InfoRow, LocalStatus, ActionButton, StatusPill, LayoutMetrics } from "../common.slint";
 import { Palette } from "../../themes/dark.slint";
@@ -178,17 +178,18 @@ export component SystemSection inherits Rectangle {
                         horizontal-stretch: 1;
                         height: 170px;
                         vertical-alignment: top;
-                        overflow: elide;
+                        wrap: word-wrap;
                     }
                 }
             }
         }
     }
 
-    copy-ti := TextInput {
+    copy-ti := TextEdit {
         y: -1000px;
-        width: 1px;
-        height: 1px;
+        width: 300px;
+        height: 100px;
+        wrap: word-wrap;
         text: root.diagnostics-summary;
         read-only: true;
     }
