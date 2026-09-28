@@ -254,7 +254,12 @@ fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
             read_aura_write_status(),
         );
 
+        if let Err(error) = &display_result {
+            tracing::debug!(error = ?error, "display output snapshot unavailable");
+        }
         let display = display_state(display_result);
+        let (display_ready, display_status) = (display.state_ready, display.status.clone());
+        tracing::debug!(ready = display_ready, status = %display_status, "display state read");
         let keyboard = keyboard_state(keyboard_result, keyboard_write_result);
         let aura_write = aura_write_result.unwrap_or(ProductWriteStatus::Unknown);
         completion.store(false, Ordering::Release);
@@ -302,7 +307,7 @@ fn display_state(result: Result<DisplayOutputSnapshot, ProviderError>) -> Displa
         Ok(snapshot) => display_state_from_snapshot(&snapshot),
         Err(error) => DisplayUiState {
             state_ready: false,
-            status: read_error_status("Display", &error),
+            status: read_error_status("Экран", &error),
         },
     }
 }
@@ -311,25 +316,25 @@ fn display_state_from_snapshot(snapshot: &DisplayOutputSnapshot) -> DisplayUiSta
     match snapshot.outputs.as_slice() {
         [] => DisplayUiState {
             state_ready: true,
-            status: "No active outputs".into(),
+            status: "Нет активных экранов".into(),
         },
         [output] => {
             let refresh_mhz = output.current_mode.current.refresh.get();
             DisplayUiState {
                 state_ready: true,
-                status: format!("{} · {} · read only", output.id, refresh_label(refresh_mhz)),
+                status: format!("{} · {}", output.id, refresh_label(refresh_mhz)),
             }
         }
         outputs => DisplayUiState {
             state_ready: true,
-            status: format!("{} outputs · target ambiguous · read only", outputs.len()),
+            status: format!("Экранов: {} · основной не определён", outputs.len()),
         },
     }
 }
 
 fn refresh_label(refresh_mhz: u32) -> String {
     if refresh_mhz == 0 {
-        return "refresh unknown".into();
+        return "частота неизвестна".into();
     }
     if refresh_mhz.is_multiple_of(1_000) {
         return format!("{} Hz", refresh_mhz / 1_000);
@@ -369,11 +374,11 @@ fn keyboard_state(
 
 fn read_error_status(prefix: &str, error: &ProviderError) -> String {
     match error {
-        ProviderError::Unsupported(_) => format!("{prefix} unsupported"),
-        ProviderError::PermissionDenied(_) => format!("{prefix} read denied"),
-        ProviderError::BackendUnavailable(_) => format!("{prefix} backend unavailable"),
-        ProviderError::Timeout(_) => format!("{prefix} read timed out"),
-        _ => format!("{prefix} state unavailable"),
+        ProviderError::Unsupported(_) => format!("{prefix}: не поддерживается"),
+        ProviderError::PermissionDenied(_) => format!("{prefix}: нет доступа на чтение"),
+        ProviderError::BackendUnavailable(_) => format!("{prefix}: источник недоступен"),
+        ProviderError::Timeout(_) => format!("{prefix}: истекло время ожидания"),
+        _ => format!("{prefix}: состояние недоступно"),
     }
 }
 
@@ -426,7 +431,7 @@ mod tests {
             outputs: vec![output("eDP-1", 120_000), output("DP-1", 60_000)],
         });
         assert!(state.state_ready);
-        assert!(state.status.contains("target ambiguous"));
+        assert!(state.status.contains("основной не определён"));
     }
 
     #[test]
@@ -435,8 +440,7 @@ mod tests {
             outputs: vec![output("eDP-1", 119_880)],
         });
         assert!(state.state_ready);
-        assert!(state.status.contains("119.88 Hz"));
-        assert!(state.status.contains("read only"));
+        assert_eq!(state.status, "eDP-1 · 119.88 Hz");
     }
 
     #[test]
