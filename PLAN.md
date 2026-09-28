@@ -34,8 +34,8 @@ capability подтверждена на машине. Неподдержива�
 
 - [x] Сведены визуальная линия и линия private-P2P тестов в одну ветку.
 - [x] Удалены противоречащие планы, логи агентов, evidence-дампы, QA-артефакты.
-- [ ] Ветка `consolidate/cleanup` влита в `implementation/current-plan`;
-      устаревшие `wt/*`, `salvage/*`, `backup/*`, `planner/*` и их worktrees удалены.
+- [x] Всё влито в `implementation/current-plan`; устаревшие локальные ветки
+      (`wt/*`, `salvage/*`, `backup/*`, `planner/*`) и их worktrees удалены.
 
 ## Этап 2. Релиз-кандидат v0.1
 
