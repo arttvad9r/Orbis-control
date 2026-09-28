@@ -100,9 +100,13 @@ def validate_packaging_assets(root: Path) -> None:
         if "/usr/local/bin/orbis-" in content:
             raise SystemExit(f"{path}: stale /usr/local/bin executable reference")
 
+    # The developer installer stays under /usr/local so it never collides with
+    # the pacman-owned /usr/bin layout; it rewrites unit ExecStart paths to it.
     install_script = (root / "packaging/install-arch.sh").read_text(encoding="utf-8")
-    if 'BIN_DIR="${DESTDIR}/usr/bin"' not in install_script:
-        raise SystemExit("packaging/install-arch.sh: package binary prefix is not /usr/bin")
+    if 'BIN_DIR="${DESTDIR}/usr/local/bin"' not in install_script:
+        raise SystemExit("packaging/install-arch.sh: developer binary prefix is not /usr/local/bin")
+    if 'sed "s#/usr/bin/#${BIN_DIR}/#g"' not in install_script:
+        raise SystemExit("packaging/install-arch.sh: units are not rewritten to the installer prefix")
 
     run(["bash", "-n", "packaging/install-arch.sh"], root)
     run(["bash", "-n", "packaging/deploy-dev-hardwared.sh"], root)
