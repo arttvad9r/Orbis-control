@@ -274,6 +274,156 @@ impl PowerLimitMutationBackend for KernelAsusPowerLimitMutationBackend {
     }
 }
 
+/// Mutation backend for the legacy `asus-nb-wmi` PPT files.
+///
+/// Field-specific and fixed-path like the Armoury backend. Ranges come from the
+/// verified per-model table because this ABI publishes no metadata; the
+/// read-back is the driver cache, which is updated only after the firmware
+/// acknowledged the WMI call.
+pub struct AsusNbWmiPowerLimitMutationBackend {
+    root: PathBuf,
+    product: Option<String>,
+}
+
+impl AsusNbWmiPowerLimitMutationBackend {
+    pub fn new() -> Self {
+        Self {
+            root: PathBuf::from(orbis_providers::ASUS_NB_WMI_ROOT),
+            product: orbis_providers::read_dmi_product_name(),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_root(root: impl Into<PathBuf>, product: Option<&str>) -> Self {
+        Self {
+            root: root.into(),
+            product: product.map(str::to_string),
+        }
+    }
+
+    fn file(&self, field: &PowerLimitField) -> Result<PathBuf, ProviderError> {
+        let name = orbis_providers::legacy_ppt_file(field).ok_or_else(|| {
+            ProviderError::Unsupported(format!("asus-nb-wmi has no attribute for {field:?}"))
+        })?;
+        Ok(self.root.join(name))
+    }
+
+    fn bounds(&self, field: &PowerLimitField) -> Result<(i32, i32), ProviderError> {
+        self.product
+            .as_deref()
+            .and_then(|product| orbis_providers::legacy_ppt_bounds(product, field))
+            .ok_or_else(|| {
+                ProviderError::Unsupported(format!(
+                    "asus-nb-wmi {field:?}: no verified range table entry for this model"
+                ))
+            })
+    }
+
+    fn read_cache(path: &Path) -> Result<i32, ProviderError> {
+        let raw = fs::read_to_string(path).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => {
+                ProviderError::Unsupported(format!("asus-nb-wmi {}: absent", path.display()))
+            }
+            std::io::ErrorKind::PermissionDenied => {
+                ProviderError::PermissionDenied(format!("asus-nb-wmi {}: denied", path.display()))
+            }
+            _ => ProviderError::Io(error),
+        })?;
+        raw.trim().parse().map_err(|error| {
+            ProviderError::Internal(format!("asus-nb-wmi {} malformed: {error}", path.display()))
+        })
+    }
+}
+
+impl Default for AsusNbWmiPowerLimitMutationBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl PowerLimitMutationBackend for AsusNbWmiPowerLimitMutationBackend {
+    fn set_power_limit_probe(&self) -> Result<(), ProviderError> {
+        self.bounds(&PowerLimitField::Spl)?;
+        Self::read_cache(&self.file(&PowerLimitField::Spl)?).map(|_| ())
+    }
+
+    async fn set_power_limit(
+        &self,
+        field: PowerLimitField,
+        value: i32,
+    ) -> Result<PowerLimitMutationReadback, ProviderError> {
+        let (min, max) = self.bounds(&field)?;
+        if value < min || value > max {
+            return Err(ProviderError::InvalidRequest(format!(
+                "asus-nb-wmi {field:?}: value {value} outside {min}..{max}"
+            )));
+        }
+        let path = self.file(&field)?;
+        fs::write(&path, format!("{value}\n")).map_err(ProviderError::Io)?;
+        let observed = Self::read_cache(&path)?;
+        if observed != value {
+            return Err(ProviderError::Conflict(format!(
+                "asus-nb-wmi {field:?} read-back mismatch: requested={value}, observed={observed}"
+            )));
+        }
+        Ok(PowerLimitMutationReadback {
+            field,
+            requested: value,
+            observed,
+            result: ApplyResult::Applied,
+        })
+    }
+}
+
+/// Armoury-first selector: the legacy backend is used only when the kernel
+/// Armoury ABI is structurally absent, never as a fallback for a failed write.
+pub struct AsusPowerLimitMutationBackend {
+    armoury: Box<dyn PowerLimitMutationBackend>,
+    legacy: Box<dyn PowerLimitMutationBackend>,
+}
+
+impl AsusPowerLimitMutationBackend {
+    pub fn new(
+        armoury: Box<dyn PowerLimitMutationBackend>,
+        legacy: Box<dyn PowerLimitMutationBackend>,
+    ) -> Self {
+        Self { armoury, legacy }
+    }
+
+    fn active(&self) -> &dyn PowerLimitMutationBackend {
+        match self.armoury.set_power_limit_probe() {
+            Ok(()) => self.armoury.as_ref(),
+            Err(_) => self.legacy.as_ref(),
+        }
+    }
+}
+
+#[async_trait]
+impl PowerLimitMutationBackend for AsusPowerLimitMutationBackend {
+    fn set_power_limit_probe(&self) -> Result<(), ProviderError> {
+        match self.armoury.set_power_limit_probe() {
+            Ok(()) => Ok(()),
+            Err(armoury_error) => {
+                self.legacy
+                    .set_power_limit_probe()
+                    .map_err(|legacy_error| match legacy_error {
+                        ProviderError::Unsupported(_) => armoury_error,
+                        other => other,
+                    })
+            }
+        }
+    }
+
+    async fn set_power_limit(
+        &self,
+        field: PowerLimitField,
+        value: i32,
+    ) -> Result<PowerLimitMutationReadback, ProviderError> {
+        self.active().set_power_limit(field, value).await
+    }
+}
+
 pub const TIMEOUT_PREFIX: &str = "orbis power-limit timeout: ";
 pub const CONFLICT_PREFIX: &str = "orbis power-limit conflict: ";
 pub fn operation_timeout() -> Duration {
@@ -283,6 +433,66 @@ pub fn operation_timeout() -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PRODUCT: &str = "ASUS TUF Gaming A17 FA707NV_FA707NV";
+
+    #[tokio::test]
+    async fn legacy_backend_writes_verified_range_and_reads_back() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("ppt_pl1_spl"), "5\n").unwrap();
+        let backend = AsusNbWmiPowerLimitMutationBackend::with_root(dir.path(), Some(PRODUCT));
+        assert!(backend.set_power_limit_probe().is_ok());
+        let readback = backend
+            .set_power_limit(PowerLimitField::Spl, 45)
+            .await
+            .unwrap();
+        assert_eq!(
+            (readback.observed, readback.result),
+            (45, ApplyResult::Applied)
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("ppt_pl1_spl"))
+                .unwrap()
+                .trim(),
+            "45"
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_backend_rejects_out_of_range_and_unverified_models() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("ppt_pl1_spl"), "5\n").unwrap();
+        let backend = AsusNbWmiPowerLimitMutationBackend::with_root(dir.path(), Some(PRODUCT));
+        for value in [14, 91] {
+            assert!(matches!(
+                backend.set_power_limit(PowerLimitField::Spl, value).await,
+                Err(ProviderError::InvalidRequest(_))
+            ));
+        }
+        assert!(matches!(
+            backend
+                .set_power_limit(PowerLimitField::CpuTempLimit, 80)
+                .await,
+            Err(ProviderError::Unsupported(_))
+        ));
+        let unknown = AsusNbWmiPowerLimitMutationBackend::with_root(dir.path(), Some("ROG X"));
+        assert!(matches!(
+            unknown.set_power_limit_probe(),
+            Err(ProviderError::Unsupported(_))
+        ));
+        assert!(
+            unknown
+                .set_power_limit(PowerLimitField::Spl, 45)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("ppt_pl1_spl"))
+                .unwrap()
+                .trim(),
+            "5"
+        );
+    }
 
     #[test]
     fn cpu_temperature_limit_is_not_wired_to_an_unrelated_backend() {

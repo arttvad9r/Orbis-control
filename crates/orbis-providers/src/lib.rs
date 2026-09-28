@@ -60,7 +60,10 @@ pub use asus_diagnostics::{
     probe_asus_diagnostics_capabilities, probe_aura, probe_keyboard_backlight,
 };
 pub use asus_gpu_mode::{AsusGpuMode, decode_asus_gpu_mode};
-pub use asus_legacy_power::AsusNbWmiPowerLimitProvider;
+pub use asus_legacy_power::{
+    ASUS_NB_WMI_ROOT, AsusNbWmiPowerLimitProvider, LEGACY_PPT_FIELDS, legacy_ppt_bounds,
+    legacy_ppt_file, read_dmi_product_name,
+};
 pub use aura::*;
 pub use bounded_probes::{
     probe_charge_limit, probe_display_output, probe_fan_curve, probe_gpu_access, probe_gpu_mux,

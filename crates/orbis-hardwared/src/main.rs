@@ -24,7 +24,8 @@ use orbis_hardwared::{
     APU_MEMORY_POLKIT_ACTION, ASPM_POLKIT_ACTION, AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION,
     BOOT_SOUND_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION, GPU_POLKIT_ACTION,
     HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
-    POWER_PROFILES_DAEMON_BUS_NAME, PRODUCT_GPU_POLKIT_ACTION, PolkitAuthorizer,
+    POWER_LIMIT_POLKIT_ACTION, POWER_PROFILES_DAEMON_BUS_NAME, PRODUCT_GPU_POLKIT_ACTION,
+    PolkitAuthorizer,
     asus_gpu_mode::{AsusGpuMutationBackend, AsusdGpuMutationClient},
     aura::{AsusdAuraStaticRgbMutationBackend, ZbusAsusdAuraClient},
     battery::{
@@ -41,6 +42,10 @@ use orbis_hardwared::{
         AsusdPanelOverdriveMutationBackend, PanelOverdriveMutationBackend,
         PanelOverdriveMutationReadback, PanelOverdriveMutationStatus,
         ZbusAsusdPanelOverdriveClient, discover_panel_overdrive_reader,
+    },
+    power_limits::{
+        AsusNbWmiPowerLimitMutationBackend, AsusPowerLimitMutationBackend,
+        KernelAsusPowerLimitMutationBackend,
     },
     supergfxd::{MutationObservation, SupergfxdMutationOperation},
 };
@@ -305,6 +310,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             APU_MEMORY_POLKIT_ACTION,
+        )),
+    );
+    let service = service.with_power_limit_backend(
+        Box::new(AsusPowerLimitMutationBackend::new(
+            Box::new(KernelAsusPowerLimitMutationBackend::new()),
+            Box::new(AsusNbWmiPowerLimitMutationBackend::new()),
+        )),
+        Box::new(PolkitAuthorizer::with_action(
+            connection.clone(),
+            POWER_LIMIT_POLKIT_ACTION,
         )),
     );
     let service = service.with_aspm_authorizer(Box::new(PolkitAuthorizer::with_action(

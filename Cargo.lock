@@ -3079,6 +3079,7 @@ dependencies = [
  "orbis-core",
  "orbis-providers",
  "serde",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

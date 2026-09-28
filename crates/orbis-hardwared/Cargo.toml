@@ -33,3 +33,4 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 zbus = { workspace = true, features = ["p2p"] }
+tempfile = { workspace = true }

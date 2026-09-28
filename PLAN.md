@@ -78,11 +78,15 @@ typed владелец (Hardware1 для привилегированного, u
 UI → read-back → тесты на fake/P2P.
 
 ### 4.0 Найдено на FA707NV (приоритет)
-- [ ] Лимиты мощности: `asus-armoury` на этом ядре отдаёт ENODEV, поэтому SPL/SPPT/
-      FPPT, Dynamic Boost и temp target в Orbis недоступны. g-helper пишет их через
-      `asus-nb-wmi` (`ppt_pl1_spl`, `ppt_pl2_sppt`, `ppt_fppt`, `nv_dynamic_boost`,
-      `nv_temp_target`) — нужен typed-владелец в Hardware1 для этого пути
-      (значения там write-only, read-back — только собственный кэш).
+- [x] Лимиты мощности через `asus-nb-wmi` (`ppt_pl1_spl`, `ppt_pl2_sppt`, `ppt_fppt`,
+      `nv_dynamic_boost`, `nv_temp_target`): `asus-armoury` на этом ядре отдаёт ENODEV
+      (в его DMI-таблице нет FA707). Диапазоны — из явной таблицы проверенных моделей
+      по токену DMI (`FA707NV`: 15–90 Вт, boost 5–25 Вт, temp 75–87 °C); чтение и
+      запись Hardware1 (polkit `set-power-limit`, `ReadWritePaths` в юните), read-back —
+      кэш драйвера, который обновляется только после подтверждения прошивкой. Модели
+      вне таблицы остаются без записи. Проверено на fake-путях; вживую не проверено
+      (исходное значение прошивки не читается — драйвер отдаёт 5, откат невозможен
+      до смены профиля).
 - [ ] Эффекты Aura на TUF: asusd заявляет только Static; g-helper использует
       `kbd_rgb_mode` в sysfs — добавить провайдер.
 - [ ] Слайдер лимита заряда не управляется с клавиатуры; 100 % трудно попасть кликом.
