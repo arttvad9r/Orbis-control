@@ -1,6 +1,6 @@
 # Architecture — Orbis Control
 
-This document describes durable system boundaries and semantics. It is not a status report, backlog, release checklist, or instruction to preserve obsolete implementation details. Current work is driven by production source, executable behavior, and `TODO.md`.
+This document describes durable system boundaries and semantics. It is not a status report, backlog, release checklist, or instruction to preserve obsolete implementation details. Current work is driven by production source, executable behavior, and `PLAN.md`.
 
 ## 1. System boundaries
 

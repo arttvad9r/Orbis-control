@@ -22,19 +22,19 @@ Do not end a session merely because one intermediate task passed. End at a meani
 
 ## Canonical completion plan
 
-For general project-completion work, [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) is the **single canonical execution queue**.
+[`PLAN.md`](PLAN.md) is the **only** plan in this repository and the single execution queue.
 
 When the user says `continue`, `finish`, `make it work`, or gives an equivalent broad instruction:
 
-1. read `IMPLEMENTATION_PLAN.md` before choosing work;
+1. read `PLAN.md` before choosing work;
 2. start at the earliest unchecked phase that can be advanced in the current environment;
 3. verify items that may already be complete in current source, mark them complete, and continue rather than stopping with a status report;
 4. work through coherent vertical slices until reaching a meaningful checkpoint or a real blocker;
 5. update plan checkboxes only after the stated behavior has actually been verified.
 
-Do not create a parallel roadmap, remediation plan, status matrix, or alternative backlog for the same completion goal. `TODO.md` is only a pointer to `FINISH_PLAN.md`.
+Do not create a parallel roadmap, remediation plan, status matrix, planning log, evidence dump or alternative backlog. Verification output belongs in the terminal/commit message, not in tracked files.
 
-A specific user request always overrides queue order for that requested task. After completing the explicit task, return to the canonical finish plan when the user's broader goal is still to finish the project.
+A specific user request always overrides queue order for that requested task. After completing the explicit task, return to `PLAN.md` when the user's broader goal is still to finish the project.
 
 ## When to stop
 
@@ -76,7 +76,7 @@ The canonical developer environment is **Arch Linux** with the native Rust toolc
 - Prefer established Rust/Slint/Linux APIs and existing project abstractions where they fit. Do not invent infrastructure solely to avoid touching existing boundaries.
 - Do not create a new design document, remediation plan, audit, status matrix, evidence taxonomy, validation trigger, or verification script unless the user explicitly requested it or the implementation truly cannot be maintained safely without it.
 - Do not update status/roadmap documents after every small change. Documentation changes should be a small final part of a completed product change, and only when the documentation would otherwise become materially false.
-- Historical plans under `docs/` are reference material, not execution instructions and not a backlog.
+- `docs/` holds stable references (architecture, ADRs, acceptance scenarios, hardware evidence, research); it is not a backlog.
 
 ## Source of truth
 
@@ -84,7 +84,7 @@ For current behavior, use this order:
 
 1. production source code;
 2. executable tests and build configuration;
-3. `IMPLEMENTATION_PLAN.md` for the ordered completion queue;
+3. `PLAN.md` for the ordered completion queue;
 4. current GitHub issues when they describe still-relevant defects or acceptance criteria;
 5. `README.md` and stable architecture/ADR documentation for intentional public invariants;
 6. other documents only as background.

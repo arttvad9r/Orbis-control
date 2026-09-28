@@ -3166,10 +3166,8 @@ fn main_window_renders_queued_target_and_reboot_state() {
     assert!(!source.contains("title: \"Optimized\""));
 }
 
-/// The merged shell (their line's layout, per TRANSFER-PLAN §4/§5) wires every
-/// sidebar item to exactly the section the interaction contract requires.
-/// Keyboard-activation markup is not present in their `NavItem`; restoring it
-/// is deferred to the UI-PARITY stage and is not an acceptance criterion.
+/// The shell wires every sidebar item to exactly its section. Keyboard
+/// activation markup is not present in `NavItem` and is not asserted here.
 #[test]
 fn sidebar_nav_items_route_to_their_sections() {
     let shell = include_str!("../../../ui/audited/main-window.slint");

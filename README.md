@@ -19,9 +19,7 @@ The current codebase includes production paths for the core application shell an
 - systemd, D-Bus and polkit integration;
 - fake-system/private-P2P integration tests for privileged boundaries.
 
-The project still contains unfinished or deliberately disabled product surfaces. The active completion queue is [`TODO.md`](TODO.md). A feature is considered finished only when the user-visible flow is connected end to end or the unused shell has been removed.
-
-The current local development candidate is on `agent/finish-v01`. Its software verification gate (`scripts/verify full`) is green, but the project is not yet declared released: target-session mutation evidence and clean package lifecycle validation remain tracked in `TODO.md`.
+The project is not yet released. The single plan of remaining work (v0.1 release, then G-Helper feature parity) is [`PLAN.md`](PLAN.md). A feature is considered finished only when the user-visible flow is connected end to end.
 
 ## Arch Linux development setup
 
@@ -125,7 +123,7 @@ Comparative project decisions are recorded in [`docs/research/comparative-projec
 
 [`AGENTS.md`](AGENTS.md) is intentionally product-first: agents are expected to complete coherent vertical work, continue across necessary crates, and stop only at a real blocker. Documentation maintenance and source-marker test generation are not default development work.
 
-When asked simply to continue or finish the project, start from [`TODO.md`](TODO.md), verify the actual source/runtime state, complete the highest-priority actionable slice, and continue to the next related item instead of stopping after a micro-fix.
+When asked simply to continue or finish the project, start from [`PLAN.md`](PLAN.md), verify the actual source/runtime state, complete the highest-priority actionable slice, and continue to the next related item instead of stopping after a micro-fix.
 
 ## License
 

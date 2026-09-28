@@ -1,3 +1,0 @@
-[2m2026-09-22T20:03:33.418378Z[0m [33m WARN[0m [2mwinit::platform_impl::linux::x11::xdisplay[0m[2m:[0m error setting XSETTINGS; Xft options won't reload automatically
-[2m2026-09-22T20:03:33.506570Z[0m [33m WARN[0m [2morbis_control[0m[2m:[0m product gpu status read failed; UI keeps previous evidence: BackendUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable")
-[2m2026-09-22T20:03:38.433654Z[0m [33m WARN[0m [2morbis_control[0m[2m:[0m product gpu status read failed; UI keeps previous evidence: BackendUnavailable("org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable")

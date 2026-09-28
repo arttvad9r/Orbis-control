@@ -418,7 +418,7 @@ Given:
 - snapshot/test fixture environment доступен.
 
 When:
-- рендерятся обязательные visual states из `SPEC.md`.
+- рендерятся обязательные visual states (Normal, Dirty, Pending, Error, Unsupported, Read-only; dark/light; 980×680 и 1200×800).
 
 Then:
 - каждый snapshot непустой;
@@ -466,7 +466,7 @@ Given:
 - текущий implementation stage завершён.
 
 When:
-- выполняются проверки из `IMPLEMENTATION_PLAN.md`.
+- выполняется `scripts/verify task` (или `full` перед релизом).
 
 Then:
 - агент сообщает фактически выполненные команды и результаты;

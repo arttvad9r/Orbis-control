@@ -2,7 +2,7 @@
 
 Orbis Control gives Linux users of supported ASUS ROG/TUF/Zephyrus laptops one normal user-session application for understanding device state and performing supported controls without pretending unsupported hardware works.
 
-This document describes durable product intent only. Current implementation state lives in the source and `TODO.md`, not in status tables here.
+This document describes durable product intent only. Current implementation state lives in the source and `PLAN.md`, not in status tables here.
 
 ## User outcomes
 
@@ -23,7 +23,7 @@ A useful Orbis installation should let the user:
 - **Safe degradation.** Missing or failing providers remain localized and explicit rather than producing fake fallback state.
 - **Bounded privilege.** The GUI remains unprivileged. Privileged mutations use narrow typed operations and capability-specific authorization, never a generic root/sysfs/shell proxy.
 - **Concept separation.** Different meanings such as GPU product mode, physical MUX, runtime power and pending reboot state must not be collapsed into one misleading value.
-- **Practical completeness.** A feature is not complete because domain types, a backend method, tests or a polished UI exist. The user-visible flow must work end to end. Intentional product UI is not deleted merely because backend work is still pending; until the backend is complete, runtime state must remain honest about availability.
+- **Practical completeness.** A feature is not complete because domain types, a backend method, tests or a polished UI exist. The user-visible flow must work end to end. A control is shown only when it has a working owner; controls whose capability is missing on the current machine are hidden or shown as honestly unavailable, never as inert placeholders.
 
 ## Non-goals
 
@@ -40,4 +40,4 @@ Orbis is not intended to:
 
 The product is ready for a first release when the core daily-control experience is coherent, the packaged application starts and behaves correctly, supported actions have honest confirmation/error semantics, known unsafe writes are not enabled, the current release candidate has fresh target-platform validation, and `scripts/verify full` passes for the exact release commit.
 
-The concrete unfinished queue is [`../TODO.md`](../TODO.md). Stable implementation boundaries are described in [`architecture.md`](architecture.md) and accepted ADRs.
+The concrete unfinished queue is [`../PLAN.md`](../PLAN.md). Stable implementation boundaries are described in [`architecture.md`](architecture.md) and accepted ADRs.
