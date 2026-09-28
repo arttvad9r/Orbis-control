@@ -3280,3 +3280,19 @@ fn performance_page_renders_dynamic_boost_with_real_unit_gating() {
         "shell must route the performance limits callbacks to the Rust pipeline"
     );
 }
+
+#[test]
+fn display_product_name_collapses_repeated_asus_model_code() {
+    assert_eq!(
+        super::display_product_name("ASUS TUF Gaming A17 FA707NV_FA707NV"),
+        "ASUS TUF Gaming A17 FA707NV"
+    );
+    assert_eq!(
+        super::display_product_name("ROG Zephyrus G14 GA402RJ_GA402RJ"),
+        "ROG Zephyrus G14 GA402RJ"
+    );
+    assert_eq!(
+        super::display_product_name("ROG Strix G513QY_G513QY_A"),
+        "ROG Strix G513QY_G513QY_A"
+    );
+}

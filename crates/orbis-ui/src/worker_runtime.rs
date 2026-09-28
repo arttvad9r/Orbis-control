@@ -661,7 +661,11 @@ async fn run_worker_inner<G, B, R, F>(
     const GPU_REFRESH_INTERVAL: u32 = 5;
     const CAPABILITY_REFRESH_INTERVAL: u32 = 30;
     const PRODUCT_GPU_STATUS_REFRESH_INTERVAL: u32 = 5;
+    // Profiles also change outside Orbis (power-profiles-daemon, Fn+F5,
+    // desktop applets); re-read so the UI never keeps a stale selection.
+    const PERFORMANCE_REFRESH_INTERVAL: u32 = 2;
     let mut gpu_refresh_counter = 0_u32;
+    let mut performance_refresh_counter = 0_u32;
     let mut capability_refresh_counter = 0_u32;
     let mut product_gpu_status_refresh_counter = 0_u32;
 
@@ -722,6 +726,18 @@ async fn run_worker_inner<G, B, R, F>(
                                 emit(WorkerEvent::GpuPowerRefresh(power));
                                 emit(WorkerEvent::GpuMuxRefresh(mux));
                                 emit(WorkerEvent::GpuAccessRefresh(access));
+                            }
+
+                            performance_refresh_counter += 1;
+                            if performance_refresh_counter >= PERFORMANCE_REFRESH_INTERVAL {
+                                performance_refresh_counter = 0;
+                                let performance =
+                                    bounded_performance_state(&runtime.performance).await;
+                                reconcile_automation_from_performance_result(
+                                    &mut automation,
+                                    &performance,
+                                );
+                                emit(WorkerEvent::PerformanceRefresh(performance));
                             }
 
                             capability_refresh_counter += 1;

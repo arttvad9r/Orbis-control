@@ -146,7 +146,13 @@ export component PerformanceSection inherits Rectangle {
                 height: 108px;
                 spacing: 14px;
                 MetricCard { label: "CPU"; value: root.ui-state.cpu-temp; detail: "температура процессора"; icon-kind: 10; }
-                MetricCard { label: "GPU"; value: root.ui-state.gpu-temp; detail: "температура графики"; icon-kind: 4; }
+                MetricCard {
+                    label: "GPU";
+                    // A suspended dGPU reports no temperature; show the iGPU then.
+                    value: root.ui-state.gpu-temp != "—" || root.ui-state.igpu-temp == "—" ? root.ui-state.gpu-temp : root.ui-state.igpu-temp;
+                    detail: root.ui-state.gpu-temp != "—" ? "температура dGPU" : root.ui-state.igpu-temp != "—" ? "температура iGPU · dGPU спит" : "температура графики";
+                    icon-kind: 4;
+                }
                 MetricCard { label: "Вентилятор CPU"; value: root.ui-state.cpu-fan-rpm; detail: "скорость вентилятора"; icon-kind: 3; }
                 MetricCard { label: "ПИТАНИЕ"; value: root.ui-state.power-ac-mw; detail: "потребление от адаптера"; icon-kind: 13; }
             }

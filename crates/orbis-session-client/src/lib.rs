@@ -66,8 +66,11 @@ trait PowerProfilesDaemon {
     #[zbus(property)]
     fn active_profile(&self) -> zbus::Result<String>;
 
+    /// `aa{sv}`: one dictionary per profile with at least a `Profile` key.
     #[zbus(property)]
-    fn profiles(&self) -> zbus::Result<Vec<(String, String)>>;
+    fn profiles(
+        &self,
+    ) -> zbus::Result<Vec<std::collections::HashMap<String, zbus::zvariant::OwnedValue>>>;
 
     #[zbus(property)]
     fn set_active_profile(&self, value: &str) -> zbus::Result<()>;
@@ -104,6 +107,29 @@ impl PowerProfilesProfile {
             PerformanceProfile::Turbo => "performance",
         }
     }
+}
+
+/// Decode the daemon `Profiles` property (`aa{sv}`) into Orbis profiles.
+///
+/// Every entry must carry a string `Profile` key naming a known profile;
+/// anything else is a contract violation rather than something to skip.
+fn power_profiles_from_wire(
+    entries: &[std::collections::HashMap<String, zbus::zvariant::OwnedValue>],
+) -> Result<Vec<PerformanceProfile>, ProviderError> {
+    entries
+        .iter()
+        .map(|entry| {
+            let name = entry
+                .get("Profile")
+                .and_then(|value| <&str>::try_from(value).ok())
+                .ok_or_else(|| {
+                    ProviderError::Internal(
+                        "power-profiles-daemon profile entry has no string 'Profile' key".into(),
+                    )
+                })?;
+            PowerProfilesProfile::from_wire(name)
+        })
+        .collect()
 }
 
 /// Typed, caller-owned client for the power-profiles-daemon system service.
@@ -165,6 +191,20 @@ impl ZbusPowerProfilesDaemonClient {
     }
 }
 
+/// Read-only liveness probe for the power-profiles-daemon bus name.
+///
+/// Any bus error is treated as "not available" so callers fall back to the
+/// honest Hardware1 status instead of assuming delegation still works.
+pub async fn power_profiles_daemon_available(connection: &zbus::Connection) -> bool {
+    let Ok(dbus) = zbus::fdo::DBusProxy::new(connection).await else {
+        return false;
+    };
+    let Ok(owner) = zbus::names::BusName::try_from(POWER_PROFILES_BUS_NAME) else {
+        return false;
+    };
+    dbus.name_has_owner(owner).await.unwrap_or(false)
+}
+
 #[async_trait]
 impl PowerProfilesDaemonClient for ZbusPowerProfilesDaemonClient {
     async fn read_current(&self) -> Result<PerformanceProfile, ProviderError> {
@@ -183,10 +223,8 @@ impl PowerProfilesDaemonClient for ZbusPowerProfilesDaemonClient {
             .await?
             .profiles()
             .await
-            .map_err(zbus_error_to_provider)?
-            .iter()
-            .map(|(name, _driver)| PowerProfilesProfile::from_wire(name))
-            .collect()
+            .map_err(zbus_error_to_provider)
+            .and_then(|entries| power_profiles_from_wire(&entries))
     }
 
     async fn set_profile(&self, profile: PerformanceProfile) -> Result<ApplyResult, ProviderError> {
@@ -2622,6 +2660,46 @@ mod tests {
     use orbis_core::newtypes::{FanPwm, TemperatureC};
 
     use super::*;
+
+    fn ppd_entry(
+        pairs: &[(&str, &str)],
+    ) -> std::collections::HashMap<String, zbus::zvariant::OwnedValue> {
+        pairs
+            .iter()
+            .map(|(key, value)| {
+                (
+                    (*key).to_string(),
+                    zbus::zvariant::OwnedValue::try_from(zbus::zvariant::Value::from(*value))
+                        .unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn power_profiles_decode_real_daemon_dictionaries() {
+        // Shape reported by power-profiles-daemon 0.30 on the target laptop.
+        let entries = vec![
+            ppd_entry(&[
+                ("Profile", "power-saver"),
+                ("CpuDriver", "amd_pstate"),
+                ("PlatformDriver", "platform_profile"),
+                ("Driver", "multiple"),
+            ]),
+            ppd_entry(&[("Profile", "balanced"), ("Driver", "multiple")]),
+            ppd_entry(&[("Profile", "performance"), ("Driver", "multiple")]),
+        ];
+        assert_eq!(
+            power_profiles_from_wire(&entries).unwrap(),
+            vec![
+                PerformanceProfile::Silent,
+                PerformanceProfile::Balanced,
+                PerformanceProfile::Turbo
+            ]
+        );
+        assert!(power_profiles_from_wire(&[ppd_entry(&[("Driver", "multiple")])]).is_err());
+        assert!(power_profiles_from_wire(&[ppd_entry(&[("Profile", "eco")])]).is_err());
+    }
 
     /// Исход теста ScriptedSource.
     #[derive(Debug, Clone, Copy)]

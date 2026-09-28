@@ -847,7 +847,10 @@ impl UiState {
                 _ => {}
             }
         }
-        if !telemetry.gpus.is_empty() {
+        // The ASUS platform `gpu_fan` is the authoritative chassis fan; a
+        // discrete GPU's own fan reading is only a fallback (laptop dGPUs
+        // usually report none, and a suspended dGPU reports nothing).
+        if gpu_fan_rpm.is_none() {
             gpu_fan_rpm = telemetry
                 .gpus
                 .iter()
@@ -1550,6 +1553,27 @@ mod tests {
         assert_eq!(s.battery_status, "discharging");
         assert_eq!(s.ac_online, "On AC");
         assert_eq!(s.power_ac, "28 W");
+    }
+
+    #[test]
+    fn suspended_dgpu_keeps_platform_gpu_fan_and_exposes_igpu_temperature() {
+        let mut telemetry = sample_telemetry();
+        telemetry.gpus[0].temperature = None;
+        telemetry.gpus[0].power = None;
+        telemetry.gpus[0].fan = None;
+        telemetry.gpus.push(orbis_core::telemetry::GpuTelemetry {
+            identity: None,
+            role: orbis_core::telemetry::GpuRole::Integrated,
+            source: "fixture".into(),
+            temperature: Some(orbis_core::newtypes::TemperatureC::new(41).unwrap()),
+            power: None,
+            fan: None,
+        });
+        let mut s = UiState::from_mock_profile("zephyrus-full");
+        s.update_telemetry(&telemetry);
+        assert_eq!(s.gpu_fan_rpm, "2100 rpm");
+        assert_eq!(s.gpu_temp, "—");
+        assert_eq!(s.igpu_temp, "41°C");
     }
 
     #[test]

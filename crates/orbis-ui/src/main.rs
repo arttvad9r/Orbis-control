@@ -827,10 +827,22 @@ fn build_app(
 fn apply_device_identity(app: &AppWindow) {
     let identity = orbis_providers::HardwareIdentityProvider::new().snapshot();
     if let Some(identity) = identity.identity {
-        app.set_device_name(identity.product.into());
+        app.set_device_name(display_product_name(&identity.product).into());
         app.set_device_board(identity.board.into());
         app.set_bios_version(identity.bios_version.into());
         app.set_bios_date(identity.bios_date.into());
+    }
+}
+
+/// ASUS firmware often repeats the model code in DMI
+/// (`ASUS TUF Gaming A17 FA707NV_FA707NV`); show it once.
+fn display_product_name(product: &str) -> String {
+    let Some((head, last)) = product.trim().rsplit_once(' ') else {
+        return product.trim().to_string();
+    };
+    match last.split_once('_') {
+        Some((first, second)) if first == second => format!("{head} {first}"),
+        _ => product.trim().to_string(),
     }
 }
 

@@ -218,11 +218,12 @@ impl TelemetryProvider for SysfsTelemetryProvider {
                     }
                 }
                 // External supplies use several kernel type names (Mains,
-                // USB*, Wireless, ...). Require an explicit non-Battery type
-                // plus the standard `online` attribute instead of selecting
-                // the first arbitrary power_supply that happens to have it.
-                _ if ac_online.is_none() && dir.join("online").exists() => match read_online(dir) {
-                    Ok(value) => ac_online = value,
+                // USB*, Wireless, ...). The machine is on external power when
+                // any of them is online: an idle USB-C port must not mask the
+                // barrel adapter, whatever order the directory listing has.
+                _ if dir.join("online").exists() => match read_online(dir) {
+                    Ok(Some(online)) => ac_online = Some(ac_online.unwrap_or(false) || online),
+                    Ok(None) => {}
                     Err(error) => record_gap(&mut field_gaps, TelemetryField::AcOnline, &error),
                 },
                 _ => {}
@@ -1030,6 +1031,33 @@ mod tests {
             Percent::new(77).unwrap()
         );
         assert_eq!(t.ac_online, Some(true));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn idle_usb_c_ports_do_not_mask_an_online_adapter() {
+        let root = fixture_root();
+        for port in ["ucsi-source-psy-USBC000:001", "ucsi-source-psy-USBC000:002"] {
+            write_fixture(&root, &format!("class/power_supply/{port}/type"), "USB\n");
+            write_fixture(&root, &format!("class/power_supply/{port}/online"), "0\n");
+        }
+        battery_type(&root, "BAT1");
+        write_fixture(&root, "class/power_supply/BAT1/capacity", "100\n");
+        external_type(&root, "ACAD");
+        write_fixture(&root, "class/power_supply/ACAD/online", "1\n");
+
+        let provider = SysfsTelemetryProvider::new(root.clone());
+        assert_eq!(
+            provider.snapshot().await.expect("snapshot").ac_online,
+            Some(true)
+        );
+
+        write_fixture(&root, "class/power_supply/ACAD/online", "0\n");
+        assert_eq!(
+            provider.snapshot().await.expect("snapshot").ac_online,
+            Some(false)
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }

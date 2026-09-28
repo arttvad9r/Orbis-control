@@ -589,6 +589,10 @@ pub struct ApplicationRuntime<G, B, R> {
     /// SPL/SPPT/FPPT apply gate with the same honest status distinctions as
     /// the other mutation evidence. Unknown until the first successful probe.
     power_limit_write_status: orbis_core::capability::CapabilityStatus,
+    /// Performance writes are delegated to power-profiles-daemon, which owns
+    /// `platform_profile`; Hardware1 then reports `Conflicted` by design, so
+    /// the periodic re-query must consult daemon liveness instead.
+    performance_delegated: bool,
 }
 
 impl<G, B, R> ApplicationRuntime<G, B, R> {
@@ -627,7 +631,14 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             performance_mutation_status,
             mutation_status_connection,
             power_limit_write_status: orbis_core::capability::CapabilityStatus::Unknown,
+            performance_delegated: false,
         }
+    }
+
+    /// Record that Performance writes go through power-profiles-daemon.
+    pub fn with_performance_delegation(mut self, delegated: bool) -> Self {
+        self.performance_delegated = delegated;
+        self
     }
 
     /// Attach the production Session1 power-limit provider without performing I/O.
@@ -700,6 +711,7 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             performance_mutation_status,
             mutation_status_connection: None,
             power_limit_write_status: orbis_core::capability::CapabilityStatus::Unknown,
+            performance_delegated: false,
         }
     }
 
@@ -739,11 +751,17 @@ impl<G, B, R> ApplicationRuntime<G, B, R> {
             orbis_session_client::hardware1_battery_mutation_status(connection),
         )
         .await;
-        self.performance_mutation_status = bounded_hardware1_status(
-            "performance_mutation_status",
-            orbis_session_client::hardware1_performance_mutation_status(connection),
-        )
-        .await;
+        self.performance_mutation_status = if self.performance_delegated
+            && orbis_session_client::power_profiles_daemon_available(connection).await
+        {
+            orbis_core::capability::CapabilityStatus::Supported
+        } else {
+            bounded_hardware1_status(
+                "performance_mutation_status",
+                orbis_session_client::hardware1_performance_mutation_status(connection),
+            )
+            .await
+        };
     }
 
     /// Return the current power-limit write evidence.
@@ -1275,7 +1293,8 @@ pub async fn build_production_runtime(
             performance_mutation_status,
             Some(system_connection),
         )
-        .with_power_limits(power_limits),
+        .with_power_limits(power_limits)
+        .with_performance_delegation(delegated_ready),
         hardware_owner,
         delegated_ready,
     ))

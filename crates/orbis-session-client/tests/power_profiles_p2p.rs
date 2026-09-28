@@ -42,9 +42,26 @@ impl FakePowerProfiles {
         Ok(())
     }
 
+    /// Same `aa{sv}` shape as the real daemon (0.30).
     #[zbus(property)]
-    async fn profiles(&self) -> Vec<(String, String)> {
-        self.profiles.clone()
+    async fn profiles(&self) -> Vec<std::collections::HashMap<String, zbus::zvariant::OwnedValue>> {
+        self.profiles
+            .iter()
+            .map(|(name, driver)| {
+                [("Profile", name), ("Driver", driver)]
+                    .into_iter()
+                    .map(|(key, value)| {
+                        (
+                            key.to_string(),
+                            zbus::zvariant::OwnedValue::try_from(zbus::zvariant::Value::from(
+                                value.as_str(),
+                            ))
+                            .unwrap(),
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
     }
 }
 
