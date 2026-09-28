@@ -29,5 +29,6 @@ pub mod diagnostics_runtime;
 pub mod diagnostics_window_model;
 pub mod display_refresh_service;
 pub mod product_mutation_promotion;
+pub mod profile_limits_runtime;
 #[path = "worker_runtime.rs"]
 pub mod worker;

@@ -19,6 +19,7 @@ pub mod desired_state;
 pub mod paths;
 pub mod policy_desired;
 pub mod preferences;
+pub mod profile_limits;
 pub mod store;
 pub mod window_state;
 
@@ -57,6 +58,11 @@ pub use preferences::{
     PreferencesPathError, PreferencesWarning, PreferencesWarningKind, ThemePreference,
     WindowPreferences, load_preferences, load_preferences_from_dir, preferences_dir,
     preferences_dir_with, preferences_file, save_preferences, save_preferences_to_dir,
+};
+pub use profile_limits::{
+    PROFILE_LIMITS_FILE, ProfileLimitSet, ProfileLimits, ProfileLimitsError, limit_key,
+    load_profile_limits, load_profile_limits_from_dir, save_profile_limits,
+    save_profile_limits_to_dir,
 };
 pub use store::{AppConfig, BatteryConfig, ExperimentalConfig, UiConfig, load_or_default};
 pub use window_state::{

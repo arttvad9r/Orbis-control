@@ -86,6 +86,10 @@ export component AppWindow inherits Window {
     callback fan-apply-clicked(bool);
     callback power-limit-changed(int, int);
     callback power-limit-apply-clicked;
+    in property <bool> profile-limits-known: false;
+    in property <bool> profile-limits-auto-apply: false;
+    in property <string> profile-limits-summary: "";
+    callback profile-limits-auto-apply-toggled(bool);
     callback aura-static-rgb-requested(int, int, int);
 
     in property <bool> backend-ready: false;
@@ -340,6 +344,10 @@ export component AppWindow inherits Window {
                         perf-clicked(i) => { root.perf-clicked(i); }
                         power-limit-changed(f, v) => { root.power-limit-changed(f, v); }
                         power-limit-apply-clicked => { root.power-limit-apply-clicked(); }
+                        profile-limits-known: root.profile-limits-known;
+                        profile-limits-auto-apply: root.profile-limits-auto-apply;
+                        profile-limits-summary: root.profile-limits-summary;
+                        profile-limits-auto-apply-toggled(v) => { root.profile-limits-auto-apply-toggled(v); }
                         graphics-open-requested => { root.open-section(Section.Graphics); }
                     }
                     if (root.active-section == Section.Power) : PowerSection {

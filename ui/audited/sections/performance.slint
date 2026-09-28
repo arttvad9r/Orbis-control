@@ -8,6 +8,7 @@ import { PageHeader, SectionCard, SectionTitle, ActionButton, StatusPill, LocalS
 import { ModeCard } from "../../components/mode-card.slint";
 import { MetricCard } from "../../components/metric-card.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
+import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { Palette } from "../../themes/dark.slint";
 
 // One backend-reported limit field: authoritative value+unit headline, a local
@@ -51,6 +52,10 @@ export component PerformanceSection inherits Rectangle {
     callback perf-clicked(int);
     callback power-limit-changed(int, int);
     callback power-limit-apply-clicked;
+    in property <bool> profile-limits-known: false;
+    in property <bool> profile-limits-auto-apply: false;
+    in property <string> profile-limits-summary: "";
+    callback profile-limits-auto-apply-toggled(bool);
     callback graphics-open-requested;
 
     function bit-set(mask: int, bit: int) -> bool {
@@ -293,6 +298,14 @@ export component PerformanceSection inherits Rectangle {
                             range: root.ui-state.gpu-temp-target-min + "–" + root.ui-state.gpu-temp-target-max + " · шаг " + root.ui-state.gpu-temp-target-step;
                             changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
                         }
+                    }
+
+                    if (root.profile-limits-known) : RequestToggleRow {
+                        label: "Запоминать для этого профиля";
+                        description: root.profile-limits-summary;
+                        checked: root.profile-limits-auto-apply;
+                        disabled: !root.ui-state.power-limits-writable;
+                        toggled(value) => { root.profile-limits-auto-apply-toggled(value); }
                     }
 
                     HorizontalLayout {

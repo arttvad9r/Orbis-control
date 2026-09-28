@@ -35,6 +35,7 @@ use orbis_session_client::{
     HardwareProductGpuSource, ProductGpuMutationResult, ZbusHardwareProductGpuSource,
 };
 use orbis_ui::composition::build_production_runtime;
+use orbis_ui::profile_limits_runtime::ProfileLimitsView;
 use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker_with_product_gpu};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
 use slint::winit_030::WinitWindowAccessor;
@@ -1783,6 +1784,7 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             state.power_limit_error = true;
             tracing::warn!(field = ?field, "power-limit mutation failed without replacing observed state: {error:?}");
         }
+        WorkerEvent::ProfileLimits(_) => {}
         WorkerEvent::ChargeLimitRefresh(result) => apply_charge_limit_refresh(state, result),
         WorkerEvent::GpuPowerRefresh(result) => apply_gpu_power_refresh(state, result),
         WorkerEvent::GpuMuxRefresh(result) => apply_gpu_mux_refresh(state, result),
@@ -1955,6 +1957,40 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
     }
 }
 
+fn profile_limits_summary(view: &ProfileLimitsView) -> String {
+    let profile = match view.profile {
+        PerformanceProfile::Silent => "Тихий",
+        PerformanceProfile::Balanced => "Сбалансированный",
+        PerformanceProfile::Turbo => "Турбо",
+    };
+    if let Some(error) = &view.error {
+        return format!("Сохранённые лимиты недоступны: {error}");
+    }
+    if view.saved.is_empty() {
+        return format!(
+            "Профиль «{profile}»: значений нет — включите и примените лимиты, они применятся при смене профиля"
+        );
+    }
+    let values = view
+        .saved
+        .iter()
+        .map(|(field, value)| {
+            let (name, unit) = match field {
+                PowerLimitField::Spl => ("SPL", "Вт"),
+                PowerLimitField::Sppt => ("SPPT", "Вт"),
+                PowerLimitField::Fppt => ("FPPT", "Вт"),
+                PowerLimitField::CpuTempLimit => ("Темп. CPU", "°C"),
+                PowerLimitField::GpuDynamicBoost => ("Dynamic Boost", "Вт"),
+                PowerLimitField::GpuTempTarget => ("Темп. GPU", "°C"),
+                PowerLimitField::Other(_) => ("?", ""),
+            };
+            format!("{name} {value} {unit}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("Профиль «{profile}»: {values}")
+}
+
 fn factory_reset_profile_for_refresh(event: &WorkerEvent) -> Option<AsusdFanProfile> {
     match event {
         WorkerEvent::FanCurveDefaults { profile, .. } => Some(*profile),
@@ -1979,6 +2015,11 @@ fn handle_worker_event(
     let factory_reset_available = factory_reset_availability_for_registry_event(&event);
     if let WorkerEvent::RegistryChange(Ok((_generation, snapshot))) = &event {
         diagnostics_backend::replace_capabilities(snapshot.clone());
+    }
+    if let WorkerEvent::ProfileLimits(view) = &event {
+        app.set_profile_limits_known(true);
+        app.set_profile_limits_auto_apply(view.auto_apply);
+        app.set_profile_limits_summary(profile_limits_summary(view).into());
     }
     let mut s = from_slint(&app.get_ui_state());
     apply_performance_event(&mut s, event);
@@ -2084,6 +2125,16 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 return;
             }
             app.set_ui_state(to_slint(&state));
+        });
+    }
+    {
+        let worker_tx = worker_tx.clone();
+        app.on_profile_limits_auto_apply_toggled(move |enabled| {
+            if let Some(tx) = &worker_tx {
+                if let Err(error) = tx.send(WorkerCommand::SetProfileLimitsAutoApply { enabled }) {
+                    tracing::warn!("worker closed, auto-apply toggle not sent: {error:?}");
+                }
+            }
         });
     }
     {

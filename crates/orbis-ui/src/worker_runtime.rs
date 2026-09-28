@@ -23,6 +23,7 @@ use crate::composition::{
     ApplicationRuntime, BatteryServiceRuntime, FanServiceRuntime, GpuServicesRuntime,
     PerformanceServiceRuntime,
 };
+use crate::profile_limits_runtime::{ProfileLimitsTracker, ProfileLimitsView};
 use orbis_application::{
     ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome, PerformanceState,
     SetChargeLimitError, SetFanCurveError, SetFanDefaultsError, SetGpuModeError,
@@ -97,6 +98,10 @@ pub enum WorkerCommand {
     ResetFanCurvesToDefaults {
         profile: AsusdFanProfile,
     },
+    /// Re-apply the stored power limits whenever the active profile changes.
+    SetProfileLimitsAutoApply {
+        enabled: bool,
+    },
 }
 
 /// Typed result emitted to the presentation boundary.
@@ -141,6 +146,8 @@ pub enum WorkerEvent {
         profile: AsusdFanProfile,
         result: Result<ApplyResult, SetFanDefaultsError>,
     },
+    /// Stored power-limit intent for the active performance profile.
+    ProfileLimits(ProfileLimitsView),
 }
 
 pub fn command_channel() -> (
@@ -263,7 +270,15 @@ pub async fn run_worker_with_product_gpu<G, B, R, F>(
     R: PerformanceServiceRuntime + Sync + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
-    run_worker_inner(runtime, receiver, emit, poll_interval, product_gpu).await;
+    run_worker_inner(
+        runtime,
+        receiver,
+        emit,
+        poll_interval,
+        product_gpu,
+        ProfileLimitsTracker::load(),
+    )
+    .await;
 }
 
 fn sync_persisted_automation_policy(driver: &mut AutomationWorkerDriver) {
@@ -627,12 +642,103 @@ async fn product_gpu_status_read(
     }
 }
 
+/// One authorised power-limit write followed by an authoritative read-back
+/// refresh. `expected_identity` guards manual applies against a changed snapshot.
+async fn write_power_limit<F>(
+    provider: Option<&Arc<dyn orbis_providers::traits::PowerLimitProvider>>,
+    field: orbis_core::limits::PowerLimitField,
+    value: i32,
+    expected_identity: Option<u64>,
+    emit: &mut F,
+) -> Result<ApplyResult, ProviderError>
+where
+    F: FnMut(WorkerEvent),
+{
+    let result = match provider {
+        Some(provider) => {
+            bounded_provider_call(provider.as_ref(), "power_limits.set", async {
+                let snapshot = provider.power_limit_snapshot().await?;
+                if expected_identity.is_some_and(|identity| snapshot.identity != identity) {
+                    return Err(ProviderError::Conflict(
+                        "power-limit snapshot changed; refresh required".into(),
+                    ));
+                }
+                provider
+                    .set_power_limit_from_snapshot(&snapshot, field.clone(), value)
+                    .await
+            })
+            .await
+        }
+        None => Err(ProviderError::BackendUnavailable(
+            "power-limit provider unavailable".into(),
+        )),
+    };
+    if result.is_ok() || matches!(result, Err(ProviderError::Timeout(_))) {
+        let refresh = match provider {
+            Some(provider) => {
+                bounded_provider_call(
+                    provider.as_ref(),
+                    "power_limits.read_back",
+                    provider.power_limit_snapshot(),
+                )
+                .await
+            }
+            None => Err(ProviderError::Unsupported(
+                "power-limit provider unavailable".into(),
+            )),
+        };
+        emit(WorkerEvent::PowerLimitsRefresh(refresh));
+    }
+    result
+}
+
+/// Feed an authoritative profile observation to the tracker and, when the
+/// profile changed and auto-apply is on, replay the stored limits (a profile
+/// switch resets them in firmware). Stops at the first failure and never
+/// retries a write whose outcome is unknown.
+async fn observe_profile_limits<G, B, R, F>(
+    runtime: &ApplicationRuntime<G, B, R>,
+    tracker: &mut ProfileLimitsTracker,
+    profile: PerformanceProfile,
+    emit: &mut F,
+) where
+    G: GpuServicesRuntime,
+    B: BatteryServiceRuntime,
+    R: PerformanceServiceRuntime,
+    F: FnMut(WorkerEvent),
+{
+    let before = tracker.view();
+    let replay = tracker.observe(profile);
+    for (field, value) in replay {
+        let result = write_power_limit(
+            runtime.power_limits.as_ref(),
+            field.clone(),
+            value,
+            None,
+            emit,
+        )
+        .await;
+        let failed = result.is_err();
+        emit(WorkerEvent::PowerLimit { field, result });
+        if failed {
+            break;
+        }
+    }
+    let after = tracker.view();
+    if after != before {
+        if let Some(view) = after {
+            emit(WorkerEvent::ProfileLimits(view));
+        }
+    }
+}
+
 async fn run_worker_inner<G, B, R, F>(
     mut runtime: ApplicationRuntime<G, B, R>,
     mut receiver: UnboundedReceiver<WorkerCommand>,
     mut emit: F,
     poll_interval: Option<Duration>,
     product_gpu: Option<std::sync::Arc<dyn HardwareProductGpuSource>>,
+    mut profile_limits: ProfileLimitsTracker,
 ) where
     G: GpuServicesRuntime + 'static,
     B: BatteryServiceRuntime + 'static,
@@ -737,7 +843,11 @@ async fn run_worker_inner<G, B, R, F>(
                                     &mut automation,
                                     &performance,
                                 );
+                                let observed = performance.as_ref().ok().map(|state| state.current);
                                 emit(WorkerEvent::PerformanceRefresh(performance));
+                                if let Some(profile) = observed {
+                                    observe_profile_limits(&runtime, &mut profile_limits, profile, &mut emit).await;
+                                }
                             }
 
                             capability_refresh_counter += 1;
@@ -850,7 +960,13 @@ async fn run_worker_inner<G, B, R, F>(
 
         let event = match command {
             WorkerCommand::SetPerformance(profile) => {
-                WorkerEvent::Performance(runtime.performance.set_performance(profile).await)
+                let result = runtime.performance.set_performance(profile).await;
+                let observed = result.as_ref().ok().map(|outcome| outcome.state.current);
+                emit(WorkerEvent::Performance(result));
+                if let Some(profile) = observed {
+                    observe_profile_limits(&runtime, &mut profile_limits, profile, &mut emit).await;
+                }
+                continue;
             }
             WorkerCommand::SetGpuMode { mode, confirmed } => {
                 WorkerEvent::Gpu(runtime.gpu.set_gpu_mode(mode, confirmed).await)
@@ -878,42 +994,30 @@ async fn run_worker_inner<G, B, R, F>(
                 value,
                 snapshot_identity,
             } => {
-                let result = match runtime.power_limits.as_ref() {
-                    Some(provider) => {
-                        bounded_provider_call(provider.as_ref(), "power_limits.set", async {
-                            let snapshot = provider.power_limit_snapshot().await?;
-                            if snapshot.identity != snapshot_identity {
-                                return Err(ProviderError::Conflict(
-                                    "power-limit snapshot changed; refresh required".into(),
-                                ));
-                            }
-                            provider
-                                .set_power_limit_from_snapshot(&snapshot, field.clone(), value)
-                                .await
-                        })
-                        .await
+                let result = write_power_limit(
+                    runtime.power_limits.as_ref(),
+                    field.clone(),
+                    value,
+                    Some(snapshot_identity),
+                    &mut emit,
+                )
+                .await;
+                if matches!(result, Ok(ApplyResult::Applied)) {
+                    profile_limits.record_applied(&field, value);
+                    if let Some(view) = profile_limits.view() {
+                        emit(WorkerEvent::ProfileLimits(view));
                     }
-                    None => Err(ProviderError::BackendUnavailable(
-                        "power-limit provider unavailable".into(),
-                    )),
-                };
-                if result.is_ok() || matches!(result, Err(ProviderError::Timeout(_))) {
-                    let refresh = match runtime.power_limits.as_ref() {
-                        Some(provider) => {
-                            bounded_provider_call(
-                                provider.as_ref(),
-                                "power_limits.read_back",
-                                provider.power_limit_snapshot(),
-                            )
-                            .await
-                        }
-                        None => Err(ProviderError::Unsupported(
-                            "power-limit provider unavailable".into(),
-                        )),
-                    };
-                    emit(WorkerEvent::PowerLimitsRefresh(refresh));
                 }
                 WorkerEvent::PowerLimit { field, result }
+            }
+            WorkerCommand::SetProfileLimitsAutoApply { enabled } => {
+                if let Err(message) = profile_limits.set_auto_apply(enabled) {
+                    tracing::warn!("profile limits auto-apply not changed: {message}");
+                }
+                if let Some(view) = profile_limits.view() {
+                    emit(WorkerEvent::ProfileLimits(view));
+                }
+                continue;
             }
             WorkerCommand::SetChargeLimit { percent } => {
                 let mut latest_percent = percent;
@@ -944,7 +1048,12 @@ async fn run_worker_inner<G, B, R, F>(
             WorkerCommand::RefreshPerformance => {
                 let result = bounded_performance_state(&runtime.performance).await;
                 reconcile_automation_from_performance_result(&mut automation, &result);
-                WorkerEvent::PerformanceRefresh(result)
+                let observed = result.as_ref().ok().map(|state| state.current);
+                emit(WorkerEvent::PerformanceRefresh(result));
+                if let Some(profile) = observed {
+                    observe_profile_limits(&runtime, &mut profile_limits, profile, &mut emit).await;
+                }
+                continue;
             }
             WorkerCommand::SetFanCurve {
                 profile,
@@ -1909,6 +2018,150 @@ mod tests {
             self.values.lock().unwrap().insert(domain_field, observed);
             Ok(observed)
         }
+    }
+
+    #[tokio::test]
+    async fn profile_change_replays_stored_limits_only_when_auto_apply_is_on() {
+        use orbis_core::limits::PowerLimitField::Spl;
+        let owner = PrivatePowerLimitHardware {
+            values: Arc::new(StdMutex::new(Default::default())),
+            calls: Arc::new(StdMutex::new(Vec::new())),
+        };
+        let calls = owner.calls.clone();
+        let (_server, connection) = private_power_limit_peer(owner).await;
+        let reads = Arc::new(StdMutex::new([(Spl, 30)].into()));
+        let runtime = power_limit_runtime(
+            orbis_session_client::ZbusHardwarePowerLimitSource::new(connection),
+            reads,
+        );
+        let initial = runtime
+            .power_limits
+            .as_ref()
+            .unwrap()
+            .power_limit_snapshot()
+            .await
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let tracker = ProfileLimitsTracker::load_from_dir(dir.path().to_path_buf());
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(run_worker_inner(
+            runtime,
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            None,
+            tracker,
+        ));
+
+        async fn next_matching(
+            rx: &mut tokio::sync::mpsc::UnboundedReceiver<WorkerEvent>,
+            pick: impl Fn(&WorkerEvent) -> bool,
+        ) -> WorkerEvent {
+            loop {
+                let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                    .await
+                    .expect("worker event")
+                    .expect("worker alive");
+                if pick(&event) {
+                    return event;
+                }
+            }
+        }
+
+        tx.send(WorkerCommand::RefreshPerformance).unwrap();
+        let initial_profile = match next_matching(&mut event_rx, |e| {
+            matches!(e, WorkerEvent::ProfileLimits(_))
+        })
+        .await
+        {
+            WorkerEvent::ProfileLimits(view) => {
+                assert!(!view.auto_apply && view.saved.is_empty());
+                view.profile
+            }
+            _ => unreachable!(),
+        };
+        let other = [PerformanceProfile::Silent, PerformanceProfile::Turbo]
+            .into_iter()
+            .find(|p| *p != initial_profile)
+            .unwrap();
+
+        // Off: applied value is not remembered and a switch replays nothing.
+        tx.send(WorkerCommand::SetPowerLimit {
+            field: Spl,
+            value: 45,
+            snapshot_identity: initial.identity,
+        })
+        .unwrap();
+        next_matching(&mut event_rx, |e| {
+            matches!(e, WorkerEvent::PowerLimit { .. })
+        })
+        .await;
+        tx.send(WorkerCommand::SetPerformance(other)).unwrap();
+        next_matching(&mut event_rx, |e| {
+            matches!(e, WorkerEvent::ProfileLimits(_))
+        })
+        .await;
+        tx.send(WorkerCommand::SetPerformance(initial_profile))
+            .unwrap();
+        next_matching(&mut event_rx, |e| {
+            matches!(e, WorkerEvent::ProfileLimits(_))
+        })
+        .await;
+        assert_eq!(*calls.lock().unwrap(), vec![(0, 45)]);
+
+        // On: the applied value is stored and replayed on returning to the profile.
+        tx.send(WorkerCommand::SetProfileLimitsAutoApply { enabled: true })
+            .unwrap();
+        next_matching(
+            &mut event_rx,
+            |e| matches!(e, WorkerEvent::ProfileLimits(v) if v.auto_apply),
+        )
+        .await;
+        tx.send(WorkerCommand::RefreshPowerLimits).unwrap();
+        let snapshot = match next_matching(&mut event_rx, |e| {
+            matches!(e, WorkerEvent::PowerLimitsRefresh(Ok(_)))
+        })
+        .await
+        {
+            WorkerEvent::PowerLimitsRefresh(Ok(snapshot)) => snapshot,
+            _ => unreachable!(),
+        };
+        tx.send(WorkerCommand::SetPowerLimit {
+            field: Spl,
+            value: 50,
+            snapshot_identity: snapshot.identity,
+        })
+        .unwrap();
+        let stored = next_matching(
+            &mut event_rx,
+            |e| matches!(e, WorkerEvent::ProfileLimits(v) if !v.saved.is_empty()),
+        )
+        .await;
+        assert!(matches!(stored, WorkerEvent::ProfileLimits(v) if v.saved == vec![(Spl, 50)]));
+        tx.send(WorkerCommand::SetPerformance(other)).unwrap();
+        next_matching(&mut event_rx, |e| {
+            matches!(e, WorkerEvent::ProfileLimits(_))
+        })
+        .await;
+        let before = calls.lock().unwrap().len();
+        tx.send(WorkerCommand::SetPerformance(initial_profile))
+            .unwrap();
+        next_matching(&mut event_rx, |e| {
+            matches!(
+                e,
+                WorkerEvent::PowerLimit {
+                    result: Ok(ApplyResult::Applied),
+                    ..
+                }
+            )
+        })
+        .await;
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), before + 1);
+        assert_eq!(*calls.last().unwrap(), (0, 50));
     }
 
     #[tokio::test]
