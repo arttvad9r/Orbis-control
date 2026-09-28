@@ -21,7 +21,7 @@ use orbis_application::{
     ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome, PerformanceCommandOutcome,
     PerformanceState, SetChargeLimitError, SetGpuModeError,
 };
-use orbis_config::{PowerRule, PowerRules};
+use orbis_config::{KeyboardTimeout, PowerRule, PowerRules};
 use orbis_config::{
     PreferencesConfig, PreferencesError, PreferencesLoad, PreferencesWarning, ThemePreference,
     load_preferences, save_preferences,
@@ -2729,6 +2729,41 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
 
 /// Wire the settings section: preferences persistence handlers plus the
 /// diagnostics actions (same runtime paths as the former windows, spec §2.4).
+fn show_keyboard_timeout(app: &AppWindow, timeout: &KeyboardTimeout) {
+    app.set_keyboard_timeout_ac(timeout.ac_secs.map_or(0, |secs| secs as i32));
+    app.set_keyboard_timeout_battery(timeout.battery_secs.map_or(0, |secs| secs as i32));
+}
+
+fn wire_keyboard_timeout(
+    app: &AppWindow,
+    settings: std::sync::Arc<tokio::sync::watch::Sender<KeyboardTimeout>>,
+) {
+    let weak = app.as_weak();
+    app.on_keyboard_timeout_requested(move |ac, secs| {
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        let secs = u32::try_from(secs).ok().filter(|secs| *secs > 0);
+        let mut next = *settings.borrow();
+        if ac {
+            next.ac_secs = secs;
+        } else {
+            next.battery_secs = secs;
+        }
+        match orbis_config::save_keyboard_timeout(&next) {
+            Ok(()) => {
+                settings.send_replace(next);
+                show_keyboard_timeout(&app, &next);
+            }
+            Err(error) => {
+                tracing::warn!(?error, "keyboard timeout not saved");
+                app.set_keyboard_timeout_status(format!("Не удалось сохранить: {error}").into());
+                app.set_keyboard_timeout_problem(true);
+            }
+        }
+    });
+}
+
 fn wire_settings_section(app: &AppWindow) {
     {
         let app_weak = app.as_weak();
@@ -2945,6 +2980,7 @@ fn main() -> anyhow::Result<()> {
     let diagnostics_session_connection = session_connection.clone();
     let diagnostics_system_connection = system_connection.clone();
     let lifecycle_connection = system_connection.clone();
+    let keyboard_light_connection = system_connection.clone();
     // Original application caller identity for the ASUS product GPU Hardware1
     // operation: the GUI owns this connection and passes it through the worker
     // FIFO. The operation stays fail-closed until polkit/backend promotion.
@@ -2980,9 +3016,47 @@ fn main() -> anyhow::Result<()> {
         app.window().set_minimized(minimized);
     });
 
+    let keyboard_timeout = orbis_config::load_keyboard_timeout().unwrap_or_else(|error| {
+        tracing::warn!(
+            ?error,
+            "keyboard timeout settings unreadable; auto-off disabled"
+        );
+        KeyboardTimeout::default()
+    });
+    let (timeout_tx, timeout_rx) = tokio::sync::watch::channel(keyboard_timeout);
+    let (ac_tx, ac_rx) = tokio::sync::watch::channel(None::<bool>);
+    let (keyboard_stop_tx, keyboard_stop_rx) = tokio::sync::oneshot::channel();
+    show_keyboard_timeout(&app, &keyboard_timeout);
+    wire_keyboard_timeout(&app, std::sync::Arc::new(timeout_tx));
+    let keyboard_status_app = app.as_weak();
+    let keyboard_task = runtime.spawn(orbis_ui::keyboard_timeout_runtime::run_keyboard_timeout(
+        timeout_rx,
+        ac_rx,
+        keyboard_stop_rx,
+        std::sync::Arc::new(orbis_providers::WaylandIdleSource),
+        std::sync::Arc::new(orbis_providers::LogindKeyboardLight::new(
+            keyboard_light_connection,
+        )),
+        move |status| {
+            let (text, problem) = orbis_ui::keyboard_timeout_runtime::status_text(&status);
+            let _ = keyboard_status_app.upgrade_in_event_loop(move |app| {
+                app.set_keyboard_timeout_status(text.into());
+                app.set_keyboard_timeout_problem(problem);
+            });
+        },
+    ));
+
     let weak = app.as_weak();
     let worker_tx_for_event = worker_tx.clone();
     let event_sink = move |event: WorkerEvent| {
+        if let WorkerEvent::TelemetryRefresh(Ok(telemetry)) = &event {
+            let online = telemetry.ac_online;
+            ac_tx.send_if_modified(|current| {
+                let changed = *current != online;
+                *current = online;
+                changed
+            });
+        }
         let weak = weak.clone();
         let worker_tx_clone = worker_tx_for_event.clone();
         if let Err(e) = weak.upgrade_in_event_loop(move |app| {
@@ -3045,6 +3119,23 @@ fn main() -> anyhow::Result<()> {
         tracing::warn!("worker закрыт, initial fan curve refresh не отправлен: {e:?}");
     }
 
+    runtime.spawn(async {
+        use tokio::signal::unix::{SignalKind, signal};
+        let (Ok(mut term), Ok(mut int)) = (
+            signal(SignalKind::terminate()),
+            signal(SignalKind::interrupt()),
+        ) else {
+            return;
+        };
+        tokio::select! {
+            _ = term.recv() => {}
+            _ = int.recv() => {}
+        }
+        let _ = slint::invoke_from_event_loop(|| {
+            let _ = slint::quit_event_loop();
+        });
+    });
+
     app.show()?;
     slint::run_event_loop()?;
 
@@ -3053,6 +3144,9 @@ fn main() -> anyhow::Result<()> {
     quick_controls_backend::clear();
     drop(app);
     drop(worker_tx);
+    let _ = keyboard_stop_tx.send(());
+    let _ = runtime
+        .block_on(async { tokio::time::timeout(Duration::from_secs(3), keyboard_task).await });
     drop(runtime);
     Ok(())
 }

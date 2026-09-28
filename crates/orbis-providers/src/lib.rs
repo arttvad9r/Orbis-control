@@ -32,7 +32,9 @@ pub mod execution;
 pub mod fan_defaults;
 pub mod gpu_diagnostics;
 pub mod hardware_identity;
+pub mod idle_notify;
 pub mod keyboard_backlight;
+pub mod keyboard_dim;
 pub mod lact_telemetry;
 pub mod linux_memory;
 pub mod native_asus_eco;
@@ -82,7 +84,9 @@ pub use execution::{bounded_operation, bounded_provider_call};
 pub use fan_defaults::{FanCurveDefaultsMutationProvider, Hardware1FanDefaultsProvider};
 pub use gpu_diagnostics::gpu_diagnostics_snapshot;
 pub use hardware_identity::HardwareIdentityProvider;
+pub use idle_notify::{IdleEvent, IdleSource, IdleWatch, WaylandIdleSource};
 pub use keyboard_backlight::*;
+pub use keyboard_dim::{KeyboardLight, LogindKeyboardLight};
 pub use lact_telemetry::{LactTelemetryProvider, merge_telemetry};
 pub use linux_memory::{
     LinuxSystemMemoryProvider, SystemMemoryProvider, parse_meminfo, parse_memory_pressure,

@@ -12,6 +12,7 @@
 
 pub mod autostart;
 pub mod desired_state;
+pub mod keyboard_timeout;
 pub mod paths;
 pub mod policy_desired;
 pub mod power_rules;
@@ -30,6 +31,10 @@ pub use desired_state::{
     DesiredStateLoad, DesiredStateLoadSource, DesiredStatePathError, DesiredStateWarning,
     DesiredStateWarningKind, desired_state_dir, desired_state_dir_with, desired_state_file,
     load_desired_state, load_desired_state_from_dir, save_desired_state, save_desired_state_to_dir,
+};
+pub use keyboard_timeout::{
+    KEYBOARD_TIMEOUT_FILE, KeyboardTimeout, KeyboardTimeoutError, load_keyboard_timeout,
+    load_keyboard_timeout_from_dir, save_keyboard_timeout, save_keyboard_timeout_to_dir,
 };
 pub use policy_desired::{
     PolicyDesiredState, UnspecifiedPresetFieldPolicy, preset_intent_from_desired,

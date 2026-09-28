@@ -3094,6 +3094,7 @@ dependencies = [
  "async-trait",
  "orbis-capabilities",
  "orbis-core",
+ "rustix 0.38.44",
  "serde",
  "serde_json",
  "tempfile",
@@ -3101,6 +3102,7 @@ dependencies = [
  "tokio",
  "tracing",
  "wayland-client",
+ "wayland-protocols",
  "zbus",
 ]
 

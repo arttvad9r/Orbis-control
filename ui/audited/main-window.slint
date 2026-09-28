@@ -115,6 +115,11 @@ export component AppWindow inherits Window {
     in property <int> power-rules-battery-hz: 0;
     callback panel-refresh-requested(int);
     callback power-rules-refresh-requested(bool, int);
+    in property <int> keyboard-timeout-ac: 0;
+    in property <int> keyboard-timeout-battery: 0;
+    in property <string> keyboard-timeout-status: "";
+    in property <bool> keyboard-timeout-problem: false;
+    callback keyboard-timeout-requested(bool, int);
     callback aura-static-rgb-requested(int, int, int);
 
     in property <bool> backend-ready: false;
@@ -418,6 +423,11 @@ export component AppWindow inherits Window {
                         keyboard-brightness <=> root.keyboard-brightness;
                         keyboard-mutation-error <=> root.keyboard-mutation-error;
                         keyboard-brightness-requested(i) => { root.keyboard-brightness-requested(i); }
+                        keyboard-timeout-ac: root.keyboard-timeout-ac;
+                        keyboard-timeout-battery: root.keyboard-timeout-battery;
+                        keyboard-timeout-status: root.keyboard-timeout-status;
+                        keyboard-timeout-problem: root.keyboard-timeout-problem;
+                        keyboard-timeout-requested(ac, secs) => { root.keyboard-timeout-requested(ac, secs); }
                         aura-state-ready <=> root.aura-state-ready;
                         aura-control-ready <=> root.aura-control-ready;
                         keyboard-effect <=> root.keyboard-effect;

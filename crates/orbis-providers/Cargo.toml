@@ -20,6 +20,9 @@ zbus = { workspace = true, features = ["p2p"] }
 # slint/winit). Используется только для read-only чтения wl_output; никакого
 # compositor toolkit и никаких writes.
 wayland-client = "0.31"
+# ext-idle-notify-v1 (staging): input idleness for the keyboard backlight timeout.
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+rustix = { workspace = true, features = ["event"] }
 orbis-core = { workspace = true }
 orbis-capabilities = { workspace = true }
 

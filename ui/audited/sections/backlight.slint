@@ -1,6 +1,6 @@
 // Backlight page — keyboard brightness and Aura state/presets.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow, StatusPill, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow, StatusPill, ActionButton, LayoutMetrics } from "../common.slint";
 import { Icon } from "../../components/icon.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
 import { Palette } from "../../themes/dark.slint";
@@ -85,6 +85,11 @@ export component BacklightSection inherits Rectangle {
     in property <int> keyboard-brightness: -1;
     in property <string> keyboard-mutation-error: "";
     callback keyboard-brightness-requested(int);
+    in property <int> keyboard-timeout-ac: 0;
+    in property <int> keyboard-timeout-battery: 0;
+    in property <string> keyboard-timeout-status: "";
+    in property <bool> keyboard-timeout-problem: false;
+    callback keyboard-timeout-requested(bool, int);
     in property <bool> aura-state-ready: false;
     in property <bool> aura-control-ready: false;
     in-out property <int> keyboard-effect: -1;
@@ -127,6 +132,12 @@ export component BacklightSection inherits Rectangle {
         if (!root.keyboard-state-ready) { return "Получение состояния подсветки"; }
         if (root.keyboard-control-ready) { return "Изменение яркости подтверждается чтением фактического уровня"; }
         return "Текущий уровень доступен только для чтения";
+    }
+
+    function timeout-label(secs: int) -> string {
+        if (secs == 0) { return "Никогда"; }
+        if (secs < 60) { return secs + " с"; }
+        return (secs / 60) + " мин";
     }
 
     function aura-effect-label() -> string {
@@ -222,6 +233,40 @@ export component BacklightSection inherits Rectangle {
                     LocalStatus {
                         text: root.keyboard-status();
                         accent: root.keyboard-control-ready ? Palette.success : root.keyboard-state-ready ? Palette.text-secondary : Palette.warning;
+                    }
+                }
+            }
+
+            if (root.keyboard-state-ready) : SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 10px;
+
+                    SectionTitle {
+                        title: "Автоотключение подсветки";
+                        detail: "После бездействия за клавиатурой";
+                    }
+                    Text { text: "От сети"; font-size: 12px; color: Palette.text-secondary; }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        for secs in [0, 15, 30, 60, 300] : ActionButton {
+                            label: root.timeout-label(secs);
+                            accent: root.keyboard-timeout-ac == secs;
+                            clicked => { root.keyboard-timeout-requested(true, secs); }
+                        }
+                    }
+                    Text { text: "От батареи"; font-size: 12px; color: Palette.text-secondary; }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        for secs in [0, 15, 30, 60, 300] : ActionButton {
+                            label: root.timeout-label(secs);
+                            accent: root.keyboard-timeout-battery == secs;
+                            clicked => { root.keyboard-timeout-requested(false, secs); }
+                        }
+                    }
+                    LocalStatus {
+                        text: root.keyboard-timeout-status;
+                        accent: root.keyboard-timeout-problem ? Palette.warning : Palette.text-secondary;
                     }
                 }
             }
