@@ -21,6 +21,7 @@ use orbis_application::{
     ChargeLimitCommandOutcome, CommandError, GpuCommandOutcome, PerformanceCommandOutcome,
     PerformanceState, SetChargeLimitError, SetGpuModeError,
 };
+use orbis_config::{PowerRule, PowerRules};
 use orbis_config::{
     PreferencesConfig, PreferencesError, PreferencesLoad, PreferencesWarning, ThemePreference,
     load_preferences, save_preferences,
@@ -1784,7 +1785,9 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             state.power_limit_error = true;
             tracing::warn!(field = ?field, "power-limit mutation failed without replacing observed state: {error:?}");
         }
-        WorkerEvent::ProfileLimits(_) | WorkerEvent::CpuTuning { .. } => {}
+        WorkerEvent::ProfileLimits(_)
+        | WorkerEvent::PowerRules(_)
+        | WorkerEvent::CpuTuning { .. } => {}
         WorkerEvent::ChargeLimitRefresh(result) => apply_charge_limit_refresh(state, result),
         WorkerEvent::GpuPowerRefresh(result) => apply_gpu_power_refresh(state, result),
         WorkerEvent::GpuMuxRefresh(result) => apply_gpu_mux_refresh(state, result),
@@ -1957,6 +1960,24 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
     }
 }
 
+fn power_rule_profile_to_int(profile: Option<PerformanceProfile>) -> i32 {
+    match profile {
+        None => 0,
+        Some(PerformanceProfile::Silent) => 1,
+        Some(PerformanceProfile::Balanced) => 2,
+        Some(PerformanceProfile::Turbo) => 3,
+    }
+}
+
+fn power_rule_profile_from_int(value: i32) -> Option<PerformanceProfile> {
+    match value {
+        1 => Some(PerformanceProfile::Silent),
+        2 => Some(PerformanceProfile::Balanced),
+        3 => Some(PerformanceProfile::Turbo),
+        _ => None,
+    }
+}
+
 fn profile_limits_summary(view: &ProfileLimitsView) -> String {
     let profile = match view.profile {
         PerformanceProfile::Silent => "Тихий",
@@ -2036,6 +2057,13 @@ fn handle_worker_event(
                 .unwrap_or_default()
                 .into(),
         );
+    }
+    if let WorkerEvent::PowerRules(view) = &event {
+        app.set_power_rules_known(true);
+        app.set_power_rules_enabled(view.rules.enabled);
+        app.set_power_rules_ac(power_rule_profile_to_int(view.rules.ac.profile));
+        app.set_power_rules_battery(power_rule_profile_to_int(view.rules.battery.profile));
+        app.set_power_rules_error(view.error.clone().unwrap_or_default().into());
     }
     if let WorkerEvent::ProfileLimits(view) = &event {
         app.set_profile_limits_known(true);
@@ -2171,6 +2199,50 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 if let Err(error) = tx.send(WorkerCommand::SetCpuBoost(enabled)) {
                     tracing::warn!("worker closed, CPU boost request not sent: {error:?}");
                 }
+            }
+        });
+    }
+    {
+        let worker_tx = worker_tx.clone();
+        let app_weak = app.as_weak();
+        let send_rules = move |enabled: bool, ac: i32, battery: i32| {
+            if let Some(tx) = &worker_tx {
+                let rules = PowerRules {
+                    enabled,
+                    ac: PowerRule {
+                        profile: power_rule_profile_from_int(ac),
+                    },
+                    battery: PowerRule {
+                        profile: power_rule_profile_from_int(battery),
+                    },
+                };
+                if let Err(error) = tx.send(WorkerCommand::SetPowerRules(rules)) {
+                    tracing::warn!("worker closed, power rules not sent: {error:?}");
+                }
+            }
+        };
+        let send_rules = std::rc::Rc::new(send_rules);
+        {
+            let app_weak = app_weak.clone();
+            let send_rules = send_rules.clone();
+            app.on_power_rules_enabled_toggled(move |enabled| {
+                if let Some(app) = app_weak.upgrade() {
+                    send_rules(
+                        enabled,
+                        app.get_power_rules_ac(),
+                        app.get_power_rules_battery(),
+                    );
+                }
+            });
+        }
+        app.on_power_rules_profile_requested(move |ac, profile| {
+            if let Some(app) = app_weak.upgrade() {
+                let (ac_profile, battery_profile) = if ac {
+                    (profile, app.get_power_rules_battery())
+                } else {
+                    (app.get_power_rules_ac(), profile)
+                };
+                send_rules(app.get_power_rules_enabled(), ac_profile, battery_profile);
             }
         });
     }

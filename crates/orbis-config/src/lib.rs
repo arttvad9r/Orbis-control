@@ -10,34 +10,16 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-pub mod automation_dry_run_preflight;
-pub mod automation_policy;
-pub mod automation_preflight;
-pub mod automation_store;
 pub mod autostart;
 pub mod desired_state;
 pub mod paths;
 pub mod policy_desired;
+pub mod power_rules;
 pub mod preferences;
 pub mod profile_limits;
 pub mod store;
 pub mod window_state;
 
-pub use automation_dry_run_preflight::preflight_automation_plan_for_dry_run;
-pub use automation_policy::{
-    AutomationPlan, AutomationPlanBlock, AutomationPolicy, AutomationPowerSource,
-    DesiredDisplayPolicy, DesiredGpuPolicy, DesiredLightingPolicy, DesiredPerformancePolicy,
-    OrbisDesiredState, PowerAutomationPolicy,
-};
-pub use automation_preflight::{
-    AutomationPreflight, AutomationPreflightBlock, preflight_automation_plan,
-    preflight_automation_plan_with_display_constraints,
-};
-pub use automation_store::{
-    AutomationPolicyLoadError, AutomationPolicySourceFingerprint,
-    automation_policy_source_fingerprint, automation_policy_source_fingerprint_from_dir,
-    load_automation_policy, load_automation_policy_from_dir,
-};
 pub use autostart::{
     AUTOSTART_ENTRY, AUTOSTART_FILE_NAME, AutostartError, AutostartPathError, AutostartStatus,
     autostart_dir, autostart_dir_with, autostart_file, autostart_status, autostart_status_from_dir,
@@ -51,6 +33,10 @@ pub use desired_state::{
 };
 pub use policy_desired::{
     PolicyDesiredState, UnspecifiedPresetFieldPolicy, preset_intent_from_desired,
+};
+pub use power_rules::{
+    POWER_RULES_FILE, PowerRule, PowerRules, PowerRulesError, load_power_rules,
+    load_power_rules_from_dir, save_power_rules, save_power_rules_to_dir,
 };
 pub use preferences::{
     AppearancePreferences, CloseAction, PREFERENCES_FILE, PREFERENCES_SCHEMA_VERSION,

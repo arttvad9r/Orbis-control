@@ -66,6 +66,13 @@ export component PerformanceSection inherits Rectangle {
     in property <string> cpu-tuning-error: "";
     callback cpu-epp-requested(int);
     callback cpu-boost-requested(bool);
+    in property <bool> power-rules-known: false;
+    in property <bool> power-rules-enabled: false;
+    in property <int> power-rules-ac: 0;
+    in property <int> power-rules-battery: 0;
+    in property <string> power-rules-error: "";
+    callback power-rules-enabled-toggled(bool);
+    callback power-rules-profile-requested(bool, int);
     callback graphics-open-requested;
 
     function bit-set(mask: int, bit: int) -> bool {
@@ -403,6 +410,53 @@ export component PerformanceSection inherits Rectangle {
                         description: root.profile-limits-summary;
                         checked: root.profile-limits-auto-apply;
                         toggled(value) => { root.profile-limits-auto-apply-toggled(value); }
+                    }
+                }
+            }
+
+            if (root.power-rules-known && root.ui-state.perf-writable) : SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 10px;
+
+                    RequestToggleRow {
+                        label: "Профиль по источнику питания";
+                        description: "Переключает профиль при подключении и отключении зарядки; при запуске ничего не меняет";
+                        checked: root.power-rules-enabled;
+                        toggled(value) => { root.power-rules-enabled-toggled(value); }
+                    }
+                    if (root.power-rules-enabled) : VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "От сети";
+                            font-size: 13.5px;
+                            font-weight: 550;
+                            color: Palette.text-primary;
+                        }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            ActionButton { label: "Не менять"; accent: root.power-rules-ac == 0; clicked => { root.power-rules-profile-requested(true, 0); } }
+                            ActionButton { label: "Тихий"; accent: root.power-rules-ac == 1; clicked => { root.power-rules-profile-requested(true, 1); } }
+                            ActionButton { label: "Сбалансированный"; accent: root.power-rules-ac == 2; clicked => { root.power-rules-profile-requested(true, 2); } }
+                            ActionButton { label: "Турбо"; accent: root.power-rules-ac == 3; clicked => { root.power-rules-profile-requested(true, 3); } }
+                        }
+                        Text {
+                            text: "От батареи";
+                            font-size: 13.5px;
+                            font-weight: 550;
+                            color: Palette.text-primary;
+                        }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            ActionButton { label: "Не менять"; accent: root.power-rules-battery == 0; clicked => { root.power-rules-profile-requested(false, 0); } }
+                            ActionButton { label: "Тихий"; accent: root.power-rules-battery == 1; clicked => { root.power-rules-profile-requested(false, 1); } }
+                            ActionButton { label: "Сбалансированный"; accent: root.power-rules-battery == 2; clicked => { root.power-rules-profile-requested(false, 2); } }
+                            ActionButton { label: "Турбо"; accent: root.power-rules-battery == 3; clicked => { root.power-rules-profile-requested(false, 3); } }
+                        }
+                    }
+                    if (root.power-rules-error != "") : LocalStatus {
+                        text: root.power-rules-error;
+                        accent: Palette.error;
                     }
                 }
             }

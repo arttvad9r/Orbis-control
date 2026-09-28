@@ -470,21 +470,6 @@ mod tests {
     }
 
     #[test]
-    fn quick_controls_keep_automation_unwired() {
-        let source = include_str!("quick_controls_backend.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("quick controls source always has a production prefix");
-        assert!(!source.contains("replace_automation_capabilities"));
-        assert!(!source.contains("observe_automation_telemetry"));
-        assert!(!source.contains("resume_observer"));
-        assert!(!source.contains("SysfsTelemetryProvider"));
-        assert!(!source.contains("AUTOMATION_READ_TIMEOUT"));
-        let mutation = ["WorkerCommand::", "Set"].concat();
-        assert!(!source.contains(&mutation));
-    }
-
-    #[test]
     fn keyboard_mutation_is_status_gated_and_readback_driven() {
         let source = include_str!("quick_controls_backend.rs");
         assert!(source.contains("read_keyboard_write_status"));

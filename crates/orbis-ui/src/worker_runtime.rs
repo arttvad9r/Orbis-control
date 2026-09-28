@@ -1,35 +1,22 @@
-//! Production sequential worker with worker-owned Automation observation.
-//!
-//! This module preserves the existing `orbis_ui::worker` public command/event
-//! API while colocating Automation policy, lifecycle revision, capability
-//! generation, serialization and recovery with the same owner that performs
-//! application mutations. Automation execution remains promotion-gated: the
-//! Performance-only executor is compiled, but the exact build must pass the
-//! promotion evidence before the constant below may be changed.
+//! Production sequential worker: one owner for application mutations, telemetry
+//! polling and the power-source rules engine.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::automation_capability::augment_snapshot_with_automation_shadow;
-use crate::automation_execution_promotion::authorize_prepared_execution;
-use crate::automation_performance_executor::{
-    AutomationPerformanceExecutionOutcome, execute_prepared_performance,
-};
-use crate::automation_worker_driver::{
-    AutomationPolicyRevisionError, AutomationWorkerDriver, AutomationWorkerObservation,
-};
 use crate::composition::{
     ApplicationRuntime, BatteryServiceRuntime, FanServiceRuntime, GpuServicesRuntime,
     PerformanceServiceRuntime,
 };
 use crate::cpu_tuning_runtime::{CpuTuningBackend, CpuTuningState};
+use crate::power_rules_runtime::{PowerRulesTracker, PowerRulesView};
 use crate::profile_limits_runtime::{ProfileLimitsTracker, ProfileLimitsView};
 use orbis_application::{
     ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome, PerformanceState,
     SetChargeLimitError, SetFanCurveError, SetFanDefaultsError, SetGpuModeError,
     SetPerformanceError,
 };
+use orbis_config::{PowerRule, PowerRules};
 use orbis_core::action::ApplyResult;
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
@@ -40,12 +27,6 @@ use orbis_providers::{bounded_operation, bounded_provider_call};
 use orbis_session_client::{HardwareProductGpuSource, ProductGpuMutationResult};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-
-/// This exact revision has not passed executable Cargo/Clippy/Slint validation
-/// in the available environment. Keep unattended mutation unreachable even if
-/// an external registry accidentally advertises Automation write support.
-const AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED: bool = false;
-const AUTOMATION_MAX_CAPABILITY_AGE: Duration = Duration::from_secs(45);
 
 /// Deadline for one read-only ASUS product GPU status query.
 ///
@@ -103,6 +84,9 @@ pub enum WorkerCommand {
     SetProfileLimitsAutoApply {
         enabled: bool,
     },
+    /// Store the AC / battery rules; applies the current source's rule when it
+    /// was enabled or edited.
+    SetPowerRules(PowerRules),
     /// Set the CPU energy/performance preference through Hardware1.
     SetCpuEpp(orbis_core::cpu_tuning::EnergyPreference),
     /// Enable or disable CPU boost through Hardware1.
@@ -158,6 +142,8 @@ pub enum WorkerEvent {
     },
     /// Stored power-limit intent for the active performance profile.
     ProfileLimits(ProfileLimitsView),
+    /// Stored AC / battery rules.
+    PowerRules(PowerRulesView),
 }
 
 pub fn command_channel() -> (
@@ -165,74 +151,6 @@ pub fn command_channel() -> (
     UnboundedReceiver<WorkerCommand>,
 ) {
     tokio::sync::mpsc::unbounded_channel()
-}
-
-#[derive(Debug, Clone, Copy)]
-struct AutomationLifecycleSignal {
-    start: bool,
-    observed_at: SystemTime,
-}
-
-#[derive(Clone)]
-struct LifecycleRegistration {
-    id: u64,
-    sender: UnboundedSender<AutomationLifecycleSignal>,
-}
-
-static NEXT_LIFECYCLE_REGISTRATION: AtomicU64 = AtomicU64::new(1);
-static LIFECYCLE_REGISTRATION: OnceLock<Mutex<Option<LifecycleRegistration>>> = OnceLock::new();
-
-fn lifecycle_registration() -> &'static Mutex<Option<LifecycleRegistration>> {
-    LIFECYCLE_REGISTRATION.get_or_init(|| Mutex::new(None))
-}
-
-struct LifecycleRegistrationGuard {
-    id: u64,
-}
-
-impl Drop for LifecycleRegistrationGuard {
-    fn drop(&mut self) {
-        let Ok(mut slot) = lifecycle_registration().lock() else {
-            return;
-        };
-        if slot.as_ref().map(|registration| registration.id) == Some(self.id) {
-            *slot = None;
-        }
-    }
-}
-
-fn register_lifecycle_sender(
-    sender: UnboundedSender<AutomationLifecycleSignal>,
-) -> LifecycleRegistrationGuard {
-    let id = NEXT_LIFECYCLE_REGISTRATION.fetch_add(1, Ordering::Relaxed);
-    if let Ok(mut slot) = lifecycle_registration().lock() {
-        *slot = Some(LifecycleRegistration { id, sender });
-    } else {
-        tracing::error!(
-            "Automation lifecycle sender registry poisoned; resume automation disabled"
-        );
-    }
-    LifecycleRegistrationGuard { id }
-}
-
-/// Publish one already-observed logind `PrepareForSleep(bool)` event to the
-/// current worker owner. No hardware action occurs here; the worker consumes the
-/// signal in FIFO/select order with commands and capability replacement.
-///
-/// Returns false when no worker is registered or its lifecycle receiver closed.
-pub fn publish_prepare_for_sleep(start: bool, observed_at: SystemTime) -> bool {
-    let sender = match lifecycle_registration().lock() {
-        Ok(slot) => slot
-            .as_ref()
-            .map(|registration| registration.sender.clone()),
-        Err(_) => None,
-    };
-    let Some(sender) = sender else {
-        return false;
-    };
-    sender
-        .send(AutomationLifecycleSignal { start, observed_at })
-        .is_ok()
 }
 
 pub async fn run_worker<G, B, R, F>(
@@ -304,285 +222,55 @@ pub async fn run_worker_with_cpu_tuning<G, B, R, F>(
         poll_interval,
         product_gpu,
         cpu_tuning,
-        ProfileLimitsTracker::load(),
+        Trackers {
+            profile_limits: ProfileLimitsTracker::load(),
+            power_rules: PowerRulesTracker::load(),
+        },
     )
     .await;
 }
 
-fn sync_persisted_automation_policy(driver: &mut AutomationWorkerDriver) {
-    match orbis_config::load_automation_policy() {
-        Ok(policy) => {
-            if driver.persisted_policy() == Some(&policy) {
-                return;
-            }
-            if let Err(error) = driver.replace_persisted_policy(policy) {
-                tracing::error!(
-                    ?error,
-                    "Automation policy revision exhausted; execution disabled"
-                );
-            }
-        }
-        Err(error) => {
-            if driver.persisted_policy().is_some() {
-                match driver.clear_persisted_policy() {
-                    Ok(revision) => tracing::warn!(
-                        error = %error,
-                        policy_revision = revision.get(),
-                        "Automation persisted policy became unavailable; cached intent cleared"
-                    ),
-                    Err(AutomationPolicyRevisionError::SequenceExhausted) => tracing::error!(
-                        error = %error,
-                        "Automation policy unavailable and revision exhausted"
-                    ),
-                }
-            } else {
-                tracing::debug!(error = %error, "Automation persisted policy unavailable");
-            }
-        }
-    }
-}
-
-async fn observe_automation_telemetry<R>(
-    driver: &mut AutomationWorkerDriver,
-    performance: &R,
-    source_capabilities: &orbis_capabilities::CapabilityRegistrySnapshot,
-    telemetry: &orbis_core::telemetry::Telemetry,
-    allow_execution: bool,
-) where
-    R: PerformanceServiceRuntime + Sync,
-{
-    sync_persisted_automation_policy(driver);
-
-    let capabilities = match augment_snapshot_with_automation_shadow(source_capabilities) {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            tracing::error!(
-                ?error,
-                "Automation capability view failed; observation skipped fail-closed"
-            );
-            return;
-        }
-    };
-    let now = SystemTime::now();
-    let observation = driver.observe_telemetry(telemetry, &capabilities, now);
-    match observation {
-        AutomationWorkerObservation::PolicyUnavailable
-        | AutomationWorkerObservation::NoConfirmedEvent => return,
-        AutomationWorkerObservation::Failed(error) => {
-            tracing::error!(?error, "Automation worker observation failed closed");
-            return;
-        }
-        AutomationWorkerObservation::Confirmed(event) => {
-            tracing::debug!(
-                revision = event.revision().get(),
-                outcome = ?event.outcome(),
-                "Automation lifecycle event confirmed under worker owner"
-            );
-        }
-    }
-
-    let envelope =
-        match driver.prepare_latest_dry_run(&capabilities, now, AUTOMATION_MAX_CAPABILITY_AGE) {
-            Ok(envelope) => envelope,
-            Err(block) => {
-                tracing::debug!(?block, "Automation dry-run preparation blocked");
-                return;
-            }
-        };
-
-    // This is the production dry-run boundary. Until the exact build is
-    // promoted, even a future Supported Automation capability cannot reach the
-    // owner call. The move-only envelope is still consumed exactly once.
-    if !allow_execution {
-        if let Err(error) = driver.finish_dry_run(envelope) {
-            tracing::error!(?error, "Resume dry-run lease release failed");
-        }
-        return;
-    }
-
-    if !AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED {
-        tracing::info!(
-            policy_revision = envelope.required_policy_revision().get(),
-            lifecycle_revision = envelope.prepared().lease().required_revision().get(),
-            generation = envelope.prepared().lease().required_generation(),
-            actions = ?envelope.prepared().lease().actions(),
-            "Automation dry-run prepared; unattended mutation promotion disabled"
-        );
-        if let Err(error) = driver.finish_dry_run(envelope) {
-            tracing::error!(?error, "Automation dry-run lease release failed");
-        }
-        return;
-    }
-
-    // The compile-time promotion bit is necessary but not sufficient. The same
-    // immutable generation must still be fresh and explicitly advertise direct
-    // Automation write support. Shadow/dry-run only removes this one runtime
-    // blocker; action-level evidence has already been checked twice under the
-    // exact same generation.
-    let permit = match authorize_prepared_execution(
-        &envelope,
-        &capabilities,
-        SystemTime::now(),
-        AUTOMATION_MAX_CAPABILITY_AGE,
-    ) {
-        Ok(permit) => permit,
-        Err(block) => {
-            tracing::warn!(?block, "Automation strict execution promotion blocked");
-            if let Err(error) = driver.finish_dry_run(envelope) {
-                tracing::error!(?error, "Automation blocked lease release failed");
-            }
-            return;
-        }
-    };
-    debug_assert_eq!(permit.required_generation(), capabilities.generation());
-
-    let outcome = execute_prepared_performance(
-        performance,
-        &envelope,
-        driver.current_policy_revision(),
-        driver.current_revision(),
-        permit.required_generation(),
-    )
-    .await;
-
-    match outcome {
-        AutomationPerformanceExecutionOutcome::NoOp => {
-            if let Err(error) = driver.finish_dry_run(envelope) {
-                tracing::error!(?error, "Automation no-op lease release failed");
-            }
-        }
-        AutomationPerformanceExecutionOutcome::Applied {
-            lease_id,
-            revision,
-            generation,
-            profile,
-        } => {
-            tracing::info!(
-                lease_id,
-                revision = revision.get(),
-                generation,
-                ?profile,
-                "Automation Performance mutation confirmed"
-            );
-            if let Err(error) = driver.finish_dry_run(envelope) {
-                tracing::error!(?error, "Automation applied lease release failed");
-            }
-        }
-        AutomationPerformanceExecutionOutcome::DefiniteFailure(error) => {
-            tracing::warn!(
-                ?error,
-                "Automation Performance execution failed before unknown outcome"
-            );
-            if let Err(finish_error) = driver.finish_dry_run(envelope) {
-                tracing::error!(?finish_error, "Automation failed lease release failed");
-            }
-        }
-        AutomationPerformanceExecutionOutcome::RecoveryRequired { requested, reason } => {
-            tracing::error!(
-                ?requested,
-                ?reason,
-                "Automation Performance outcome unknown; recovery required"
-            );
-            if let Err(error) = driver.finish_performance_unknown(envelope) {
-                tracing::error!(?error, "Automation could not enter recovery barrier");
-                return;
-            }
-            match bounded_performance_state(performance).await {
-                Ok(state) => {
-                    let recovered = driver.reconcile_performance(&state);
-                    tracing::warn!(
-                        ?recovered,
-                        "Automation Performance recovery reconciled from fresh read"
-                    );
-                }
-                Err(error) => {
-                    tracing::error!(
-                        ?error,
-                        "Automation Performance recovery read failed; barrier remains active"
-                    );
-                }
-            }
-        }
-    }
-}
-
-fn reconcile_automation_from_performance_result(
-    driver: &mut AutomationWorkerDriver,
-    result: &Result<PerformanceState, ProviderError>,
-) {
-    if let Ok(state) = result {
-        let outcome = driver.reconcile_performance(state);
-        if !matches!(
-            outcome,
-            crate::automation_recovery::AutomationPerformanceRecoveryOutcome::NotRequired
-        ) {
-            tracing::warn!(
-                ?outcome,
-                "Automation recovery cleared by authoritative Performance refresh"
-            );
-        }
-    }
-}
-
-/// Reconcile read-only state after a paired resume observation.
-///
-/// This publishes fresh provider results and a new capability generation. It
-/// deliberately does not dispatch or restore any hardware mutation.
-async fn reconcile_after_resume<G, B, R, F>(
-    runtime: &mut ApplicationRuntime<G, B, R>,
-    automation: &mut AutomationWorkerDriver,
+/// Apply one power-source rule through the same authorised paths as a manual
+/// change. A failed or unknown outcome is reported and never retried.
+async fn apply_power_rule<G, B, R, F>(
+    runtime: &ApplicationRuntime<G, B, R>,
+    profile_limits: &mut ProfileLimitsTracker,
+    cpu_tuning: Option<&dyn CpuTuningBackend>,
+    rule: PowerRule,
     emit: &mut F,
 ) where
     G: GpuServicesRuntime,
     B: BatteryServiceRuntime,
-    R: PerformanceServiceRuntime + Sync,
+    R: PerformanceServiceRuntime,
     F: FnMut(WorkerEvent),
 {
-    match refresh_capability_registry(runtime).await {
-        Ok(snapshot) => {
-            let generation = snapshot.generation();
-            let snapshot = Arc::new(snapshot);
-            runtime.replace_capabilities((*snapshot).clone());
-            emit(WorkerEvent::RegistryChange(Ok((generation, snapshot))));
+    if let Some(profile) = rule.profile {
+        let result = runtime.performance.set_performance(profile).await;
+        let observed = result.as_ref().ok().map(|outcome| outcome.state.current);
+        emit(WorkerEvent::Performance(result));
+        if let Some(profile) = observed {
+            observe_profile_limits(runtime, profile_limits, cpu_tuning, profile, emit).await;
         }
-        Err(error) => emit(WorkerEvent::RegistryChange(Err(error))),
     }
+}
 
-    let (power, mux, access) = bounded_gpu_capabilities(&runtime.gpu).await;
-    emit(WorkerEvent::GpuPowerRefresh(power));
-    emit(WorkerEvent::GpuMuxRefresh(mux));
-    emit(WorkerEvent::GpuAccessRefresh(access));
-
-    let performance = bounded_performance_state(&runtime.performance).await;
-    reconcile_automation_from_performance_result(automation, &performance);
-    emit(WorkerEvent::PerformanceRefresh(performance));
-    emit(WorkerEvent::ChargeLimitRefresh(
-        bounded_charge_limit(&runtime.battery).await,
-    ));
-
-    let telemetry = runtime.telemetry.snapshot().await;
-    if let Err(error) = &telemetry {
-        // Canonical provider identity and declared deadline flow into the
-        // diagnostic path (#123): failures name the backend and its contract
-        // deadline instead of an anonymous read.
-        tracing::warn!(
-            provider = runtime.telemetry.provider_id(),
-            deadline_ms = runtime.telemetry.snapshot_timeout().as_millis() as u64,
-            "telemetry refresh failed: {error:?}"
-        );
+/// Feed the observed power source to the rules engine and apply a triggered rule.
+async fn observe_power_source<G, B, R, F>(
+    runtime: &ApplicationRuntime<G, B, R>,
+    power_rules: &mut PowerRulesTracker,
+    profile_limits: &mut ProfileLimitsTracker,
+    cpu_tuning: Option<&dyn CpuTuningBackend>,
+    ac_online: Option<bool>,
+    emit: &mut F,
+) where
+    G: GpuServicesRuntime,
+    B: BatteryServiceRuntime,
+    R: PerformanceServiceRuntime,
+    F: FnMut(WorkerEvent),
+{
+    if let Some(rule) = ac_online.and_then(|ac| power_rules.observe(ac)) {
+        apply_power_rule(runtime, profile_limits, cpu_tuning, rule, emit).await;
     }
-    if let Ok(sample) = &telemetry {
-        let capabilities = runtime.capabilities().clone();
-        observe_automation_telemetry(
-            automation,
-            &runtime.performance,
-            &capabilities,
-            sample,
-            false,
-        )
-        .await;
-    }
-    emit(WorkerEvent::TelemetryRefresh(telemetry));
 }
 
 async fn bounded_performance_state<R>(performance: &R) -> Result<PerformanceState, ProviderError>
@@ -800,6 +488,12 @@ async fn emit_cpu_tuning<F>(
     }
 }
 
+/// Persistent-intent trackers owned by the worker.
+struct Trackers {
+    profile_limits: ProfileLimitsTracker,
+    power_rules: PowerRulesTracker,
+}
+
 async fn run_worker_inner<G, B, R, F>(
     mut runtime: ApplicationRuntime<G, B, R>,
     mut receiver: UnboundedReceiver<WorkerCommand>,
@@ -807,18 +501,18 @@ async fn run_worker_inner<G, B, R, F>(
     poll_interval: Option<Duration>,
     product_gpu: Option<std::sync::Arc<dyn HardwareProductGpuSource>>,
     cpu_tuning: Option<Arc<dyn CpuTuningBackend>>,
-    mut profile_limits: ProfileLimitsTracker,
+    trackers: Trackers,
 ) where
     G: GpuServicesRuntime + 'static,
     B: BatteryServiceRuntime + 'static,
     R: PerformanceServiceRuntime + Sync + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
-    let mut automation = AutomationWorkerDriver::new();
-    sync_persisted_automation_policy(&mut automation);
-
-    let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::mpsc::unbounded_channel();
-    let _lifecycle_registration = register_lifecycle_sender(lifecycle_tx);
+    let Trackers {
+        mut profile_limits,
+        mut power_rules,
+    } = trackers;
+    emit(WorkerEvent::PowerRules(power_rules.view()));
 
     let mut deferred_command: Option<WorkerCommand> = None;
     let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::unbounded_channel::<
@@ -851,38 +545,20 @@ async fn run_worker_inner<G, B, R, F>(
                 Some(timer) => {
                     tokio::select! {
                         command = receiver.recv() => command,
-                        lifecycle = lifecycle_rx.recv() => {
-                            if let Some(lifecycle) = lifecycle {
-                                let outcome = automation.observe_prepare_for_sleep(
-                                    lifecycle.start,
-                                    lifecycle.observed_at,
-                                );
-                                tracing::debug!(
-                                    start = lifecycle.start,
-                                    outcome = ?outcome,
-                                    "Automation lifecycle signal consumed by worker"
-                                );
-                                if !lifecycle.start {
-                                    reconcile_after_resume(&mut runtime, &mut automation, &mut emit)
-                                        .await;
-                                }
-                            }
-                            continue;
-                        }
                         snapshot = snapshot_rx.recv(), if poll_in_progress => {
                             if let Some(snapshot) = snapshot {
-                                if let Ok(telemetry) = &snapshot {
-                                    let capabilities = runtime.capabilities().clone();
-                                    observe_automation_telemetry(
-                                        &mut automation,
-                                        &runtime.performance,
-                                        &capabilities,
-                                        telemetry,
-                                        true,
-                                    ).await;
-                                }
+                                let ac_online = snapshot.as_ref().ok().and_then(|t| t.ac_online);
                                 emit(WorkerEvent::TelemetryRefresh(snapshot));
                                 poll_in_progress = false;
+                                observe_power_source(
+                                    &runtime,
+                                    &mut power_rules,
+                                    &mut profile_limits,
+                                    cpu_tuning.as_deref(),
+                                    ac_online,
+                                    &mut emit,
+                                )
+                                .await;
                             }
                             continue;
                         }
@@ -908,10 +584,6 @@ async fn run_worker_inner<G, B, R, F>(
                                 performance_refresh_counter = 0;
                                 let performance =
                                     bounded_performance_state(&runtime.performance).await;
-                                reconcile_automation_from_performance_result(
-                                    &mut automation,
-                                    &performance,
-                                );
                                 let observed = performance.as_ref().ok().map(|state| state.current);
                                 emit(WorkerEvent::PerformanceRefresh(performance));
                                 if let Some(profile) = observed {
@@ -956,20 +628,6 @@ async fn run_worker_inner<G, B, R, F>(
                 None => {
                     tokio::select! {
                         command = receiver.recv() => command,
-                        lifecycle = lifecycle_rx.recv() => {
-                            if let Some(lifecycle) = lifecycle {
-                                let outcome = automation.observe_prepare_for_sleep(
-                                    lifecycle.start,
-                                    lifecycle.observed_at,
-                                );
-                                tracing::debug!(start = lifecycle.start, outcome = ?outcome, "Automation lifecycle signal consumed by worker");
-                                if !lifecycle.start {
-                                    reconcile_after_resume(&mut runtime, &mut automation, &mut emit)
-                                        .await;
-                                }
-                            }
-                            continue;
-                        }
                     }
                 }
             },
@@ -1001,18 +659,17 @@ async fn run_worker_inner<G, B, R, F>(
 
         if matches!(command, WorkerCommand::RefreshTelemetry) {
             let snapshot = runtime.telemetry.snapshot().await;
-            if let Ok(telemetry) = &snapshot {
-                let capabilities = runtime.capabilities().clone();
-                observe_automation_telemetry(
-                    &mut automation,
-                    &runtime.performance,
-                    &capabilities,
-                    telemetry,
-                    true,
-                )
-                .await;
-            }
+            let ac_online = snapshot.as_ref().ok().and_then(|t| t.ac_online);
             emit(WorkerEvent::TelemetryRefresh(snapshot));
+            observe_power_source(
+                &runtime,
+                &mut power_rules,
+                &mut profile_limits,
+                cpu_tuning.as_deref(),
+                ac_online,
+                &mut emit,
+            )
+            .await;
             continue;
         }
 
@@ -1127,6 +784,21 @@ async fn run_worker_inner<G, B, R, F>(
                 }
                 continue;
             }
+            WorkerCommand::SetPowerRules(rules) => {
+                let apply = power_rules.set_rules(rules);
+                emit(WorkerEvent::PowerRules(power_rules.view()));
+                if let Ok(Some(rule)) = apply {
+                    apply_power_rule(
+                        &runtime,
+                        &mut profile_limits,
+                        cpu_tuning.as_deref(),
+                        rule,
+                        &mut emit,
+                    )
+                    .await;
+                }
+                continue;
+            }
             WorkerCommand::SetProfileLimitsAutoApply { enabled } => {
                 if let Err(message) = profile_limits.set_auto_apply(enabled) {
                     tracing::warn!("profile limits auto-apply not changed: {message}");
@@ -1164,7 +836,6 @@ async fn run_worker_inner<G, B, R, F>(
             }
             WorkerCommand::RefreshPerformance => {
                 let result = bounded_performance_state(&runtime.performance).await;
-                reconcile_automation_from_performance_result(&mut automation, &result);
                 let observed = result.as_ref().ok().map(|state| state.current);
                 emit(WorkerEvent::PerformanceRefresh(result));
                 if let Some(profile) = observed {
@@ -1256,30 +927,6 @@ mod tests {
     }
 
     #[test]
-    fn execution_promotion_is_fail_closed_on_this_revision() {
-        const {
-            assert!(!AUTOMATION_PERFORMANCE_EXECUTION_PROMOTED);
-        }
-    }
-
-    #[test]
-    fn worker_source_owns_automation_and_only_performance_executor() {
-        let source = production_source();
-        assert!(source.contains("AutomationWorkerDriver::new()"));
-        assert!(source.contains("observe_prepare_for_sleep"));
-        assert!(source.contains("observe_automation_telemetry"));
-        assert!(source.contains("authorize_prepared_execution"));
-        assert!(source.contains("execute_prepared_performance"));
-        assert!(source.contains("finish_performance_unknown"));
-        assert!(source.contains("reconcile_performance"));
-        assert!(source.contains("reconcile_after_resume"));
-        assert!(source.contains("sample,\n            false,"));
-        assert!(!source.contains("set_gpu_mode_for_automation"));
-        assert!(!source.contains("set_fan_curve_for_automation"));
-        assert!(!source.contains("set_charge_limit_for_automation"));
-    }
-
-    #[test]
     fn product_gpu_request_is_fifo_only_and_never_automated() {
         let source = production_source();
         assert!(source.contains("WorkerCommand::SetProductGpuMode { raw }"));
@@ -1318,14 +965,6 @@ mod tests {
         assert!(source.contains("bounded_charge_limit(&runtime.battery).await"));
         assert!(source.contains("bounded_performance_state(&runtime.performance).await"));
         assert!(source.contains("bounded_fan_curve(runtime.fan.as_ref(), profile, &fan).await"));
-    }
-
-    #[test]
-    fn lifecycle_publish_fails_closed_without_registered_worker() {
-        if let Ok(mut slot) = lifecycle_registration().lock() {
-            *slot = None;
-        }
-        assert!(!publish_prepare_for_sleep(false, SystemTime::UNIX_EPOCH));
     }
 
     // --- Read-only product GPU status: real worker-loop coverage (D2) ---
@@ -1527,29 +1166,14 @@ mod tests {
         }
     }
 
-    fn mock_runtime() -> ApplicationRuntime<
+    type MockRuntime = ApplicationRuntime<
         GpuServices<MockProvider, MockProvider, MockProvider, MockProvider>,
         AppService<MockProvider>,
         AppService<MockProvider>,
-    > {
-        let provider = Arc::new(MockProvider::new(
-            build_state_arc("zephyrus-full").expect("profile exists"),
-        ));
-        ApplicationRuntime::empty_for_testing(
-            GpuServices::new(
-                AppService::new(provider.clone()),
-                AppService::new(provider.clone()),
-                AppService::new(provider.clone()),
-                AppService::new(provider.clone()),
-            ),
-            AppService::new(provider.clone()),
-            AppService::new(provider.clone()),
-            AppService::new(provider.clone()),
-            AppService::new(provider),
-            orbis_core::capability::CapabilityStatus::Unsupported,
-            orbis_core::capability::CapabilityStatus::Unsupported,
-            orbis_core::capability::CapabilityStatus::Unsupported,
-        )
+    >;
+
+    fn mock_runtime() -> MockRuntime {
+        mock_runtime_with_state(build_state_arc("zephyrus-full").expect("profile exists"))
     }
 
     struct PrivatePerformanceSession {
@@ -2087,15 +1711,30 @@ mod tests {
         }
     }
 
+    fn mock_runtime_with_state(
+        state: Arc<tokio::sync::RwLock<orbis_providers::mock::MockState>>,
+    ) -> MockRuntime {
+        ApplicationRuntime::empty_for_testing(
+            GpuServices::new(
+                AppService::new(Arc::new(MockProvider::new(state.clone()))),
+                AppService::new(Arc::new(MockProvider::new(state.clone()))),
+                AppService::new(Arc::new(MockProvider::new(state.clone()))),
+                AppService::new(Arc::new(MockProvider::new(state.clone()))),
+            ),
+            AppService::new(Arc::new(MockProvider::new(state.clone()))),
+            AppService::new(Arc::new(MockProvider::new(state.clone()))),
+            AppService::new(Arc::new(MockProvider::new(state.clone()))),
+            AppService::new(Arc::new(MockProvider::new(state))),
+            orbis_core::capability::CapabilityStatus::Unsupported,
+            orbis_core::capability::CapabilityStatus::Unsupported,
+            orbis_core::capability::CapabilityStatus::Unsupported,
+        )
+    }
+
     fn power_limit_runtime(
         source: orbis_session_client::ZbusHardwarePowerLimitSource,
         read_values: Arc<StdMutex<std::collections::BTreeMap<PowerLimitField, i32>>>,
-    ) -> ApplicationRuntime<
-        GpuServices<MockProvider, MockProvider, MockProvider, MockProvider>,
-        AppService<MockProvider>,
-        AppService<MockProvider>,
-    > {
-        let provider = MockProvider::new(build_state_arc("zephyrus-full").expect("profile exists"));
+    ) -> MockRuntime {
         let values = read_values;
         let limits = Arc::new(SessionHardwarePowerLimitProvider::new(
             DeterministicPowerLimitReads {
@@ -2103,22 +1742,7 @@ mod tests {
             },
             TestHardwarePowerLimitSource { source, values },
         ));
-        ApplicationRuntime::empty_for_testing(
-            GpuServices::new(
-                AppService::new(Arc::new(MockProvider::new(provider.state()))),
-                AppService::new(Arc::new(MockProvider::new(provider.state()))),
-                AppService::new(Arc::new(MockProvider::new(provider.state()))),
-                AppService::new(Arc::new(MockProvider::new(provider.state()))),
-            ),
-            AppService::new(Arc::new(MockProvider::new(provider.state()))),
-            AppService::new(Arc::new(MockProvider::new(provider.state()))),
-            AppService::new(Arc::new(MockProvider::new(provider.state()))),
-            AppService::new(Arc::new(provider)),
-            orbis_core::capability::CapabilityStatus::Unsupported,
-            orbis_core::capability::CapabilityStatus::Unsupported,
-            orbis_core::capability::CapabilityStatus::Unsupported,
-        )
-        .with_power_limits(limits)
+        mock_runtime().with_power_limits(limits)
     }
 
     struct TestHardwarePowerLimitSource {
@@ -2203,7 +1827,10 @@ mod tests {
             None,
             None,
             Some(backend),
-            tracker,
+            Trackers {
+                profile_limits: tracker,
+                power_rules: PowerRulesTracker::load_from_dir(dir.path().to_path_buf()),
+            },
         ));
 
         async fn next_view(
@@ -2256,6 +1883,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn power_source_change_applies_the_rule_but_startup_and_disabled_do_not() {
+        use orbis_config::{PowerRule, PowerRules};
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        {
+            let mut guard = state.write().await;
+            guard.profile = PerformanceProfile::Balanced;
+            guard.telemetry.ac_online = Some(true);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let rule = |profile| PowerRule {
+            profile: Some(profile),
+        };
+        let mut rules = PowerRules {
+            enabled: true,
+            ac: rule(PerformanceProfile::Turbo),
+            battery: rule(PerformanceProfile::Silent),
+        };
+        let mut power_rules = PowerRulesTracker::load_from_dir(dir.path().to_path_buf());
+        power_rules.set_rules(rules).unwrap();
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(run_worker_inner(
+            mock_runtime_with_state(state.clone()),
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            None,
+            None,
+            Trackers {
+                profile_limits: ProfileLimitsTracker::load_from_dir(dir.path().to_path_buf()),
+                power_rules,
+            },
+        ));
+
+        async fn next_performance(
+            rx: &mut tokio::sync::mpsc::UnboundedReceiver<WorkerEvent>,
+        ) -> PerformanceProfile {
+            loop {
+                let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                    .await
+                    .expect("worker event")
+                    .expect("worker alive");
+                if let WorkerEvent::Performance(Ok(outcome)) = event {
+                    return outcome.state.current;
+                }
+            }
+        }
+        // Everything up to the next command is already processed once a
+        // refresh answers, so this proves that no rule ran before it.
+        async fn settle(
+            tx: &UnboundedSender<WorkerCommand>,
+            rx: &mut tokio::sync::mpsc::UnboundedReceiver<WorkerEvent>,
+        ) {
+            tx.send(WorkerCommand::RefreshPerformance).unwrap();
+            loop {
+                let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                    .await
+                    .expect("worker event")
+                    .expect("worker alive");
+                match event {
+                    WorkerEvent::PerformanceRefresh(_) => return,
+                    WorkerEvent::Performance(_) => panic!("unexpected rule application"),
+                    _ => {}
+                }
+            }
+        }
+
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        settle(&tx, &mut event_rx).await;
+        assert_eq!(state.read().await.profile, PerformanceProfile::Balanced);
+
+        state.write().await.telemetry.ac_online = Some(false);
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        assert_eq!(
+            next_performance(&mut event_rx).await,
+            PerformanceProfile::Silent
+        );
+
+        rules.battery = rule(PerformanceProfile::Balanced);
+        tx.send(WorkerCommand::SetPowerRules(rules)).unwrap();
+        assert_eq!(
+            next_performance(&mut event_rx).await,
+            PerformanceProfile::Balanced
+        );
+
+        rules.enabled = false;
+        tx.send(WorkerCommand::SetPowerRules(rules)).unwrap();
+        state.write().await.telemetry.ac_online = Some(true);
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        settle(&tx, &mut event_rx).await;
+        assert_eq!(state.read().await.profile, PerformanceProfile::Balanced);
+    }
+
+    #[tokio::test]
     async fn profile_change_replays_stored_limits_only_when_auto_apply_is_on() {
         use orbis_core::limits::PowerLimitField::Spl;
         let owner = PrivatePowerLimitHardware {
@@ -2289,7 +2012,10 @@ mod tests {
             None,
             None,
             None,
-            tracker,
+            Trackers {
+                profile_limits: tracker,
+                power_rules: PowerRulesTracker::load_from_dir(dir.path().to_path_buf()),
+            },
         ));
 
         async fn next_matching(
@@ -2428,6 +2154,10 @@ mod tests {
             let _ = event_tx.send(event);
         }));
 
+        assert!(matches!(
+            event_rx.recv().await,
+            Some(WorkerEvent::PowerRules(_))
+        ));
         let mut snapshot = initial.clone();
         for (field, value, wire) in [(Spl, 45, 0), (GpuDynamicBoost, 25, 4)] {
             tx.send(WorkerCommand::SetPowerLimit {

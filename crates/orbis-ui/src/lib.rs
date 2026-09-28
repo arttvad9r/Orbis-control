@@ -6,21 +6,6 @@
 
 #![forbid(unsafe_code)]
 
-pub mod automation_capability;
-pub mod automation_execution_guard;
-pub mod automation_execution_promotion;
-pub mod automation_execution_scope;
-pub mod automation_lifecycle_revision;
-mod automation_performance_executor;
-pub mod automation_policy_sync;
-pub mod automation_recovery;
-pub mod automation_registry;
-pub mod automation_retry;
-pub mod automation_serialization;
-pub mod automation_shadow_runtime;
-pub mod automation_worker_coordinator;
-pub mod automation_worker_driver;
-pub mod automation_worker_runtime;
 pub mod composition;
 pub mod cpu_tuning_runtime;
 pub mod diagnostics_dto;
@@ -29,6 +14,7 @@ pub mod diagnostics_metadata;
 pub mod diagnostics_runtime;
 pub mod diagnostics_window_model;
 pub mod display_refresh_service;
+pub mod power_rules_runtime;
 pub mod product_mutation_promotion;
 pub mod profile_limits_runtime;
 #[path = "worker_runtime.rs"]

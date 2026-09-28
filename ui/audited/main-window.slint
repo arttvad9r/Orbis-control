@@ -100,6 +100,13 @@ export component AppWindow inherits Window {
     in property <string> cpu-tuning-error: "";
     callback cpu-epp-requested(int);
     callback cpu-boost-requested(bool);
+    in property <bool> power-rules-known: false;
+    in property <bool> power-rules-enabled: false;
+    in property <int> power-rules-ac: 0;
+    in property <int> power-rules-battery: 0;
+    in property <string> power-rules-error: "";
+    callback power-rules-enabled-toggled(bool);
+    callback power-rules-profile-requested(bool, int);
     callback aura-static-rgb-requested(int, int, int);
 
     in property <bool> backend-ready: false;
@@ -368,6 +375,13 @@ export component AppWindow inherits Window {
                         cpu-tuning-error: root.cpu-tuning-error;
                         cpu-epp-requested(v) => { root.cpu-epp-requested(v); }
                         cpu-boost-requested(v) => { root.cpu-boost-requested(v); }
+                        power-rules-known: root.power-rules-known;
+                        power-rules-enabled: root.power-rules-enabled;
+                        power-rules-ac: root.power-rules-ac;
+                        power-rules-battery: root.power-rules-battery;
+                        power-rules-error: root.power-rules-error;
+                        power-rules-enabled-toggled(v) => { root.power-rules-enabled-toggled(v); }
+                        power-rules-profile-requested(ac, p) => { root.power-rules-profile-requested(ac, p); }
                         graphics-open-requested => { root.open-section(Section.Graphics); }
                     }
                     if (root.active-section == Section.Power) : PowerSection {
