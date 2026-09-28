@@ -22,10 +22,10 @@ use std::error::Error;
 use async_trait::async_trait;
 use orbis_hardwared::{
     APU_MEMORY_POLKIT_ACTION, ASPM_POLKIT_ACTION, AURA_POLKIT_ACTION, BATTERY_POLKIT_ACTION,
-    BOOT_SOUND_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH, FAN_POLKIT_ACTION, GPU_POLKIT_ACTION,
-    HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION, PANEL_POLKIT_ACTION,
-    POWER_LIMIT_POLKIT_ACTION, POWER_PROFILES_DAEMON_BUS_NAME, PRODUCT_GPU_POLKIT_ACTION,
-    PolkitAuthorizer,
+    BOOT_SOUND_POLKIT_ACTION, CPU_TUNING_POLKIT_ACTION, DBUS_NAME, DBUS_OBJECT_PATH,
+    FAN_POLKIT_ACTION, GPU_POLKIT_ACTION, HardwareService, KEYBOARD_BACKLIGHT_POLKIT_ACTION,
+    PANEL_POLKIT_ACTION, POWER_LIMIT_POLKIT_ACTION, POWER_PROFILES_DAEMON_BUS_NAME,
+    PRODUCT_GPU_POLKIT_ACTION, PolkitAuthorizer,
     asus_gpu_mode::{AsusGpuMutationBackend, AsusdGpuMutationClient},
     aura::{AsusdAuraStaticRgbMutationBackend, ZbusAsusdAuraClient},
     battery::{
@@ -325,6 +325,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let service = service.with_aspm_authorizer(Box::new(PolkitAuthorizer::with_action(
         connection.clone(),
         ASPM_POLKIT_ACTION,
+    )));
+    let service = service.with_cpu_tuning_authorizer(Box::new(PolkitAuthorizer::with_action(
+        connection.clone(),
+        CPU_TUNING_POLKIT_ACTION,
     )));
 
     connection

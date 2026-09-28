@@ -11,6 +11,7 @@ use orbis_config::load_profile_limits_from_dir;
 use orbis_config::{
     ProfileLimits, load_profile_limits, save_profile_limits, save_profile_limits_to_dir,
 };
+use orbis_core::cpu_tuning::EnergyPreference;
 use orbis_core::limits::PowerLimitField;
 use orbis_core::profile::PerformanceProfile;
 
@@ -20,7 +21,23 @@ pub struct ProfileLimitsView {
     pub profile: PerformanceProfile,
     pub auto_apply: bool,
     pub saved: Vec<(PowerLimitField, i32)>,
+    pub epp: Option<EnergyPreference>,
+    pub cpu_boost: Option<bool>,
     pub error: Option<String>,
+}
+
+/// Everything to re-apply after a profile change.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProfileReplay {
+    pub limits: Vec<(PowerLimitField, i32)>,
+    pub epp: Option<EnergyPreference>,
+    pub cpu_boost: Option<bool>,
+}
+
+impl ProfileReplay {
+    pub fn is_empty(&self) -> bool {
+        self.limits.is_empty() && self.epp.is_none() && self.cpu_boost.is_none()
+    }
 }
 
 pub struct ProfileLimitsTracker {
@@ -68,6 +85,8 @@ impl ProfileLimitsTracker {
             profile,
             auto_apply: set.auto_apply && self.error.is_none(),
             saved: set.entries(),
+            epp: set.epp,
+            cpu_boost: set.cpu_boost,
             error: self.error.clone(),
         })
     }
@@ -75,16 +94,20 @@ impl ProfileLimitsTracker {
     /// Record the authoritative current profile. Returns the values to re-apply
     /// when the profile changed from a previously observed one and auto-apply is
     /// on for the new profile. The very first observation never applies.
-    pub fn observe(&mut self, profile: PerformanceProfile) -> Vec<(PowerLimitField, i32)> {
+    pub fn observe(&mut self, profile: PerformanceProfile) -> ProfileReplay {
         let previous = self.current.replace(profile);
         if previous.is_none() || previous == Some(profile) || self.error.is_some() {
-            return Vec::new();
+            return ProfileReplay::default();
         }
         let set = self.limits.get(profile);
         if set.auto_apply {
-            set.entries()
+            ProfileReplay {
+                limits: set.entries(),
+                epp: set.epp,
+                cpu_boost: set.cpu_boost,
+            }
         } else {
-            Vec::new()
+            ProfileReplay::default()
         }
     }
 
@@ -115,6 +138,36 @@ impl ProfileLimitsTracker {
         next.get_mut(profile).values.insert(key.into(), value);
         if let Err(message) = self.save(next) {
             tracing::warn!("profile limits could not be saved: {message}");
+        }
+    }
+
+    pub fn record_epp(&mut self, epp: EnergyPreference) {
+        self.record(|set| set.epp != Some(epp), |set| set.epp = Some(epp));
+    }
+
+    pub fn record_cpu_boost(&mut self, enabled: bool) {
+        self.record(
+            |set| set.cpu_boost != Some(enabled),
+            |set| set.cpu_boost = Some(enabled),
+        );
+    }
+
+    fn record(
+        &mut self,
+        changed: impl Fn(&orbis_config::ProfileLimitSet) -> bool,
+        update: impl FnOnce(&mut orbis_config::ProfileLimitSet),
+    ) {
+        let Some(profile) = self.current else { return };
+        if self.error.is_some() || !self.limits.get(profile).auto_apply {
+            return;
+        }
+        if !changed(self.limits.get(profile)) {
+            return;
+        }
+        let mut next = self.limits.clone();
+        update(next.get_mut(profile));
+        if let Err(message) = self.save(next) {
+            tracing::warn!("profile CPU tuning could not be saved: {message}");
         }
     }
 
@@ -156,19 +209,20 @@ mod tests {
             vec![(PowerLimitField::Spl, 40)]
         );
 
+        tracker.record_epp(EnergyPreference::Power);
+        tracker.record_cpu_boost(false);
         assert!(tracker.observe(PerformanceProfile::Turbo).is_empty());
-        assert_eq!(
-            tracker.observe(PerformanceProfile::Balanced),
-            vec![(PowerLimitField::Spl, 40)]
-        );
+        let expected = ProfileReplay {
+            limits: vec![(PowerLimitField::Spl, 40)],
+            epp: Some(EnergyPreference::Power),
+            cpu_boost: Some(false),
+        };
+        assert_eq!(tracker.observe(PerformanceProfile::Balanced), expected);
         assert!(tracker.observe(PerformanceProfile::Balanced).is_empty());
 
         let mut reloaded = ProfileLimitsTracker::load_from_dir(dir.path().to_path_buf());
         assert!(reloaded.observe(PerformanceProfile::Turbo).is_empty());
-        assert_eq!(
-            reloaded.observe(PerformanceProfile::Balanced),
-            vec![(PowerLimitField::Spl, 40)]
-        );
+        assert_eq!(reloaded.observe(PerformanceProfile::Balanced), expected);
     }
 
     #[test]

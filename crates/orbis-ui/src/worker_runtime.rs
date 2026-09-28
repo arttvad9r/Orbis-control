@@ -23,6 +23,7 @@ use crate::composition::{
     ApplicationRuntime, BatteryServiceRuntime, FanServiceRuntime, GpuServicesRuntime,
     PerformanceServiceRuntime,
 };
+use crate::cpu_tuning_runtime::{CpuTuningBackend, CpuTuningState};
 use crate::profile_limits_runtime::{ProfileLimitsTracker, ProfileLimitsView};
 use orbis_application::{
     ChargeLimitCommandOutcome, GpuCommandOutcome, PerformanceCommandOutcome, PerformanceState,
@@ -102,11 +103,20 @@ pub enum WorkerCommand {
     SetProfileLimitsAutoApply {
         enabled: bool,
     },
+    /// Set the CPU energy/performance preference through Hardware1.
+    SetCpuEpp(orbis_core::cpu_tuning::EnergyPreference),
+    /// Enable or disable CPU boost through Hardware1.
+    SetCpuBoost(bool),
 }
 
 /// Typed result emitted to the presentation boundary.
 #[derive(Debug)]
 pub enum WorkerEvent {
+    /// Observed CPU tuning state; `error` is set when a requested write failed.
+    CpuTuning {
+        state: CpuTuningState,
+        error: Option<String>,
+    },
     Performance(Result<PerformanceCommandOutcome, SetPerformanceError>),
     Gpu(Result<GpuCommandOutcome, SetGpuModeError>),
     /// Authoritative result of the ASUS product GPU queue operation.
@@ -270,12 +280,30 @@ pub async fn run_worker_with_product_gpu<G, B, R, F>(
     R: PerformanceServiceRuntime + Sync + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
+    run_worker_with_cpu_tuning(runtime, receiver, emit, poll_interval, product_gpu, None).await;
+}
+
+/// Worker entry point that also owns the CPU tuning (EPP/boost) backend.
+pub async fn run_worker_with_cpu_tuning<G, B, R, F>(
+    runtime: ApplicationRuntime<G, B, R>,
+    receiver: UnboundedReceiver<WorkerCommand>,
+    emit: F,
+    poll_interval: Option<Duration>,
+    product_gpu: Option<std::sync::Arc<dyn HardwareProductGpuSource>>,
+    cpu_tuning: Option<Arc<dyn CpuTuningBackend>>,
+) where
+    G: GpuServicesRuntime + 'static,
+    B: BatteryServiceRuntime + 'static,
+    R: PerformanceServiceRuntime + Sync + 'static,
+    F: FnMut(WorkerEvent) + Send + 'static,
+{
     run_worker_inner(
         runtime,
         receiver,
         emit,
         poll_interval,
         product_gpu,
+        cpu_tuning,
         ProfileLimitsTracker::load(),
     )
     .await;
@@ -699,6 +727,7 @@ where
 async fn observe_profile_limits<G, B, R, F>(
     runtime: &ApplicationRuntime<G, B, R>,
     tracker: &mut ProfileLimitsTracker,
+    cpu_tuning: Option<&dyn CpuTuningBackend>,
     profile: PerformanceProfile,
     emit: &mut F,
 ) where
@@ -708,8 +737,11 @@ async fn observe_profile_limits<G, B, R, F>(
     F: FnMut(WorkerEvent),
 {
     let before = tracker.view();
+    let profile_changed = before.as_ref().map(|view| view.profile) != Some(profile);
     let replay = tracker.observe(profile);
-    for (field, value) in replay {
+    let mut cpu_error = None;
+    let mut failed = false;
+    for (field, value) in replay.limits {
         let result = write_power_limit(
             runtime.power_limits.as_ref(),
             field.clone(),
@@ -718,10 +750,31 @@ async fn observe_profile_limits<G, B, R, F>(
             emit,
         )
         .await;
-        let failed = result.is_err();
+        failed = result.is_err();
         emit(WorkerEvent::PowerLimit { field, result });
         if failed {
             break;
+        }
+    }
+    if let (false, Some(backend)) = (failed, cpu_tuning) {
+        if let Some(preference) = replay.epp {
+            if let Err(error) = backend.set_epp(preference).await {
+                cpu_error = Some(format!("EPP: {error}"));
+                failed = true;
+            }
+        }
+        if let (false, Some(enabled)) = (failed, replay.cpu_boost) {
+            if let Err(error) = backend.set_boost(enabled).await {
+                cpu_error = Some(format!("boost: {error}"));
+            }
+        }
+    }
+    if let Some(backend) = cpu_tuning {
+        if profile_changed {
+            emit(WorkerEvent::CpuTuning {
+                state: backend.read().await,
+                error: cpu_error,
+            });
         }
     }
     let after = tracker.view();
@@ -732,12 +785,28 @@ async fn observe_profile_limits<G, B, R, F>(
     }
 }
 
+async fn emit_cpu_tuning<F>(
+    backend: Option<&dyn CpuTuningBackend>,
+    error: Option<String>,
+    emit: &mut F,
+) where
+    F: FnMut(WorkerEvent),
+{
+    if let Some(backend) = backend {
+        emit(WorkerEvent::CpuTuning {
+            state: backend.read().await,
+            error,
+        });
+    }
+}
+
 async fn run_worker_inner<G, B, R, F>(
     mut runtime: ApplicationRuntime<G, B, R>,
     mut receiver: UnboundedReceiver<WorkerCommand>,
     mut emit: F,
     poll_interval: Option<Duration>,
     product_gpu: Option<std::sync::Arc<dyn HardwareProductGpuSource>>,
+    cpu_tuning: Option<Arc<dyn CpuTuningBackend>>,
     mut profile_limits: ProfileLimitsTracker,
 ) where
     G: GpuServicesRuntime + 'static,
@@ -846,7 +915,14 @@ async fn run_worker_inner<G, B, R, F>(
                                 let observed = performance.as_ref().ok().map(|state| state.current);
                                 emit(WorkerEvent::PerformanceRefresh(performance));
                                 if let Some(profile) = observed {
-                                    observe_profile_limits(&runtime, &mut profile_limits, profile, &mut emit).await;
+                                    observe_profile_limits(
+                        &runtime,
+                        &mut profile_limits,
+                        cpu_tuning.as_deref(),
+                        profile,
+                        &mut emit,
+                    )
+                    .await;
                                 }
                             }
 
@@ -964,7 +1040,14 @@ async fn run_worker_inner<G, B, R, F>(
                 let observed = result.as_ref().ok().map(|outcome| outcome.state.current);
                 emit(WorkerEvent::Performance(result));
                 if let Some(profile) = observed {
-                    observe_profile_limits(&runtime, &mut profile_limits, profile, &mut emit).await;
+                    observe_profile_limits(
+                        &runtime,
+                        &mut profile_limits,
+                        cpu_tuning.as_deref(),
+                        profile,
+                        &mut emit,
+                    )
+                    .await;
                 }
                 continue;
             }
@@ -1010,6 +1093,40 @@ async fn run_worker_inner<G, B, R, F>(
                 }
                 WorkerEvent::PowerLimit { field, result }
             }
+            WorkerCommand::SetCpuEpp(preference) => {
+                let error = match cpu_tuning.as_deref() {
+                    Some(backend) => match backend.set_epp(preference).await {
+                        Ok(()) => {
+                            profile_limits.record_epp(preference);
+                            None
+                        }
+                        Err(error) => Some(error.to_string()),
+                    },
+                    None => Some("CPU tuning backend unavailable".into()),
+                };
+                emit_cpu_tuning(cpu_tuning.as_deref(), error, &mut emit).await;
+                if let Some(view) = profile_limits.view() {
+                    emit(WorkerEvent::ProfileLimits(view));
+                }
+                continue;
+            }
+            WorkerCommand::SetCpuBoost(enabled) => {
+                let error = match cpu_tuning.as_deref() {
+                    Some(backend) => match backend.set_boost(enabled).await {
+                        Ok(()) => {
+                            profile_limits.record_cpu_boost(enabled);
+                            None
+                        }
+                        Err(error) => Some(error.to_string()),
+                    },
+                    None => Some("CPU tuning backend unavailable".into()),
+                };
+                emit_cpu_tuning(cpu_tuning.as_deref(), error, &mut emit).await;
+                if let Some(view) = profile_limits.view() {
+                    emit(WorkerEvent::ProfileLimits(view));
+                }
+                continue;
+            }
             WorkerCommand::SetProfileLimitsAutoApply { enabled } => {
                 if let Err(message) = profile_limits.set_auto_apply(enabled) {
                     tracing::warn!("profile limits auto-apply not changed: {message}");
@@ -1051,7 +1168,14 @@ async fn run_worker_inner<G, B, R, F>(
                 let observed = result.as_ref().ok().map(|state| state.current);
                 emit(WorkerEvent::PerformanceRefresh(result));
                 if let Some(profile) = observed {
-                    observe_profile_limits(&runtime, &mut profile_limits, profile, &mut emit).await;
+                    observe_profile_limits(
+                        &runtime,
+                        &mut profile_limits,
+                        cpu_tuning.as_deref(),
+                        profile,
+                        &mut emit,
+                    )
+                    .await;
                 }
                 continue;
             }
@@ -2020,6 +2144,117 @@ mod tests {
         }
     }
 
+    struct FakeCpuTuning {
+        calls: Arc<StdMutex<Vec<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl CpuTuningBackend for FakeCpuTuning {
+        async fn read(&self) -> CpuTuningState {
+            CpuTuningState {
+                epp_supported: true,
+                epp_writable: true,
+                boost_writable: true,
+                ..Default::default()
+            }
+        }
+        async fn set_epp(
+            &self,
+            preference: orbis_core::cpu_tuning::EnergyPreference,
+        ) -> Result<(), ProviderError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("epp={}", preference.sysfs()));
+            Ok(())
+        }
+        async fn set_boost(&self, enabled: bool) -> Result<(), ProviderError> {
+            self.calls.lock().unwrap().push(format!("boost={enabled}"));
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn cpu_tuning_is_remembered_per_profile_and_replayed_on_change() {
+        use orbis_core::cpu_tuning::EnergyPreference;
+        let owner = PrivatePowerLimitHardware {
+            values: Arc::new(StdMutex::new(Default::default())),
+            calls: Arc::new(StdMutex::new(Vec::new())),
+        };
+        let (_server, connection) = private_power_limit_peer(owner).await;
+        let runtime = power_limit_runtime(
+            orbis_session_client::ZbusHardwarePowerLimitSource::new(connection),
+            Arc::new(StdMutex::new(Default::default())),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let tracker = ProfileLimitsTracker::load_from_dir(dir.path().to_path_buf());
+        let calls = Arc::new(StdMutex::new(Vec::new()));
+        let backend: Arc<dyn CpuTuningBackend> = Arc::new(FakeCpuTuning {
+            calls: calls.clone(),
+        });
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(run_worker_inner(
+            runtime,
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            None,
+            Some(backend),
+            tracker,
+        ));
+
+        async fn next_view(
+            rx: &mut tokio::sync::mpsc::UnboundedReceiver<WorkerEvent>,
+            pick: impl Fn(&ProfileLimitsView) -> bool,
+        ) -> ProfileLimitsView {
+            loop {
+                let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                    .await
+                    .expect("worker event")
+                    .expect("worker alive");
+                if let WorkerEvent::ProfileLimits(view) = event {
+                    if pick(&view) {
+                        return view;
+                    }
+                }
+            }
+        }
+
+        tx.send(WorkerCommand::RefreshPerformance).unwrap();
+        let initial = next_view(&mut event_rx, |_| true).await.profile;
+        let other = [PerformanceProfile::Silent, PerformanceProfile::Turbo]
+            .into_iter()
+            .find(|p| *p != initial)
+            .unwrap();
+
+        tx.send(WorkerCommand::SetProfileLimitsAutoApply { enabled: true })
+            .unwrap();
+        next_view(&mut event_rx, |v| v.auto_apply).await;
+        tx.send(WorkerCommand::SetCpuEpp(EnergyPreference::Power))
+            .unwrap();
+        tx.send(WorkerCommand::SetCpuBoost(false)).unwrap();
+        let view = next_view(&mut event_rx, |v| v.cpu_boost == Some(false)).await;
+        assert_eq!(view.epp, Some(EnergyPreference::Power));
+        assert_eq!(*calls.lock().unwrap(), ["epp=power", "boost=false"]);
+
+        tx.send(WorkerCommand::SetPerformance(other)).unwrap();
+        next_view(&mut event_rx, |v| v.profile == other).await;
+        assert_eq!(
+            calls.lock().unwrap().len(),
+            2,
+            "nothing stored for the other profile"
+        );
+        tx.send(WorkerCommand::SetPerformance(initial)).unwrap();
+        next_view(&mut event_rx, |v| v.profile == initial).await;
+        assert_eq!(
+            *calls.lock().unwrap(),
+            ["epp=power", "boost=false", "epp=power", "boost=false"]
+        );
+    }
+
     #[tokio::test]
     async fn profile_change_replays_stored_limits_only_when_auto_apply_is_on() {
         use orbis_core::limits::PowerLimitField::Spl;
@@ -2051,6 +2286,7 @@ mod tests {
             move |event| {
                 let _ = event_tx.send(event);
             },
+            None,
             None,
             None,
             tracker,

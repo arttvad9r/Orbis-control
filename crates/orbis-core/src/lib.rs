@@ -21,6 +21,7 @@ pub mod automation;
 pub mod automation_policy;
 pub mod battery;
 pub mod capability;
+pub mod cpu_tuning;
 pub mod desired_observed;
 pub mod diagnostics;
 pub mod display;

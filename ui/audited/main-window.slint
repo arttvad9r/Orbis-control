@@ -90,6 +90,16 @@ export component AppWindow inherits Window {
     in property <bool> profile-limits-auto-apply: false;
     in property <string> profile-limits-summary: "";
     callback profile-limits-auto-apply-toggled(bool);
+    in property <bool> cpu-tuning-ready: false;
+    in property <int> cpu-epp: 0;
+    in property <bool> cpu-epp-supported: false;
+    in property <bool> cpu-epp-writable: false;
+    in property <bool> cpu-boost-known: false;
+    in property <bool> cpu-boost: false;
+    in property <bool> cpu-boost-writable: false;
+    in property <string> cpu-tuning-error: "";
+    callback cpu-epp-requested(int);
+    callback cpu-boost-requested(bool);
     callback aura-static-rgb-requested(int, int, int);
 
     in property <bool> backend-ready: false;
@@ -348,6 +358,16 @@ export component AppWindow inherits Window {
                         profile-limits-auto-apply: root.profile-limits-auto-apply;
                         profile-limits-summary: root.profile-limits-summary;
                         profile-limits-auto-apply-toggled(v) => { root.profile-limits-auto-apply-toggled(v); }
+                        cpu-tuning-ready: root.cpu-tuning-ready;
+                        cpu-epp: root.cpu-epp;
+                        cpu-epp-supported: root.cpu-epp-supported;
+                        cpu-epp-writable: root.cpu-epp-writable;
+                        cpu-boost-known: root.cpu-boost-known;
+                        cpu-boost: root.cpu-boost;
+                        cpu-boost-writable: root.cpu-boost-writable;
+                        cpu-tuning-error: root.cpu-tuning-error;
+                        cpu-epp-requested(v) => { root.cpu-epp-requested(v); }
+                        cpu-boost-requested(v) => { root.cpu-boost-requested(v); }
                         graphics-open-requested => { root.open-section(Section.Graphics); }
                     }
                     if (root.active-section == Section.Power) : PowerSection {

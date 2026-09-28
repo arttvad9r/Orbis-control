@@ -3282,8 +3282,7 @@ fn backlight_exposes_editable_rgb_channels() {
 
 /// REQ-BOOST / SC-BOOST: the performance page hosts the backend-metadata
 /// limits card, the Dynamic Boost row is driven by the authoritative
-/// gpu-dynamic-boost-* fields (real backend unit, draft-aware), and no
-/// invented CPU-boost control exists anywhere in the UI surface.
+/// gpu-dynamic-boost-* fields (real backend unit, draft-aware).
 #[test]
 fn performance_page_renders_dynamic_boost_with_real_unit_gating() {
     let source = include_str!("../../../ui/audited/sections/performance.slint");
@@ -3303,12 +3302,9 @@ fn performance_page_renders_dynamic_boost_with_real_unit_gating() {
     // honest card (reason text), not a silently missing surface.
     assert!(source.contains("visible: root.ui-state.power-limits-ready;"));
     assert!(source.contains("!root.ui-state.power-limits-ready"));
-    // No invented CPU boost field: the authoritative field map (Rust) has no
-    // such key, so no section may render one.
-    assert!(
-        !source.contains("cpu-boost") && !source.contains("CPU Boost"),
-        "invented CPU boost control must not exist"
-    );
+    // CPU boost is a separate, sysfs-evidenced control and stays disabled
+    // unless Hardware1 reports it writable.
+    assert!(source.contains("disabled: !root.cpu-boost-writable;"));
 
     let shell = include_str!("../../../ui/audited/main-window.slint");
     assert!(

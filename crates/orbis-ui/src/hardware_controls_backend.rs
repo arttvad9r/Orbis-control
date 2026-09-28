@@ -5,11 +5,14 @@
 //! brightness and Aura Static RGB. This adapter preserves that evidence and
 //! validates mutation read-back without exposing a generic D-Bus call surface.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use orbis_core::action::ApplyResult;
 use orbis_core::aura::AuraRgb;
+use orbis_core::cpu_tuning::EnergyPreference;
 use orbis_providers::error::ProviderError;
+use orbis_ui::cpu_tuning_runtime::{CpuTuningBackend, CpuTuningState};
 use zbus::proxy::CacheProperties;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -46,6 +49,11 @@ trait HardwareProductControls {
     fn aspm_mutation_status(&self) -> zbus::Result<u8>;
     fn aspm_disabled(&self) -> zbus::Result<bool>;
     fn set_aspm_disabled(&self, disabled: bool) -> zbus::Result<bool>;
+
+    fn cpu_epp_mutation_status(&self) -> zbus::Result<u8>;
+    fn cpu_boost_mutation_status(&self) -> zbus::Result<u8>;
+    fn set_cpu_epp(&self, preference: u8) -> zbus::Result<u8>;
+    fn set_cpu_boost(&self, enabled: bool) -> zbus::Result<bool>;
 
     fn boot_sound_mutation_status(&self) -> zbus::Result<u8>;
     fn set_boot_sound(&self, enabled: bool) -> zbus::Result<u8>;
@@ -170,6 +178,54 @@ impl HardwareProductControlClient {
         )?;
         let disabled = timed("ASPM state", proxy.aspm_disabled()).await?;
         Ok((disabled, status))
+    }
+
+    pub(crate) async fn cpu_epp_status(&self) -> Result<ProductWriteStatus, ProviderError> {
+        let proxy = self.proxy().await?;
+        decode_status(
+            timed("CPU EPP mutation status", proxy.cpu_epp_mutation_status()).await?,
+            "CPU EPP",
+        )
+    }
+
+    pub(crate) async fn cpu_boost_status(&self) -> Result<ProductWriteStatus, ProviderError> {
+        let proxy = self.proxy().await?;
+        decode_status(
+            timed(
+                "CPU boost mutation status",
+                proxy.cpu_boost_mutation_status(),
+            )
+            .await?,
+            "CPU boost",
+        )
+    }
+
+    pub(crate) async fn set_cpu_epp(
+        &self,
+        preference: EnergyPreference,
+    ) -> Result<(), ProviderError> {
+        require_supported(self.cpu_epp_status().await?, "CPU EPP")?;
+        let proxy = self.proxy().await?;
+        let confirmed = timed("CPU EPP mutation", proxy.set_cpu_epp(preference.wire())).await?;
+        if confirmed != preference.wire() {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "Hardware1 CPU EPP read-back mismatch: requested={}, returned={confirmed}",
+                preference.wire()
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn set_cpu_boost(&self, enabled: bool) -> Result<(), ProviderError> {
+        require_supported(self.cpu_boost_status().await?, "CPU boost")?;
+        let proxy = self.proxy().await?;
+        let confirmed = timed("CPU boost mutation", proxy.set_cpu_boost(enabled)).await?;
+        if confirmed != enabled {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "Hardware1 CPU boost read-back mismatch: requested={enabled}, returned={confirmed}"
+            )));
+        }
+        Ok(())
     }
 
     pub(crate) async fn set_aspm_disabled(&self, disabled: bool) -> Result<bool, ProviderError> {
@@ -444,6 +500,64 @@ fn zbus_error_to_provider(error: zbus::Error) -> ProviderError {
         };
     }
     ProviderError::Dbus(error.to_string())
+}
+
+const CPU_SYSFS_ROOT: &str = "/sys/devices/system/cpu";
+
+/// Production CPU tuning backend: sysfs reads, typed Hardware1 writes.
+pub(crate) struct SystemCpuTuning {
+    client: HardwareProductControlClient,
+    root: PathBuf,
+}
+
+impl SystemCpuTuning {
+    pub(crate) fn new(connection: zbus::Connection) -> Self {
+        Self {
+            client: HardwareProductControlClient::new(connection),
+            root: PathBuf::from(CPU_SYSFS_ROOT),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl CpuTuningBackend for SystemCpuTuning {
+    async fn read(&self) -> CpuTuningState {
+        let epp_raw =
+            std::fs::read_to_string(self.root.join("cpu0/cpufreq/energy_performance_preference"))
+                .ok();
+        let boost_raw = std::fs::read_to_string(self.root.join("cpufreq/boost")).ok();
+        let epp_supported = epp_raw.is_some();
+        let boost = boost_raw.as_deref().and_then(|raw| match raw.trim() {
+            "1" => Some(true),
+            "0" => Some(false),
+            _ => None,
+        });
+        CpuTuningState {
+            epp: epp_raw.as_deref().and_then(EnergyPreference::from_sysfs),
+            epp_supported,
+            epp_writable: epp_supported
+                && self
+                    .client
+                    .cpu_epp_status()
+                    .await
+                    .is_ok_and(|status| status.is_supported()),
+            boost,
+            boost_writable: boost.is_some()
+                && self
+                    .client
+                    .cpu_boost_status()
+                    .await
+                    .is_ok_and(|status| status.is_supported()),
+        }
+    }
+
+    async fn set_epp(&self, preference: EnergyPreference) -> Result<(), ProviderError> {
+        self.client.set_cpu_epp(preference).await
+    }
+
+    async fn set_boost(&self, enabled: bool) -> Result<(), ProviderError> {
+        self.client.set_cpu_boost(enabled).await
+    }
 }
 
 #[cfg(test)]

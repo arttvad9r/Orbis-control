@@ -27,6 +27,7 @@ pub mod aspm;
 pub mod asus_gpu_mode;
 pub mod aura;
 pub mod battery;
+pub mod cpu_tuning;
 pub mod fans;
 pub mod firmware;
 pub mod keyboard_backlight;
@@ -248,6 +249,9 @@ pub const DBUS_INTERFACE_NAME: &str = "io.github.orbiscontrol.Hardware1";
 pub const POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-performance-profile";
 /// Polkit action id for PCIe ASPM policy mutation.
 pub const ASPM_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-aspm";
+
+/// Polkit action id for CPU energy-preference and boost mutation.
+pub const CPU_TUNING_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-cpu-tuning";
 /// Polkit action id for Battery charge-limit mutation.
 pub const BATTERY_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-charge-limit";
 /// Polkit action id for the injectable GPU mutation boundary.
@@ -511,6 +515,34 @@ where
         .set_disabled(disabled)
         .map_err(provider_error_to_dbus)?;
     Ok(disabled)
+}
+
+pub async fn handle_set_cpu_epp(
+    authorizer: &dyn Authorizer,
+    writer: &cpu_tuning::CpuTuningWriter,
+    preference: orbis_core::cpu_tuning::EnergyPreference,
+    sender: &str,
+) -> zbus::fdo::Result<u8> {
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+    writer.set_epp(preference).map_err(provider_error_to_dbus)?;
+    Ok(preference.wire())
+}
+
+pub async fn handle_set_cpu_boost(
+    authorizer: &dyn Authorizer,
+    writer: &cpu_tuning::CpuTuningWriter,
+    enabled: bool,
+    sender: &str,
+) -> zbus::fdo::Result<bool> {
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+    writer.set_boost(enabled).map_err(provider_error_to_dbus)?;
+    Ok(enabled)
 }
 
 /// Обработка Battery mutation до публичного D-Bus boundary.
@@ -872,6 +904,7 @@ pub async fn handle_product_gpu_status(
 pub struct HardwareService {
     authorizer: Box<dyn Authorizer>,
     aspm_authorizer: Box<dyn Authorizer>,
+    cpu_tuning_authorizer: Box<dyn Authorizer>,
     writer: PlatformProfileWriter<StdProfileIo>,
     battery_authorizer: Box<dyn Authorizer>,
     battery_backend: Option<Box<dyn BatteryMutationBackend>>,
@@ -901,6 +934,7 @@ impl HardwareService {
         Self {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
+            cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -934,6 +968,7 @@ impl HardwareService {
         Self {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
+            cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -969,6 +1004,7 @@ impl HardwareService {
         Self {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
+            cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -1002,6 +1038,7 @@ impl HardwareService {
         Self {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
+            cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -1039,6 +1076,7 @@ impl HardwareService {
         Self {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
+            cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -1073,6 +1111,7 @@ impl HardwareService {
         Self {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
+            cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -1177,6 +1216,11 @@ impl HardwareService {
         self
     }
 
+    pub fn with_cpu_tuning_authorizer(mut self, authorizer: Box<dyn Authorizer>) -> Self {
+        self.cpu_tuning_authorizer = authorizer;
+        self
+    }
+
     /// Apply startup-only read-only evidence about platform-profile ownership.
     pub fn with_platform_profile_owner_state(
         mut self,
@@ -1251,6 +1295,58 @@ impl HardwareService {
 
     fn aspm_mutation_status(&self) -> u8 {
         aspm::mutation_wire::to_wire(aspm::AspmWriter::default().mutation_status())
+    }
+
+    async fn set_cpu_epp(
+        &self,
+        preference: u8,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<u8> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let preference = orbis_core::cpu_tuning::EnergyPreference::from_wire(preference)
+            .ok_or_else(|| {
+                zbus::fdo::Error::InvalidArgs(format!(
+                    "hardwared: неизвестное значение EPP {preference}"
+                ))
+            })?;
+        let writer = cpu_tuning::CpuTuningWriter::default();
+        handle_set_cpu_epp(
+            self.cpu_tuning_authorizer.as_ref(),
+            &writer,
+            preference,
+            &sender,
+        )
+        .await
+    }
+
+    async fn set_cpu_boost(
+        &self,
+        enabled: bool,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let writer = cpu_tuning::CpuTuningWriter::default();
+        handle_set_cpu_boost(
+            self.cpu_tuning_authorizer.as_ref(),
+            &writer,
+            enabled,
+            &sender,
+        )
+        .await
+    }
+
+    fn cpu_epp_mutation_status(&self) -> u8 {
+        cpu_tuning::mutation_wire::to_wire(cpu_tuning::CpuTuningWriter::default().epp_status())
+    }
+
+    fn cpu_boost_mutation_status(&self) -> u8 {
+        cpu_tuning::mutation_wire::to_wire(cpu_tuning::CpuTuningWriter::default().boost_status())
     }
 
     fn aspm_disabled(&self) -> zbus::fdo::Result<bool> {
@@ -1742,6 +1838,10 @@ pub trait Hardware1 {
     fn set_aspm_disabled(&self, disabled: bool) -> zbus::Result<bool>;
     fn aspm_mutation_status(&self) -> zbus::Result<u8>;
     fn aspm_disabled(&self) -> zbus::Result<bool>;
+    fn set_cpu_epp(&self, preference: u8) -> zbus::Result<u8>;
+    fn set_cpu_boost(&self, enabled: bool) -> zbus::Result<bool>;
+    fn cpu_epp_mutation_status(&self) -> zbus::Result<u8>;
+    fn cpu_boost_mutation_status(&self) -> zbus::Result<u8>;
 
     /// Установить Battery configured threshold; возвращает подтверждённый
     /// configured percent, effective value остаётся отдельным read-model field.

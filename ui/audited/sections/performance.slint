@@ -56,6 +56,16 @@ export component PerformanceSection inherits Rectangle {
     in property <bool> profile-limits-auto-apply: false;
     in property <string> profile-limits-summary: "";
     callback profile-limits-auto-apply-toggled(bool);
+    in property <bool> cpu-tuning-ready: false;
+    in property <int> cpu-epp: 0;
+    in property <bool> cpu-epp-supported: false;
+    in property <bool> cpu-epp-writable: false;
+    in property <bool> cpu-boost-known: false;
+    in property <bool> cpu-boost: false;
+    in property <bool> cpu-boost-writable: false;
+    in property <string> cpu-tuning-error: "";
+    callback cpu-epp-requested(int);
+    callback cpu-boost-requested(bool);
     callback graphics-open-requested;
 
     function bit-set(mask: int, bit: int) -> bool {
@@ -300,14 +310,6 @@ export component PerformanceSection inherits Rectangle {
                         }
                     }
 
-                    if (root.profile-limits-known) : RequestToggleRow {
-                        label: "Запоминать для этого профиля";
-                        description: root.profile-limits-summary;
-                        checked: root.profile-limits-auto-apply;
-                        disabled: !root.ui-state.power-limits-writable;
-                        toggled(value) => { root.profile-limits-auto-apply-toggled(value); }
-                    }
-
                     HorizontalLayout {
                         height: LayoutMetrics.compact-control-height;
                         spacing: 12px;
@@ -330,6 +332,78 @@ export component PerformanceSection inherits Rectangle {
                 VerticalLayout {
                     padding: LayoutMetrics.card-padding;
                     SectionTitle { title: "Лимиты мощности и температуры"; detail: root.ui-state.power-limits-reason; }
+                }
+            }
+
+            SectionCard {
+                visible: root.cpu-tuning-ready;
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 10px;
+
+                    SectionTitle {
+                        title: "Процессор";
+                        detail: root.cpu-epp-writable || root.cpu-boost-writable ? "Запись доступна" : "Только чтение";
+                    }
+                    if (root.cpu-epp-supported) : VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "Энергетический режим (EPP)";
+                            font-size: 13.5px;
+                            font-weight: 550;
+                            color: Palette.text-primary;
+                        }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            ActionButton {
+                                label: "Производительность";
+                                accent: root.cpu-epp == 1;
+                                disabled: !root.cpu-epp-writable;
+                                clicked => { root.cpu-epp-requested(1); }
+                            }
+                            ActionButton {
+                                label: "Баланс: скорость";
+                                accent: root.cpu-epp == 2;
+                                disabled: !root.cpu-epp-writable;
+                                clicked => { root.cpu-epp-requested(2); }
+                            }
+                            ActionButton {
+                                label: "Баланс: экономия";
+                                accent: root.cpu-epp == 3;
+                                disabled: !root.cpu-epp-writable;
+                                clicked => { root.cpu-epp-requested(3); }
+                            }
+                            ActionButton {
+                                label: "Экономия";
+                                accent: root.cpu-epp == 4;
+                                disabled: !root.cpu-epp-writable;
+                                clicked => { root.cpu-epp-requested(4); }
+                            }
+                        }
+                    }
+                    if (root.cpu-boost-known) : RequestToggleRow {
+                        label: "Турбо-буст процессора";
+                        description: "Разрешает кратковременный разгон выше базовой частоты";
+                        checked: root.cpu-boost;
+                        disabled: !root.cpu-boost-writable;
+                        toggled(value) => { root.cpu-boost-requested(value); }
+                    }
+                    if (root.cpu-tuning-error != "") : LocalStatus {
+                        text: root.cpu-tuning-error;
+                        accent: Palette.error;
+                    }
+                }
+            }
+
+            if (root.profile-limits-known && (root.ui-state.power-limits-writable || root.cpu-epp-writable || root.cpu-boost-writable)) : SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    RequestToggleRow {
+                        label: "Запоминать для этого профиля";
+                        description: root.profile-limits-summary;
+                        checked: root.profile-limits-auto-apply;
+                        toggled(value) => { root.profile-limits-auto-apply-toggled(value); }
+                    }
                 }
             }
 

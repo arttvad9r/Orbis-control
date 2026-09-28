@@ -8,6 +8,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use orbis_core::cpu_tuning::EnergyPreference;
 use orbis_core::limits::PowerLimitField;
 use orbis_core::profile::PerformanceProfile;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,12 @@ pub struct ProfileLimitSet {
     /// Explicitly applied values keyed by [`limit_key`].
     #[serde(default)]
     pub values: BTreeMap<String, i32>,
+    /// Explicitly applied CPU energy preference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epp: Option<EnergyPreference>,
+    /// Explicitly applied CPU boost state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_boost: Option<bool>,
 }
 
 impl ProfileLimitSet {
@@ -200,6 +207,8 @@ mod tests {
         turbo.auto_apply = true;
         turbo.values.insert("spl".into(), 80);
         turbo.values.insert("gpu_temp_target".into(), 80);
+        turbo.epp = Some(EnergyPreference::BalancePerformance);
+        turbo.cpu_boost = Some(false);
         save_profile_limits_to_dir(&limits, dir.path()).unwrap();
         let loaded = load_profile_limits_from_dir(dir.path()).unwrap();
         assert_eq!(loaded, limits);

@@ -32,6 +32,8 @@ CapabilityBoundingSet=
 # /sys stays read-only except the exact capability-owned write paths.
 ReadOnlyPaths=/sys
 ReadWritePaths=-/sys/firmware/acpi/platform_profile
+ReadWritePaths=-/sys/module/pcie_aspm/parameters/policy
+ReadWritePaths=-/sys/devices/system/cpu
 ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl1_spl/current_value
 ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl2_sppt/current_value
 ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl3_fppt/current_value

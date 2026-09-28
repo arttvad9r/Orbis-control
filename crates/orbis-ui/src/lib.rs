@@ -22,6 +22,7 @@ pub mod automation_worker_coordinator;
 pub mod automation_worker_driver;
 pub mod automation_worker_runtime;
 pub mod composition;
+pub mod cpu_tuning_runtime;
 pub mod diagnostics_dto;
 pub mod diagnostics_export;
 pub mod diagnostics_metadata;

@@ -36,7 +36,7 @@ use orbis_session_client::{
 };
 use orbis_ui::composition::build_production_runtime;
 use orbis_ui::profile_limits_runtime::ProfileLimitsView;
-use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker_with_product_gpu};
+use orbis_ui::worker::{WorkerCommand, WorkerEvent, run_worker_with_cpu_tuning};
 use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEvent};
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, LogicalSize, PhysicalSize, Rgb8Pixel, WindowSize};
@@ -1784,7 +1784,7 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             state.power_limit_error = true;
             tracing::warn!(field = ?field, "power-limit mutation failed without replacing observed state: {error:?}");
         }
-        WorkerEvent::ProfileLimits(_) => {}
+        WorkerEvent::ProfileLimits(_) | WorkerEvent::CpuTuning { .. } => {}
         WorkerEvent::ChargeLimitRefresh(result) => apply_charge_limit_refresh(state, result),
         WorkerEvent::GpuPowerRefresh(result) => apply_gpu_power_refresh(state, result),
         WorkerEvent::GpuMuxRefresh(result) => apply_gpu_mux_refresh(state, result),
@@ -1966,12 +1966,12 @@ fn profile_limits_summary(view: &ProfileLimitsView) -> String {
     if let Some(error) = &view.error {
         return format!("Сохранённые лимиты недоступны: {error}");
     }
-    if view.saved.is_empty() {
+    if view.saved.is_empty() && view.epp.is_none() && view.cpu_boost.is_none() {
         return format!(
-            "Профиль «{profile}»: значений нет — включите и примените лимиты, они применятся при смене профиля"
+            "Профиль «{profile}»: значений нет — включите и примените настройки, они применятся при смене профиля"
         );
     }
-    let values = view
+    let mut values = view
         .saved
         .iter()
         .map(|(field, value)| {
@@ -1986,9 +1986,14 @@ fn profile_limits_summary(view: &ProfileLimitsView) -> String {
             };
             format!("{name} {value} {unit}")
         })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("Профиль «{profile}»: {values}")
+        .collect::<Vec<_>>();
+    if let Some(epp) = view.epp {
+        values.push(format!("EPP {}", epp.sysfs()));
+    }
+    if let Some(boost) = view.cpu_boost {
+        values.push(format!("буст {}", if boost { "вкл" } else { "выкл" }));
+    }
+    format!("Профиль «{profile}»: {}", values.join(", "))
 }
 
 fn factory_reset_profile_for_refresh(event: &WorkerEvent) -> Option<AsusdFanProfile> {
@@ -2015,6 +2020,22 @@ fn handle_worker_event(
     let factory_reset_available = factory_reset_availability_for_registry_event(&event);
     if let WorkerEvent::RegistryChange(Ok((_generation, snapshot))) = &event {
         diagnostics_backend::replace_capabilities(snapshot.clone());
+    }
+    if let WorkerEvent::CpuTuning { state, error } = &event {
+        app.set_cpu_tuning_ready(state.epp_supported || state.boost.is_some());
+        app.set_cpu_epp(state.epp.map_or(0, |epp| i32::from(epp.wire())));
+        app.set_cpu_epp_supported(state.epp_supported);
+        app.set_cpu_epp_writable(state.epp_writable);
+        app.set_cpu_boost_known(state.boost.is_some());
+        app.set_cpu_boost(state.boost.unwrap_or(false));
+        app.set_cpu_boost_writable(state.boost_writable);
+        app.set_cpu_tuning_error(
+            error
+                .as_ref()
+                .map(|message| format!("Не удалось применить настройку процессора: {message}"))
+                .unwrap_or_default()
+                .into(),
+        );
     }
     if let WorkerEvent::ProfileLimits(view) = &event {
         app.set_profile_limits_known(true);
@@ -2125,6 +2146,32 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 return;
             }
             app.set_ui_state(to_slint(&state));
+        });
+    }
+    {
+        let worker_tx = worker_tx.clone();
+        app.on_cpu_epp_requested(move |raw| {
+            let Some(preference) = u8::try_from(raw)
+                .ok()
+                .and_then(orbis_core::cpu_tuning::EnergyPreference::from_wire)
+            else {
+                return;
+            };
+            if let Some(tx) = &worker_tx {
+                if let Err(error) = tx.send(WorkerCommand::SetCpuEpp(preference)) {
+                    tracing::warn!("worker closed, CPU EPP request not sent: {error:?}");
+                }
+            }
+        });
+    }
+    {
+        let worker_tx = worker_tx.clone();
+        app.on_cpu_boost_requested(move |enabled| {
+            if let Some(tx) = &worker_tx {
+                if let Err(error) = tx.send(WorkerCommand::SetCpuBoost(enabled)) {
+                    tracing::warn!("worker closed, CPU boost request not sent: {error:?}");
+                }
+            }
         });
     }
     {
@@ -2773,6 +2820,12 @@ fn main() -> anyhow::Result<()> {
     // FIFO. The operation stays fail-closed until polkit/backend promotion.
     let product_gpu_source: std::sync::Arc<dyn HardwareProductGpuSource> =
         std::sync::Arc::new(ZbusHardwareProductGpuSource::new(system_connection.clone()));
+    let cpu_tuning_backend: std::sync::Arc<dyn orbis_ui::cpu_tuning_runtime::CpuTuningBackend> =
+        std::sync::Arc::new(
+            quick_controls_backend::hardware_controls_backend::SystemCpuTuning::new(
+                system_connection.clone(),
+            ),
+        );
     let (application_runtime, _hardware_owner, delegated_ready) = runtime.block_on(
         build_production_runtime(session_connection, system_connection),
     )?;
@@ -2818,12 +2871,13 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    runtime.spawn(run_worker_with_product_gpu(
+    runtime.spawn(run_worker_with_cpu_tuning(
         application_runtime,
         worker_rx,
         event_sink,
         Some(poll_interval),
         Some(product_gpu_source),
+        Some(cpu_tuning_backend),
     ));
 
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshChargeLimit) {
