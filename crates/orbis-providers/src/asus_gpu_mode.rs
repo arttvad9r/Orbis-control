@@ -84,6 +84,16 @@ impl AsusGpuModeSnapshot {
         queued_gpu_mux_mode: Option<u32>,
     ) -> Self {
         let current_mode = decode_asus_gpu_mode(current_dgpu_disable, current_gpu_mux_mode);
+        // asusd queues only the attribute whose value changes (verified on
+        // FA707NV: Standard -> Ultimate queues gpu_mux_mode=0 and leaves
+        // dgpu_disable at -1). An unqueued attribute therefore keeps its
+        // current value in the deferred target; with no current value the
+        // target stays incomplete and is never guessed.
+        let (queued_dgpu_disable, queued_gpu_mux_mode) =
+            match (queued_dgpu_disable, queued_gpu_mux_mode) {
+                (None, None) => (None, None),
+                (dgpu, mux) => (dgpu.or(current_dgpu_disable), mux.or(current_gpu_mux_mode)),
+            };
         let queued_mode = match (queued_dgpu_disable, queued_gpu_mux_mode) {
             (Some(dgpu), Some(mux)) => Some(decode_asus_gpu_mode(Some(dgpu), Some(mux))),
             _ => None,
@@ -272,6 +282,10 @@ pub fn classify_product_gpu_readback(
         AsusGpuMode::Incomplete | AsusGpuMode::Unknown { .. } => ProductGpuOutcome::Unknown,
         AsusGpuMode::Conflicted { .. } => ProductGpuOutcome::Inconsistent,
         _ => match (snapshot.queued_dgpu_disable, snapshot.queued_gpu_mux_mode) {
+            // A deferred pair equal to the current pair defers nothing.
+            (Some(_), Some(_)) if !snapshot.reboot_required && snapshot.current_mode == mode => {
+                ProductGpuOutcome::AlreadyActive
+            }
             (Some(dgpu), Some(mux))
                 if dgpu == target_dgpu_disable && mux == target_gpu_mux_mode =>
             {
@@ -316,15 +330,21 @@ mod tests {
     }
 
     #[test]
-    fn queued_target_requires_both_attributes_to_match() {
+    fn queued_target_is_the_current_pair_overlaid_with_queued_values() {
         let target = AsusGpuMode::Integrated;
         assert_eq!(
-            classify_product_gpu_readback(target, snapshot(1, 1, Some(1), Some(1))),
+            classify_product_gpu_readback(target, snapshot(0, 1, Some(1), Some(1))),
             ProductGpuOutcome::RebootRequired
         );
+        // Only dgpu_disable queued from Standard: MUX stays, target complete.
+        assert_eq!(
+            classify_product_gpu_readback(target, snapshot(0, 1, Some(1), None)),
+            ProductGpuOutcome::RebootRequired
+        );
+        // Queue equal to the current Integrated pair: nothing is deferred.
         assert_eq!(
             classify_product_gpu_readback(target, snapshot(1, 1, Some(1), None)),
-            ProductGpuOutcome::Unknown
+            ProductGpuOutcome::AlreadyActive
         );
         assert_eq!(
             classify_product_gpu_readback(target, snapshot(1, 1, Some(0), Some(1))),
@@ -408,8 +428,20 @@ mod tests {
     }
 
     #[test]
-    fn partial_queue_is_not_presented_as_a_mode() {
+    fn single_queued_attribute_keeps_the_other_current_value() {
+        // Standard -> Ultimate as asusd reports it: only the MUX is queued.
+        let snapshot = AsusGpuModeSnapshot::from_values(Some(0), Some(1), None, Some(0));
+        assert_eq!(snapshot.queued_mode, Some(AsusGpuMode::Ultimate));
+        assert!(snapshot.reboot_required());
+        // Standard -> Eco: only dgpu_disable is queued.
         let snapshot = AsusGpuModeSnapshot::from_values(Some(0), Some(1), Some(1), None);
+        assert_eq!(snapshot.queued_mode, Some(AsusGpuMode::Integrated));
+        assert!(snapshot.reboot_required());
+    }
+
+    #[test]
+    fn queue_without_current_value_is_not_presented_as_a_mode() {
+        let snapshot = AsusGpuModeSnapshot::from_values(Some(0), None, Some(1), None);
         assert_eq!(snapshot.queued_mode, None);
         assert!(!snapshot.reboot_required());
     }

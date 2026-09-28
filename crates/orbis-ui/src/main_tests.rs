@@ -2994,8 +2994,23 @@ fn product_gpu_status_queued_target_does_not_claim_applied_mode() {
     assert!(s.gpu_reboot_required);
     assert_eq!(s.gpu_mode_state, controller::GpuModeHwState::Ready);
     assert!(!s.gpu_section_error);
-    // A read proves evidence, not write permission.
+    // A consistent read proves the typed backend owns the pair: the modes
+    // become selectable (polkit still decides each write).
+    assert!(s.gpu_mode_writable);
+    assert_eq!(s.available_gpu_mask, 0b0111);
+    assert!(!s.gpu_ultimate_disabled);
+}
+
+#[test]
+fn product_gpu_status_unknown_or_missing_backend_never_unlocks_modes() {
+    let mut s = controller::UiState::production_initial();
+    apply_product_gpu_status(
+        &mut s,
+        product_status_result(PRODUCT_GPU_WIRE_INTEGRATED, u32::MAX, 2, false),
+    );
     assert!(!s.gpu_mode_writable);
+    assert_eq!(s.available_gpu_mask, 0);
+    assert!(s.gpu_ultimate_disabled);
 }
 
 /// A successful status read with no deferred target clears stale queued
@@ -3295,4 +3310,15 @@ fn display_product_name_collapses_repeated_asus_model_code() {
         super::display_product_name("ROG Strix G513QY_G513QY_A"),
         "ROG Strix G513QY_G513QY_A"
     );
+}
+
+#[test]
+fn eco_fan_tab_requires_a_firmware_low_power_profile() {
+    assert!(!super::platform_offers_low_power(Some(
+        "quiet balanced performance\n"
+    )));
+    assert!(super::platform_offers_low_power(Some(
+        "low-power balanced performance\n"
+    )));
+    assert!(!super::platform_offers_low_power(None));
 }

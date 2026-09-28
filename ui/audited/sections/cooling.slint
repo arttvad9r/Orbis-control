@@ -9,6 +9,7 @@ export component CoolingSection inherits Rectangle {
     in property <UiState> ui-state;
     in property <bool> mutation-safety-blocked: false;
     in property <bool> factory-reset-available: true;
+    in property <bool> fan-eco-profile-available: false;
     in property <string> policy-status: "Кривая применяется через Hardware1 с read-back";
 
     property <bool> factory-reset-pending: false;
@@ -87,6 +88,7 @@ export component CoolingSection inherits Rectangle {
                     FanCurveEditor {
                         vertical-stretch: 1;
                         state: root.ui-state.fan-curve-state;
+                        eco-profile-available: root.fan-eco-profile-available;
                          writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked && !root.ui-state.fan-curve-pending && !root.ui-state.fan-curve-unconfirmed;
                         error-state: root.ui-state.fan-curve-error;
                         dirty: root.ui-state.fan-curve-dirty;

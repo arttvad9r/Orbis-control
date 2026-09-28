@@ -236,7 +236,7 @@ export component SystemSection inherits Rectangle {
                     spacing: 12px;
                     HorizontalLayout {
                         height: 30px;
-                        SectionTitle { horizontal-stretch: 1; title: "Диагностика"; detail: root.refresh-enabled ? "Сводка системы" : "Недоступно"; }
+                        SectionTitle { horizontal-stretch: 1; title: "Диагностика"; }
                         StatusPill {
                             text: root.refresh-enabled ? "Готово" : "Недоступно";
                             accent: root.refresh-enabled ? Palette.success : Palette.text-secondary;

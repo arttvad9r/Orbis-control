@@ -46,6 +46,7 @@ export component AppWindow inherits Window {
     };
 
     in property <string> device-name: "";
+    in property <bool> fan-eco-profile-available: false;
     in property <string> device-board: "";
     in property <string> bios-version: "";
     in property <string> bios-date: "";
@@ -349,6 +350,7 @@ export component AppWindow inherits Window {
                         ui-state <=> root.ui-state;
                         mutation-safety-blocked <=> root.mutation-safety-blocked;
                         factory-reset-available <=> root.factory-reset-available;
+                        fan-eco-profile-available: root.fan-eco-profile-available;
                         policy-status <=> root.policy-status;
                         fan-changed(i) => { root.fan-changed(i); }
                         fan-profile-changed(i) => { root.fan-profile-changed(i); }

@@ -832,6 +832,21 @@ fn apply_device_identity(app: &AppWindow) {
         app.set_bios_version(identity.bios_version.into());
         app.set_bios_date(identity.bios_date.into());
     }
+    app.set_fan_eco_profile_available(platform_offers_low_power(
+        std::fs::read_to_string("/sys/firmware/acpi/platform_profile_choices")
+            .ok()
+            .as_deref(),
+    ));
+}
+
+/// The fan editor's Eco tab maps to the firmware low-power profile, which
+/// only some models offer; a missing choices file means no evidence.
+fn platform_offers_low_power(choices: Option<&str>) -> bool {
+    choices.is_some_and(|choices| {
+        choices
+            .split_whitespace()
+            .any(|choice| choice == "low-power")
+    })
 }
 
 /// ASUS firmware often repeats the model code in DMI
@@ -1347,6 +1362,10 @@ fn apply_product_gpu_result(
     }
 }
 
+/// Eco | Standard | Ultimate: every mode the typed ASUS pair can queue.
+/// Optimized needs an automation owner and stays unavailable.
+const PRODUCT_GPU_WRITABLE_MASK: i32 = 0b0111;
+
 /// Wire outcome encoding of `Hardware1.ProductGpuStatus` (orbis-hardwared).
 const PRODUCT_STATUS_OUTCOME_ALREADY_ACTIVE: u32 = 0;
 const PRODUCT_STATUS_OUTCOME_REBOOT_REQUIRED: u32 = 1;
@@ -1356,9 +1375,10 @@ const PRODUCT_STATUS_OUTCOME_INCONSISTENT: u32 = 3;
 /// Apply one authoritative read-only product GPU status read to UI state.
 ///
 /// Honesty rules (AC-050/051/052):
-/// - a successful read proves the read path and the reported current/queued/
-///   reboot triple — it never proves write permission, so `gpu_mode_writable`
-///   is never earned here (mutation promotion is a separate product decision);
+/// - a consistent read proves hardwared owns the typed dgpu_disable/
+///   gpu_mux_mode pair, so Eco/Standard/Ultimate become selectable; permission
+///   is still decided by polkit on every write and a denial is shown as an
+///   error, never as success;
 /// - `Unknown` is "backend answered but the state is unreadable right now":
 ///   not evidence of "no queue", so previous UI evidence stays;
 /// - `Inconsistent` (or a wire outcome contradicting its own fields) is a
@@ -1398,6 +1418,11 @@ fn apply_product_gpu_status(state: &mut controller::UiState, reply: ProductGpuMu
             state.gpu_reboot_required = reply.reboot_required;
             state.gpu_mode_state = controller::GpuModeHwState::Ready;
             state.gpu_section_error = false;
+            state.gpu_mode_writable = true;
+            state.available_gpu_mask = PRODUCT_GPU_WRITABLE_MASK;
+            // The pair includes gpu_mux_mode, so the MUX (Ultimate) target is
+            // owned by the same typed backend.
+            state.gpu_ultimate_disabled = false;
             tracing::debug!(
                 "product gpu status: current={}, queued={}, reboot_required={}",
                 reply.current_mode,
@@ -1697,8 +1722,8 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             // Read-only authoritative evidence; same honest rules as the
             // mutation read-back (`apply_product_gpu_result`) but derived from
             // an unprompted status read: current/queued/reboot are applied only
-            // from what the backend reported, a read never earns write access,
-            // and an unknown/inconsistent read never invents a mode.
+            // from what the backend reported, and an unknown/inconsistent read
+            // never invents a mode or unlocks selection.
             apply_product_gpu_status(state, reply);
         }
         WorkerEvent::ProductGpuStatusRefresh(Err(e)) => {
@@ -1713,6 +1738,7 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
             ) {
                 state.gpu_mode_state = controller::GpuModeHwState::Unavailable;
                 state.gpu_mode_writable = false;
+                state.available_gpu_mask = 0;
             }
         }
         WorkerEvent::ChargeLimit(result) => apply_charge_limit_result(state, result),

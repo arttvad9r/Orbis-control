@@ -82,7 +82,10 @@ impl FakeAttribute {
             return Err(zbus::fdo::Error::Failed(message));
         }
         if !*self.retain_queued_on_set.lock().unwrap() {
-            *self.queued.lock().unwrap() = Some(value);
+            // Real asusd: writing the current value clears the queue (-1);
+            // any other value is deferred until reboot.
+            *self.queued.lock().unwrap() =
+                (value != *self.current.lock().unwrap()).then_some(value);
         }
         Ok(())
     }
@@ -189,17 +192,48 @@ async fn second_setter_failure_is_unknown_and_is_not_retried() {
 }
 
 #[tokio::test]
-async fn partial_queued_readback_is_unknown() {
+async fn queue_that_ignores_the_changed_attribute_is_not_confirmed() {
+    // dgpu_disable must change for Integrated; if the daemon drops that write
+    // the read-back shows no target, which is never a confirmed queue.
     let dgpu = FakeAttribute::new("dgpu_disable", 0, None);
+    dgpu.retain_queued_on_set();
     let mux = FakeAttribute::new("gpu_mux_mode", 1, None);
-    mux.retain_queued_on_set();
     let (_connection, client) = client(dgpu, mux).await;
 
     let result = operation(client)
         .set_mode(AsusGpuMode::Integrated)
         .await
         .unwrap();
-    assert_eq!(result.outcome, ProductGpuOutcome::Unknown);
+    assert_ne!(result.outcome, ProductGpuOutcome::RebootRequired);
+    assert_ne!(result.outcome, ProductGpuOutcome::AlreadyActive);
+}
+
+#[tokio::test]
+async fn ultimate_queues_only_the_mux_and_is_confirmed() {
+    let dgpu = FakeAttribute::new("dgpu_disable", 0, None);
+    let mux = FakeAttribute::new("gpu_mux_mode", 1, None);
+    let (_connection, client) = client(dgpu, mux).await;
+
+    let result = operation(client)
+        .set_mode(AsusGpuMode::Ultimate)
+        .await
+        .unwrap();
+    assert_eq!(result.outcome, ProductGpuOutcome::RebootRequired);
+    assert_eq!(result.snapshot.queued_mode, Some(AsusGpuMode::Ultimate));
+}
+
+#[tokio::test]
+async fn selecting_current_mode_again_cancels_the_queue() {
+    let dgpu = FakeAttribute::new("dgpu_disable", 0, None);
+    let mux = FakeAttribute::new("gpu_mux_mode", 1, Some(0));
+    let (_connection, client) = client(dgpu, mux).await;
+
+    let result = operation(client)
+        .set_mode(AsusGpuMode::Hybrid)
+        .await
+        .unwrap();
+    assert_eq!(result.snapshot.queued_mode, None);
+    assert!(!result.snapshot.reboot_required());
 }
 
 #[tokio::test]
@@ -277,18 +311,18 @@ async fn status_read_reports_queued_target_and_reboot_required() {
 }
 
 #[tokio::test]
-async fn status_read_with_partial_queue_is_unknown_not_fabricated() {
+async fn status_read_with_single_queued_attribute_reports_the_target() {
+    // asusd queues only the changed attribute: dgpu_disable=1 with the MUX
+    // unchanged is a complete Eco (Integrated) target pending reboot.
     let dgpu = FakeAttribute::new("dgpu_disable", 0, Some(1));
     let mux = FakeAttribute::new("gpu_mux_mode", 1, None);
     let (_connection, client) = client(dgpu, mux).await;
 
     let result = operation(client).read_status().await.unwrap();
 
-    // Only one attribute queued proves no complete target; report Unknown
-    // instead of inventing a queued mode or a reboot requirement.
-    assert_eq!(result.snapshot.queued_mode, None);
-    assert!(!result.snapshot.reboot_required());
-    assert_eq!(result.outcome, ProductGpuOutcome::Unknown);
+    assert_eq!(result.snapshot.queued_mode, Some(AsusGpuMode::Integrated));
+    assert!(result.snapshot.reboot_required());
+    assert_eq!(result.outcome, ProductGpuOutcome::RebootRequired);
 }
 
 #[tokio::test]

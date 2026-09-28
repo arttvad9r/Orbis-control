@@ -38,7 +38,7 @@ component GraphPoint inherits Rectangle {
         border-color: Palette.border-default;
         background: Palette.surface-raised;
         Text {
-            text: root.shown + "";
+            text: Math.round(root.shown * 100 / 255) + " %";
             font-size: 10.5px;
             font-weight: 650;
             color: Palette.text-primary;

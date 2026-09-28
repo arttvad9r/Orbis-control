@@ -110,14 +110,14 @@ pub(crate) fn refresh(window: &AppWindow) {
         window.set_refresh_enabled(false);
         window.set_refresh_pending(false);
         window.set_export_enabled(false);
-        window.set_diagnostics_status("Diagnostics runtime unavailable".into());
+        window.set_diagnostics_status("Диагностика недоступна".into());
         return;
     };
 
     window.set_refresh_enabled(false);
     window.set_refresh_pending(true);
     window.set_export_enabled(false);
-    window.set_diagnostics_status("Collecting read-only snapshot…".into());
+    window.set_diagnostics_status("Сбор сведений…".into());
 
     let runtime = context.runtime.clone();
     let source = context.source.clone();
@@ -137,9 +137,9 @@ pub(crate) fn refresh(window: &AppWindow) {
             window.set_refresh_enabled(true);
             window.set_diagnostics_status(
                 if export_ready {
-                    "Snapshot refreshed"
+                    "Сведения обновлены"
                 } else {
-                    "Snapshot refreshed · export unavailable"
+                    "Сведения обновлены · экспорт недоступен"
                 }
                 .into(),
             );
@@ -161,19 +161,19 @@ fn export_report(window: &AppWindow) {
     let context = CONTEXT.with(|slot| slot.borrow().clone());
     let Some(context) = context else {
         window.set_export_enabled(false);
-        window.set_diagnostics_status("Diagnostics runtime unavailable".into());
+        window.set_diagnostics_status("Диагностика недоступна".into());
         return;
     };
 
     let Some(dto) = latest_snapshot(&context) else {
         window.set_export_enabled(false);
-        window.set_diagnostics_status("Refresh diagnostics before exporting".into());
+        window.set_diagnostics_status("Сначала обновите сведения".into());
         return;
     };
 
     if !export_path_available() {
         window.set_export_enabled(false);
-        window.set_diagnostics_status("Diagnostics export path unavailable".into());
+        window.set_diagnostics_status("Не удалось определить папку для экспорта".into());
         return;
     }
 
@@ -181,7 +181,7 @@ fn export_report(window: &AppWindow) {
     // re-enable actions over a newer pending snapshot.
     window.set_refresh_enabled(false);
     window.set_export_enabled(false);
-    window.set_diagnostics_status("Exporting privacy-safe report…".into());
+    window.set_diagnostics_status("Экспорт отчёта без личных данных…".into());
 
     let weak = window.as_weak();
     context.runtime.spawn(async move {
@@ -191,17 +191,21 @@ fn export_report(window: &AppWindow) {
             match result {
                 Ok(Ok(path)) => {
                     window.set_export_enabled(true);
-                    window.set_diagnostics_status(format!("Exported · {}", path.display()).into());
+                    window.set_diagnostics_status(format!("Сохранено · {}", path.display()).into());
                 }
                 Ok(Err(error)) => {
                     tracing::warn!(error = %error, "diagnostics report export failed");
                     window.set_export_enabled(false);
-                    window.set_diagnostics_status("Report export failed · refresh to retry".into());
+                    window.set_diagnostics_status(
+                        "Не удалось сохранить отчёт · обновите сведения и повторите".into(),
+                    );
                 }
                 Err(error) => {
                     tracing::warn!(error = %error, "diagnostics report export task failed");
                     window.set_export_enabled(false);
-                    window.set_diagnostics_status("Report export failed · refresh to retry".into());
+                    window.set_diagnostics_status(
+                        "Не удалось сохранить отчёт · обновите сведения и повторите".into(),
+                    );
                 }
             }
         }) {
@@ -396,7 +400,7 @@ mod tests {
     #[test]
     fn export_failure_stays_fail_closed_until_refresh() {
         let source = include_str!("diagnostics_backend.rs");
-        assert!(source.contains("Report export failed · refresh to retry"));
+        assert!(source.contains("Не удалось сохранить отчёт · обновите сведения и повторите"));
         assert!(source.contains("export_path_available"));
     }
 }
