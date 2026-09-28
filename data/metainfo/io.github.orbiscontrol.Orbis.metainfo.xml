@@ -18,5 +18,12 @@
     <category>Settings</category>
     <category>HardwareSettings</category>
   </categories>
+  <releases>
+    <release version="0.1.0" date="2026-09-28">
+      <description>
+        <p>First release: performance profiles, battery charge limit, custom fan curves, GPU mode switching with reboot queue, keyboard backlight and Aura static colour, Panel Overdrive, capability-gated ASUS advanced parameters, telemetry dashboard, diagnostics export and tray.</p>
+      </description>
+    </release>
+  </releases>
   <content_rating type="oars-1.1" />
 </component>

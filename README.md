@@ -19,7 +19,23 @@ The current codebase includes production paths for the core application shell an
 - systemd, D-Bus and polkit integration;
 - fake-system/private-P2P integration tests for privileged boundaries.
 
-The project is not yet released. The single plan of remaining work (v0.1 release, then G-Helper feature parity) is [`PLAN.md`](PLAN.md). A feature is considered finished only when the user-visible flow is connected end to end.
+The current release is v0.1.0. Remaining work (G-Helper feature parity) is tracked in the single plan [`PLAN.md`](PLAN.md). A feature is considered finished only when the user-visible flow is connected end to end.
+
+## Install (Arch Linux)
+
+The v0.1.0 release is packaged with the pinned `packaging/arch/PKGBUILD`:
+
+```bash
+git clone --branch v0.1.0 https://github.com/arttvad9r/Orbis-control.git
+cd Orbis-control/packaging/arch
+makepkg -si
+sudo systemctl enable --now orbis-hardwared.service
+systemctl --user enable --now orbis-sessiond.service
+```
+
+A prebuilt `orbis-control-0.1.0-*.pkg.tar.zst` is attached to the GitHub release (`sudo pacman -U <file>`). Runtime requirements: `asusd` for ASUS controls; `power-profiles-daemon` is used for performance profiles when it is running.
+
+v0.1.0 was validated on an ASUS TUF Gaming A17 FA707NV. Other models get exactly the controls their runtime evidence supports.
 
 ## Arch Linux development setup
 
@@ -54,13 +70,13 @@ Build the release workspace:
 cargo build --workspace --release --locked
 ```
 
-Install the current checkout as a local Arch system integration build:
+Install the current checkout as a local developer build:
 
 ```bash
 bash packaging/install-arch.sh
 ```
 
-This installs the four production binaries under `/usr/bin`, the system/user systemd units, D-Bus policy, polkit actions and desktop/AppStream metadata. It uses the same package-owned executable prefix as the Arch release layout.
+This installs the four binaries and desktop/AppStream metadata under `/usr/local`, rewrites the systemd units to that prefix, and installs the D-Bus policy and polkit actions. It is deliberately separate from the pacman-owned `/usr/bin` layout of the release package; uninstall it (`--uninstall`) before installing the package, otherwise `/usr/local/bin/orbis-control` shadows the packaged one.
 
 To update only the privileged helper during development:
 
