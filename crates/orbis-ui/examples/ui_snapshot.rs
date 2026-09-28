@@ -2,8 +2,7 @@
 //!
 //! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme] [width] [height] [state]`
 //! Sections: dashboard | performance | power | cooling | graphics | backlight
-//! | display | system | settings | about | dialog. States: normal | readonly |
-//! pending | error | unsupported | dirty.
+//! | display | system | settings | about | dialog.
 
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
@@ -179,59 +178,69 @@ fn demo_state(component: &AppWindow) {
     component.set_diagnostics_status("Диагностика актуальна".into());
 }
 
-/// Apply a visual-review state to the otherwise fully populated fixture. These
-/// projections deliberately use the same UI state fields production renders;
-/// they never invoke a hardware callback or imply a mutation result.
-fn review_state(component: &AppWindow, state_name: &str) -> anyhow::Result<()> {
-    let mut state = component.get_ui_state();
-    match state_name {
-        "normal" => {}
-        "readonly" => {
-            state.perf_writable = false;
-            state.charge_limit_writable = false;
-            state.fan_curve_writable = false;
-        }
-        "pending" => {
-            state.performance_delegated_pending = true;
-            state.fan_curve_pending = true;
-            state.charge_limit_pending = true;
-        }
-        "error" => {
-            state.performance_delegated_error = "Не удалось подтвердить профиль".into();
-            state.fan_curve_error = true;
-            state.charge_limit_error = "Не удалось записать порог".into();
-        }
-        "unsupported" => {
-            state.perf_state = PerformanceHwState::Unavailable;
-            state.perf_writable = false;
-            state.perf_unavailable_reason = "Режимы производительности не поддерживаются".into();
-            state.charge_limit_state = ChargeLimitState::Unavailable;
-            state.charge_limit_writable = false;
-            state.charge_limit_unavailable_reason = "Порог заряда не поддерживается".into();
-            state.fan_curve_state = FanCurveHwState::Unavailable;
-            state.fan_curve_writable = false;
-            state.fan_curve_unavailable_reason = "Пользовательская кривая не поддерживается".into();
-        }
-        "dirty" => {
-            state.fan_curve_dirty = true;
-        }
-        other => anyhow::bail!("unknown review state: {other}"),
+fn apply_snapshot_state(
+    component: &AppWindow,
+    section: &str,
+    state_name: &str,
+) -> anyhow::Result<()> {
+    let applicable = match state_name {
+        "normal" => true,
+        "dirty" => section == "cooling",
+        "pending" | "error" | "unsupported" | "readonly" => matches!(
+            section,
+            "dashboard" | "performance" | "cooling" | "graphics"
+        ),
+        other => anyhow::bail!("unknown snapshot state: {other}"),
+    };
+    if !applicable {
+        anyhow::bail!("snapshot state {state_name:?} is not applicable to section {section:?}");
     }
-    component.set_ui_state(state);
-    Ok(())
-}
 
-fn parse_dimension(value: Option<String>, name: &str, default: u32) -> anyhow::Result<u32> {
-    match value {
-        Some(value) => {
-            let parsed: u32 = value.parse()?;
-            if parsed == 0 {
-                anyhow::bail!("{name} must be greater than zero");
-            }
-            Ok(parsed)
+    let mut ui_state = component.get_ui_state();
+    match (section, state_name) {
+        (_, "normal") => {}
+        ("cooling", "dirty") => ui_state.fan_curve_dirty = true,
+        ("cooling", "pending") => ui_state.fan_curve_pending = true,
+        ("cooling", "error") => ui_state.fan_curve_error = true,
+        ("cooling", "unsupported") => {
+            ui_state.fan_curve_state = FanCurveHwState::Unavailable;
+            ui_state.fan_curve_writable = false;
+            ui_state.fan_curve_unavailable_reason =
+                "Поддержка кривой вентиляторов не обнаружена".into();
         }
-        None => Ok(default),
+        ("cooling", "readonly") => ui_state.fan_curve_writable = false,
+        ("performance", "pending") => ui_state.performance_delegated_pending = true,
+        ("performance", "error") => {
+            ui_state.performance_delegated_error =
+                "Ошибка чтения профиля производительности".into();
+        }
+        ("dashboard", "pending") => {
+            ui_state.perf_state = PerformanceHwState::Unavailable;
+            ui_state.perf_writable = false;
+            ui_state.perf_unavailable_reason = "Ожидание подтверждения".into();
+        }
+        ("dashboard", "error") => {
+            ui_state.perf_state = PerformanceHwState::Unavailable;
+            ui_state.perf_writable = false;
+            ui_state.perf_unavailable_reason = "Ошибка чтения профиля производительности".into();
+        }
+        ("performance", "unsupported") | ("dashboard", "unsupported") => {
+            ui_state.perf_state = PerformanceHwState::Unavailable;
+            ui_state.perf_writable = false;
+            ui_state.perf_unavailable_reason = "Поддержка профиля не обнаружена".into();
+        }
+        ("performance", "readonly") | ("dashboard", "readonly") => ui_state.perf_writable = false,
+        ("graphics", "pending") => ui_state.gpu_mode_pending = true,
+        ("graphics", "error") => ui_state.gpu_section_error = true,
+        ("graphics", "unsupported") => {
+            ui_state.gpu_mode_state = GpuModeHwState::Unavailable;
+            ui_state.gpu_mode_writable = false;
+        }
+        ("graphics", "readonly") => ui_state.gpu_mode_writable = false,
+        _ => unreachable!("applicability checked above"),
     }
+    component.set_ui_state(ui_state);
+    Ok(())
 }
 
 fn setup(width: u32, height: u32) -> Rc<slint::platform::software_renderer::SoftwareRenderer> {
@@ -280,21 +289,25 @@ fn main() -> anyhow::Result<()> {
     let kind = args.next().unwrap_or_else(|| "dashboard".to_string());
     let path = args.next().unwrap_or_else(|| format!("{kind}.png"));
     let theme = args.next().unwrap_or_else(|| "dark".to_string());
-    let requested_width = args.next();
-    let requested_height = args.next();
-    let state_name = args.next().unwrap_or_else(|| "normal".to_string());
+    let requested_width = args.next().map(|value| value.parse()).transpose()?;
+    let requested_height = args.next().map(|value| value.parse()).transpose()?;
+    let state = args.next().unwrap_or_else(|| "normal".to_string());
+    if args.next().is_some() {
+        anyhow::bail!("too many arguments");
+    }
     let light = match theme.as_str() {
         "dark" => false,
         "light" => true,
         other => anyhow::bail!("unknown theme: {other}"),
     };
 
-    let (default_width, default_height) = match kind.as_str() {
-        "dialog" => (470, 228),
-        _ => (1200, 800),
+    let (default_width, default_height) = if kind == "dialog" {
+        (470, 228)
+    } else {
+        (1240, 820)
     };
-    let width = parse_dimension(requested_width, "width", default_width)?;
-    let height = parse_dimension(requested_height, "height", default_height)?;
+    let width = requested_width.unwrap_or(default_width);
+    let height = requested_height.unwrap_or(default_height);
 
     let renderer = setup(width, height);
 
@@ -308,7 +321,7 @@ fn main() -> anyhow::Result<()> {
                 ThemeMode::Dark
             });
             demo_state(&component);
-            review_state(&component, &state_name)?;
+            apply_snapshot_state(&component, &kind, &state)?;
             let section = match kind.as_str() {
                 "performance" => Section::Performance,
                 "power" => Section::Power,

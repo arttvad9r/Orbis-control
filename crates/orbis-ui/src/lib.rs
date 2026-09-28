@@ -6,7 +6,6 @@
 
 #![forbid(unsafe_code)]
 
-pub mod automation_backend;
 pub mod automation_capability;
 pub mod automation_execution_guard;
 pub mod automation_execution_promotion;

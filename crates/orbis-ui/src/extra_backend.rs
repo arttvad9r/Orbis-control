@@ -29,8 +29,18 @@ struct ExtraContext {
     advanced_unresolved: Arc<AtomicBool>,
     advanced_draft: Arc<Mutex<Option<AdvancedApplyDraft>>>,
     clamshell: Arc<dyn SessionClamshellSource>,
+    refresh_reads: Arc<dyn Fn() -> RefreshReadsFuture + Send + Sync>,
     write_statuses: Arc<dyn Fn() -> WriteStatusFuture + Send + Sync>,
 }
+
+type RefreshReads = (
+    Result<orbis_core::aura::AuraState, ProviderError>,
+    Result<PanelOverdriveState, ProviderError>,
+    Result<BootSoundState, ProviderError>,
+    Result<u8, ProviderError>,
+    Result<(bool, ProductWriteStatus), ProviderError>,
+);
+type RefreshReadsFuture = std::pin::Pin<Box<dyn std::future::Future<Output = RefreshReads> + Send>>;
 
 type WriteStatuses = Result<
     (
@@ -225,6 +235,7 @@ pub(crate) fn initialize(runtime: tokio::runtime::Handle, session_connection: zb
             advanced_unresolved: Arc::new(AtomicBool::new(false)),
             advanced_draft: Arc::new(Mutex::new(None)),
             clamshell: Arc::new(ZbusSessionClamshellSource::new(session_connection)),
+            refresh_reads: Arc::new(|| Box::pin(bounded_refresh_reads())),
             write_statuses: Arc::new(|| Box::pin(bounded_write_statuses())),
         });
     });
@@ -792,9 +803,8 @@ fn refresh_with_status(
     let weak = window.as_weak();
     let completion = context.refreshing.clone();
     context.runtime.spawn(async move {
-        let refresh_reads = Box::pin(bounded_refresh_reads());
         let (refresh_results, write_statuses, clamshell_result) = tokio::join!(
-            refresh_reads,
+            (context.refresh_reads)(),
             (context.write_statuses)(),
             context.clamshell.read_clamshell(),
         );
@@ -990,13 +1000,7 @@ async fn bounded_aspm_read() -> Result<(bool, ProductWriteStatus), ProviderError
         .map_err(|_| ProviderError::Timeout("Extra ASPM read timed out".into()))?
 }
 
-async fn bounded_refresh_reads() -> (
-    Result<orbis_core::aura::AuraState, ProviderError>,
-    Result<PanelOverdriveState, ProviderError>,
-    Result<BootSoundState, ProviderError>,
-    Result<u8, ProviderError>,
-    Result<(bool, ProductWriteStatus), ProviderError>,
-) {
+async fn bounded_refresh_reads() -> RefreshReads {
     let panel_provider = AsusArmouryPanelOverdriveProvider::default();
     let boot_sound_provider = AsusBootSoundProvider::default();
     tokio::join!(
@@ -1234,6 +1238,7 @@ fn advanced_apply_control_label(control: AdvancedApplyControl) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicUsize;
     use std::sync::{Arc, Mutex};
 
     use super::*;
@@ -1241,8 +1246,238 @@ mod tests {
     use orbis_core::aura::{
         AuraBrightness, AuraDirection, AuraEffect, AuraRgb, AuraState, AuraZone,
     };
+    use orbis_session_client::{HardwareProductGpuSource, ProductGpuMutationResult};
 
     const OBJECT_PATH: &str = "/io/github/orbiscontrol/Hardware";
+
+    struct FakeClamshell;
+
+    #[async_trait::async_trait]
+    impl SessionClamshellSource for FakeClamshell {
+        async fn read_clamshell(&self) -> Result<u8, ProviderError> {
+            Ok(clamshell::ACTIVE)
+        }
+
+        async fn set_clamshell(&self, _enabled: bool) -> Result<u8, ProviderError> {
+            Ok(clamshell::ACTIVE)
+        }
+    }
+
+    #[test]
+    fn production_refresh_publishes_injected_reads_to_app_window() {
+        i_slint_backend_testing::init_integration_test_with_mock_time();
+        let app = AppWindow::new().expect("construct headless AppWindow");
+        app.set_status("before callback".into());
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("build fixture runtime");
+        let (refresh_started, refresh_started_rx) = std::sync::mpsc::channel();
+        let injected = Arc::new(AtomicUsize::new(0));
+        let calls = injected.clone();
+        let hardware = FakeAdvancedHardware {
+            state: Arc::new(Mutex::new((false, 2, false))),
+            boot_status: 0,
+            fail_on: None,
+        };
+        let (initial_server, initial_connection) =
+            runtime.block_on(private_advanced_peer(hardware));
+        let peer = Arc::new(Mutex::new(HardwareProductControlClient::new(
+            initial_connection,
+        )));
+        let peer_for_status = peer.clone();
+        let server = Arc::new(Mutex::new(Some(initial_server)));
+        let fixture_runtime = runtime.handle().clone();
+        let context = ExtraContext {
+            runtime: runtime.handle().clone(),
+            refreshing: Arc::new(AtomicBool::new(false)),
+            mutating: Arc::new(AtomicBool::new(false)),
+            advanced_dirty: Arc::new(AtomicBool::new(false)),
+            advanced_unresolved: Arc::new(AtomicBool::new(false)),
+            advanced_draft: Arc::new(Mutex::new(None)),
+            clamshell: Arc::new(FakeClamshell),
+            refresh_reads: Arc::new(move || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                refresh_started.send(()).expect("signal refresh read start");
+                Box::pin(async {
+                    (
+                        Ok(AuraState {
+                            current_mode: AuraMode::Static,
+                            current_effect: AuraEffect {
+                                mode: AuraMode::Static,
+                                zone: AuraZone::None,
+                                colour1: AuraRgb {
+                                    r: 12,
+                                    g: 34,
+                                    b: 56,
+                                },
+                                colour2: AuraRgb { r: 0, g: 0, b: 0 },
+                                speed: AuraSpeed::Med,
+                                direction: AuraDirection::Right,
+                            },
+                            brightness: AuraBrightness::Med,
+                            supported_modes: vec![AuraMode::Static],
+                            supported_zones: Vec::new(),
+                            supported_brightness: vec![AuraBrightness::Med],
+                        }),
+                        Ok(PanelOverdriveState::Enabled),
+                        Ok(BootSoundState::Enabled),
+                        Ok(6),
+                        Ok((true, ProductWriteStatus::Supported)),
+                    )
+                })
+            }),
+            write_statuses: Arc::new(move || {
+                let client = peer_for_status.lock().expect("peer client lock").clone();
+                Box::pin(async move { bounded_write_statuses_with(&client).await })
+            }),
+        };
+        CONTEXT.with(|slot| *slot.borrow_mut() = Some(context));
+        wire_window(&app);
+
+        refresh_with_status(&app, None, None, true);
+        refresh_started_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("production refresh reaches injected read source");
+
+        let (cancel_watchdog, watchdog_cancelled) = std::sync::mpsc::channel();
+        let watchdog = std::thread::spawn(move || {
+            if watchdog_cancelled
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .is_err()
+            {
+                let _ = slint::quit_event_loop();
+            }
+        });
+        let (observed, observed_rx) = std::sync::mpsc::channel();
+        let observed = Arc::new(Mutex::new(Some(observed)));
+        let poll_weak = app.as_weak();
+        let apply_phase = Arc::new(AtomicUsize::new(0));
+        let poll_apply_phase = apply_phase.clone();
+        let poll_deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
+        let poll = Arc::new(Mutex::new(None::<Box<dyn FnMut() + Send>>));
+        let poll_again = poll.clone();
+        let phase = Arc::new(AtomicUsize::new(0));
+        let poll_phase = phase.clone();
+        let poll_peer = peer.clone();
+        let poll_server = server.clone();
+        let poll_runtime = fixture_runtime.clone();
+        let poll_once: Box<dyn FnMut() + Send> = Box::new(move || {
+            let current_phase = poll_phase.load(Ordering::SeqCst);
+            let ready = poll_weak.upgrade().is_some_and(|window| {
+                window.get_aura_state_ready()
+                    && window.get_rgb_red() == 12
+                    && window.get_boot_sound_control_ready() == (current_phase != 1)
+                    && window.get_igpu_memory_control_ready() == (current_phase != 1)
+                    && window.get_aspm_control_ready()
+            });
+            if ready && current_phase == 0 && poll_apply_phase.load(Ordering::SeqCst) == 0 {
+                let window = poll_weak.upgrade().expect("AppWindow remains alive");
+                window.invoke_boot_sound_requested(!window.get_boot_sound());
+                assert!(window.get_advanced_apply_ready());
+                poll_apply_phase.store(1, Ordering::SeqCst);
+            }
+            let ready = ready
+                && poll_weak.upgrade().is_some_and(|window| {
+                    window.get_advanced_apply_ready() == (current_phase == 0)
+                });
+            if ready && current_phase < 2 {
+                let next_phase = current_phase + 1;
+                poll_phase.store(next_phase, Ordering::SeqCst);
+                if next_phase == 1 {
+                    drop(poll_server.lock().expect("peer server lock").take());
+                    let client = poll_peer.lock().expect("peer client lock").clone();
+                    assert!(
+                        poll_runtime
+                            .block_on(bounded_write_statuses_with(&client))
+                            .is_err()
+                    );
+                } else {
+                    let hardware = FakeAdvancedHardware {
+                        state: Arc::new(Mutex::new((false, 2, false))),
+                        boot_status: 0,
+                        fail_on: None,
+                    };
+                    let (new_server, new_connection) =
+                        poll_runtime.block_on(private_advanced_peer(hardware));
+                    *poll_peer.lock().expect("peer client lock") =
+                        HardwareProductControlClient::new(new_connection);
+                    *poll_server.lock().expect("peer server lock") = Some(new_server);
+                }
+                let weak = poll_weak.clone();
+                slint::invoke_from_event_loop(move || {
+                    let window = weak.upgrade().expect("AppWindow remains alive");
+                    refresh_with_status(&window, None, None, true);
+                })
+                .expect("schedule next production refresh after publication");
+                let next = poll_again.clone();
+                slint::invoke_from_event_loop(move || {
+                    if let Some(poll) = next.lock().expect("poll callback lock").as_mut() {
+                        poll();
+                    }
+                })
+                .expect("requeue owner-thread getter check");
+            } else if ready {
+                observed
+                    .lock()
+                    .expect("observation sender lock")
+                    .take()
+                    .expect("observation sender available")
+                    .send(())
+                    .expect("signal final publication");
+                let callback_weak = poll_weak.clone();
+                slint::invoke_from_event_loop(move || {
+                    let window = callback_weak.upgrade().expect("AppWindow stays alive");
+                    window.set_status("callback delivered".into());
+                    slint::quit_event_loop().expect("quit after final callback status update");
+                })
+                .expect("schedule H1 callback after recovery publication");
+            } else if std::time::Instant::now() >= poll_deadline {
+                observed.lock().expect("observation sender lock").take();
+                slint::quit_event_loop().expect("quit after getter watchdog deadline");
+            } else {
+                let next = poll_again.clone();
+                slint::invoke_from_event_loop(move || {
+                    if let Some(poll) = next.lock().expect("poll callback lock").as_mut() {
+                        poll();
+                    }
+                })
+                .expect("requeue owner-thread getter check");
+            }
+        });
+        *poll.lock().expect("poll callback lock") = Some(poll_once);
+        let first_poll = poll.clone();
+        slint::invoke_from_event_loop(move || {
+            if let Some(poll) = first_poll.lock().expect("poll callback lock").as_mut() {
+                poll();
+            }
+        })
+        .expect("queue first owner-thread getter check");
+        slint::run_event_loop().expect("pump bounded Slint event loop");
+        observed_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("event loop quit after bounded getter check");
+        assert_eq!(app.get_status(), "callback delivered");
+        cancel_watchdog
+            .send(())
+            .expect("cancel event-loop watchdog");
+        watchdog.join().expect("event-loop watchdog completes");
+        assert_eq!(injected.load(Ordering::SeqCst), 3);
+        assert!(app.get_aura_state_ready());
+        assert_eq!(app.get_rgb_red(), 12);
+        assert_eq!(app.get_rgb_green(), 34);
+        assert_eq!(app.get_rgb_blue(), 56);
+        assert!(app.get_panel_overdrive());
+        assert!(app.get_boot_sound());
+        assert_eq!(app.get_igpu_memory(), 6);
+        assert!(app.get_disable_aspm());
+        assert_eq!(app.get_auto_clamshell_state(), ClamshellState::Active);
+        assert!(!app.get_advanced_apply_ready());
+        CONTEXT.with(|slot| slot.borrow_mut().take());
+        drop(runtime);
+    }
 
     #[derive(Clone)]
     struct FakeAdvancedHardware {
@@ -1300,6 +1535,88 @@ mod tests {
             self.state.lock().unwrap().2 = disabled;
             Ok(disabled)
         }
+    }
+
+    #[derive(Clone)]
+    struct FakeProductGpuHardware {
+        state: Arc<Mutex<ProductGpuMutationResult>>,
+    }
+
+    #[zbus::interface(name = "io.github.orbiscontrol.Hardware1")]
+    impl FakeProductGpuHardware {
+        async fn set_product_gpu_mode(
+            &self,
+            requested_mode: u32,
+        ) -> zbus::fdo::Result<ProductGpuMutationResult> {
+            let mut state = self.state.lock().unwrap();
+            *state = ProductGpuMutationResult {
+                requested_mode,
+                current_mode: state.current_mode,
+                queued_mode: requested_mode,
+                outcome: 1,
+                reboot_required: true,
+            };
+            Ok(*state)
+        }
+
+        async fn product_gpu_status(&self) -> zbus::fdo::Result<ProductGpuMutationResult> {
+            Ok(*self.state.lock().unwrap())
+        }
+    }
+
+    async fn private_product_gpu_peer(
+        hardware: FakeProductGpuHardware,
+    ) -> (zbus::Connection, zbus::Connection) {
+        let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        let server = zbus::connection::Builder::unix_stream(server_stream)
+            .server(zbus::Guid::generate())
+            .unwrap()
+            .p2p()
+            .serve_at(OBJECT_PATH, hardware)
+            .unwrap();
+        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        tokio::try_join!(server.build(), client.build()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn private_product_gpu_peer_mutates_reads_back_and_recovers_owner() {
+        let initial = ProductGpuMutationResult {
+            requested_mode: 0,
+            current_mode: 0,
+            queued_mode: u32::MAX,
+            outcome: 0,
+            reboot_required: false,
+        };
+        let first_hardware = FakeProductGpuHardware {
+            state: Arc::new(Mutex::new(initial)),
+        };
+        let first_state = first_hardware.state.clone();
+        let (first_server, first_connection) = private_product_gpu_peer(first_hardware).await;
+        let first_client =
+            orbis_session_client::ZbusHardwareProductGpuSource::new(first_connection);
+
+        let mutation = first_client.set_product_gpu_mode(2).await.unwrap();
+        assert_eq!(mutation.queued_mode, 2);
+        assert!(mutation.reboot_required);
+        let read_back = first_client.product_gpu_status().await.unwrap();
+        assert_eq!(read_back.current_mode, 0);
+        assert_eq!(read_back.queued_mode, 2);
+        assert_eq!(*first_state.lock().unwrap(), read_back);
+
+        drop(first_server);
+        assert!(first_client.product_gpu_status().await.is_err());
+
+        let recovered_hardware = FakeProductGpuHardware {
+            state: Arc::new(Mutex::new(initial)),
+        };
+        let recovered_state = recovered_hardware.state.clone();
+        let (_recovered_server, recovered_connection) =
+            private_product_gpu_peer(recovered_hardware).await;
+        let recovered_client =
+            orbis_session_client::ZbusHardwareProductGpuSource::new(recovered_connection);
+        let recovered = recovered_client.product_gpu_status().await.unwrap();
+        assert_eq!(recovered.queued_mode, u32::MAX);
+        assert_eq!(*recovered_state.lock().unwrap(), initial);
     }
 
     async fn private_advanced_peer(

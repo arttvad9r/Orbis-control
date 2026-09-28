@@ -785,7 +785,7 @@ fn optimized_gpu_mode_is_not_advertised_without_typed_write_target() {
     let mut state = base_state();
     assert_eq!(state.available_gpu_mask & 0b1000, 0);
     assert_eq!(gpu_mode_from_index(3), None);
-    assert_eq!(gpu_mode_card_disabled(&state, 3, 0b1000), true);
+    assert!(gpu_mode_card_disabled(&state, 3, 0b1000));
 
     state.gpu_mode_state = controller::GpuModeHwState::Ready;
     state.gpu_mode_writable = true;
