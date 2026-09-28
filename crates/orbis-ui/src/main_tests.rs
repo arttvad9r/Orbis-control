@@ -2777,6 +2777,27 @@ fn product_gpu_current_read_back_selects_the_card() {
 }
 
 #[test]
+fn product_gpu_queued_reply_releases_the_cards_so_the_queue_can_be_cancelled() {
+    let mut s = base_state();
+    s.gpu_mode_pending = true;
+
+    apply_product_gpu_result(
+        &mut s,
+        Ok(product_gpu_result(
+            PRODUCT_GPU_WIRE_HYBRID,
+            PRODUCT_GPU_WIRE_ULTIMATE,
+            PRODUCT_GPU_OUTCOME_REBOOT_REQUIRED,
+            true,
+        )),
+    );
+
+    assert!(!s.gpu_mode_pending);
+    assert_eq!(s.gpu_queued, 2);
+    // Re-selecting the observed Standard card is a real cancel request.
+    assert!(!gpu_mode_click_is_noop(&s, 1));
+}
+
+#[test]
 fn product_gpu_queued_target_is_carried_and_reboot_required() {
     let mut s = base_state();
     s.gpu_queued = -1;

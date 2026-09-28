@@ -1291,6 +1291,10 @@ fn apply_product_gpu_result(
 
     match result {
         Ok(reply) => {
+            // The in-flight request is answered; the reply below decides what
+            // is shown, and the cards must accept the next choice (including
+            // re-selecting the current mode to cancel a queued switch).
+            state.gpu_mode_pending = false;
             let wire_consistent = match reply.outcome {
                 OUTCOME_ALREADY_ACTIVE => {
                     reply.current_mode == reply.requested_mode
