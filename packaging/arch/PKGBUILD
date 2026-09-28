@@ -7,9 +7,9 @@ url='https://github.com/arttvad9r/Orbis-control'
 license=('GPL-3.0-or-later')
 depends=('dbus' 'glibc' 'polkit' 'wayland' 'libx11' 'libxcb' 'libxkbcommon')
 makedepends=('cargo')
-_commit=4ce963c2161537b90fcecbe3df6519a61de1818c
+_commit=794cd7a945d1e2b2e711337f72efc1e2bb7c65c3
 source=("orbis-control-${pkgver}.tar.gz::https://github.com/arttvad9r/Orbis-control/archive/${_commit}.tar.gz")
-sha256sums=('3ddf066bbb9a1a68870e049b03ea8444e86d9dc9a66a0e420784904465d701f0')
+sha256sums=('2ce040abcd21de30e70081d30edb2bcd8a98e84ca1c1bf667d380217937486e4')
 
 build() {
   cd "$srcdir/Orbis-control-${_commit}"
