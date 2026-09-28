@@ -420,8 +420,8 @@ export component PerformanceSection inherits Rectangle {
                     spacing: 10px;
 
                     RequestToggleRow {
-                        label: "Профиль по источнику питания";
-                        description: "Переключает профиль при подключении и отключении зарядки; при запуске ничего не меняет";
+                        label: "Правила по источнику питания";
+                        description: "Переключает профиль (и частоту экрана — на странице «Экран») при подключении и отключении зарядки; при запуске ничего не меняет";
                         checked: root.power-rules-enabled;
                         toggled(value) => { root.power-rules-enabled-toggled(value); }
                     }

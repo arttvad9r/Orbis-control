@@ -1787,7 +1787,8 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         }
         WorkerEvent::ProfileLimits(_)
         | WorkerEvent::PowerRules(_)
-        | WorkerEvent::CpuTuning { .. } => {}
+        | WorkerEvent::CpuTuning { .. }
+        | WorkerEvent::PanelRefresh { .. } => {}
         WorkerEvent::ChargeLimitRefresh(result) => apply_charge_limit_refresh(state, result),
         WorkerEvent::GpuPowerRefresh(result) => apply_gpu_power_refresh(state, result),
         WorkerEvent::GpuMuxRefresh(result) => apply_gpu_mux_refresh(state, result),
@@ -2058,8 +2059,35 @@ fn handle_worker_event(
                 .into(),
         );
     }
+    if let WorkerEvent::PanelRefresh { state, write_error } = &event {
+        match state {
+            Ok(panel) => {
+                app.set_panel_refresh_known(true);
+                app.set_panel_refresh_current(i32::try_from(panel.current_hz).unwrap_or(0));
+                let rates: Vec<i32> = panel
+                    .rates_hz
+                    .iter()
+                    .filter_map(|hz| i32::try_from(*hz).ok())
+                    .collect();
+                app.set_panel_refresh_rates(slint::ModelRc::new(slint::VecModel::from(rates)));
+            }
+            Err(message) => {
+                app.set_panel_refresh_known(false);
+                tracing::debug!("panel refresh unavailable: {message}");
+            }
+        }
+        app.set_panel_refresh_error(
+            write_error
+                .as_ref()
+                .map(|message| format!("Не удалось переключить частоту: {message}"))
+                .unwrap_or_default()
+                .into(),
+        );
+    }
     if let WorkerEvent::PowerRules(view) = &event {
         app.set_power_rules_known(true);
+        app.set_power_rules_ac_hz(view.rules.ac.refresh_hz.map_or(0, |hz| hz as i32));
+        app.set_power_rules_battery_hz(view.rules.battery.refresh_hz.map_or(0, |hz| hz as i32));
         app.set_power_rules_enabled(view.rules.enabled);
         app.set_power_rules_ac(power_rule_profile_to_int(view.rules.ac.profile));
         app.set_power_rules_battery(power_rule_profile_to_int(view.rules.battery.profile));
@@ -2205,20 +2233,25 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
     {
         let worker_tx = worker_tx.clone();
         let app_weak = app.as_weak();
-        let send_rules = move |enabled: bool, ac: i32, battery: i32| {
-            if let Some(tx) = &worker_tx {
-                let rules = PowerRules {
-                    enabled,
-                    ac: PowerRule {
-                        profile: power_rule_profile_from_int(ac),
-                    },
-                    battery: PowerRule {
-                        profile: power_rule_profile_from_int(battery),
-                    },
-                };
-                if let Err(error) = tx.send(WorkerCommand::SetPowerRules(rules)) {
-                    tracing::warn!("worker closed, power rules not sent: {error:?}");
-                }
+        let send_rules = move |app: &AppWindow, edit: &dyn Fn(&mut PowerRules)| {
+            let Some(tx) = &worker_tx else {
+                return;
+            };
+            let hz = |value: i32| u32::try_from(value).ok().filter(|hz| *hz > 0);
+            let mut rules = PowerRules {
+                enabled: app.get_power_rules_enabled(),
+                ac: PowerRule {
+                    profile: power_rule_profile_from_int(app.get_power_rules_ac()),
+                    refresh_hz: hz(app.get_power_rules_ac_hz()),
+                },
+                battery: PowerRule {
+                    profile: power_rule_profile_from_int(app.get_power_rules_battery()),
+                    refresh_hz: hz(app.get_power_rules_battery_hz()),
+                },
+            };
+            edit(&mut rules);
+            if let Err(error) = tx.send(WorkerCommand::SetPowerRules(rules)) {
+                tracing::warn!("worker closed, power rules not sent: {error:?}");
             }
         };
         let send_rules = std::rc::Rc::new(send_rules);
@@ -2227,22 +2260,47 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             let send_rules = send_rules.clone();
             app.on_power_rules_enabled_toggled(move |enabled| {
                 if let Some(app) = app_weak.upgrade() {
-                    send_rules(
-                        enabled,
-                        app.get_power_rules_ac(),
-                        app.get_power_rules_battery(),
-                    );
+                    send_rules(&app, &|rules| rules.enabled = enabled);
                 }
             });
         }
-        app.on_power_rules_profile_requested(move |ac, profile| {
+        {
+            let app_weak = app_weak.clone();
+            let send_rules = send_rules.clone();
+            app.on_power_rules_profile_requested(move |ac, profile| {
+                if let Some(app) = app_weak.upgrade() {
+                    let profile = power_rule_profile_from_int(profile);
+                    send_rules(&app, &|rules| {
+                        if ac {
+                            rules.ac.profile = profile;
+                        } else {
+                            rules.battery.profile = profile;
+                        }
+                    });
+                }
+            });
+        }
+        app.on_power_rules_refresh_requested(move |ac, hz| {
             if let Some(app) = app_weak.upgrade() {
-                let (ac_profile, battery_profile) = if ac {
-                    (profile, app.get_power_rules_battery())
-                } else {
-                    (app.get_power_rules_ac(), profile)
-                };
-                send_rules(app.get_power_rules_enabled(), ac_profile, battery_profile);
+                let hz = u32::try_from(hz).ok().filter(|hz| *hz > 0);
+                send_rules(&app, &|rules| {
+                    if ac {
+                        rules.ac.refresh_hz = hz;
+                    } else {
+                        rules.battery.refresh_hz = hz;
+                    }
+                });
+            }
+        });
+    }
+    {
+        let worker_tx = worker_tx.clone();
+        app.on_panel_refresh_requested(move |hz| {
+            let (Some(tx), Ok(hz)) = (&worker_tx, u32::try_from(hz)) else {
+                return;
+            };
+            if let Err(error) = tx.send(WorkerCommand::SetPanelRefresh(hz)) {
+                tracing::warn!("worker closed, panel refresh request not sent: {error:?}");
             }
         });
     }
@@ -2950,7 +3008,14 @@ fn main() -> anyhow::Result<()> {
         Some(poll_interval),
         Some(product_gpu_source),
         Some(cpu_tuning_backend),
+        Some(std::sync::Arc::new(
+            orbis_providers::KscreenDoctorPanel::default(),
+        )),
     ));
+
+    if let Err(e) = worker_tx.send(WorkerCommand::RefreshPanelRefresh) {
+        tracing::warn!("worker закрыт, initial panel refresh не отправлен: {e:?}");
+    }
 
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshChargeLimit) {
         tracing::warn!("worker закрыт, initial battery refresh не отправлен: {e:?}");

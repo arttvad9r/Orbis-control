@@ -107,6 +107,14 @@ export component AppWindow inherits Window {
     in property <string> power-rules-error: "";
     callback power-rules-enabled-toggled(bool);
     callback power-rules-profile-requested(bool, int);
+    in property <bool> panel-refresh-known: false;
+    in property <[int]> panel-refresh-rates: [];
+    in property <int> panel-refresh-current: 0;
+    in property <string> panel-refresh-error: "";
+    in property <int> power-rules-ac-hz: 0;
+    in property <int> power-rules-battery-hz: 0;
+    callback panel-refresh-requested(int);
+    callback power-rules-refresh-requested(bool, int);
     callback aura-static-rgb-requested(int, int, int);
 
     in property <bool> backend-ready: false;
@@ -443,6 +451,15 @@ export component AppWindow inherits Window {
                         panel-overdrive <=> root.panel-overdrive;
                         applying <=> root.applying;
                         panel-overdrive-requested(v) => { root.panel-overdrive-requested(v); }
+                        panel-refresh-known: root.panel-refresh-known;
+                        panel-refresh-rates: root.panel-refresh-rates;
+                        panel-refresh-current: root.panel-refresh-current;
+                        panel-refresh-error: root.panel-refresh-error;
+                        power-rules-enabled: root.power-rules-known && root.power-rules-enabled;
+                        power-rules-ac-hz: root.power-rules-ac-hz;
+                        power-rules-battery-hz: root.power-rules-battery-hz;
+                        panel-refresh-requested(hz) => { root.panel-refresh-requested(hz); }
+                        power-rules-refresh-requested(ac, hz) => { root.power-rules-refresh-requested(ac, hz); }
                     }
                     if (root.active-section == Section.System) : SystemSection {
                         ui-state <=> root.ui-state;

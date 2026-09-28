@@ -22,12 +22,15 @@ pub struct PowerRule {
     /// Performance profile to activate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<PerformanceProfile>,
+    /// Internal panel refresh rate in whole hertz.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_hz: Option<u32>,
 }
 
 impl PowerRule {
     /// True when the rule changes nothing.
     pub fn is_empty(&self) -> bool {
-        self.profile.is_none()
+        self.profile.is_none() && self.refresh_hz.is_none()
     }
 }
 
@@ -150,9 +153,11 @@ mod tests {
             enabled: true,
             ac: PowerRule {
                 profile: Some(PerformanceProfile::Turbo),
+                refresh_hz: Some(144),
             },
             battery: PowerRule {
                 profile: Some(PerformanceProfile::Silent),
+                refresh_hz: Some(60),
             },
         };
         save_power_rules_to_dir(&rules, dir.path()).unwrap();

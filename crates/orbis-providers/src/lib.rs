@@ -36,6 +36,7 @@ pub mod keyboard_backlight;
 pub mod lact_telemetry;
 pub mod linux_memory;
 pub mod native_asus_eco;
+pub mod panel_refresh;
 pub mod probes;
 pub mod readiness;
 pub mod ryzenadj_diagnostics;
@@ -87,6 +88,7 @@ pub use linux_memory::{
     LinuxSystemMemoryProvider, SystemMemoryProvider, parse_meminfo, parse_memory_pressure,
 };
 pub use native_asus_eco::*;
+pub use panel_refresh::{KscreenDoctorPanel, PanelRefreshBackend, PanelRefreshState};
 pub use readiness::{bounded_readiness_probe, join_readiness2};
 pub use ryzenadj_diagnostics::{
     RyzenAdjCurrentValue, RyzenAdjInfoEvidence, parse_info_output as parse_ryzenadj_info_output,

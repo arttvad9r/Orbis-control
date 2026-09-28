@@ -109,6 +109,7 @@ mod tests {
     fn rule(profile: PerformanceProfile) -> PowerRule {
         PowerRule {
             profile: Some(profile),
+            refresh_hz: None,
         }
     }
 

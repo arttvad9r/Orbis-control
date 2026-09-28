@@ -23,6 +23,7 @@ use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::FanCurvePoints;
+use orbis_providers::{PanelRefreshBackend, PanelRefreshState};
 use orbis_providers::{bounded_operation, bounded_provider_call};
 use orbis_session_client::{HardwareProductGpuSource, ProductGpuMutationResult};
 use tokio::sync::mpsc::error::TryRecvError;
@@ -91,6 +92,10 @@ pub enum WorkerCommand {
     SetCpuEpp(orbis_core::cpu_tuning::EnergyPreference),
     /// Enable or disable CPU boost through Hardware1.
     SetCpuBoost(bool),
+    /// Read the internal panel refresh state from the compositor.
+    RefreshPanelRefresh,
+    /// Switch the internal panel to this whole-hertz rate.
+    SetPanelRefresh(u32),
 }
 
 /// Typed result emitted to the presentation boundary.
@@ -100,6 +105,12 @@ pub enum WorkerEvent {
     CpuTuning {
         state: CpuTuningState,
         error: Option<String>,
+    },
+    /// Observed internal panel refresh state; `write_error` is set when a
+    /// requested switch failed or was not confirmed.
+    PanelRefresh {
+        state: Result<PanelRefreshState, String>,
+        write_error: Option<String>,
     },
     Performance(Result<PerformanceCommandOutcome, SetPerformanceError>),
     Gpu(Result<GpuCommandOutcome, SetGpuModeError>),
@@ -198,10 +209,20 @@ pub async fn run_worker_with_product_gpu<G, B, R, F>(
     R: PerformanceServiceRuntime + Sync + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
-    run_worker_with_cpu_tuning(runtime, receiver, emit, poll_interval, product_gpu, None).await;
+    run_worker_with_cpu_tuning(
+        runtime,
+        receiver,
+        emit,
+        poll_interval,
+        product_gpu,
+        None,
+        None,
+    )
+    .await;
 }
 
-/// Worker entry point that also owns the CPU tuning (EPP/boost) backend.
+/// Worker entry point that also owns the CPU tuning (EPP/boost) and the
+/// internal panel refresh backends.
 pub async fn run_worker_with_cpu_tuning<G, B, R, F>(
     runtime: ApplicationRuntime<G, B, R>,
     receiver: UnboundedReceiver<WorkerCommand>,
@@ -209,6 +230,7 @@ pub async fn run_worker_with_cpu_tuning<G, B, R, F>(
     poll_interval: Option<Duration>,
     product_gpu: Option<std::sync::Arc<dyn HardwareProductGpuSource>>,
     cpu_tuning: Option<Arc<dyn CpuTuningBackend>>,
+    panel_refresh: Option<Arc<dyn PanelRefreshBackend>>,
 ) where
     G: GpuServicesRuntime + 'static,
     B: BatteryServiceRuntime + 'static,
@@ -221,7 +243,10 @@ pub async fn run_worker_with_cpu_tuning<G, B, R, F>(
         emit,
         poll_interval,
         product_gpu,
-        cpu_tuning,
+        LocalBackends {
+            cpu_tuning,
+            panel_refresh,
+        },
         Trackers {
             profile_limits: ProfileLimitsTracker::load(),
             power_rules: PowerRulesTracker::load(),
@@ -236,6 +261,7 @@ async fn apply_power_rule<G, B, R, F>(
     runtime: &ApplicationRuntime<G, B, R>,
     profile_limits: &mut ProfileLimitsTracker,
     cpu_tuning: Option<&dyn CpuTuningBackend>,
+    panel_refresh: Option<&dyn PanelRefreshBackend>,
     rule: PowerRule,
     emit: &mut F,
 ) where
@@ -252,6 +278,40 @@ async fn apply_power_rule<G, B, R, F>(
             observe_profile_limits(runtime, profile_limits, cpu_tuning, profile, emit).await;
         }
     }
+    if rule.refresh_hz.is_some() {
+        apply_panel_refresh(panel_refresh, rule.refresh_hz, emit).await;
+    }
+}
+
+/// Switch the panel rate (when asked) and always report the observed state.
+async fn apply_panel_refresh<F>(
+    backend: Option<&dyn PanelRefreshBackend>,
+    hz: Option<u32>,
+    emit: &mut F,
+) where
+    F: FnMut(WorkerEvent),
+{
+    let Some(backend) = backend else {
+        if hz.is_some() {
+            emit(WorkerEvent::PanelRefresh {
+                state: Err("панель недоступна".into()),
+                write_error: Some("Управление частотой экрана недоступно".into()),
+            });
+        }
+        return;
+    };
+    let write_error = match hz {
+        Some(hz) => backend
+            .set_rate(hz)
+            .await
+            .err()
+            .map(|error| error.to_string()),
+        None => None,
+    };
+    emit(WorkerEvent::PanelRefresh {
+        state: backend.read().await.map_err(|error| error.to_string()),
+        write_error,
+    });
 }
 
 /// Feed the observed power source to the rules engine and apply a triggered rule.
@@ -260,6 +320,7 @@ async fn observe_power_source<G, B, R, F>(
     power_rules: &mut PowerRulesTracker,
     profile_limits: &mut ProfileLimitsTracker,
     cpu_tuning: Option<&dyn CpuTuningBackend>,
+    panel_refresh: Option<&dyn PanelRefreshBackend>,
     ac_online: Option<bool>,
     emit: &mut F,
 ) where
@@ -269,7 +330,15 @@ async fn observe_power_source<G, B, R, F>(
     F: FnMut(WorkerEvent),
 {
     if let Some(rule) = ac_online.and_then(|ac| power_rules.observe(ac)) {
-        apply_power_rule(runtime, profile_limits, cpu_tuning, rule, emit).await;
+        apply_power_rule(
+            runtime,
+            profile_limits,
+            cpu_tuning,
+            panel_refresh,
+            rule,
+            emit,
+        )
+        .await;
     }
 }
 
@@ -488,6 +557,13 @@ async fn emit_cpu_tuning<F>(
     }
 }
 
+/// User-session backends the worker drives besides the application services.
+#[derive(Default)]
+struct LocalBackends {
+    cpu_tuning: Option<Arc<dyn CpuTuningBackend>>,
+    panel_refresh: Option<Arc<dyn PanelRefreshBackend>>,
+}
+
 /// Persistent-intent trackers owned by the worker.
 struct Trackers {
     profile_limits: ProfileLimitsTracker,
@@ -500,7 +576,7 @@ async fn run_worker_inner<G, B, R, F>(
     mut emit: F,
     poll_interval: Option<Duration>,
     product_gpu: Option<std::sync::Arc<dyn HardwareProductGpuSource>>,
-    cpu_tuning: Option<Arc<dyn CpuTuningBackend>>,
+    backends: LocalBackends,
     trackers: Trackers,
 ) where
     G: GpuServicesRuntime + 'static,
@@ -508,6 +584,10 @@ async fn run_worker_inner<G, B, R, F>(
     R: PerformanceServiceRuntime + Sync + 'static,
     F: FnMut(WorkerEvent) + Send + 'static,
 {
+    let LocalBackends {
+        cpu_tuning,
+        panel_refresh,
+    } = backends;
     let Trackers {
         mut profile_limits,
         mut power_rules,
@@ -530,6 +610,8 @@ async fn run_worker_inner<G, B, R, F>(
     const GPU_REFRESH_INTERVAL: u32 = 5;
     const CAPABILITY_REFRESH_INTERVAL: u32 = 30;
     const PRODUCT_GPU_STATUS_REFRESH_INTERVAL: u32 = 5;
+    // The desktop can change the refresh rate on its own.
+    const PANEL_REFRESH_INTERVAL: u32 = 5;
     // Profiles also change outside Orbis (power-profiles-daemon, Fn+F5,
     // desktop applets); re-read so the UI never keeps a stale selection.
     const PERFORMANCE_REFRESH_INTERVAL: u32 = 2;
@@ -537,6 +619,7 @@ async fn run_worker_inner<G, B, R, F>(
     let mut performance_refresh_counter = 0_u32;
     let mut capability_refresh_counter = 0_u32;
     let mut product_gpu_status_refresh_counter = 0_u32;
+    let mut panel_refresh_counter = 0_u32;
 
     loop {
         let command = match deferred_command.take() {
@@ -555,6 +638,7 @@ async fn run_worker_inner<G, B, R, F>(
                                     &mut power_rules,
                                     &mut profile_limits,
                                     cpu_tuning.as_deref(),
+                                    panel_refresh.as_deref(),
                                     ac_online,
                                     &mut emit,
                                 )
@@ -621,6 +705,12 @@ async fn run_worker_inner<G, B, R, F>(
                                     product_gpu_status_read(product_gpu.as_deref()).await,
                                 ));
                             }
+                            panel_refresh_counter += 1;
+                            if panel_refresh_counter >= PANEL_REFRESH_INTERVAL {
+                                panel_refresh_counter = 0;
+                                apply_panel_refresh(panel_refresh.as_deref(), None, &mut emit)
+                                    .await;
+                            }
                             continue;
                         }
                     }
@@ -650,6 +740,16 @@ async fn run_worker_inner<G, B, R, F>(
             continue;
         }
 
+        if matches!(command, WorkerCommand::RefreshPanelRefresh) {
+            apply_panel_refresh(panel_refresh.as_deref(), None, &mut emit).await;
+            continue;
+        }
+
+        if let WorkerCommand::SetPanelRefresh(hz) = command {
+            apply_panel_refresh(panel_refresh.as_deref(), Some(hz), &mut emit).await;
+            continue;
+        }
+
         if matches!(command, WorkerCommand::RefreshProductGpuStatus) {
             emit(WorkerEvent::ProductGpuStatusRefresh(
                 product_gpu_status_read(product_gpu.as_deref()).await,
@@ -666,6 +766,7 @@ async fn run_worker_inner<G, B, R, F>(
                 &mut power_rules,
                 &mut profile_limits,
                 cpu_tuning.as_deref(),
+                panel_refresh.as_deref(),
                 ac_online,
                 &mut emit,
             )
@@ -792,6 +893,7 @@ async fn run_worker_inner<G, B, R, F>(
                         &runtime,
                         &mut profile_limits,
                         cpu_tuning.as_deref(),
+                        panel_refresh.as_deref(),
                         rule,
                         &mut emit,
                     )
@@ -865,7 +967,9 @@ async fn run_worker_inner<G, B, R, F>(
             },
             WorkerCommand::RefreshCapabilities
             | WorkerCommand::RefreshTelemetry
-            | WorkerCommand::RefreshPowerLimits => {
+            | WorkerCommand::RefreshPowerLimits
+            | WorkerCommand::RefreshPanelRefresh
+            | WorkerCommand::SetPanelRefresh(_) => {
                 unreachable!("handled before service dispatch")
             }
         };
@@ -1826,7 +1930,10 @@ mod tests {
             },
             None,
             None,
-            Some(backend),
+            LocalBackends {
+                cpu_tuning: Some(backend),
+                panel_refresh: None,
+            },
             Trackers {
                 profile_limits: tracker,
                 power_rules: PowerRulesTracker::load_from_dir(dir.path().to_path_buf()),
@@ -1894,6 +2001,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let rule = |profile| PowerRule {
             profile: Some(profile),
+            refresh_hz: None,
         };
         let mut rules = PowerRules {
             enabled: true,
@@ -1912,7 +2020,7 @@ mod tests {
             },
             None,
             None,
-            None,
+            LocalBackends::default(),
             Trackers {
                 profile_limits: ProfileLimitsTracker::load_from_dir(dir.path().to_path_buf()),
                 power_rules,
@@ -1978,6 +2086,115 @@ mod tests {
         assert_eq!(state.read().await.profile, PerformanceProfile::Balanced);
     }
 
+    struct FakePanel {
+        state: Arc<StdMutex<(u32, Vec<u32>)>>,
+        calls: Arc<StdMutex<Vec<u32>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl PanelRefreshBackend for FakePanel {
+        async fn read(&self) -> Result<PanelRefreshState, ProviderError> {
+            let (current_hz, rates_hz) = self.state.lock().unwrap().clone();
+            Ok(PanelRefreshState {
+                output: "eDP-1".into(),
+                current_hz,
+                rates_hz,
+            })
+        }
+
+        async fn set_rate(&self, hz: u32) -> Result<PanelRefreshState, ProviderError> {
+            self.calls.lock().unwrap().push(hz);
+            if !self.state.lock().unwrap().1.contains(&hz) {
+                return Err(ProviderError::InvalidRequest(format!("{hz} Гц недоступна")));
+            }
+            self.state.lock().unwrap().0 = hz;
+            self.read().await
+        }
+    }
+
+    #[tokio::test]
+    async fn panel_refresh_follows_power_source_rules_and_manual_requests() {
+        use orbis_config::{PowerRule, PowerRules};
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        state.write().await.telemetry.ac_online = Some(true);
+        let dir = tempfile::tempdir().unwrap();
+        let panel_state = Arc::new(StdMutex::new((144, vec![60, 144])));
+        let calls = Arc::new(StdMutex::new(Vec::new()));
+        let panel: Arc<dyn PanelRefreshBackend> = Arc::new(FakePanel {
+            state: panel_state.clone(),
+            calls: calls.clone(),
+        });
+        let mut power_rules = PowerRulesTracker::load_from_dir(dir.path().to_path_buf());
+        power_rules
+            .set_rules(PowerRules {
+                enabled: true,
+                ac: PowerRule {
+                    profile: None,
+                    refresh_hz: Some(144),
+                },
+                battery: PowerRule {
+                    profile: None,
+                    refresh_hz: Some(60),
+                },
+            })
+            .unwrap();
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(run_worker_inner(
+            mock_runtime_with_state(state.clone()),
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            None,
+            LocalBackends {
+                cpu_tuning: None,
+                panel_refresh: Some(panel),
+            },
+            Trackers {
+                profile_limits: ProfileLimitsTracker::load_from_dir(dir.path().to_path_buf()),
+                power_rules,
+            },
+        ));
+
+        async fn next_panel(
+            rx: &mut tokio::sync::mpsc::UnboundedReceiver<WorkerEvent>,
+        ) -> (Result<PanelRefreshState, String>, Option<String>) {
+            loop {
+                let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                    .await
+                    .expect("worker event")
+                    .expect("worker alive");
+                if let WorkerEvent::PanelRefresh { state, write_error } = event {
+                    return (state, write_error);
+                }
+            }
+        }
+
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        tx.send(WorkerCommand::RefreshPanelRefresh).unwrap();
+        let (observed, error) = next_panel(&mut event_rx).await;
+        assert_eq!(observed.unwrap().current_hz, 144);
+        assert_eq!(error, None);
+        assert!(calls.lock().unwrap().is_empty(), "startup must not write");
+
+        state.write().await.telemetry.ac_online = Some(false);
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        let (observed, error) = next_panel(&mut event_rx).await;
+        assert_eq!(observed.unwrap().current_hz, 60);
+        assert_eq!(error, None);
+
+        tx.send(WorkerCommand::SetPanelRefresh(144)).unwrap();
+        assert_eq!(next_panel(&mut event_rx).await.0.unwrap().current_hz, 144);
+
+        tx.send(WorkerCommand::SetPanelRefresh(75)).unwrap();
+        let (observed, error) = next_panel(&mut event_rx).await;
+        assert_eq!(observed.unwrap().current_hz, 144);
+        assert!(error.unwrap().contains("75"));
+        assert_eq!(*calls.lock().unwrap(), vec![60, 144, 75]);
+    }
+
     #[tokio::test]
     async fn profile_change_replays_stored_limits_only_when_auto_apply_is_on() {
         use orbis_core::limits::PowerLimitField::Spl;
@@ -2011,7 +2228,7 @@ mod tests {
             },
             None,
             None,
-            None,
+            LocalBackends::default(),
             Trackers {
                 profile_limits: tracker,
                 power_rules: PowerRulesTracker::load_from_dir(dir.path().to_path_buf()),
