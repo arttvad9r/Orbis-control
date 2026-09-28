@@ -1,8 +1,8 @@
 // Graphics page — product GPU mode with explicit current/queued semantics and
 // observed dGPU hardware state.
 import { ScrollView } from "std-widgets.slint";
-import { UiState, GpuModeHwState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, StatusPill, LocalStatus, LayoutMetrics } from "../common.slint";
+import { UiState, GpuHwState, GpuModeHwState } from "../model.slint";
+import { PageHeader, SectionCard, SectionTitle, InfoRow, StatusPill, LocalStatus, LayoutMetrics } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -30,6 +30,32 @@ export component GraphicsSection inherits Rectangle {
         if (index == 1) { return "Standard"; }
         if (index == 2) { return "Ultimate"; }
         return "—";
+    }
+
+    function power-label() -> string {
+        if (root.ui-state.gpu-power-state == GpuHwState.Loading) { return "—"; }
+        if (root.ui-state.gpu-power-state == GpuHwState.Unavailable) { return "Недоступно"; }
+        if (root.ui-state.gpu-power-value == 0) { return "Активна"; }
+        if (root.ui-state.gpu-power-value == 1) { return "Приостановлена"; }
+        if (root.ui-state.gpu-power-value == 2) { return "Выключена"; }
+        return "Неизвестно";
+    }
+
+    function mux-label() -> string {
+        if (root.ui-state.gpu-mux-state == GpuHwState.Loading) { return "—"; }
+        if (root.ui-state.gpu-mux-state == GpuHwState.Unavailable) { return "Недоступно"; }
+        if (root.ui-state.gpu-mux-value == 0) { return "Гибрид (iGPU)"; }
+        if (root.ui-state.gpu-mux-value == 1) { return "Дискретный"; }
+        return "Неизвестно";
+    }
+
+    function access-label() -> string {
+        if (root.ui-state.gpu-access-state == GpuHwState.Loading) { return "—"; }
+        if (root.ui-state.gpu-access-state == GpuHwState.Unavailable) { return "Недоступно"; }
+        if (root.ui-state.gpu-access-value == 0) { return "Не заблокирована"; }
+        if (root.ui-state.gpu-access-value == 1) { return "Заблокирована"; }
+        if (root.ui-state.gpu-access-value == 2) { return "Ожидает"; }
+        return "Неизвестно";
     }
 
     ScrollView {
@@ -157,6 +183,20 @@ export component GraphicsSection inherits Rectangle {
                         text: "Переключение поставлено в очередь и завершится после перезагрузки или выключения";
                         accent: Palette.warning;
                     }
+                }
+            }
+
+            // Read-only observations; hidden when no source reports anything.
+            if (root.ui-state.gpu-power-state != GpuHwState.Unavailable
+                || root.ui-state.gpu-mux-state != GpuHwState.Unavailable
+                || root.ui-state.gpu-access-state != GpuHwState.Unavailable) : SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 4px;
+                    SectionTitle { title: "Состояние оборудования"; }
+                    InfoRow { label: "Питание dGPU"; value: root.power-label(); }
+                    InfoRow { label: "Физический MUX"; value: root.mux-label(); }
+                    InfoRow { label: "Доступ к dGPU"; value: root.access-label(); }
                 }
             }
 

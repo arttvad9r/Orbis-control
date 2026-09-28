@@ -1,5 +1,9 @@
-// System page — device identity and diagnostics.
+// System page — device identity, capability-gated ASUS advanced parameters and
+// diagnostics. An advanced row is rendered only when its capability is observed
+// on this machine; there are no inert placeholder controls.
 import { ScrollView, TextEdit } from "std-widgets.slint";
+import { OptionStepper } from "../../components/steppers.slint";
+import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { UiState, ClamshellState } from "../model.slint";
 import { PageHeader, SectionCard, SectionTitle, InfoRow, LocalStatus, ActionButton, StatusPill, LayoutMetrics } from "../common.slint";
 import { Palette } from "../../themes/dark.slint";
@@ -102,24 +106,31 @@ export component SystemSection inherits Rectangle {
     }
 
     function clamshell-state-label() -> string {
-        if (root.auto-clamshell-state == ClamshellState.Loading) { return "Определяется"; }
+        if (root.auto-clamshell-state == ClamshellState.Loading) { return "Проверяем состояние компонента сессии"; }
         if (root.auto-clamshell-state == ClamshellState.Inactive) { return "Выключено"; }
         if (root.auto-clamshell-state == ClamshellState.Active) { return "Включено"; }
         if (root.auto-clamshell-state == ClamshellState.Unavailable) { return "Недоступно"; }
-        if (root.auto-clamshell-state == ClamshellState.PermissionDenied) { return "Нет разрешения"; }
-        if (root.auto-clamshell-state == ClamshellState.StartFailed) { return "Не включилось"; }
-        if (root.auto-clamshell-state == ClamshellState.ExitFailed) { return "Не выключилось"; }
-        return "Неизвестно";
+        if (root.auto-clamshell-state == ClamshellState.PermissionDenied) { return "Компонент сессии отклонил доступ"; }
+        if (root.auto-clamshell-state == ClamshellState.StartFailed) { return "Не удалось включить режим"; }
+        if (root.auto-clamshell-state == ClamshellState.ExitFailed) { return "Не удалось выключить режим"; }
+        return "Состояние компонента сессии не определено";
     }
 
-    function clamshell-state-accent() -> color {
-        if (root.auto-clamshell-state == ClamshellState.Active) { return Palette.success; }
-        if (root.auto-clamshell-state == ClamshellState.PermissionDenied
-            || root.auto-clamshell-state == ClamshellState.StartFailed
-            || root.auto-clamshell-state == ClamshellState.ExitFailed) { return Palette.error; }
-        if (root.auto-clamshell-state == ClamshellState.Inactive) { return Palette.text-secondary; }
-        return Palette.warning;
+    // Closed-lid mode is owned by sessiond; it is hidden only when the session
+    // component reports the capability as unavailable.
+    function clamshell-visible() -> bool {
+        return root.auto-clamshell-state != ClamshellState.Unavailable;
     }
+
+    function advanced-visible() -> bool {
+        return root.boot-sound-state-ready || root.igpu-memory-state-ready
+            || root.aspm-state-ready || root.clamshell-visible();
+    }
+
+    function staged-visible() -> bool {
+        return root.boot-sound-state-ready || root.igpu-memory-state-ready || root.aspm-state-ready;
+    }
+
 
     ScrollView {
         VerticalLayout {
@@ -131,7 +142,7 @@ export component SystemSection inherits Rectangle {
 
             PageHeader {
                 title: "Система";
-                description: "Сведения об устройстве и диагностика.";
+                description: "Сведения об устройстве, расширенные параметры и диагностика.";
             }
 
             SectionCard {
@@ -143,6 +154,79 @@ export component SystemSection inherits Rectangle {
                     InfoRow { label: "Плата"; value: root.board-label(); }
                     InfoRow { label: "BIOS"; value: root.bios-label(); }
                     InfoRow { label: "Orbis Control"; value: root.ui-state.version; }
+                }
+            }
+
+            if (root.advanced-visible()) : SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 8px;
+
+                    HorizontalLayout {
+                        height: 30px;
+                        SectionTitle { horizontal-stretch: 1; title: "Расширенные параметры ASUS"; }
+                        StatusPill {
+                            text: root.applying ? "Применение" : root.backend-ready ? "Доступно" : "Определяется";
+                            accent: root.applying || !root.backend-ready ? Palette.warning : Palette.success;
+                        }
+                    }
+
+                    if (root.status != "") : LocalStatus { text: root.status; accent: Palette.text-secondary; }
+
+                    if (root.boot-sound-state-ready) : RequestToggleRow {
+                        label: "Звук при включении";
+                        description: "Звуковой сигнал POST при старте ноутбука";
+                        checked: root.boot-sound;
+                        disabled: !root.boot-sound-control-ready || root.applying;
+                        toggled(value) => { root.boot-sound-requested(value); }
+                    }
+
+                    if (root.aspm-state-ready) : RequestToggleRow {
+                        label: "Отключить энергосбережение PCIe (ASPM)";
+                        description: "Политика ядра «performance» вместо «default»; сбрасывается после перезагрузки";
+                        checked: root.disable-aspm;
+                        disabled: !root.aspm-control-ready || root.applying;
+                        toggled(value) => { root.aspm-requested(value); }
+                    }
+
+                    if (root.igpu-memory-state-ready) : HorizontalLayout {
+                        height: 40px;
+                        padding-left: 10px;
+                        spacing: 12px;
+                        Text { width: 176px; text: "Память iGPU"; font-size: 13.5px; font-weight: 550; color: Palette.text-primary; vertical-alignment: center; }
+                        OptionStepper {
+                            label: root.igpu-memory-pending ? root.igpu-label(root.igpu-memory) + " · после перезагрузки" : root.igpu-label(root.igpu-memory);
+                            disabled: !root.igpu-memory-control-ready || root.applying;
+                            can-previous: root.igpu-memory > 0;
+                            can-next: root.igpu-memory < 8;
+                            previous => { root.igpu-memory-requested(Math.max(0, root.igpu-memory - 1)); }
+                            next => { root.igpu-memory-requested(Math.min(8, root.igpu-memory + 1)); }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+
+                    if (root.clamshell-visible()) : RequestToggleRow {
+                        label: "Не засыпать при закрытой крышке";
+                        description: root.auto-clamshell-state == ClamshellState.Inactive || root.auto-clamshell-state == ClamshellState.Active
+                            ? "Для работы с внешним монитором при закрытой крышке"
+                            : root.clamshell-state-label();
+                        checked: root.auto-clamshell-state == ClamshellState.Active;
+                        disabled: (root.auto-clamshell-state != ClamshellState.Inactive && root.auto-clamshell-state != ClamshellState.Active) || root.applying;
+                        toggled(value) => { root.auto-clamshell-requested(value); }
+                    }
+
+                    if (root.staged-visible()) : HorizontalLayout {
+                        height: 40px;
+                        spacing: 8px;
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        ActionButton { label: "Обновить"; disabled: root.applying; clicked => { root.reload-requested(); } }
+                        ActionButton {
+                            label: root.applying ? "Применение…" : "Применить";
+                            accent: root.advanced-apply-ready;
+                            disabled: !root.advanced-apply-ready || root.applying;
+                            clicked => { root.apply-requested(); }
+                        }
+                    }
                 }
             }
 

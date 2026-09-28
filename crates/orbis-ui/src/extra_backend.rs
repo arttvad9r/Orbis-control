@@ -290,9 +290,9 @@ pub(crate) fn wire_window(window: &AppWindow) {
     window.set_igpu_memory(0);
     window.set_status(
         if CONTEXT.with(|slot| slot.borrow().is_some()) {
-            "Reading advanced hardware observations…"
+            "Чтение состояния…"
         } else {
-            "Advanced controls backend unavailable"
+            "Служба расширенных параметров недоступна"
         }
         .into(),
     );
@@ -434,7 +434,7 @@ fn apply_advanced(window: &AppWindow) {
         return;
     };
     if !context.advanced_dirty.load(Ordering::Acquire) {
-        window.set_status("Apply skipped · no staged changes".into());
+        window.set_status("Нет изменений для применения".into());
         return;
     }
     let draft = advanced_apply_draft(
@@ -449,7 +449,7 @@ fn apply_advanced(window: &AppWindow) {
         return;
     };
     window.set_advanced_apply_ready(false);
-    window.set_status("Applying staged ASUS parameters through Hardware1…".into());
+    window.set_status("Применение параметров…".into());
     let weak = window.as_weak();
     let completion = context.mutating.clone();
     let unresolved_state = context.advanced_unresolved.clone();
@@ -490,9 +490,9 @@ fn apply_advanced(window: &AppWindow) {
             let (status, pending) = match result {
                 Ok(observation) => (
                     if observation.igpu_memory.is_some_and(|(_, pending)| pending) {
-                        "Staged ASUS parameters applied · reboot required".to_string()
+                        "Параметры применены · память iGPU изменится после перезагрузки".to_string()
                     } else {
-                        "Staged ASUS parameters applied · read-back confirmed".to_string()
+                        "Параметры применены и подтверждены".to_string()
                     },
                     observation.igpu_memory.map(|(_, pending)| pending),
                 ),
@@ -656,9 +656,15 @@ fn request_aura_effect(window: &AppWindow, request: AuraEffectRequest) {
                     window.set_aura_secondary_red(observed.colour2.r as i32);
                     window.set_aura_secondary_green(observed.colour2.g as i32);
                     window.set_aura_secondary_blue(observed.colour2.b as i32);
-                    window.set_status("Aura effect accepted · config read-back confirmed".into());
+                    window.set_status("Эффект Aura применён".into());
                 }
-                Err(error) => window.set_status(format!("Aura effect failed · {error}").into()),
+                Err(error) => window.set_status(
+                    format!(
+                        "Не удалось применить эффект Aura · {}",
+                        write_error_label(&error)
+                    )
+                    .into(),
+                ),
             }
             refresh(&window);
         }) {
@@ -679,7 +685,7 @@ fn request_panel_overdrive(window: &AppWindow, enabled: bool) {
         return;
     };
 
-    window.set_status("Applying Panel Overdrive through Hardware1…".into());
+    window.set_status("Применение Panel Overdrive…".into());
     let weak = window.as_weak();
     let completion = context.mutating.clone();
     context.runtime.spawn(async move {
@@ -697,8 +703,12 @@ fn request_panel_overdrive(window: &AppWindow, enabled: bool) {
                     window.set_panel_overdrive(observed);
                     window.set_status(
                         format!(
-                            "Panel Overdrive {} · authoritative read-back confirmed",
-                            if observed { "on" } else { "off" }
+                            "Panel Overdrive {} · подтверждено",
+                            if observed {
+                                "включён"
+                            } else {
+                                "выключен"
+                            }
                         )
                         .into(),
                     );
@@ -706,7 +716,11 @@ fn request_panel_overdrive(window: &AppWindow, enabled: bool) {
                 Err(error) => {
                     tracing::warn!(error = ?error, "Extra Panel Overdrive mutation failed");
                     window.set_status(
-                        format!("Panel write failed · {}", write_error_label(&error)).into(),
+                        format!(
+                            "Не удалось изменить Panel Overdrive · {}",
+                            write_error_label(&error)
+                        )
+                        .into(),
                     );
                 }
             }
@@ -727,7 +741,7 @@ fn request_clamshell(window: &AppWindow, enabled: bool) {
     let Some(context) = begin_mutation(window) else {
         return;
     };
-    window.set_status("Updating closed-lid mode…".into());
+    window.set_status("Изменение режима закрытой крышки…".into());
     let weak = window.as_weak();
     let completion = context.mutating.clone();
     let clamshell = context.clamshell.clone();
@@ -759,14 +773,14 @@ fn clamshell_ui_state(result: Result<u8, ProviderError>) -> ClamshellState {
 
 fn clamshell_status(state: ClamshellState) -> &'static str {
     match state {
-        ClamshellState::Loading => "Closed-lid mode is loading",
-        ClamshellState::Inactive => "Closed-lid mode off · session inhibitor inactive",
-        ClamshellState::Active => "Closed-lid mode on · session inhibitor active",
-        ClamshellState::Unavailable => "Closed-lid mode unavailable",
-        ClamshellState::PermissionDenied => "Closed-lid mode unavailable · permission denied",
-        ClamshellState::StartFailed => "Closed-lid mode unavailable · inhibitor start failed",
-        ClamshellState::ExitFailed => "Closed-lid mode unavailable · inhibitor exit failed",
-        ClamshellState::Unknown => "Closed-lid mode unknown",
+        ClamshellState::Loading => "Режим закрытой крышки определяется",
+        ClamshellState::Inactive => "Режим закрытой крышки выключен",
+        ClamshellState::Active => "Режим закрытой крышки включён",
+        ClamshellState::Unavailable => "Режим закрытой крышки недоступен",
+        ClamshellState::PermissionDenied => "Режим закрытой крышки недоступен · нет разрешения",
+        ClamshellState::StartFailed => "Не удалось включить режим закрытой крышки",
+        ClamshellState::ExitFailed => "Не удалось выключить режим закрытой крышки",
+        ClamshellState::Unknown => "Состояние режима закрытой крышки неизвестно",
     }
 }
 
@@ -783,7 +797,7 @@ fn refresh_with_status(
     let context = CONTEXT.with(|slot| slot.borrow().clone());
     let Some(context) = context else {
         reset_readiness(window);
-        window.set_status("Advanced controls backend unavailable".into());
+        window.set_status("Служба расширенных параметров недоступна".into());
         return;
     };
 
@@ -798,7 +812,7 @@ fn refresh_with_status(
     window.set_keyboard_control_ready(false);
     window.set_panel_overdrive_control_ready(false);
     window.set_auto_clamshell_state(ClamshellState::Loading);
-    window.set_status("Refreshing advanced hardware state…".into());
+    window.set_status("Обновление состояния…".into());
 
     let weak = window.as_weak();
     let completion = context.refreshing.clone();
@@ -944,13 +958,12 @@ fn refresh_with_status(
                     aura.status, boot_sound.status, apu.status,
                 )
             };
-            window.set_status(
-                final_status
-                    .unwrap_or_else(|| {
-                        format!("{observed_status} · {}", clamshell_status(clamshell_state))
-                    })
-                    .into(),
+            tracing::debug!(
+                status = %observed_status,
+                clamshell = clamshell_status(clamshell_state),
+                "advanced hardware state refreshed"
             );
+            window.set_status(final_status.unwrap_or_default().into());
         }) {
             tracing::warn!(error = ?error, "failed to publish Extra observed state to UI");
         }
@@ -1183,18 +1196,18 @@ fn error_status(prefix: &str, error: &ProviderError) -> String {
 
 fn write_error_label(error: &ProviderError) -> &'static str {
     match error {
-        ProviderError::Unsupported(_) => "write disabled",
-        ProviderError::BackendUnavailable(_) => "write unavailable",
-        ProviderError::PermissionDenied(_) => "write denied",
-        ProviderError::Timeout(_) => "write timed out",
-        _ => "write failed",
+        ProviderError::Unsupported(_) => "запись не поддерживается",
+        ProviderError::BackendUnavailable(_) => "служба недоступна",
+        ProviderError::PermissionDenied(_) => "доступ запрещён",
+        ProviderError::Timeout(_) => "истекло время ожидания",
+        _ => "ошибка записи",
     }
 }
 
 fn advanced_apply_error_status(error: &AdvancedApplyError) -> String {
     let reason = write_error_label(&error.error);
     let Some(failed) = error.failed.map(advanced_apply_control_label) else {
-        return format!("Apply failed · {reason} · hardware state refreshed");
+        return format!("Не удалось применить · {reason} · состояние обновлено");
     };
     if matches!(error.error, ProviderError::Timeout(_)) {
         let completed = if error.completed.is_empty() {
@@ -1205,33 +1218,31 @@ fn advanced_apply_error_status(error: &AdvancedApplyError) -> String {
                 error
                     .completed
                     .iter()
-                    .map(|control| format!("{} applied", advanced_apply_control_label(*control)))
+                    .map(|control| format!("{}: применено", advanced_apply_control_label(*control)))
                     .collect::<Vec<_>>()
                     .join(", ")
             )
         };
         return format!(
-            "Apply outcome unknown · {completed}{failed} may have changed · {reason} · hardware state refreshed"
+            "Исход неизвестен · {completed}{failed}: возможно изменено · {reason} · состояние обновлено"
         );
     }
     if error.completed.is_empty() {
-        return format!("Apply failed · {failed} {reason} · hardware state refreshed");
+        return format!("Не удалось применить · {failed}: {reason} · состояние обновлено");
     }
     let completed = error
         .completed
         .iter()
-        .map(|control| format!("{} applied", advanced_apply_control_label(*control)))
+        .map(|control| format!("{}: применено", advanced_apply_control_label(*control)))
         .collect::<Vec<_>>()
         .join(", ");
-    format!(
-        "Apply partially completed · {completed}; {failed} failed · {reason} · hardware state refreshed"
-    )
+    format!("Применено частично · {completed}; {failed}: {reason} · состояние обновлено")
 }
 
 fn advanced_apply_control_label(control: AdvancedApplyControl) -> &'static str {
     match control {
-        AdvancedApplyControl::BootSound => "boot sound",
-        AdvancedApplyControl::IgpuMemory => "iGPU memory",
+        AdvancedApplyControl::BootSound => "звук при включении",
+        AdvancedApplyControl::IgpuMemory => "память iGPU",
         AdvancedApplyControl::Aspm => "ASPM",
     }
 }
@@ -1804,7 +1815,7 @@ mod tests {
         assert_eq!(*state.lock().unwrap(), (true, 2, false));
         assert_eq!(
             advanced_apply_error_status(&error),
-            "Apply partially completed · boot sound applied; iGPU memory failed · write failed · hardware state refreshed"
+            "Применено частично · звук при включении: применено; память iGPU: ошибка записи · состояние обновлено"
         );
     }
 
@@ -1817,7 +1828,7 @@ mod tests {
 
         assert_eq!(
             advanced_apply_error_status(&error),
-            "Apply failed · boot sound write disabled · hardware state refreshed"
+            "Не удалось применить · звук при включении: запись не поддерживается · состояние обновлено"
         );
     }
 
@@ -1831,7 +1842,7 @@ mod tests {
 
         assert_eq!(
             advanced_apply_error_status(&error),
-            "Apply partially completed · boot sound applied; iGPU memory failed · write unavailable · hardware state refreshed"
+            "Применено частично · звук при включении: применено; память iGPU: служба недоступна · состояние обновлено"
         );
         assert!(!advanced_apply_error_status(&error).contains("rolled back"));
     }
@@ -1845,7 +1856,7 @@ mod tests {
 
         assert_eq!(
             advanced_apply_error_status(&error),
-            "Apply outcome unknown · ASPM may have changed · write timed out · hardware state refreshed"
+            "Исход неизвестен · ASPM: возможно изменено · истекло время ожидания · состояние обновлено"
         );
     }
 
@@ -1859,7 +1870,7 @@ mod tests {
 
         assert_eq!(
             advanced_apply_error_status(&error),
-            "Apply outcome unknown · boot sound applied; iGPU memory may have changed · write timed out · hardware state refreshed"
+            "Исход неизвестен · звук при включении: применено; память iGPU: возможно изменено · истекло время ожидания · состояние обновлено"
         );
         assert!(advanced_apply_requires_reconciliation(&error));
         assert!(!advanced_control_writable(true, true, true));
@@ -1947,26 +1958,29 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_advanced_controls_are_omitted_from_the_system_ui() {
+    fn system_ui_renders_owned_advanced_rows_only_behind_capability_gates() {
         let source = include_str!("../../../ui/audited/sections/system.slint");
-        for omitted_control in [
+        for owner_less in [
             "Светодиоды состояния",
-            "Автоматический режим при закрытой крышке",
-            "Отключать PCIe ASPM при работе от сети",
-            "Отключать сеть в современном режиме ожидания",
-            "Память iGPU",
+            "современном режиме ожидания",
             "Гибернация через",
             "Активные ядра CPU",
             "КЛАВИШИ M1–M5",
-            "Звук при включении",
+        ] {
+            assert!(!source.contains(owner_less), "no typed owner: {owner_less}");
+        }
+        for gated_row in [
+            "if (root.boot-sound-state-ready) : RequestToggleRow",
+            "if (root.aspm-state-ready) : RequestToggleRow",
+            "if (root.igpu-memory-state-ready) : HorizontalLayout",
+            "if (root.clamshell-visible()) : RequestToggleRow",
+            "if (root.advanced-visible()) : SectionCard",
         ] {
             assert!(
-                !source.contains(omitted_control),
-                "unsupported System control must be omitted: {omitted_control}"
+                source.contains(gated_row),
+                "missing capability gate: {gated_row}"
             );
         }
-        assert!(source.contains("title: \"Устройство\""));
-        assert!(source.contains("title: \"Диагностика\""));
     }
 
     #[test]
@@ -2008,26 +2022,24 @@ mod tests {
             clamshell_ui_state(Err(ProviderError::Internal("permission denied".into()))),
             ClamshellState::Unknown
         );
-        let source = include_str!("../../../ui/audited/sections/system.slint");
-        assert!(
-            !source.contains("Автоматический режим при закрытой крышке"),
-            "the unsupported session control must not be rendered"
-        );
     }
 
     #[test]
     fn clamshell_ui_status_covers_every_explicit_state() {
         for (state, marker) in [
-            (ClamshellState::Loading, "loading"),
-            (ClamshellState::Inactive, "off"),
-            (ClamshellState::Active, "on"),
-            (ClamshellState::Unavailable, "unavailable"),
-            (ClamshellState::PermissionDenied, "permission denied"),
-            (ClamshellState::StartFailed, "start failed"),
-            (ClamshellState::ExitFailed, "exit failed"),
-            (ClamshellState::Unknown, "unknown"),
+            (ClamshellState::Loading, "определяется"),
+            (ClamshellState::Inactive, "выключен"),
+            (ClamshellState::Active, "включён"),
+            (ClamshellState::Unavailable, "недоступен"),
+            (ClamshellState::PermissionDenied, "нет разрешения"),
+            (ClamshellState::StartFailed, "не удалось включить"),
+            (ClamshellState::ExitFailed, "не удалось выключить"),
+            (ClamshellState::Unknown, "неизвестно"),
         ] {
-            assert!(clamshell_status(state).contains(marker), "{state:?}");
+            assert!(
+                clamshell_status(state).to_lowercase().contains(marker),
+                "{state:?}"
+            );
         }
     }
 }

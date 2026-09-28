@@ -143,21 +143,17 @@ fn demo_state(component: &AppWindow) {
     component.set_panel_overdrive(true);
 
     component.set_boot_sound_state_ready(true);
+    component.set_boot_sound_control_ready(true);
     component.set_boot_sound(true);
-    component.set_backend_ready(true);
-    component.set_status("Состояние расширенных параметров синхронизировано".into());
-    component.set_status_led(true);
+    component.set_aspm_state_ready(true);
+    component.set_aspm_control_ready(true);
     component.set_disable_aspm(false);
-    component.set_disable_standby_networking(false);
+    component.set_igpu_memory_state_ready(true);
+    component.set_igpu_memory_control_ready(true);
     component.set_igpu_memory(2);
-    component.set_hibernate_after(30);
-    component.set_p_cores(8);
-    component.set_e_cores(0);
-    component.set_m1_action(2);
-    component.set_m2_action(3);
-    component.set_m3_action(4);
-    component.set_m4_action(7);
-    component.set_m5_action(8);
+    component.set_auto_clamshell_state(ClamshellState::Inactive);
+    component.set_backend_ready(true);
+    component.set_status("".into());
 
     component.set_startup(true);
     component.set_startup_enabled(true);
