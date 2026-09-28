@@ -14,20 +14,83 @@ export component ValueSlider inherits Rectangle {
     // slider width exceed a 1/3 card column at the 980px window (audit
     // t_29073c31).
     in property <bool> show-percent: true;
+    out property <bool> has-keyboard-focus: focus-scope.has-focus;
     callback changed(float);
 
     height: 40px;
     background: transparent;
 
     property <bool> gesture-active: false;
+    property <bool> keyboard-active: false;
     property <float> preview-value: root.value;
     property <float> internal-value: root.gesture-active ? root.preview-value : root.value;
     property <float> frac: (root.internal-value - root.min) / (root.max - root.min);
+
+    function edit-to(target: float) {
+        if (root.disabled) { return; }
+        root.gesture-active = true;
+        root.keyboard-active = true;
+        root.preview-value = root.snap(target);
+        commit-timer.running = false;
+        commit-timer.running = true;
+    }
+
+    function nudge(delta: float) {
+        root.edit-to((root.keyboard-active ? root.preview-value : root.value) + delta);
+    }
+
+    function commit-keyboard() {
+        commit-timer.running = false;
+        if (!root.keyboard-active) { return; }
+        let final-value = root.snap(root.preview-value);
+        root.keyboard-active = false;
+        root.gesture-active = false;
+        root.preview-value = root.value;
+        if (final-value != root.value) {
+            root.changed(final-value);
+        }
+    }
+
+    commit-timer := Timer {
+        interval: 600ms;
+        running: false;
+        triggered => { root.commit-keyboard(); }
+    }
 
     function snap(v: float) -> float {
         let clamped = Math.min(Math.max(v, root.min), root.max);
         let steps = Math.round((clamped - root.min) / root.step);
         return root.min + steps * root.step;
+    }
+
+    focus-scope := FocusScope {
+        focus-on-tab-navigation: true;
+        enabled: !root.disabled;
+        key-pressed(event) => {
+            if (event.text == Key.LeftArrow || event.text == Key.DownArrow) {
+                root.nudge(-root.step);
+                return accept;
+            } else if (event.text == Key.RightArrow || event.text == Key.UpArrow) {
+                root.nudge(root.step);
+                return accept;
+            } else if (event.text == Key.PageDown) {
+                root.nudge(-10 * root.step);
+                return accept;
+            } else if (event.text == Key.PageUp) {
+                root.nudge(10 * root.step);
+                return accept;
+            } else if (event.text == Key.Home) {
+                root.edit-to(root.min);
+                return accept;
+            } else if (event.text == Key.End) {
+                root.edit-to(root.max);
+                return accept;
+            } else if (event.text == Key.Return) {
+                root.commit-keyboard();
+                return accept;
+            }
+            return reject;
+        }
     }
 
     HorizontalLayout {
@@ -64,7 +127,7 @@ export component ValueSlider inherits Rectangle {
                 height: 18px;
                 border-radius: 9px;
                 background: root.disabled ? Palette.surface-muted : Palette.surface-default;
-                border-width: 2px;
+                border-width: focus-scope.has-focus ? 3px : 2px;
                 border-color: root.disabled ? Palette.text-disabled : Palette.accent-default;
                 x: root.frac * (parent.width - 18px);
                 y: (parent.height - 18px) / 2;
@@ -77,6 +140,9 @@ export component ValueSlider inherits Rectangle {
                 enabled: !root.disabled;
                 pointer-event(ev) => {
                     if (ev.kind == PointerEventKind.down) {
+                        focus-scope.focus();
+                        commit-timer.running = false;
+                        root.keyboard-active = false;
                         root.gesture-active = true;
                         root.preview-value = root.snap(root.min
                             + (self.mouse-x / parent.width) * (root.max - root.min));
