@@ -1,38 +1,9 @@
 // Fan curve editor: fan/profile selection, curve chart and per-point temperature
 // controls. Write gating remains authoritative outside this visual component.
 import { FanCurveHwState } from "model.slint";
-import { SectionCard, SectionTitle, LocalStatus } from "common.slint";
+import { ChoiceButton } from "common.slint";
 import { FanCurveChart } from "../components/fan-curve-chart.slint";
 import { Palette } from "../themes/dark.slint";
-
-component TabButton inherits Rectangle {
-    in property <string> label;
-    in property <bool> selected: false;
-    callback clicked;
-
-    height: 32px;
-    min-width: 90px;
-    border-radius: 10px;
-    border-width: root.selected ? 1.5px : 1px;
-    border-color: root.selected ? Palette.accent-default
-        : touch.has-hover ? Palette.border-strong
-        : Palette.border-default;
-    background: touch.pressed ? Palette.surface-pressed
-        : root.selected ? Palette.accent-soft
-        : touch.has-hover ? Palette.surface-hover
-        : Palette.surface-raised;
-
-    Text {
-        text: root.label;
-        font-size: 13px;
-        font-weight: root.selected ? 650 : 550;
-        color: root.selected ? Palette.accent-default : Palette.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-
-    touch := TouchArea { clicked => { root.clicked(); } }
-}
 
 component StepButton inherits Rectangle {
     in property <string> glyph;
@@ -70,7 +41,7 @@ component TempStepper inherits Rectangle {
 
     min-width: 60px;
     horizontal-stretch: 1;
-    height: 54px;
+    height: 58px;
     border-radius: 10px;
     border-width: 1px;
     border-color: Palette.border-default;
@@ -78,12 +49,12 @@ component TempStepper inherits Rectangle {
 
     Text {
         x: 0px;
-        y: 7px;
+        y: 6px;
         width: parent.width;
         height: 20px;
         text: root.value + "°";
-        font-size: 12.5px;
-        font-weight: 650;
+        font-size: 13px;
+        font-weight: 600;
         color: root.editable ? Palette.text-primary : Palette.text-secondary;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -91,14 +62,14 @@ component TempStepper inherits Rectangle {
 
     StepButton {
         x: 7px;
-        y: 27px;
+        y: 28px;
         glyph: "−";
         editable: root.editable;
         clicked => { root.changed(root.index, root.value - 1); }
     }
     StepButton {
-        x: parent.width - 35px;
-        y: 27px;
+        x: parent.width - 31px;
+        y: 28px;
         glyph: "+";
         editable: root.editable;
         clicked => { root.changed(root.index, root.value + 1); }
@@ -127,108 +98,73 @@ export component FanCurveEditor inherits Rectangle {
     background: transparent;
     min-height: 390px;
 
-    function state-text() -> string {
-        if (root.error-state) { return "Ошибка кривой"; }
-        if (root.state == FanCurveHwState.Loading) { return "Чтение"; }
-        if (root.state == FanCurveHwState.Unavailable) { return "Недоступно"; }
-        if (!root.writable) { return "Только чтение"; }
-        if (root.dirty) { return "Есть изменения"; }
-        return "Актуальна";
-    }
-
-    function state-color() -> color {
-        if (root.error-state || root.state == FanCurveHwState.Unavailable) { return Palette.error; }
-        if (root.dirty) { return Palette.warning; }
-        if (root.state == FanCurveHwState.Ready) { return root.writable ? Palette.success : Palette.text-secondary; }
-        return Palette.text-secondary;
-    }
-
     VerticalLayout {
-        spacing: 7px;
+        spacing: 14px;
 
         HorizontalLayout {
-            height: 32px;
-            spacing: 7px;
-            TabButton {
+            height: 36px;
+            spacing: 6px;
+            ChoiceButton {
+                width: 96px;
+                height: 36px;
                 label: "CPU";
                 selected: root.fan-selected == 0;
                 clicked => { root.fan-changed(0); }
             }
-            TabButton {
+            ChoiceButton {
+                width: 96px;
+                height: 36px;
                 label: "GPU";
                 selected: root.fan-selected == 1;
                 clicked => { root.fan-changed(1); }
             }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-            LocalStatus {
-                width: 180px;
-                text: root.state-text();
-                accent: root.state-color();
-            }
-        }
-
-        HorizontalLayout {
-            height: 32px;
-            spacing: 7px;
-            Text {
-                width: 100px;
-                text: "Профиль BIOS";
-                font-size: 13px;
-                font-weight: 550;
-                color: Palette.text-secondary;
-                vertical-alignment: center;
-            }
-            TabButton {
-                 label: "Баланс";
+            Rectangle { horizontal-stretch: 1; }
+            ChoiceButton {
+                width: 104px;
+                height: 36px;
+                label: "Баланс";
                 selected: root.profile-selected == 0;
                 clicked => { root.profile-changed(0); }
             }
-            TabButton {
-                 label: "Производ.";
+            ChoiceButton {
+                width: 104px;
+                height: 36px;
+                label: "Турбо";
                 selected: root.profile-selected == 1;
                 clicked => { root.profile-changed(1); }
             }
-            TabButton {
-                 label: "Тихий";
+            ChoiceButton {
+                width: 104px;
+                height: 36px;
+                label: "Тихий";
                 selected: root.profile-selected == 2;
                 clicked => { root.profile-changed(2); }
             }
-            if (root.eco-profile-available || root.profile-selected == 3) : TabButton {
-                 label: "Эко";
+            if (root.eco-profile-available || root.profile-selected == 3) : ChoiceButton {
+                width: 104px;
+                height: 36px;
+                label: "Эко";
                 selected: root.profile-selected == 3;
                 clicked => { root.profile-changed(3); }
             }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
         }
 
-        SectionCard {
+        FanCurveChart {
             vertical-stretch: 1;
-            background: Palette.surface-raised;
-            VerticalLayout {
-                padding: 12px;
-                spacing: 7px;
-                SectionTitle {
-                    title: root.fan-selected == 0 ? "Кривая вентилятора CPU" : "Кривая вентилятора GPU";
-                    detail: root.writable ? "Перетащите точки или измените температуры ниже" : "Авторитетная кривая · только чтение";
-                }
-                FanCurveChart {
-                    vertical-stretch: 1;
-                    state: root.state;
-                    editable: root.writable && !root.error-state;
-                    percent-labels: true;
-                    accent: root.fan-selected == 0 ? Palette.accent-default : Palette.turbo;
-                    temp-0: root.temp-0; temp-1: root.temp-1; temp-2: root.temp-2; temp-3: root.temp-3;
-                    temp-4: root.temp-4; temp-5: root.temp-5; temp-6: root.temp-6; temp-7: root.temp-7;
-                    pwm-0: root.pwm-0; pwm-1: root.pwm-1; pwm-2: root.pwm-2; pwm-3: root.pwm-3;
-                    pwm-4: root.pwm-4; pwm-5: root.pwm-5; pwm-6: root.pwm-6; pwm-7: root.pwm-7;
-                    pwm-changed(i, v) => { root.pwm-point-changed(i, v); }
-                }
-            }
+            state: root.state;
+            editable: root.writable && !root.error-state;
+            percent-labels: true;
+            accent: root.fan-selected == 0 ? Palette.accent-default : Palette.success;
+            temp-0: root.temp-0; temp-1: root.temp-1; temp-2: root.temp-2; temp-3: root.temp-3;
+            temp-4: root.temp-4; temp-5: root.temp-5; temp-6: root.temp-6; temp-7: root.temp-7;
+            pwm-0: root.pwm-0; pwm-1: root.pwm-1; pwm-2: root.pwm-2; pwm-3: root.pwm-3;
+            pwm-4: root.pwm-4; pwm-5: root.pwm-5; pwm-6: root.pwm-6; pwm-7: root.pwm-7;
+            pwm-changed(i, v) => { root.pwm-point-changed(i, v); }
         }
 
         HorizontalLayout {
-            height: 54px;
-            spacing: 6px;
+            height: 58px;
+            spacing: 8px;
             TempStepper { index: 0; value: root.temp-0; editable: root.writable && root.state == FanCurveHwState.Ready; changed(i,v) => { root.temp-point-changed(i,v); } }
             TempStepper { index: 1; value: root.temp-1; editable: root.writable && root.state == FanCurveHwState.Ready; changed(i,v) => { root.temp-point-changed(i,v); } }
             TempStepper { index: 2; value: root.temp-2; editable: root.writable && root.state == FanCurveHwState.Ready; changed(i,v) => { root.temp-point-changed(i,v); } }

@@ -116,6 +116,10 @@ export struct UiState {
     battery-percent: string,
     /// Numeric battery charge percent for the header indicator (-1 = unknown).
     battery-percent-value: int,
+    /// Numeric temperatures for gauges (-1 = unknown).
+    cpu-temp-value: int,
+    gpu-temp-value: int,
+    igpu-temp-value: int,
     power-ac-mw: string,
     battery-health: string,
     battery-cycles: string,

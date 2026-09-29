@@ -20,12 +20,13 @@ component GraphPoint inherits Rectangle {
 
     Rectangle {
         y: (1 - Math.min(Math.max(root.shown / 255, 0), 1)) * (parent.height - 16px) - 2px;
+        x: 2px;
         width: 14px;
         height: 14px;
         border-radius: 7px;
-        border-width: 2px;
-        border-color: Palette.surface-default;
-        background: root.accent;
+        border-width: 3px;
+        border-color: root.accent;
+        background: Palette.text-on-accent;
     }
 
     if (drag.has-hover || root.active) : Rectangle {
@@ -116,15 +117,15 @@ export component FanCurveChart inherits Rectangle {
         spacing: 8px;
 
         VerticalLayout {
-            width: 34px;
+            width: 38px;
             padding-top: 3px;
             padding-bottom: 20px;
             alignment: space-between;
-            Text { text: root.percent-labels ? "100 %": "255"; font-size: 10px; color: Palette.text-disabled; horizontal-alignment: right; }
-            Text { text: root.percent-labels ? "75 %": "191"; font-size: 10px; color: Palette.text-disabled; horizontal-alignment: right; }
-            Text { text: root.percent-labels ? "50 %": "128"; font-size: 10px; color: Palette.text-disabled; horizontal-alignment: right; }
-            Text { text: root.percent-labels ? "25 %": "64"; font-size: 10px; color: Palette.text-disabled; horizontal-alignment: right; }
-            Text { text: root.percent-labels ? "0 %": "0"; font-size: 10px; color: Palette.text-disabled; horizontal-alignment: right; }
+            Text { text: root.percent-labels ? "100 %": "255"; font-size: 11px; color: Palette.text-secondary; horizontal-alignment: right; }
+            Text { text: root.percent-labels ? "75 %": "191"; font-size: 11px; color: Palette.text-secondary; horizontal-alignment: right; }
+            Text { text: root.percent-labels ? "50 %": "128"; font-size: 11px; color: Palette.text-secondary; horizontal-alignment: right; }
+            Text { text: root.percent-labels ? "25 %": "64"; font-size: 11px; color: Palette.text-secondary; horizontal-alignment: right; }
+            Text { text: root.percent-labels ? "0 %": "0"; font-size: 11px; color: Palette.text-secondary; horizontal-alignment: right; }
         }
 
         Rectangle {
@@ -138,7 +139,7 @@ export component FanCurveChart inherits Rectangle {
                 border-radius: 10px;
                 border-width: 1px;
                 border-color: Palette.border-default;
-                background: Palette.surface-muted;
+                background: Palette.surface-default;
                 clip: true;
 
                 Rectangle { x: 0px; y: parent.height * 0.25; width: parent.width; height: 1px; background: Palette.border-default; }
@@ -165,7 +166,8 @@ export component FanCurveChart inherits Rectangle {
                         width: parent.width / 52 + 1px;
                         y: parent.height * (1 - self.frac);
                         height: parent.height * self.frac;
-                        background: root.accent.transparentize(0.80);
+                        // Opaque fill: overlapping translucent columns would show seams.
+                        background: @linear-gradient(180deg, root.accent.mix(Palette.surface-default, 0.32) 0%, root.accent.mix(Palette.surface-default, 0.08) 100%);
                     }
                 }
 
@@ -194,15 +196,15 @@ export component FanCurveChart inherits Rectangle {
             HorizontalLayout {
                 y: plot.height + 4px;
                 height: 16px;
-                Text { width: 42px; text: root.axis-min + " °C"; font-size: 10px; color: Palette.text-disabled; }
+                Text { width: 42px; text: root.axis-min + " °C"; font-size: 11px; color: Palette.text-secondary; }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                Text { text: root.axis-min + root.axis-span / 4 + " °C"; font-size: 10px; color: Palette.text-disabled; }
+                Text { text: root.axis-min + root.axis-span / 4 + " °C"; font-size: 11px; color: Palette.text-secondary; }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                Text { text: root.axis-min + root.axis-span / 2 + " °C"; font-size: 10px; color: Palette.text-disabled; }
+                Text { text: root.axis-min + root.axis-span / 2 + " °C"; font-size: 11px; color: Palette.text-secondary; }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                Text { text: root.axis-min + root.axis-span * 3 / 4 + " °C"; font-size: 10px; color: Palette.text-disabled; }
+                Text { text: root.axis-min + root.axis-span * 3 / 4 + " °C"; font-size: 11px; color: Palette.text-secondary; }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                Text { width: 42px; text: root.axis-max + " °C"; font-size: 10px; color: Palette.text-disabled; horizontal-alignment: right; }
+                Text { width: 42px; text: root.axis-max + " °C"; font-size: 11px; color: Palette.text-secondary; horizontal-alignment: right; }
             }
         }
     }

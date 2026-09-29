@@ -4,15 +4,14 @@
 // the backend's real unit; no invented CPU-boost entry exists.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, PerformanceHwState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, ActionButton, StatusPill, LocalStatus, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, ActionButton, ChoiceButton, FieldRow, Divider, LocalStatus, LayoutMetrics } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
-import { MetricCard } from "../../components/metric-card.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { Palette } from "../../themes/dark.slint";
 
-// One backend-reported limit field: authoritative value+unit headline, a local
-// preview slider bound to the backend range and the draft when one is dirty.
+// One backend-reported limit field: label, slider bound to the backend range
+// and the authoritative value (or the dirty draft) with the backend's unit.
 export component LimitRow inherits Rectangle {
     in property <int> field-index;
     in property <string> label;
@@ -21,29 +20,31 @@ export component LimitRow inherits Rectangle {
     in property <int> max;
     in property <int> step;
     in property <string> unit;
-    in property <string> range;
     in property <bool> disabled: false;
     callback changed(int, float);
 
-    height: 96px;
+    height: 44px;
     background: transparent;
-    VerticalLayout {
-        spacing: 2px;
-        Text { text: root.label; font-size: 12px; color: Palette.text-secondary; overflow: elide; }
-        Text { text: root.value + " " + root.unit; font-size: 18px; font-weight: 600; color: Palette.text-primary; }
+    HorizontalLayout {
+        spacing: 16px;
+        Text {
+            width: 112px;
+            text: root.label;
+            font-size: 13.5px;
+            color: Palette.text-secondary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
         ValueSlider {
+            horizontal-stretch: 1;
             min: root.min;
             max: root.max;
             step: root.step;
             value: root.value;
+            unit: root.unit;
             disabled: root.disabled;
-            // The row headline already carries the authoritative value+unit;
-            // hiding the slider's own readout keeps three limit rows inside
-            // the card at the 980px minimum window (audit t_29073c31).
-            show-percent: false;
             changed(v) => { root.changed(root.field-index, v); }
         }
-        Text { text: root.range; font-size: 10.5px; color: Palette.text-secondary; overflow: elide; }
     }
 }
 
@@ -87,22 +88,15 @@ export component PerformanceSection inherits Rectangle {
         return shifted - 2 * Math.floor(shifted / 2) == 1;
     }
 
-    function perf-reason() -> string {
+    // Only non-normal states get a line under the tiles.
+    function perf-note() -> string {
         if (root.ui-state.performance-delegated-pending) { return "Ожидание подтверждения"; }
         if (root.ui-state.performance-delegated-error != "") { return root.ui-state.performance-delegated-error; }
         if (root.ui-state.perf-state == PerformanceHwState.Ready) {
-            return root.ui-state.perf-writable ? (root.ui-state.performance-delegated-ready ? "Доступно через power-profiles-daemon" : "Доступно") : "Только чтение";
+            return root.ui-state.perf-writable ? "" : "Профиль доступен только для чтения";
         }
-        if (root.ui-state.perf-state == PerformanceHwState.Loading) { return "Получение профиля"; }
+        if (root.ui-state.perf-state == PerformanceHwState.Loading) { return ""; }
         return root.ui-state.perf-unavailable-reason;
-    }
-
-    function current-profile() -> string {
-        if (root.ui-state.perf-state != PerformanceHwState.Ready) { return "—"; }
-        if (root.ui-state.perf-selected == 0) { return "Тихий"; }
-        if (root.ui-state.perf-selected == 1) { return "Сбалансированный"; }
-        if (root.ui-state.perf-selected == 2) { return "Турбо"; }
-        return "—";
     }
 
     ScrollView {
@@ -110,424 +104,287 @@ export component PerformanceSection inherits Rectangle {
             width: root.width - 2 * LayoutMetrics.page-margin;
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
-            padding-top: 14px;
+            padding-top: LayoutMetrics.page-margin;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
-            PageHeader {
-                title: "Производительность";
-                description: "Профиль платформы управляет балансом производительности, температуры и шума.";
-            }
+            PageHeader { title: "Производительность"; }
 
-            SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 14px;
-
-                    HorizontalLayout {
-                        height: 30px;
-                        SectionTitle {
-                            horizontal-stretch: 1;
-                            title: "Режим производительности";
-                            detail: root.perf-reason();
-                        }
-                        StatusPill {
-                            width: 156px;
-                            text: root.current-profile();
-                            accent: root.ui-state.perf-state == PerformanceHwState.Ready ? Palette.balanced : Palette.text-secondary;
-                        }
-                    }
-
-                    HorizontalLayout {
-                        height: 94px;
-                        spacing: 12px;
-                        ModeCard {
-                            title: "Тихий";
-                            description: "Минимум шума и нагрева";
-                            icon-kind: 16;
-                            accent: Palette.silent;
-                            selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0;
-                            disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 1);
-                            clicked => { root.perf-clicked(0); }
-                        }
-                        ModeCard {
-                            title: "Сбалансированный";
-                            description: "Оптимален для повседневной работы";
-                            icon-kind: 17;
-                            accent: Palette.balanced;
-                            selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1;
-                            disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 2);
-                            clicked => { root.perf-clicked(1); }
-                        }
-                        ModeCard {
-                            title: "Турбо";
-                            description: "Максимальная производительность";
-                            icon-kind: 18;
-                            accent: Palette.turbo;
-                            selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 2;
-                            disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 4);
-                            clicked => { root.perf-clicked(2); }
-                        }
-                    }
+            HorizontalLayout {
+                height: 92px;
+                spacing: 12px;
+                ModeCard {
+                    title: "Тихий";
+                    icon-kind: 16;
+                    selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0;
+                    disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 1);
+                    clicked => { root.perf-clicked(0); }
                 }
+                ModeCard {
+                    title: "Баланс";
+                    icon-kind: 17;
+                    selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1;
+                    disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 2);
+                    clicked => { root.perf-clicked(1); }
+                }
+                ModeCard {
+                    title: "Турбо";
+                    icon-kind: 18;
+                    selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 2;
+                    disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 4);
+                    clicked => { root.perf-clicked(2); }
+                }
+            }
+            if (root.perf-note() != "") : LocalStatus {
+                text: root.perf-note();
+                accent: root.ui-state.performance-delegated-error != "" ? Palette.error : Palette.warning;
             }
 
             HorizontalLayout {
-                height: 108px;
-                spacing: 14px;
-                MetricCard { label: "CPU"; value: root.ui-state.cpu-temp; detail: "температура процессора"; icon-kind: 10; }
-                MetricCard {
-                    label: "GPU";
-                    // A suspended dGPU reports no temperature; show the iGPU then.
-                    value: root.ui-state.gpu-temp != "—" || root.ui-state.igpu-temp == "—" ? root.ui-state.gpu-temp : root.ui-state.igpu-temp;
-                    detail: root.ui-state.gpu-temp != "—" ? "температура dGPU" : root.ui-state.igpu-temp != "—" ? "температура iGPU · dGPU спит" : "температура графики";
-                    icon-kind: 4;
-                }
-                MetricCard { label: "Вентилятор CPU"; value: root.ui-state.cpu-fan-rpm; detail: "скорость вентилятора"; icon-kind: 3; }
-                MetricCard { label: "ПИТАНИЕ"; value: root.ui-state.power-ac-mw; detail: "потребление от адаптера"; icon-kind: 13; }
-            }
+                spacing: LayoutMetrics.page-gap;
+                alignment: stretch;
 
-            SectionCard {
-                min-height: 108px;
-                HorizontalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 18px;
+                // Power/thermal limits: values, ranges and units come from the
+                // backend snapshot (REQ-POWER/REQ-BOOST); a field row exists
+                // only when the backend reports that field with metadata.
+                if (root.ui-state.power-limits-ready) : SectionCard {
+                    width: root.cpu-tuning-ready ? (parent.width - LayoutMetrics.page-gap) / 2 : parent.width;
                     VerticalLayout {
-                        horizontal-stretch: 1;
-                        alignment: center;
-                        spacing: 4px;
-                        Text { text: "Графический режим"; font-size: 15px; font-weight: 650; color: Palette.text-primary; }
-                        Text {
-                            text: "Режим GPU настраивается отдельно и может требовать перезагрузку.";
-                            font-size: 12.5px;
-                            color: Palette.text-secondary;
-                            wrap: word-wrap;
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 8px;
+                        SectionTitle { title: "Лимиты мощности и температуры"; detail: root.ui-state.power-limits-reason; }
+                        VerticalLayout {
+                            spacing: 4px;
+                            if (root.ui-state.spl-unit != "") : LimitRow {
+                                field-index: 0;
+                                label: "SPL / PL1";
+                                value: root.bit-set(root.ui-state.power-limit-dirty-mask, 1) ? root.ui-state.spl-draft : root.ui-state.spl-value;
+                                min: root.ui-state.spl-min;
+                                max: root.ui-state.spl-max;
+                                step: root.ui-state.spl-step;
+                                unit: root.ui-state.spl-unit;
+                                disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 1);
+                                changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
+                            }
+                            if (root.ui-state.sppt-unit != "") : LimitRow {
+                                field-index: 1;
+                                label: "SPPT / PL2";
+                                value: root.bit-set(root.ui-state.power-limit-dirty-mask, 2) ? root.ui-state.sppt-draft : root.ui-state.sppt-value;
+                                min: root.ui-state.sppt-min;
+                                max: root.ui-state.sppt-max;
+                                step: root.ui-state.sppt-step;
+                                unit: root.ui-state.sppt-unit;
+                                disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 2);
+                                changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
+                            }
+                            if (root.ui-state.fppt-unit != "") : LimitRow {
+                                field-index: 2;
+                                label: "FPPT / PL3";
+                                value: root.bit-set(root.ui-state.power-limit-dirty-mask, 4) ? root.ui-state.fppt-draft : root.ui-state.fppt-value;
+                                min: root.ui-state.fppt-min;
+                                max: root.ui-state.fppt-max;
+                                step: root.ui-state.fppt-step;
+                                unit: root.ui-state.fppt-unit;
+                                disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 4);
+                                changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
+                            }
+                            if (root.ui-state.cpu-temp-limit-unit != "") : LimitRow {
+                                field-index: 3;
+                                label: "Темп. CPU";
+                                value: root.bit-set(root.ui-state.power-limit-dirty-mask, 8) ? root.ui-state.cpu-temp-limit-draft : root.ui-state.cpu-temp-limit-value;
+                                min: root.ui-state.cpu-temp-limit-min;
+                                max: root.ui-state.cpu-temp-limit-max;
+                                step: root.ui-state.cpu-temp-limit-step;
+                                unit: root.ui-state.cpu-temp-limit-unit;
+                                disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 8);
+                                changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
+                            }
+                            if (root.ui-state.gpu-dynamic-boost-unit != "") : LimitRow {
+                                field-index: 4;
+                                label: "NVIDIA Dynamic Boost";
+                                value: root.bit-set(root.ui-state.power-limit-dirty-mask, 16) ? root.ui-state.gpu-dynamic-boost-draft : root.ui-state.gpu-dynamic-boost-value;
+                                min: root.ui-state.gpu-dynamic-boost-min;
+                                max: root.ui-state.gpu-dynamic-boost-max;
+                                step: root.ui-state.gpu-dynamic-boost-step;
+                                unit: root.ui-state.gpu-dynamic-boost-unit;
+                                disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 16);
+                                changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
+                            }
+                            if (root.ui-state.gpu-temp-target-unit != "") : LimitRow {
+                                field-index: 5;
+                                label: "Темп. GPU";
+                                value: root.bit-set(root.ui-state.power-limit-dirty-mask, 32) ? root.ui-state.gpu-temp-target-draft : root.ui-state.gpu-temp-target-value;
+                                min: root.ui-state.gpu-temp-target-min;
+                                max: root.ui-state.gpu-temp-target-max;
+                                step: root.ui-state.gpu-temp-target-step;
+                                unit: root.ui-state.gpu-temp-target-unit;
+                                disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 32);
+                                changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
+                            }
                         }
-                    }
-                    Rectangle {
-              width: 126px;
-              vertical-stretch: 1;
-              background: transparent;
-              ActionButton {
-                  width: parent.width;
-                  y: (parent.height - self.height) / 2;
-                  label: "Открыть графику";
-                  clicked => { root.graphics-open-requested(); }
-              }
-          }
-                }
-            }
-
-            // Power/thermal limits: values, ranges and units come from the
-            // backend snapshot (REQ-POWER/REQ-BOOST); a field row exists only
-            // when the backend reports that field with metadata.
-            SectionCard {
-                visible: root.ui-state.power-limits-ready;
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 10px;
-
-                    SectionTitle { title: "Лимиты мощности и температуры"; detail: root.ui-state.power-limits-reason; }
-                    Text {
-                        text: "Значения и диапазоны получены от backend. Изменение проходит авторизацию, запись и authoritative read-back.";
-                        font-size: 11.5px;
-                        color: Palette.text-secondary;
-                        overflow: elide;
-                    }
-
-                    if (root.ui-state.power-limit-error) : LocalStatus {
-                        text: "Не удалось применить лимиты мощности: доступ запрещён или backend отклонил запись. Измените черновик и повторите.";
-                        accent: Palette.error;
-                    }
-
-                    HorizontalLayout {
-                        spacing: 16px;
-                        if (root.ui-state.spl-unit != "") : LimitRow {
-                            horizontal-stretch: 1;
-                            field-index: 0;
-                            label: "SPL / PL1";
-                            value: root.bit-set(root.ui-state.power-limit-dirty-mask, 1) ? root.ui-state.spl-draft : root.ui-state.spl-value;
-                            min: root.ui-state.spl-min;
-                            max: root.ui-state.spl-max;
-                            step: root.ui-state.spl-step;
-                            unit: root.ui-state.spl-unit;
-                            disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 1);
-                            range: root.ui-state.spl-min + "–" + root.ui-state.spl-max + " · шаг " + root.ui-state.spl-step;
-                            changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
-                        }
-                        if (root.ui-state.sppt-unit != "") : LimitRow {
-                            horizontal-stretch: 1;
-                            field-index: 1;
-                            label: "SPPT / PL2";
-                            value: root.bit-set(root.ui-state.power-limit-dirty-mask, 2) ? root.ui-state.sppt-draft : root.ui-state.sppt-value;
-                            min: root.ui-state.sppt-min;
-                            max: root.ui-state.sppt-max;
-                            step: root.ui-state.sppt-step;
-                            unit: root.ui-state.sppt-unit;
-                            disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 2);
-                            range: root.ui-state.sppt-min + "–" + root.ui-state.sppt-max + " · шаг " + root.ui-state.sppt-step;
-                            changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
-                        }
-                        if (root.ui-state.fppt-unit != "") : LimitRow {
-                            horizontal-stretch: 1;
-                            field-index: 2;
-                            label: "FPPT / PL3";
-                            value: root.bit-set(root.ui-state.power-limit-dirty-mask, 4) ? root.ui-state.fppt-draft : root.ui-state.fppt-value;
-                            min: root.ui-state.fppt-min;
-                            max: root.ui-state.fppt-max;
-                            step: root.ui-state.fppt-step;
-                            unit: root.ui-state.fppt-unit;
-                            disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 4);
-                            range: root.ui-state.fppt-min + "–" + root.ui-state.fppt-max + " · шаг " + root.ui-state.fppt-step;
-                            changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
-                        }
-                    }
-                    HorizontalLayout {
-                        spacing: 16px;
-                        if (root.ui-state.cpu-temp-limit-unit != "") : LimitRow {
-                            horizontal-stretch: 1;
-                            field-index: 3;
-                            label: "Лимит температуры CPU";
-                            value: root.bit-set(root.ui-state.power-limit-dirty-mask, 8) ? root.ui-state.cpu-temp-limit-draft : root.ui-state.cpu-temp-limit-value;
-                            min: root.ui-state.cpu-temp-limit-min;
-                            max: root.ui-state.cpu-temp-limit-max;
-                            step: root.ui-state.cpu-temp-limit-step;
-                            unit: root.ui-state.cpu-temp-limit-unit;
-                            disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 8);
-                            range: root.ui-state.cpu-temp-limit-min + "–" + root.ui-state.cpu-temp-limit-max + " · шаг " + root.ui-state.cpu-temp-limit-step;
-                            changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
-                        }
-                        if (root.ui-state.gpu-dynamic-boost-unit != "") : LimitRow {
-                            horizontal-stretch: 1;
-                            field-index: 4;
-                            label: "NVIDIA Dynamic Boost";
-                            value: root.bit-set(root.ui-state.power-limit-dirty-mask, 16) ? root.ui-state.gpu-dynamic-boost-draft : root.ui-state.gpu-dynamic-boost-value;
-                            min: root.ui-state.gpu-dynamic-boost-min;
-                            max: root.ui-state.gpu-dynamic-boost-max;
-                            step: root.ui-state.gpu-dynamic-boost-step;
-                            unit: root.ui-state.gpu-dynamic-boost-unit;
-                            disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 16);
-                            range: root.ui-state.gpu-dynamic-boost-min + "–" + root.ui-state.gpu-dynamic-boost-max + " · шаг " + root.ui-state.gpu-dynamic-boost-step;
-                            changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
-                        }
-                        if (root.ui-state.gpu-temp-target-unit != "") : LimitRow {
-                            horizontal-stretch: 1;
-                            field-index: 5;
-                            label: "Целевая температура GPU";
-                            value: root.bit-set(root.ui-state.power-limit-dirty-mask, 32) ? root.ui-state.gpu-temp-target-draft : root.ui-state.gpu-temp-target-value;
-                            min: root.ui-state.gpu-temp-target-min;
-                            max: root.ui-state.gpu-temp-target-max;
-                            step: root.ui-state.gpu-temp-target-step;
-                            unit: root.ui-state.gpu-temp-target-unit;
-                            disabled: !root.ui-state.power-limits-writable || root.bit-set(root.ui-state.power-limit-pending-mask, 32);
-                            range: root.ui-state.gpu-temp-target-min + "–" + root.ui-state.gpu-temp-target-max + " · шаг " + root.ui-state.gpu-temp-target-step;
-                            changed(f, v) => { root.power-limit-changed(f, Math.round(v)); }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        height: LayoutMetrics.compact-control-height;
-                        spacing: 12px;
-                        ActionButton {
-                            width: 168px;
-                            label: root.ui-state.power-limit-dirty-mask != 0 ? "Применить лимиты" : "Лимиты применены";
-                            disabled: !root.ui-state.power-limits-writable || root.ui-state.power-limit-dirty-mask == 0 || root.ui-state.power-limit-pending-mask != 0;
-                            clicked => { root.power-limit-apply-clicked(); }
+                        if (root.ui-state.power-limit-error) : LocalStatus {
+                            text: "Лимиты не применены: доступ запрещён или запись отклонена";
+                            accent: Palette.error;
                         }
                         if (root.ui-state.power-limit-verification-mask != 0) : LocalStatus {
-                            horizontal-stretch: 1;
-                            text: "Подтверждение записи чтением фактического состояния…";
+                            text: "Проверка записанных значений…";
                             accent: Palette.warning;
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                        HorizontalLayout {
+                            alignment: end;
+                            ActionButton {
+                                width: 160px;
+                                label: "Применить";
+                                accent: root.ui-state.power-limit-dirty-mask != 0;
+                                disabled: !root.ui-state.power-limits-writable || root.ui-state.power-limit-dirty-mask == 0 || root.ui-state.power-limit-pending-mask != 0;
+                                clicked => { root.power-limit-apply-clicked(); }
+                            }
                         }
                     }
                 }
-            }
-
-            if (!root.ui-state.power-limits-ready) : SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    SectionTitle { title: "Лимиты мощности и температуры"; detail: root.ui-state.power-limits-reason; }
+                if (!root.ui-state.power-limits-ready) : SectionCard {
+                    width: root.cpu-tuning-ready ? (parent.width - LayoutMetrics.page-gap) / 2 : parent.width;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 10px;
+                        SectionTitle { title: "Лимиты мощности и температуры"; }
+                        LocalStatus {
+                            text: root.ui-state.power-limits-reason != "" ? root.ui-state.power-limits-reason : "Недоступно";
+                            accent: Palette.text-secondary;
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                    }
                 }
-            }
 
-            SectionCard {
-                visible: root.cpu-tuning-ready;
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 10px;
+                if (root.cpu-tuning-ready) : SectionCard {
+                    width: (parent.width - LayoutMetrics.page-gap) / 2;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 10px;
 
-                    SectionTitle {
-                        title: "Процессор";
-                        detail: root.cpu-epp-writable || root.cpu-boost-writable || root.cpu-co-writable ? "Запись доступна" : "Только чтение";
-                    }
-                    if (root.cpu-epp-supported) : VerticalLayout {
-                        spacing: 6px;
-                        Text {
-                            text: "Энергетический режим (EPP)";
-                            font-size: 13.5px;
-                            font-weight: 550;
-                            color: Palette.text-primary;
+                        SectionTitle {
+                            title: "Процессор";
+                            detail: root.cpu-epp-writable || root.cpu-boost-writable || root.cpu-co-writable ? "" : "Только чтение";
                         }
-                        HorizontalLayout {
-                            spacing: 10px;
-                            ActionButton {
-                                label: "Производительность";
-                                accent: root.cpu-epp == 1;
-                                disabled: !root.cpu-epp-writable;
-                                clicked => { root.cpu-epp-requested(1); }
-                            }
-                            ActionButton {
-                                label: "Баланс: скорость";
-                                accent: root.cpu-epp == 2;
-                                disabled: !root.cpu-epp-writable;
-                                clicked => { root.cpu-epp-requested(2); }
-                            }
-                            ActionButton {
-                                label: "Баланс: экономия";
-                                accent: root.cpu-epp == 3;
-                                disabled: !root.cpu-epp-writable;
-                                clicked => { root.cpu-epp-requested(3); }
-                            }
-                            ActionButton {
-                                label: "Экономия";
-                                accent: root.cpu-epp == 4;
-                                disabled: !root.cpu-epp-writable;
-                                clicked => { root.cpu-epp-requested(4); }
+                        if (root.cpu-epp-supported) : VerticalLayout {
+                            spacing: 8px;
+                            Text { text: "Энергорежим (EPP)"; font-size: 13.5px; color: Palette.text-secondary; }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                ChoiceButton { min-width: 0px; label: "Скорость"; selected: root.cpu-epp == 1; disabled: !root.cpu-epp-writable; clicked => { root.cpu-epp-requested(1); } }
+                                ChoiceButton { min-width: 0px; label: "Баланс+"; selected: root.cpu-epp == 2; disabled: !root.cpu-epp-writable; clicked => { root.cpu-epp-requested(2); } }
+                                ChoiceButton { min-width: 0px; label: "Баланс−"; selected: root.cpu-epp == 3; disabled: !root.cpu-epp-writable; clicked => { root.cpu-epp-requested(3); } }
+                                ChoiceButton { min-width: 0px; label: "Экономия"; selected: root.cpu-epp == 4; disabled: !root.cpu-epp-writable; clicked => { root.cpu-epp-requested(4); } }
                             }
                         }
-                    }
-                    if (root.cpu-boost-known) : RequestToggleRow {
-                        label: "Турбо-буст процессора";
-                        description: "Разрешает кратковременный разгон выше базовой частоты";
-                        checked: root.cpu-boost;
-                        disabled: !root.cpu-boost-writable;
-                        toggled(value) => { root.cpu-boost-requested(value); }
-                    }
-                    if (root.cpu-co-supported) : VerticalLayout {
-                        spacing: 6px;
-                        HorizontalLayout {
-                            spacing: 12px;
-                            Text {
-                                horizontal-stretch: 1;
-                                text: "Curve Optimizer (все ядра)";
-                                font-size: 13.5px;
-                                font-weight: 550;
-                                color: Palette.text-primary;
-                                vertical-alignment: center;
+                        if (root.cpu-boost-known) : RequestToggleRow {
+                            label: "Турбо-буст";
+                            checked: root.cpu-boost;
+                            disabled: !root.cpu-boost-writable;
+                            toggled(value) => { root.cpu-boost-requested(value); }
+                        }
+                        if (root.cpu-co-supported) : VerticalLayout {
+                            spacing: 6px;
+                            HorizontalLayout {
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: "Curve Optimizer";
+                                    font-size: 13.5px;
+                                    color: Palette.text-secondary;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: root.cpu-co-applied-known ? "применено " + root.cpu-co-applied : "не применялось";
+                                    font-size: 12px;
+                                    color: Palette.text-disabled;
+                                    vertical-alignment: center;
+                                }
                             }
-                            Text {
-                                text: root.co-draft + " шагов";
-                                font-size: 14px;
-                                font-weight: 650;
-                                color: Palette.text-primary;
-                                vertical-alignment: center;
+                            ValueSlider {
+                                min: -30;
+                                max: 0;
+                                step: 1;
+                                value: root.co-draft;
+                                unit: "";
+                                disabled: !root.cpu-co-writable;
+                                changed(v) => { root.co-draft = Math.round(v); root.co-confirming = false; }
                             }
-                        }
-                        ValueSlider {
-                            min: -30;
-                            max: 0;
-                            step: 1;
-                            value: root.co-draft;
-                            unit: "";
-                            show-percent: false;
-                            disabled: !root.cpu-co-writable;
-                            changed(v) => { root.co-draft = Math.round(v); root.co-confirming = false; }
-                        }
-                        Text {
-                            text: "Отрицательное значение снижает напряжение. Слишком глубокое приводит к сбоям и перезагрузке. "
-                                + "Текущее значение прочитать нельзя: "
-                                + (root.cpu-co-applied-known ? "в этом сеансе применено " + root.cpu-co-applied + "." : "в этом сеансе ничего не применялось.");
-                            font-size: 11.5px;
-                            color: Palette.text-secondary;
-                            wrap: word-wrap;
-                        }
-                        if (root.co-confirming) : LocalStatus {
-                            text: "Значение ниже −15 часто нестабильно. Сохраните работу: при сбое система перезагрузится, настройка сбросится.";
-                            accent: Palette.warning;
-                        }
-                        HorizontalLayout {
-                            spacing: 10px;
-                            ActionButton {
-                                label: root.co-confirming ? "Подтвердить и применить" : "Применить";
-                                accent: true;
-                                disabled: !root.cpu-co-writable || (root.cpu-co-applied-known && root.cpu-co-applied == root.co-draft) || (!root.cpu-co-applied-known && root.co-draft == 0);
-                                clicked => {
-                                    if (root.co-draft < -15 && !root.co-confirming) {
-                                        root.co-confirming = true;
-                                    } else {
+                            if (root.co-confirming) : LocalStatus {
+                                text: "Ниже −15 часто нестабильно: при сбое система перезагрузится";
+                                accent: Palette.warning;
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: end;
+                                ActionButton {
+                                    width: 120px;
+                                    label: "Сбросить";
+                                    disabled: !root.cpu-co-writable || !root.cpu-co-applied-known || root.cpu-co-applied == 0;
+                                    clicked => {
                                         root.co-confirming = false;
-                                        root.cpu-co-requested(root.co-draft);
+                                        root.co-draft = 0;
+                                        root.cpu-co-requested(0);
+                                    }
+                                }
+                                ActionButton {
+                                    width: 160px;
+                                    label: root.co-confirming ? "Подтвердить" : "Применить";
+                                    accent: true;
+                                    disabled: !root.cpu-co-writable || (root.cpu-co-applied-known && root.cpu-co-applied == root.co-draft) || (!root.cpu-co-applied-known && root.co-draft == 0);
+                                    clicked => {
+                                        if (root.co-draft < -15 && !root.co-confirming) {
+                                            root.co-confirming = true;
+                                        } else {
+                                            root.co-confirming = false;
+                                            root.cpu-co-requested(root.co-draft);
+                                        }
                                     }
                                 }
                             }
-                            ActionButton {
-                                label: "Сбросить в 0";
-                                disabled: !root.cpu-co-writable || !root.cpu-co-applied-known || root.cpu-co-applied == 0;
-                                clicked => {
-                                    root.co-confirming = false;
-                                    root.co-draft = 0;
-                                    root.cpu-co-requested(0);
-                                }
-                            }
                         }
-                    }
-                    if (root.cpu-tuning-error != "") : LocalStatus {
-                        text: root.cpu-tuning-error;
-                        accent: Palette.error;
+                        if (root.cpu-tuning-error != "") : LocalStatus {
+                            text: root.cpu-tuning-error;
+                            accent: Palette.error;
+                        }
+                        Rectangle { vertical-stretch: 1; }
                     }
                 }
             }
 
-            if (root.profile-limits-known && (root.ui-state.power-limits-writable || root.cpu-epp-writable || root.cpu-boost-writable || root.cpu-co-writable)) : SectionCard {
+            if ((root.profile-limits-known && (root.ui-state.power-limits-writable || root.cpu-epp-writable || root.cpu-boost-writable || root.cpu-co-writable))
+                || (root.power-rules-known && root.ui-state.perf-writable)) : SectionCard {
                 VerticalLayout {
                     padding: LayoutMetrics.card-padding;
-                    RequestToggleRow {
-                        label: "Запоминать для этого профиля";
+                    spacing: 8px;
+                    SectionTitle { title: "Автоматизация"; }
+                    if (root.profile-limits-known && (root.ui-state.power-limits-writable || root.cpu-epp-writable || root.cpu-boost-writable || root.cpu-co-writable)) : RequestToggleRow {
+                        label: "Запоминать настройки для каждого профиля";
                         description: root.profile-limits-summary;
                         checked: root.profile-limits-auto-apply;
                         toggled(value) => { root.profile-limits-auto-apply-toggled(value); }
                     }
-                }
-            }
-
-            if (root.power-rules-known && root.ui-state.perf-writable) : SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 10px;
-
-                    RequestToggleRow {
+                    if (root.power-rules-known && root.ui-state.perf-writable) : RequestToggleRow {
                         label: "Правила по источнику питания";
-                        description: "Переключает профиль (и частоту экрана — на странице «Экран») при подключении и отключении зарядки; при запуске ничего не меняет";
+                        description: "Профиль и частота экрана при подключении и отключении зарядки";
                         checked: root.power-rules-enabled;
                         toggled(value) => { root.power-rules-enabled-toggled(value); }
                     }
-                    if (root.power-rules-enabled) : VerticalLayout {
-                        spacing: 6px;
-                        Text {
-                            text: "От сети";
-                            font-size: 13.5px;
-                            font-weight: 550;
-                            color: Palette.text-primary;
-                        }
-                        HorizontalLayout {
-                            spacing: 10px;
-                            ActionButton { label: "Не менять"; accent: root.power-rules-ac == 0; clicked => { root.power-rules-profile-requested(true, 0); } }
-                            ActionButton { label: "Тихий"; accent: root.power-rules-ac == 1; clicked => { root.power-rules-profile-requested(true, 1); } }
-                            ActionButton { label: "Сбалансированный"; accent: root.power-rules-ac == 2; clicked => { root.power-rules-profile-requested(true, 2); } }
-                            ActionButton { label: "Турбо"; accent: root.power-rules-ac == 3; clicked => { root.power-rules-profile-requested(true, 3); } }
-                        }
-                        Text {
-                            text: "От батареи";
-                            font-size: 13.5px;
-                            font-weight: 550;
-                            color: Palette.text-primary;
-                        }
-                        HorizontalLayout {
-                            spacing: 10px;
-                            ActionButton { label: "Не менять"; accent: root.power-rules-battery == 0; clicked => { root.power-rules-profile-requested(false, 0); } }
-                            ActionButton { label: "Тихий"; accent: root.power-rules-battery == 1; clicked => { root.power-rules-profile-requested(false, 1); } }
-                            ActionButton { label: "Сбалансированный"; accent: root.power-rules-battery == 2; clicked => { root.power-rules-profile-requested(false, 2); } }
-                            ActionButton { label: "Турбо"; accent: root.power-rules-battery == 3; clicked => { root.power-rules-profile-requested(false, 3); } }
-                        }
+                    if (root.power-rules-known && root.ui-state.perf-writable && root.power-rules-enabled) : VerticalLayout {
+                        spacing: 8px;
+                            FieldRow {
+                                label: "От сети";
+                                ChoiceButton { label: "Не менять"; selected: root.power-rules-ac == 0; clicked => { root.power-rules-profile-requested(true, 0); } }
+                                ChoiceButton { label: "Тихий"; selected: root.power-rules-ac == 1; clicked => { root.power-rules-profile-requested(true, 1); } }
+                                ChoiceButton { label: "Баланс"; selected: root.power-rules-ac == 2; clicked => { root.power-rules-profile-requested(true, 2); } }
+                                ChoiceButton { label: "Турбо"; selected: root.power-rules-ac == 3; clicked => { root.power-rules-profile-requested(true, 3); } }
+                            }
+                            FieldRow {
+                                label: "От батареи";
+                                ChoiceButton { label: "Не менять"; selected: root.power-rules-battery == 0; clicked => { root.power-rules-profile-requested(false, 0); } }
+                                ChoiceButton { label: "Тихий"; selected: root.power-rules-battery == 1; clicked => { root.power-rules-profile-requested(false, 1); } }
+                                ChoiceButton { label: "Баланс"; selected: root.power-rules-battery == 2; clicked => { root.power-rules-profile-requested(false, 2); } }
+                                ChoiceButton { label: "Турбо"; selected: root.power-rules-battery == 3; clicked => { root.power-rules-profile-requested(false, 3); } }
+                            }
                     }
                     if (root.power-rules-error != "") : LocalStatus {
                         text: root.power-rules-error;
@@ -536,7 +393,7 @@ export component PerformanceSection inherits Rectangle {
                 }
             }
 
-            Rectangle { vertical-stretch: 100; background: transparent; }
+            Rectangle { vertical-stretch: 100; }
         }
     }
 }

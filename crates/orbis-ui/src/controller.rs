@@ -337,6 +337,10 @@ pub struct UiState {
     pub battery_percent: String,
     /// Numeric battery percent for the header indicator (-1 = unknown).
     pub battery_percent_value: i32,
+    /// Numeric CPU / dGPU / iGPU temperatures for gauges (-1 = unknown).
+    pub cpu_temp_value: i32,
+    pub gpu_temp_value: i32,
+    pub igpu_temp_value: i32,
     /// Battery health (capacity), % от design ("—" = неизвестно).
     pub battery_health: String,
     /// Число циклов заряда ("—" = неизвестно).
@@ -498,6 +502,9 @@ impl UiState {
             gpu_fan_rpm: "—".into(),
             battery_percent: "—".into(),
             battery_percent_value: -1,
+            cpu_temp_value: -1,
+            gpu_temp_value: -1,
+            igpu_temp_value: -1,
             battery_health: "—".into(),
             battery_cycles: "—".into(),
             battery_status: String::new(),
@@ -667,6 +674,9 @@ impl UiState {
             gpu_fan_rpm,
             battery_percent: format_percent(battery_percent),
             battery_percent_value: battery_percent.map(|p| i32::from(p.get())).unwrap_or(-1),
+            cpu_temp_value: celsius_value(state.telemetry.cpu_temp),
+            gpu_temp_value: celsius_value(state.telemetry.gpu_temp),
+            igpu_temp_value: -1,
             battery_health: format_percent(battery_health),
             battery_cycles: battery_cycles
                 .map(|c| c.to_string())
@@ -781,6 +791,9 @@ impl UiState {
         self.gpu_fan_rpm = "—".into();
         self.battery_percent = "—".into();
         self.battery_percent_value = -1;
+        self.cpu_temp_value = -1;
+        self.gpu_temp_value = -1;
+        self.igpu_temp_value = -1;
         self.battery_health = "—".into();
         self.battery_cycles = "—".into();
         self.battery_status.clear();
@@ -819,9 +832,12 @@ impl UiState {
 
         self.telemetry_fresh = true;
         self.cpu_temp = format_celsius(telemetry.cpu_temp);
+        self.cpu_temp_value = celsius_value(telemetry.cpu_temp);
         if telemetry.gpus.is_empty() {
             self.gpu_temp = format_celsius(telemetry.gpu_temp);
+            self.gpu_temp_value = celsius_value(telemetry.gpu_temp);
             self.igpu_temp = "—".into();
+            self.igpu_temp_value = -1;
             self.igpu_power_display = "—".into();
         } else {
             let discrete = telemetry
@@ -833,7 +849,9 @@ impl UiState {
                 .iter()
                 .find(|gpu| gpu.role == orbis_core::telemetry::GpuRole::Integrated);
             self.gpu_temp = format_celsius(discrete.and_then(|gpu| gpu.temperature));
+            self.gpu_temp_value = celsius_value(discrete.and_then(|gpu| gpu.temperature));
             self.igpu_temp = format_celsius(integrated.and_then(|gpu| gpu.temperature));
+            self.igpu_temp_value = celsius_value(integrated.and_then(|gpu| gpu.temperature));
             self.igpu_power_display = format_watts(integrated.and_then(|gpu| gpu.power));
         }
 
@@ -1042,6 +1060,10 @@ impl UiState {
 }
 
 /// Отформатировать температуру: °C или "—".
+fn celsius_value(t: Option<orbis_core::newtypes::TemperatureC>) -> i32 {
+    t.map(|t| i32::from(t.get())).unwrap_or(-1)
+}
+
 fn format_celsius(t: Option<orbis_core::newtypes::TemperatureC>) -> String {
     match t {
         Some(t) => format!("{}°C", t.get()),

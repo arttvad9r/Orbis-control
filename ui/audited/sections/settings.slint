@@ -1,6 +1,6 @@
 // Settings page — appearance, startup and window behavior.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, LocalStatus, ActionButton, ChoiceButton, StatusPill, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, ActionButton, ChoiceButton, FieldRow, LayoutMetrics } from "../common.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { Palette, ThemeState, ThemeMode } from "../../themes/dark.slint";
 
@@ -23,137 +23,107 @@ export component SettingsSection inherits Rectangle {
     in property <string> settings-local-status: "";
     callback quit-requested;
 
+    function status-line() -> string {
+        return root.startup-status != "" && root.startup-status != "Недоступно" ? root.startup-status : root.settings-local-status;
+    }
+
     ScrollView {
         VerticalLayout {
             width: root.width - 2 * LayoutMetrics.page-margin;
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
-            padding-top: 14px;
+            padding-top: LayoutMetrics.page-margin;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
-            PageHeader {
-                title: "Настройки";
-                description: "Внешний вид, запуск вместе с системой и поведение окна Orbis.";
-            }
-
-            SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 14px;
-
-                    HorizontalLayout {
-                        height: 30px;
-                        SectionTitle { horizontal-stretch: 1; title: "Внешний вид"; }
-                        StatusPill {
-                            text: ThemeState.mode == ThemeMode.Dark ? "Тёмная тема" : "Светлая тема";
-                            accent: Palette.accent-default;
-                        }
-                    }
-
-                    HorizontalLayout {
-                        height: 44px;
-                        spacing: 10px;
-                        Text {
-                            width: 180px;
-                            text: "Тема интерфейса";
-                            font-size: 13.5px;
-                            font-weight: 550;
-                            color: Palette.text-primary;
-                            vertical-alignment: center;
-                        }
-                        ChoiceButton {
-                            label: "Тёмная";
-                            selected: ThemeState.mode == ThemeMode.Dark;
-                            clicked => { ThemeState.mode = ThemeMode.Dark; root.theme-changed(false); }
-                        }
-                        ChoiceButton {
-                            label: "Светлая";
-                            selected: ThemeState.mode == ThemeMode.Light;
-                            clicked => { ThemeState.mode = ThemeMode.Light; root.theme-changed(true); }
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-                }
-            }
-
-            SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 8px;
-
-                    SectionTitle { title: "Запуск и сессия"; }
-
-                    RequestToggleRow {
-                        label: "Запускать при входе в систему";
-                        description: root.startup-enabled ? "Автоматически запускать Orbis вместе с пользовательской сессией" : "Поддержка автозапуска определяется для текущей сессии";
-                        checked: root.startup;
-                        disabled: !root.startup-enabled;
-                        toggled(value) => { root.startup-changed(value); }
-                    }
-                    RequestToggleRow {
-                        label: "Запускать свёрнутым";
-                        description: root.start-minimized-enabled ? "Открывать приложение в фоне без захвата фокуса" : "Опция появится после инициализации lifecycle-настроек";
-                        checked: root.start-minimized;
-                        disabled: !root.start-minimized-enabled;
-                        toggled(value) => { root.start-minimized-changed(value); }
-                    }
-                    RequestToggleRow {
-                        label: "Помнить положение окна";
-                        description: root.remember-position-enabled ? "Восстанавливать последнее положение, если это поддерживает оконная система" : "Текущая оконная система не публикует сохранение позиции";
-                        checked: root.remember-position;
-                        disabled: !root.remember-position-enabled;
-                        toggled(value) => { root.remember-position-changed(value); }
-                    }
-                }
-            }
-
-            SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 12px;
-
-                    SectionTitle { title: "Поведение окна"; }
-
-                    HorizontalLayout {
-                        height: 44px;
-                        spacing: 10px;
-                        Text {
-                            width: 180px;
-                            text: "Кнопка закрытия";
-                            font-size: 13.5px;
-                            font-weight: 550;
-                            color: root.close-action-enabled ? Palette.text-primary : Palette.text-secondary;
-                            vertical-alignment: center;
-                        }
-                        ChoiceButton {
-                            label: "Закрыть приложение";
-                            selected: root.close-action == 0;
-                            disabled: !root.close-action-enabled;
-                            clicked => { root.close-action-changed(0); }
-                        }
-                        ChoiceButton {
-                            label: "Скрыть в трей";
-                            selected: root.close-action == 1;
-                            disabled: !root.close-action-enabled || !root.hide-to-tray-enabled;
-                            clicked => { root.close-action-changed(1); }
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                    }
-
-                    LocalStatus {
-                        text: root.startup-status != "" && root.startup-status != "Недоступно" ? root.startup-status : root.settings-local-status;
-                        accent: Palette.text-secondary;
-                    }
-                }
-            }
+            PageHeader { title: "Настройки"; }
 
             HorizontalLayout {
-                height: 38px;
-                spacing: 8px;
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                ActionButton { label: "Выйти из Orbis"; clicked => { root.quit-requested(); } }
+                spacing: LayoutMetrics.page-gap;
+
+                SectionCard {
+                    width: (parent.width - LayoutMetrics.page-gap) / 2;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 12px;
+
+                        SectionTitle { title: "Окно"; }
+
+                        FieldRow {
+                            label: "Тема";
+                            ChoiceButton {
+                                min-width: 0px;
+                                label: "Тёмная";
+                                selected: ThemeState.mode == ThemeMode.Dark;
+                                clicked => { ThemeState.mode = ThemeMode.Dark; root.theme-changed(false); }
+                            }
+                            ChoiceButton {
+                                min-width: 0px;
+                                label: "Светлая";
+                                selected: ThemeState.mode == ThemeMode.Light;
+                                clicked => { ThemeState.mode = ThemeMode.Light; root.theme-changed(true); }
+                            }
+                        }
+
+                        FieldRow {
+                            label: "Кнопка закрытия";
+                            muted: !root.close-action-enabled;
+                            ChoiceButton {
+                                min-width: 0px;
+                                label: "Выход";
+                                selected: root.close-action == 0;
+                                disabled: !root.close-action-enabled;
+                                clicked => { root.close-action-changed(0); }
+                            }
+                            ChoiceButton {
+                                min-width: 0px;
+                                label: "В трей";
+                                selected: root.close-action == 1;
+                                disabled: !root.close-action-enabled || !root.hide-to-tray-enabled;
+                                clicked => { root.close-action-changed(1); }
+                            }
+                        }
+
+                        Rectangle { vertical-stretch: 1; }
+
+                        HorizontalLayout {
+                            alignment: end;
+                            ActionButton { width: 150px; label: "Выйти из Orbis"; clicked => { root.quit-requested(); } }
+                        }
+                    }
+                }
+
+                SectionCard {
+                    width: (parent.width - LayoutMetrics.page-gap) / 2;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 4px;
+
+                        SectionTitle { title: "Запуск"; detail: root.status-line(); }
+
+                        RequestToggleRow {
+                            label: "Запускать при входе в систему";
+                            checked: root.startup;
+                            disabled: !root.startup-enabled;
+                            toggled(value) => { root.startup-changed(value); }
+                        }
+                        RequestToggleRow {
+                            label: "Запускать свёрнутым";
+                            checked: root.start-minimized;
+                            disabled: !root.start-minimized-enabled;
+                            toggled(value) => { root.start-minimized-changed(value); }
+                        }
+                        RequestToggleRow {
+                            label: "Помнить положение окна";
+                            checked: root.remember-position;
+                            disabled: !root.remember-position-enabled;
+                            toggled(value) => { root.remember-position-changed(value); }
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
             }
-            Rectangle { vertical-stretch: 100; background: transparent; }
+
+            Rectangle { vertical-stretch: 100; }
         }
     }
 }

@@ -1,7 +1,7 @@
-// Cooling page — full fan curve workspace with explicit state and action bar.
+// Cooling page — fan curve workspace: selectors, chart, points and one action bar.
 import { ScrollView } from "std-widgets.slint";
-import { UiState } from "../model.slint";
-import { PageHeader, SectionCard, LocalStatus, ActionButton, StatusPill, LayoutMetrics } from "../common.slint";
+import { UiState, FanCurveHwState } from "../model.slint";
+import { PageHeader, SectionCard, ActionButton, LayoutMetrics } from "../common.slint";
 import { FanCurveEditor } from "../fan-curve-editor-v3.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -25,13 +25,14 @@ export component CoolingSection inherits Rectangle {
         if (root.ui-state.fan-curve-pending) { return "Изменение поставлено в очередь"; }
         if (root.ui-state.fan-curve-unconfirmed) { return "Результат неизвестен · обновите состояние перед новой записью"; }
         if (root.mutation-safety-blocked) { return root.policy-status; }
-        if (root.factory-reset-pending) { return "Выбраны заводские значения · подтвердите применение"; }
-        if (!root.ui-state.fan-curve-writable) { return "Кривая доступна только для чтения"; }
+        if (root.factory-reset-pending) { return "Будут применены заводские значения"; }
+        if (root.ui-state.fan-curve-state != FanCurveHwState.Ready) { return ""; }
+        if (!root.ui-state.fan-curve-writable) { return "Только чтение"; }
         if (root.ui-state.fan-curve-dirty) { return "Есть неприменённые изменения"; }
         if (root.ui-state.fan-curve-enabled-known) {
-            return root.ui-state.fan-curve-enabled ? "Пользовательская кривая включена" : "Пользовательская кривая сохранена, но выключена";
+            return root.ui-state.fan-curve-enabled ? "Пользовательская кривая активна" : "Кривая сохранена, но выключена";
         }
-        return "Состояние пользовательской кривой уточняется";
+        return "";
     }
 
     function status-color() -> color {
@@ -45,51 +46,33 @@ export component CoolingSection inherits Rectangle {
             width: root.width - 2 * LayoutMetrics.page-margin;
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
-            padding-top: 14px;
+            padding-top: LayoutMetrics.page-margin;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
-            PageHeader {
-                title: "Охлаждение";
-                description: "Выбери вентилятор и профиль, измени точки кривой и подтверди применение.";
-            }
-
             HorizontalLayout {
-                height: 30px;
-                LocalStatus {
-                    horizontal-stretch: 1;
-                    text: root.status-text();
-                    accent: root.status-color();
+                PageHeader { horizontal-stretch: 1; title: "Охлаждение"; }
+                for fan in [
+                    { label: "CPU", rpm: root.ui-state.cpu-fan-rpm },
+                    { label: "GPU", rpm: root.ui-state.gpu-fan-rpm },
+                ] : HorizontalLayout {
+                    padding-left: 20px;
+                    spacing: 8px;
+                    Text { text: fan.label; font-size: 13px; color: Palette.text-secondary; vertical-alignment: center; }
+                    Text { text: fan.rpm; font-size: 15px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }
                 }
-                Rectangle { width: 10px; background: transparent; }
-                Rectangle {
-          width: root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed || root.ui-state.fan-curve-error ? 142px : root.ui-state.fan-curve-writable ? 130px : 112px;
-          vertical-stretch: 1;
-          background: transparent;
-          StatusPill {
-              width: parent.width;
-              y: (parent.height - self.height) / 2;
-              text: root.ui-state.fan-curve-error ? "Ошибка"
-                  : root.ui-state.fan-curve-pending ? "В очереди"
-                  : root.ui-state.fan-curve-unconfirmed ? "Нужна проверка"
-                  : root.ui-state.fan-curve-writable ? "Доступно" : "Только чтение";
-              accent: root.ui-state.fan-curve-error ? Palette.error
-                  : root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed ? Palette.warning
-                  : root.ui-state.fan-curve-writable ? Palette.success : Palette.text-secondary;
-          }
-      }
             }
 
             SectionCard {
-                min-height: 430px;
+                min-height: 540px;
                 VerticalLayout {
-                    padding: 12px;
-                    spacing: 7px;
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 16px;
 
                     FanCurveEditor {
                         vertical-stretch: 1;
                         state: root.ui-state.fan-curve-state;
                         eco-profile-available: root.fan-eco-profile-available;
-                         writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked && !root.ui-state.fan-curve-pending && !root.ui-state.fan-curve-unconfirmed;
+                        writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked && !root.ui-state.fan-curve-pending && !root.ui-state.fan-curve-unconfirmed;
                         error-state: root.ui-state.fan-curve-error;
                         dirty: root.ui-state.fan-curve-dirty;
                         fan-selected: root.ui-state.fan-selected;
@@ -107,47 +90,43 @@ export component CoolingSection inherits Rectangle {
                     Rectangle { height: 1px; background: Palette.border-default; }
 
                     HorizontalLayout {
-                        height: 40px;
+                        height: 36px;
                         spacing: 10px;
+                        if (root.status-text() != "") : Rectangle {
+                            width: 8px;
+                            Rectangle {
+                                y: (parent.height - self.height) / 2;
+                                width: 8px;
+                                height: 8px;
+                                border-radius: 4px;
+                                background: root.status-color();
+                            }
+                        }
                         Text {
                             horizontal-stretch: 1;
-                            text: root.factory-reset-pending
-                                ? "Заводская кривая будет применена к выбранному профилю BIOS."
-                                : "Изменения отправляются только после нажатия «Применить».";
-                            font-size: 12px;
+                            text: root.status-text();
+                            font-size: 13px;
                             color: Palette.text-secondary;
                             vertical-alignment: center;
                             overflow: elide;
                         }
-                        Rectangle {
-                  width: 146px;
-                  vertical-stretch: 1;
-                  background: transparent;
-                  ActionButton {
-                      width: parent.width;
-                      y: (parent.height - self.height) / 2;
-                      label: "Заводские значения";
-                       disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed;
-                      clicked => { root.factory-reset-pending = true; }
-                  }
-              }
-              Rectangle {
-                  width: 168px;
-                  vertical-stretch: 1;
-                  background: transparent;
-                  ActionButton {
-                      width: parent.width;
-                      y: (parent.height - self.height) / 2;
-                      label: root.factory-reset-pending ? "Применить заводские" : "Применить изменения";
-                      accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
-                       disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
-                      clicked => {
-                          let reset = root.factory-reset-pending;
-                          root.fan-apply-clicked(reset);
-                          if (reset) { root.factory-reset-pending = false; }
-                      }
-                  }
-              }
+                        ActionButton {
+                            width: 170px;
+                            label: "Заводские значения";
+                            disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed;
+                            clicked => { root.factory-reset-pending = true; }
+                        }
+                        ActionButton {
+                            width: 170px;
+                            label: "Применить";
+                            accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
+                            disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
+                            clicked => {
+                                let reset = root.factory-reset-pending;
+                                root.fan-apply-clicked(reset);
+                                if (reset) { root.factory-reset-pending = false; }
+                            }
+                        }
                     }
                 }
             }

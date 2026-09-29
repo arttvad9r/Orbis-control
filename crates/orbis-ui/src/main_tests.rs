@@ -3300,7 +3300,7 @@ fn performance_page_renders_dynamic_boost_with_real_unit_gating() {
     assert!(source.contains("power-limit-apply-clicked"));
     // The card is capability-gated, and an unavailable backend still gets an
     // honest card (reason text), not a silently missing surface.
-    assert!(source.contains("visible: root.ui-state.power-limits-ready;"));
+    assert!(source.contains("if (root.ui-state.power-limits-ready) : SectionCard"));
     assert!(source.contains("!root.ui-state.power-limits-ready"));
     // CPU boost is a separate, sysfs-evidenced control and stays disabled
     // unless Hardware1 reports it writable.

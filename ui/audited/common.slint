@@ -1,21 +1,15 @@
 import { Palette as WidgetPalette } from "std-widgets.slint";
 import { Palette, ThemeState, ThemeMode } from "../themes/dark.slint";
 
-// Canonical geometry for the product UI. Pages may still compose differently,
-// but they share one rhythm instead of carrying per-screen magic numbers.
-//
-// TARGET_DESIGN (docs/references/orbis-visual-2026-09-24/): the reference uses
-// a ~16px gutter between cards, 18-20px card padding and ~12px card radius at a
-// 1448px-wide capture. Scaled to Orbis's 980-1200px window these become the
-// values below; the earlier 12px gutter / 14px padding / 14px radius rhythm was
-// visibly tighter than the target.
+// Canonical geometry for the product UI (docs/references/orbis-visual-2026-09-24/):
+// one gutter, one card padding and one radius shared by every page.
 export global LayoutMetrics {
-    in property <length> sidebar-width: 232px;
-    in property <length> titlebar-height: 48px;
+    in property <length> sidebar-width: 240px;
+    in property <length> titlebar-height: 44px;
     in property <length> page-margin: 24px;
     in property <length> page-gap: 16px;
-    in property <length> card-padding: 18px;
-    in property <length> card-radius: 12px;
+    in property <length> card-padding: 20px;
+    in property <length> card-radius: 14px;
     in property <length> control-height: 40px;
     in property <length> compact-control-height: 36px;
     in property <length> page-bottom-padding: 24px;
@@ -44,7 +38,7 @@ export component SectionCard inherits Rectangle {
     border-radius: LayoutMetrics.card-radius;
     border-width: 1px;
     border-color: Palette.border-default;
-    background: Palette.surface-default;
+    background: @linear-gradient(180deg, Palette.card-top 0%, Palette.surface-default 100%);
 }
 
 export component SectionTitle inherits Rectangle {
@@ -59,7 +53,7 @@ export component SectionTitle inherits Rectangle {
         Text {
             text: root.title;
             font-size: 16px;
-            font-weight: 650;
+            font-weight: 600;
             color: Palette.text-primary;
             vertical-alignment: center;
             overflow: elide;
@@ -79,29 +73,18 @@ export component SectionTitle inherits Rectangle {
 
 export component PageHeader inherits Rectangle {
     in property <string> title;
-    in property <string> description: "";
-    // TARGET_DESIGN: the reference page header is a large page title with a
-    // full-width description line below it, separated from the first card by the
-    // page gutter. Orbis keeps the same composition at its own window scale.
-    height: root.description == "" ? 40px : 66px;
+    height: 44px;
     background: transparent;
 
-    VerticalLayout {
-        alignment: center;
-        spacing: 6px;
-        Text {
-            text: root.title;
-            font-size: 27px;
-            font-weight: 700;
-            color: Palette.text-primary;
-            overflow: elide;
-        }
-        if (root.description != "") : Text {
-            text: root.description;
-            font-size: 13.5px;
-            color: Palette.text-secondary;
-            overflow: elide;
-        }
+    Text {
+        width: parent.width;
+        horizontal-alignment: left;
+        text: root.title;
+        font-size: 28px;
+        font-weight: 700;
+        color: Palette.text-primary;
+        vertical-alignment: center;
+        overflow: elide;
     }
 }
 
@@ -140,8 +123,8 @@ export component Divider inherits Rectangle {
 export component InfoRow inherits Rectangle {
     in property <string> label;
     in property <string> value;
-    in property <color> value-color: Palette.text-secondary;
-    height: 38px;
+    in property <color> value-color: Palette.text-primary;
+    height: 36px;
     background: transparent;
 
     HorizontalLayout {
@@ -150,7 +133,7 @@ export component InfoRow inherits Rectangle {
             text: root.label;
             font-size: 13.5px;
             font-weight: 500;
-            color: Palette.text-primary;
+            color: Palette.text-secondary;
             vertical-alignment: center;
             overflow: elide;
         }
@@ -158,7 +141,7 @@ export component InfoRow inherits Rectangle {
         Text {
             text: root.value;
             font-size: 13.5px;
-            font-weight: 500;
+            font-weight: 600;
             color: root.value-color;
             vertical-alignment: center;
             horizontal-alignment: right;
@@ -229,31 +212,35 @@ export component StatusPill inherits Rectangle {
     }
 }
 
+// Selector segment: the selected option is a solid accent fill, as in the
+// reference tabs (CPU/GPU, profile tiles).
 export component ChoiceButton inherits Rectangle {
     in property <string> label;
     in property <bool> selected: false;
     in property <bool> disabled: false;
     callback clicked;
 
-    min-width: 112px;
+    min-width: 72px;
+    preferred-width: 0px;
+    horizontal-stretch: 1;
     height: LayoutMetrics.control-height;
     border-radius: 10px;
-    border-width: root.selected ? 1.5px : 1px;
-    border-color: root.selected ? Palette.accent-default
+    border-width: 1px;
+    border-color: root.selected && !root.disabled ? Palette.accent-border
         : touch.has-hover && !root.disabled ? Palette.border-strong
         : Palette.border-default;
-    background: root.disabled ? Palette.surface-disabled
+    background: root.selected ? (root.disabled ? Palette.accent-fill.transparentize(0.55) : Palette.accent-fill)
+        : root.disabled ? Palette.surface-disabled
         : touch.pressed ? Palette.surface-pressed
-        : root.selected ? Palette.accent-soft
         : touch.has-hover ? Palette.surface-hover
         : Palette.surface-raised;
 
     Text {
         text: root.label;
         font-size: 13px;
-        font-weight: root.selected ? 650 : 550;
-        color: root.disabled ? Palette.text-disabled
-            : root.selected ? Palette.accent-default
+        font-weight: root.selected ? 600 : 500;
+        color: root.selected ? Palette.text-on-accent
+            : root.disabled ? Palette.text-disabled
             : Palette.text-primary;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -265,6 +252,7 @@ export component ChoiceButton inherits Rectangle {
     }
 }
 
+// Command button. `accent` marks the primary action of a card.
 export component ActionButton inherits Rectangle {
     in property <string> label;
     in property <bool> disabled: false;
@@ -272,24 +260,26 @@ export component ActionButton inherits Rectangle {
     callback clicked;
 
     height: LayoutMetrics.compact-control-height;
-    min-width: 88px;
-    border-radius: 9px;
+    min-width: 96px;
+    border-radius: 10px;
     border-width: 1px;
-    border-color: root.accent && !root.disabled ? Palette.accent-default
+    border-color: root.accent && !root.disabled ? Palette.accent-border
         : touch.has-hover && !root.disabled ? Palette.border-strong
         : Palette.border-default;
     background: root.disabled ? Palette.surface-disabled
+        : root.accent ? (touch.pressed ? Palette.accent-fill.darker(0.2) : touch.has-hover ? Palette.accent-fill.brighter(0.12) : Palette.accent-fill)
         : touch.pressed ? Palette.surface-pressed
-        : root.accent ? Palette.accent-soft
         : touch.has-hover ? Palette.surface-hover
         : Palette.surface-raised;
 
     Text {
+        x: 12px;
+        width: parent.width - 24px;
         text: root.label;
         font-size: 13px;
-        font-weight: root.accent ? 650 : 550;
+        font-weight: root.accent ? 600 : 500;
         color: root.disabled ? Palette.text-disabled
-            : root.accent ? Palette.accent-default
+            : root.accent ? Palette.text-on-accent
             : Palette.text-primary;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -302,20 +292,46 @@ export component ActionButton inherits Rectangle {
     }
 }
 
+// Labeled control row: fixed label column on the left, control on the right.
+export component FieldRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> muted: false;
+    height: LayoutMetrics.control-height;
+    background: transparent;
+
+    HorizontalLayout {
+        spacing: 16px;
+        Text {
+            width: 140px;
+            text: root.label;
+            font-size: 13.5px;
+            font-weight: 500;
+            color: root.muted ? Palette.text-disabled : Palette.text-secondary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+            @children
+        }
+    }
+}
+
 export component LocalStatus inherits Rectangle {
     in property <string> text;
     in property <color> accent: Palette.text-secondary;
-    height: LayoutMetrics.compact-control-height;
+    min-height: LayoutMetrics.compact-control-height;
+    vertical-stretch: 0;
     border-radius: 10px;
-    border-width: 1px;
-    border-color: Palette.border-default;
-    background: Palette.surface-muted;
+    background: root.accent.transparentize(0.9);
 
     HorizontalLayout {
         padding-left: 12px;
         padding-right: 12px;
+        padding-top: 8px;
+        padding-bottom: 8px;
         spacing: 9px;
-        alignment: center;
         Rectangle {
             width: 7px;
             vertical-stretch: 1;
@@ -335,7 +351,7 @@ export component LocalStatus inherits Rectangle {
             font-weight: 500;
             color: Palette.text-secondary;
             vertical-alignment: center;
-            overflow: elide;
+            wrap: word-wrap;
         }
     }
 }

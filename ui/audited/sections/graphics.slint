@@ -3,7 +3,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { UiState, GpuHwState, GpuModeHwState, NvidiaRow } from "../model.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
-import { PageHeader, SectionCard, SectionTitle, InfoRow, StatusPill, LocalStatus, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, InfoRow, LocalStatus, LayoutMetrics } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -22,16 +22,6 @@ export component GraphicsSection inherits Rectangle {
     function bit-set(mask: int, bit: int) -> bool {
         let shifted = Math.floor(mask / bit);
         return shifted - 2 * Math.floor(shifted / 2) == 1;
-    }
-
-    function mode-reason() -> string {
-        if (root.ui-state.gpu-mode-pending) { return "Ожидание подтверждения"; }
-        if (root.ui-state.gpu-mode-unconfirmed) { return "Результат неизвестен · обновите состояние"; }
-        if (root.ui-state.gpu-mode-state == GpuModeHwState.Ready) {
-            return root.ui-state.gpu-mode-writable ? "Доступно" : "Только чтение";
-        }
-        if (root.ui-state.gpu-mode-state == GpuModeHwState.Loading) { return "Получение состояния"; }
-        return "Управление недоступно";
     }
 
     function mode-label(index: int) -> string {
@@ -72,231 +62,142 @@ export component GraphicsSection inherits Rectangle {
             width: root.width - 2 * LayoutMetrics.page-margin;
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
-            padding-top: 14px;
+            padding-top: LayoutMetrics.page-margin;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
-            PageHeader {
-                title: "Графика";
-                description: "Режим гибридной графики, очередь переключения и состояние дискретного GPU.";
+            PageHeader { title: "Графика"; }
+
+            HorizontalLayout {
+                height: 92px;
+                spacing: 12px;
+                if (root.bit-set(root.ui-state.available-gpu-mask, 1)) : ModeCard {
+                    title: "Eco";
+                    icon-kind: 16;
+                    selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0 && !root.gpu-optimized;
+                    pending: root.ui-state.gpu-queued == 0;
+                    disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
+                    clicked => { if (root.gpu-optimized) { root.gpu-optimized-requested(false); } root.gpu-clicked(0); }
+                }
+                if (root.bit-set(root.ui-state.available-gpu-mask, 2)) : ModeCard {
+                    title: "Standard";
+                    icon-kind: 4;
+                    selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1 && !root.gpu-optimized;
+                    pending: root.ui-state.gpu-queued == 1;
+                    disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
+                    clicked => { if (root.gpu-optimized) { root.gpu-optimized-requested(false); } root.gpu-clicked(1); }
+                }
+                if (root.bit-set(root.ui-state.available-gpu-mask, 4)) : ModeCard {
+                    title: "Ultimate";
+                    icon-kind: 18;
+                    selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2 && !root.gpu-optimized;
+                    pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2;
+                    disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || root.ui-state.gpu-ultimate-disabled;
+                    clicked => { if (root.gpu-optimized) { root.gpu-optimized-requested(false); } root.gpu-clicked(2); }
+                }
+                if (root.bit-set(root.ui-state.available-gpu-mask, 8)) : ModeCard {
+                    title: "Optimized";
+                    icon-kind: 13;
+                    selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.gpu-optimized;
+                    disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
+                    clicked => { root.gpu-optimized-requested(true); }
+                }
+            }
+
+            if (root.ui-state.gpu-mode-state == GpuModeHwState.Unavailable) : LocalStatus {
+                text: "Переключение режима GPU недоступно на этом устройстве";
+                accent: Palette.text-secondary;
+            }
+            if (root.ui-state.gpu-mode-state == GpuModeHwState.Ready && !root.ui-state.gpu-mode-writable) : LocalStatus {
+                text: "Режим GPU доступен только для чтения";
+                accent: Palette.text-secondary;
+            }
+            if (root.ui-state.gpu-mode-pending) : LocalStatus {
+                text: "Ожидание подтверждения";
+                accent: Palette.warning;
+            }
+            if (root.ui-state.gpu-section-error) : LocalStatus {
+                text: "Изменение режима GPU не подтверждено";
+                accent: Palette.error;
+            }
+            if (root.ui-state.gpu-mode-unconfirmed) : LocalStatus {
+                text: "Результат неизвестен · обновите состояние перед новой записью";
+                accent: Palette.warning;
+            }
+            if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : LocalStatus {
+                text: "В очереди: " + root.mode-label(root.ui-state.gpu-queued) + " · применится после перезагрузки";
+                accent: Palette.warning;
+            }
+            if (root.gpu-optimized) : LocalStatus {
+                text: "Eco от батареи, Standard от сети · переключение после перезагрузки";
+                accent: Palette.accent-default;
             }
 
             HorizontalLayout {
-                height: 74px;
-                spacing: 14px;
-                SectionCard {
-                    horizontal-stretch: 1;
-                    background: Palette.surface-raised;
-                    HorizontalLayout {
-                        padding-left: 16px; padding-right: 16px; spacing: 10px; alignment: center;
-                        VerticalLayout {
-                            alignment: center; spacing: 2px;
-                            Text { text: "Текущий режим"; font-size: 11.5px; color: Palette.text-secondary; }
-                            Text { text: root.mode-label(root.ui-state.gpu-selected); font-size: 17px; font-weight: 700; color: Palette.text-primary; }
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        Rectangle {
-                  width: root.ui-state.gpu-mode-writable ? 88px : 112px;
-                  vertical-stretch: 1;
-                  background: transparent;
-                  StatusPill {
-                      width: parent.width;
-                      y: (parent.height - self.height) / 2;
-                      text: root.ui-state.gpu-mode-writable ? "Доступно" : "Только чтение";
-                      accent: root.ui-state.gpu-mode-writable ? Palette.success : Palette.text-secondary;
-                  }
-              }
-                    }
-                }
-                SectionCard {
-                    horizontal-stretch: 1;
-                    background: Palette.surface-raised;
-                    HorizontalLayout {
-                        padding-left: 16px; padding-right: 16px; spacing: 10px; alignment: center;
-                        VerticalLayout {
-                            alignment: center; spacing: 2px;
-                            Text { text: "В очереди"; font-size: 11.5px; color: Palette.text-secondary; }
-                            Text { text: root.mode-label(root.ui-state.gpu-queued); font-size: 17px; font-weight: 700; color: root.ui-state.gpu-queued >= 0 ? Palette.warning : Palette.text-disabled; }
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        if (root.ui-state.gpu-reboot-required) : Rectangle {
-                  width: 150px;
-                  vertical-stretch: 1;
-                  background: transparent;
-                  StatusPill {
-                      width: parent.width;
-                      y: (parent.height - self.height) / 2;
-                      text: "Нужен перезапуск";
-                      accent: Palette.warning;
-                  }
-              }
-                    }
-                }
-            }
+                spacing: LayoutMetrics.page-gap;
 
-            SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 14px;
-
-                    SectionTitle {
-                        title: "Режим GPU";
-                        detail: root.mode-reason();
-                    }
-
-                    HorizontalLayout {
-                        spacing: 12px;
-                        if (root.bit-set(root.ui-state.available-gpu-mask, 1)) : ModeCard {
-                            horizontal-stretch: 1;
-                            title: "Eco";
-                            description: "Только интегрированная графика";
-                            icon-kind: 4;
-                            accent: Palette.eco;
-                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0 && !root.gpu-optimized;
-                            pending: root.ui-state.gpu-queued == 0;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
-                            clicked => { if (root.gpu-optimized) { root.gpu-optimized-requested(false); } root.gpu-clicked(0); }
-                        }
-                        if (root.bit-set(root.ui-state.available-gpu-mask, 2)) : ModeCard {
-                            horizontal-stretch: 1;
-                            title: "Standard";
-                            description: "Гибридный режим";
-                            icon-kind: 4;
-                            accent: Palette.standard;
-                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1 && !root.gpu-optimized;
-                            pending: root.ui-state.gpu-queued == 1;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
-                            clicked => { if (root.gpu-optimized) { root.gpu-optimized-requested(false); } root.gpu-clicked(1); }
-                        }
-                        if (root.bit-set(root.ui-state.available-gpu-mask, 4)) : ModeCard {
-                            horizontal-stretch: 1;
-                            title: "Ultimate";
-                            description: "Прямой вывод через dGPU";
-                            icon-kind: 4;
-                            accent: Palette.ultimate;
-                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2 && !root.gpu-optimized;
-                            pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || root.ui-state.gpu-ultimate-disabled;
-                            clicked => { if (root.gpu-optimized) { root.gpu-optimized-requested(false); } root.gpu-clicked(2); }
-                        }
-                        if (root.bit-set(root.ui-state.available-gpu-mask, 8)) : ModeCard {
-                            horizontal-stretch: 1;
-                            title: "Optimized";
-                            description: "Eco от батареи, Standard от сети";
-                            icon-kind: 4;
-                            accent: Palette.optimized;
-                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.gpu-optimized;
-                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
-                            clicked => { root.gpu-optimized-requested(true); }
-                        }
-                    }
-
-                     if (root.ui-state.gpu-section-error) : LocalStatus {
-                        text: "Изменение режима GPU не было подтверждено";
-                        accent: Palette.error;
-                     }
-                    if (root.ui-state.gpu-mode-unconfirmed) : LocalStatus {
-                        text: "Результат неизвестен · обновите состояние перед новой записью";
-                        accent: Palette.warning;
-                    }
-                    if (root.gpu-optimized) : LocalStatus {
-                        text: "Optimized: при смене источника питания в очередь ставится Eco (батарея) или Standard (сеть); переключение вступает после перезагрузки";
-                        accent: Palette.text-secondary;
-                    }
-                    if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : LocalStatus {
-                        text: "Переключение поставлено в очередь и завершится после перезагрузки или выключения";
-                        accent: Palette.warning;
-                    }
-                }
-            }
-
-            // Read-only observations; hidden when no source reports anything.
-            if (root.ui-state.gpu-power-state != GpuHwState.Unavailable
-                || root.ui-state.gpu-mux-state != GpuHwState.Unavailable
-                || root.ui-state.gpu-access-state != GpuHwState.Unavailable) : SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 4px;
-                    SectionTitle { title: "Состояние оборудования"; }
-                    InfoRow { label: "Питание dGPU"; value: root.power-label(); }
-                    InfoRow { label: "Физический MUX"; value: root.mux-label(); }
-                    InfoRow { label: "Доступ к dGPU"; value: root.access-label(); }
-                }
-            }
-
-            if (root.nvidia-visible) : SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 10px;
-
-                    HorizontalLayout {
-                        height: 30px;
-                        SectionTitle {
-                            horizontal-stretch: 1;
-                            title: "NVIDIA: частоты и мощность";
-                        }
-                        StatusPill {
-                            text: root.nvidia-rows.length == 0 ? "Недоступно" : root.nvidia-writable ? "Доступно" : "Только чтение";
-                            accent: root.nvidia-rows.length == 0 ? Palette.warning : root.nvidia-writable ? Palette.success : Palette.text-secondary;
-                        }
-                    }
-                    Text {
-                        text: "Действуют до перезагрузки; при включённом автоприменении повторяются при смене профиля.";
-                        font-size: 11.5px;
-                        color: Palette.text-secondary;
-                        wrap: word-wrap;
-                    }
-                    if (root.nvidia-status != "") : LocalStatus {
-                        text: root.nvidia-status;
-                        accent: Palette.text-secondary;
-                    }
-                    for row in root.nvidia-rows : VerticalLayout {
+                // Read-only observations; hidden when no source reports anything.
+                if (root.ui-state.gpu-power-state != GpuHwState.Unavailable
+                    || root.ui-state.gpu-mux-state != GpuHwState.Unavailable
+                    || root.ui-state.gpu-access-state != GpuHwState.Unavailable) : SectionCard {
+                    width: root.nvidia-visible ? (parent.width - LayoutMetrics.page-gap) / 2 : parent.width;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
                         spacing: 2px;
-                        HorizontalLayout {
-                            spacing: 12px;
+                        SectionTitle { title: "Состояние"; }
+                        Rectangle { height: 6px; }
+                        InfoRow { label: "Текущий режим"; value: root.mode-label(root.ui-state.gpu-selected); }
+                        InfoRow { label: "Питание dGPU"; value: root.power-label(); }
+                        InfoRow { label: "MUX"; value: root.mux-label(); }
+                        InfoRow { label: "Доступ к dGPU"; value: root.access-label(); }
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
+
+                if (root.nvidia-visible) : SectionCard {
+                    horizontal-stretch: 1;
+                    min-width: (parent.width - LayoutMetrics.page-gap) / 2;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 8px;
+                        SectionTitle {
+                            title: "NVIDIA";
+                            detail: root.nvidia-rows.length == 0 ? "Недоступно" : root.nvidia-writable ? "" : "Только чтение";
+                        }
+                        if (root.nvidia-status != "") : LocalStatus {
+                            text: root.nvidia-status;
+                            accent: Palette.text-secondary;
+                        }
+                        for row in root.nvidia-rows : HorizontalLayout {
+                            height: 44px;
+                            spacing: 16px;
                             Text {
-                                horizontal-stretch: 1;
+                                width: 128px;
                                 text: row.label;
                                 font-size: 13.5px;
-                                font-weight: 550;
-                                color: Palette.text-primary;
+                                color: Palette.text-secondary;
                                 vertical-alignment: center;
+                                overflow: elide;
                             }
-                            Text {
-                                text: (row.current > 0 && row.unit == "МГц" ? "+" : "") + row.current + " " + row.unit;
-                                font-size: 14px;
-                                font-weight: 650;
-                                color: Palette.text-primary;
-                                vertical-alignment: center;
-                            }
-                        }
-                        HorizontalLayout {
                             ValueSlider {
                                 horizontal-stretch: 1;
                                 min: row.min;
                                 max: row.max;
                                 value: row.current;
                                 unit: row.unit;
-                                show-percent: false;
                                 disabled: !root.nvidia-writable;
                                 changed(v) => { root.nvidia-tuning-requested(row.field, Math.round(v)); }
                             }
                         }
-                        Text {
-                            text: "Диапазон драйвера: " + row.min + " … " + row.max + " " + row.unit
-                                + (row.default-known ? " · по умолчанию " + row.default : "")
-                                + (row.saved-known ? " · сохранено для профиля: " + row.saved : "");
-                            font-size: 11.5px;
-                            color: Palette.text-secondary;
+                        if (root.nvidia-error != "") : LocalStatus {
+                            text: root.nvidia-error;
+                            accent: Palette.error;
                         }
-                    }
-                    if (root.nvidia-error != "") : LocalStatus {
-                        text: root.nvidia-error;
-                        accent: Palette.error;
+                        Rectangle { vertical-stretch: 1; }
                     }
                 }
             }
 
-            Rectangle { vertical-stretch: 100; background: transparent; }
+            Rectangle { vertical-stretch: 100; }
         }
     }
 }

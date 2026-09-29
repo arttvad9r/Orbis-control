@@ -1,6 +1,6 @@
 // About page — product identity, scope and version.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, InfoRow, StatusPill, ActionButton, LocalStatus, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, InfoRow, ActionButton, LayoutMetrics } from "../common.slint";
 import { AppMark } from "../../components/app-mark.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -16,37 +16,31 @@ export component AboutSection inherits Rectangle {
             width: root.width - 2 * LayoutMetrics.page-margin;
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
-            padding-top: 14px;
+            padding-top: LayoutMetrics.page-margin;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
-            PageHeader {
-                title: "О программе";
-                description: "Orbis Control — единый центр управления поддерживаемыми функциями ноутбуков ASUS в Linux.";
-            }
+            PageHeader { title: "О программе"; }
 
             SectionCard {
-                min-height: 180px;
-                background: Palette.surface-raised;
+                height: 140px;
                 HorizontalLayout {
-                    padding: 24px;
+                    padding-left: 24px;
+                    padding-right: 24px;
                     spacing: 20px;
-                    alignment: center;
 
                     Rectangle {
                         width: 72px;
-                        vertical-stretch: 1;
-                        background: transparent;
                         AppMark {
                             width: 72px;
                             height: 72px;
-                            y: (parent.height - self.height) / 2 + 1px;
+                            y: (parent.height - self.height) / 2;
                         }
                     }
 
                     VerticalLayout {
-                        width: 430px;
+                        horizontal-stretch: 1;
                         alignment: center;
-                        spacing: 5px;
+                        spacing: 6px;
                         Text {
                             text: "Orbis Control";
                             font-size: 24px;
@@ -54,45 +48,27 @@ export component AboutSection inherits Rectangle {
                             color: Palette.text-primary;
                         }
                         Text {
-                            height: 36px;
-                            text: "Нативный Linux control center для ASUS ROG / TUF / Zephyrus";
-                            font-size: 13px;
+                            text: "Версия " + root.version;
+                            font-size: 13.5px;
                             color: Palette.text-secondary;
-                            wrap: word-wrap;
-                            vertical-alignment: center;
                         }
-                        Rectangle { height: 4px; background: transparent; }
-                        StatusPill { width: 126px; text: "Версия " + root.version; accent: Palette.accent-default; }
                     }
-                }
-            }
 
-            HorizontalLayout {
-                spacing: 14px;
-                SectionCard {
-                    horizontal-stretch: 1;
                     VerticalLayout {
-                        padding: LayoutMetrics.card-padding;
-                        spacing: 10px;
-                        SectionTitle { title: "Возможности"; }
-                        Text {
-                            text: "Профили производительности, управление батареей, вентиляторами, гибридной графикой, подсветкой, панелью и расширенными функциями ASUS.";
-                            font-size: 13px;
-                            color: Palette.text-primary;
-                            wrap: word-wrap;
+                        width: 240px;
+                        alignment: center;
+                        spacing: 8px;
+                        ActionButton {
+                            label: root.update-busy ? "Проверяю…" : "Проверить обновления";
+                            accent: true;
+                            disabled: root.update-busy;
+                            clicked => { root.update-check-requested(); }
                         }
-                    }
-                }
-                SectionCard {
-                    horizontal-stretch: 1;
-                    VerticalLayout {
-                        padding: LayoutMetrics.card-padding;
-                        spacing: 10px;
-                        SectionTitle { title: "Принцип работы"; }
-                        Text {
-                            text: "Интерфейс строится по фактическим возможностям устройства. Изменения проходят через ограниченный Hardware1 API и, где возможно, подтверждаются чтением реального состояния.";
-                            font-size: 13px;
-                            color: Palette.text-secondary;
+                        if (root.update-status != "") : Text {
+                            text: root.update-status;
+                            font-size: 12px;
+                            color: root.update-problem ? Palette.warning : Palette.text-secondary;
+                            horizontal-alignment: center;
                             wrap: word-wrap;
                         }
                     }
@@ -102,41 +78,16 @@ export component AboutSection inherits Rectangle {
             SectionCard {
                 VerticalLayout {
                     padding: LayoutMetrics.card-padding;
-                    spacing: 4px;
+                    spacing: 2px;
                     SectionTitle { title: "Приложение"; }
-                    InfoRow { label: "Название"; value: "Orbis Control"; }
-                    InfoRow { label: "Версия"; value: root.version; }
-                    InfoRow { label: "Платформа"; value: "Linux · Arch first"; }
+                    Rectangle { height: 6px; }
+                    InfoRow { label: "Платформа"; value: "Linux"; }
+                    InfoRow { label: "Устройства"; value: "ASUS ROG / TUF / Zephyrus"; }
                     InfoRow { label: "Лицензия"; value: "GPL-3.0-or-later"; }
                 }
             }
 
-            SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 10px;
-                    SectionTitle {
-                        title: "Обновления";
-                        detail: "Проверка идёт только по нажатию и только читает список релизов на GitHub. Установка — через pacman.";
-                    }
-                    HorizontalLayout {
-                        spacing: 10px;
-                        ActionButton {
-                            width: 190px;
-                            label: root.update-busy ? "Проверяю…" : "Проверить обновления";
-                            disabled: root.update-busy;
-                            clicked => { root.update-check-requested(); }
-                        }
-                        if (root.update-status != "") : LocalStatus {
-                            horizontal-stretch: 1;
-                            text: root.update-status;
-                            accent: root.update-problem ? Palette.warning : Palette.text-secondary;
-                        }
-                    }
-                }
-            }
-
-            Rectangle { vertical-stretch: 100; background: transparent; }
+            Rectangle { vertical-stretch: 100; }
         }
     }
 }

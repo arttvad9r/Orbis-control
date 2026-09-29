@@ -1,9 +1,9 @@
-// Power page — battery overview, charge preservation and observed consumption.
+// Power page — battery state, health/consumption and the charge limit.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, ChargeLimitState } from "../model.slint";
 import { PageHeader, SectionCard, SectionTitle, InfoRow, LocalStatus, LayoutMetrics } from "../common.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
-import { MetricCard } from "../../components/metric-card.slint";
+import { Icon } from "../../components/icon.slint";
 import { Palette } from "../../themes/dark.slint";
 
 export component PowerSection inherits Rectangle {
@@ -25,41 +25,94 @@ export component PowerSection inherits Rectangle {
         return root.ui-state.battery-status;
     }
 
+    function charging() -> bool {
+        return root.ui-state.battery-status == "Charging" || root.ui-state.battery-status == "charging"
+            || root.ui-state.battery-status == "Full" || root.ui-state.battery-status == "full";
+    }
+
     ScrollView {
         VerticalLayout {
             width: root.width - 2 * LayoutMetrics.page-margin;
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
-            padding-top: 14px;
+            padding-top: LayoutMetrics.page-margin;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
-            PageHeader {
-                title: "Питание";
-                description: "Состояние аккумулятора, ограничение заряда и текущее энергопотребление.";
-            }
+            PageHeader { title: "Питание"; }
 
             HorizontalLayout {
-                height: 108px;
-                spacing: 14px;
-                MetricCard { label: "Заряд"; value: root.ui-state.battery-percent; detail: root.battery-status-label(); icon-kind: 2; value-color: Palette.text-primary; }
-                MetricCard { label: "Здоровье"; value: root.ui-state.battery-health; detail: "остаточная ёмкость"; icon-kind: 2; }
-                MetricCard { label: "Циклы"; value: root.ui-state.battery-cycles; detail: "циклов аккумулятора"; icon-kind: 13; }
-                MetricCard { label: "Источник"; value: root.ac-label(); detail: root.ui-state.power-ac-mw; icon-kind: 13; }
+                spacing: LayoutMetrics.page-gap;
+                height: 232px;
+
+                SectionCard {
+                    width: (parent.width - LayoutMetrics.page-gap) / 2;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 10px;
+                        SectionTitle { title: "Батарея"; }
+                        Rectangle { vertical-stretch: 1; }
+                        HorizontalLayout {
+                            spacing: 18px;
+                            Text {
+                                text: root.ui-state.battery-percent;
+                                font-size: 48px;
+                                font-weight: 700;
+                                color: Palette.text-primary;
+                                vertical-alignment: center;
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 4px;
+                                Text {
+                                    text: root.battery-status-label();
+                                    font-size: 15px;
+                                    font-weight: 600;
+                                    color: root.charging() ? Palette.success : Palette.text-primary;
+                                }
+                                Text { text: root.ac-label(); font-size: 13px; color: Palette.text-secondary; }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                        Rectangle {
+                            height: 8px;
+                            border-radius: 4px;
+                            background: Palette.border-default;
+                            Rectangle {
+                                x: 0px;
+                                width: parent.width * Math.min(Math.max(root.ui-state.battery-percent-value, 0), 100) / 100;
+                                height: parent.height;
+                                border-radius: 4px;
+                                background: Palette.success;
+                            }
+                        }
+                    }
+                }
+
+                SectionCard {
+                    width: (parent.width - LayoutMetrics.page-gap) / 2;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 2px;
+                        SectionTitle { title: "Состояние"; }
+                        Rectangle { height: 6px; }
+                        InfoRow { label: "Здоровье"; value: root.ui-state.battery-health; }
+                        InfoRow { label: "Циклы заряда"; value: root.ui-state.battery-cycles; }
+                        InfoRow { label: "Потребление"; value: root.ui-state.power-ac-mw; }
+                        InfoRow { label: "Дискретная графика"; value: root.ui-state.gpu-power; }
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
             }
 
             SectionCard {
                 VerticalLayout {
                     padding: LayoutMetrics.card-padding;
-                    spacing: 14px;
+                    spacing: 12px;
 
-                     SectionTitle {
-                         title: "Ограничение заряда батареи";
-                         detail: root.ui-state.charge-limit-pending ? "Ожидание подтверждения"
-                             : root.ui-state.charge-limit-unconfirmed ? "Результат неизвестен · обновите состояние"
-                             : root.ui-state.charge-limit-error != "" ? root.ui-state.charge-limit-error
-                             : root.ui-state.charge-limit-state == ChargeLimitState.Ready
-                            ? (root.ui-state.charge-limit-writable ? "Доступно" : "Только чтение")
-                            : "Получение состояния";
+                    SectionTitle {
+                        title: "Лимит заряда";
+                        detail: root.ui-state.charge-limit-state == ChargeLimitState.Ready && !root.ui-state.charge-limit-writable ? "Только чтение" : "";
                     }
 
                     if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : ValueSlider {
@@ -67,60 +120,23 @@ export component PowerSection inherits Rectangle {
                         max: 100;
                         step: 1;
                         value: root.ui-state.charge-limit;
-                         disabled: !root.ui-state.charge-limit-writable || root.ui-state.charge-limit-pending || root.ui-state.charge-limit-unconfirmed || root.ui-state.charge-limit-error != "";
+                        disabled: !root.ui-state.charge-limit-writable || root.ui-state.charge-limit-pending || root.ui-state.charge-limit-unconfirmed || root.ui-state.charge-limit-error != "";
                         changed(v) => { root.charge-changed(v); }
-                     }
-                     if (root.ui-state.charge-limit-pending || root.ui-state.charge-limit-unconfirmed || root.ui-state.charge-limit-error != "") : LocalStatus {
-                         text: root.ui-state.charge-limit-pending ? "Изменение поставлено в очередь"
-                             : root.ui-state.charge-limit-unconfirmed ? "Результат неизвестен · обновите состояние перед новой записью"
-                             : root.ui-state.charge-limit-error;
-                         accent: root.ui-state.charge-limit-error != "" ? Palette.error : Palette.warning;
-                     }
+                    }
+                    if (root.ui-state.charge-limit-pending || root.ui-state.charge-limit-unconfirmed || root.ui-state.charge-limit-error != "") : LocalStatus {
+                        text: root.ui-state.charge-limit-pending ? "Ожидание подтверждения"
+                            : root.ui-state.charge-limit-unconfirmed ? "Результат неизвестен · обновите состояние перед новой записью"
+                            : root.ui-state.charge-limit-error;
+                        accent: root.ui-state.charge-limit-error != "" ? Palette.error : Palette.warning;
+                    }
                     if (root.ui-state.charge-limit-state != ChargeLimitState.Ready) : LocalStatus {
-                        text: root.ui-state.charge-limit-state == ChargeLimitState.Loading
-                            ? "Чтение текущего порога заряда"
-                            : "Порог заряда недоступен на текущем backend";
+                        text: root.ui-state.charge-limit-state == ChargeLimitState.Loading ? "Чтение…" : "Недоступно на этом устройстве";
                         accent: root.ui-state.charge-limit-state == ChargeLimitState.Loading ? Palette.text-secondary : Palette.warning;
                     }
-
-                    Text {
-                        text: "Для постоянной работы от сети обычно достаточно 70–80 %. Значение применяется только после подтверждения фактического состояния.";
-                        font-size: 12px;
-                        color: Palette.text-secondary;
-                        wrap: word-wrap;
-                    }
                 }
             }
 
-            HorizontalLayout {
-                spacing: 14px;
-                SectionCard {
-                    horizontal-stretch: 1;
-                    VerticalLayout {
-                        padding: LayoutMetrics.card-padding;
-                        spacing: 4px;
-                        SectionTitle { title: "Аккумулятор"; }
-                        InfoRow { label: "Состояние"; value: root.battery-status-label(); }
-                        InfoRow { label: "Текущий заряд"; value: root.ui-state.battery-percent; }
-                        InfoRow { label: "Здоровье"; value: root.ui-state.battery-health; }
-                        InfoRow { label: "Циклы"; value: root.ui-state.battery-cycles; }
-                    }
-                }
-
-                SectionCard {
-                    horizontal-stretch: 1;
-                    VerticalLayout {
-                        padding: LayoutMetrics.card-padding;
-                        spacing: 4px;
-                        SectionTitle { title: "Энергопотребление"; }
-                        InfoRow { label: "Источник"; value: root.ac-label(); }
-                        InfoRow { label: "От адаптера"; value: root.ui-state.power-ac-mw; }
-                        InfoRow { label: "Дискретная графика"; value: root.ui-state.gpu-power; }
-                    }
-                }
-            }
-
-            Rectangle { vertical-stretch: 100; background: transparent; }
+            Rectangle { vertical-stretch: 100; }
         }
     }
 }

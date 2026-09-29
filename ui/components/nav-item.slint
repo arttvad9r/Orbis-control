@@ -1,15 +1,6 @@
-// Sidebar navigation item.
-//
-// TARGET_DESIGN (docs/references/orbis-visual-2026-09-24/): the reference
-// sidebar uses two-line rows — a main label with a smaller secondary
-// description underneath — and marks the active destination with a full-width
-// blue pill rather than a slim accent rail. Measured from the reference
-// (1448px capture): the active pill spans the whole row inset-to-inset with a
-// ~8px radius, an accent fill, an accent-tinted icon and light body text.
-//
-// Geometry stays absolute (constant icon column, constant label x) so the icon
-// column cannot zigzag with label length — the F4a/F4b property preserved from
-// the previous implementation.
+// Sidebar navigation item: two-line row, solid accent pill when active
+// (docs/references/orbis-visual-2026-09-24/). Geometry is absolute so the icon
+// column and label x are identical on every row.
 import { Icon } from "icon.slint";
 import { Palette } from "../themes/dark.slint";
 
@@ -20,60 +11,42 @@ export component NavItem inherits Rectangle {
     in property <bool> selected: false;
     callback clicked;
 
-    // Constant column geometry: 12px row inset + fixed 18×18 icon box + 11px
-    // gap; the label starts at the same x on every row.
-    out property <length> row-inset: 12px;
-    out property <length> icon-size: 18px;
-    out property <length> spacing-icon-label: 11px;
+    out property <length> row-inset: 14px;
+    out property <length> icon-size: 20px;
+    out property <length> spacing-icon-label: 14px;
 
-    height: root.sublabel == "" ? 40px : 48px;
-    border-radius: 9px;
+    height: root.sublabel == "" ? 42px : 54px;
+    border-radius: 10px;
     background: root.selected ? Palette.accent-fill
         : touch.has-hover ? Palette.surface-hover
         : transparent;
 
-    // Icon sits on the first text line, as in the reference, so the two-line
-    // block stays optically centered while the icon tracks the label.
-    icon-box := Rectangle {
+    Icon {
         x: root.row-inset;
-        y: root.sublabel == "" ? (parent.height - self.height) / 2
-            : 11px;
+        y: (parent.height - self.height) / 2;
         width: root.icon-size;
         height: root.icon-size;
-        background: transparent;
-
-        Icon {
-            width: root.icon-size;
-            height: root.icon-size;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            kind: root.icon-kind;
-            tint: root.selected ? Palette.text-on-accent : Palette.text-secondary;
-        }
+        kind: root.icon-kind;
+        tint: root.selected ? Palette.text-on-accent : Palette.text-secondary;
     }
 
-    // Label column: fills the remaining width and elides at the row edge, so no
-    // label can push or pull the row content horizontally.
     VerticalLayout {
         x: root.row-inset + root.icon-size + root.spacing-icon-label;
         width: parent.width - self.x - 10px;
-        y: root.sublabel == "" ? 0px : 8px;
-        height: root.sublabel == "" ? parent.height : parent.height - 12px;
-        spacing: 1px;
+        spacing: 2px;
         alignment: center;
 
         Text {
             text: root.label;
-            font-size: 13px;
-            font-weight: root.selected ? 650 : 550;
+            font-size: 13.5px;
+            font-weight: root.selected ? 600 : 500;
             color: root.selected ? Palette.text-on-accent : Palette.text-primary;
             overflow: elide;
         }
         if (root.sublabel != "") : Text {
             text: root.sublabel;
-            font-size: 10.5px;
-            font-weight: 500;
-            color: root.selected ? Palette.text-on-accent.transparentize(0.22) : Palette.text-disabled;
+            font-size: 11px;
+            color: root.selected ? Palette.text-on-accent.transparentize(0.2) : Palette.text-disabled;
             overflow: elide;
         }
     }

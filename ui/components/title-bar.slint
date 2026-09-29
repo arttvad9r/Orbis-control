@@ -60,45 +60,32 @@ export component TitleBar inherits Rectangle {
             width: LayoutMetrics.sidebar-width;
             background: transparent;
             HorizontalLayout {
-                padding-left: 14px;
+                padding-left: 23px;
                 padding-right: 12px;
-                spacing: 10px;
+                spacing: 12px;
                 alignment: center;
                 Rectangle {
-                    width: 28px;
+                    width: 26px;
                     vertical-stretch: 1;
                     background: transparent;
                     AppMark {
-                        width: 28px;
-                        height: 28px;
-                        y: (parent.height - self.height) / 2 + 1px;
+                        width: 26px;
+                        height: 26px;
+                        y: (parent.height - self.height) / 2;
                     }
                 }
-                VerticalLayout {
-                    alignment: center;
-                    spacing: 0px;
-                    Text {
-                        text: root.app-title;
-                        font-size: 13.5px;
-                        font-weight: 650;
-                        color: Palette.text-primary;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    Text {
-                        text: "Управление ASUS";
-                        font-size: 9.5px;
-                        font-weight: 550;
-                        color: Palette.text-disabled;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
+                Text {
+                    text: root.app-title;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: Palette.text-primary;
+                    vertical-alignment: center;
+                    overflow: elide;
                 }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
             }
         }
 
-        Rectangle { width: 1px; background: Palette.border-default; }
         Rectangle { horizontal-stretch: 1; background: transparent; }
 
         WindowButton { glyph: "–"; clicked => { root.minimize-requested(); } }
@@ -106,10 +93,4 @@ export component TitleBar inherits Rectangle {
         WindowButton { glyph: "\u{00D7}"; danger: true; clicked => { root.close-requested(); } }
     }
 
-    Rectangle {
-        y: parent.height - 1px;
-        width: parent.width;
-        height: 1px;
-        background: Palette.border-default;
-    }
 }

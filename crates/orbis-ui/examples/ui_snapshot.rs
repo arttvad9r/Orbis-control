@@ -79,6 +79,8 @@ fn demo_state(component: &AppWindow) {
 
     state.cpu_temp = "56°C".into();
     state.gpu_temp = "51°C".into();
+    state.cpu_temp_value = 56;
+    state.gpu_temp_value = 51;
     state.cpu_fan_rpm = "2300 rpm".into();
     state.gpu_fan_rpm = "2100 rpm".into();
     state.battery_percent = "78%".into();
@@ -121,7 +123,97 @@ fn demo_state(component: &AppWindow) {
     state.fan_pwm_5 = 144;
     state.fan_pwm_6 = 196;
     state.fan_pwm_7 = 255;
+
+    state.power_limits_ready = true;
+    state.power_limits_writable = true;
+    state.spl_unit = "W".into();
+    state.spl_value = 45;
+    state.spl_min = 15;
+    state.spl_max = 80;
+    state.spl_step = 1;
+    state.sppt_unit = "W".into();
+    state.sppt_value = 65;
+    state.sppt_min = 15;
+    state.sppt_max = 90;
+    state.sppt_step = 1;
+    state.fppt_unit = "W".into();
+    state.fppt_value = 80;
+    state.fppt_min = 15;
+    state.fppt_max = 100;
+    state.fppt_step = 1;
+    state.gpu_dynamic_boost_unit = "W".into();
+    state.gpu_dynamic_boost_value = 25;
+    state.gpu_dynamic_boost_min = 5;
+    state.gpu_dynamic_boost_max = 25;
+    state.gpu_dynamic_boost_step = 1;
     component.set_ui_state(state);
+
+    component.set_cpu_tuning_ready(true);
+    component.set_cpu_epp_supported(true);
+    component.set_cpu_epp_writable(true);
+    component.set_cpu_epp(2);
+    component.set_cpu_boost_known(true);
+    component.set_cpu_boost(true);
+    component.set_cpu_boost_writable(true);
+    component.set_cpu_co_supported(true);
+    component.set_cpu_co_writable(true);
+    component.set_profile_limits_known(true);
+    component.set_profile_limits_auto_apply(true);
+    component.set_power_rules_known(true);
+    component.set_power_rules_enabled(true);
+    component.set_power_rules_ac(3);
+    component.set_power_rules_battery(1);
+    component.set_panel_refresh_known(true);
+    component.set_panel_refresh_rates(slint::ModelRc::new(slint::VecModel::from(vec![60, 144])));
+    component.set_panel_refresh_current(144);
+    component.set_power_rules_ac_hz(144);
+    component.set_power_rules_battery_hz(60);
+    component.set_panel_brightness_known(true);
+    component.set_panel_brightness(70);
+    component.set_nvidia_visible(true);
+    component.set_nvidia_writable(true);
+    component.set_nvidia_rows(slint::ModelRc::new(slint::VecModel::from(vec![
+        NvidiaRow {
+            field: 0,
+            label: "Частота ядра".into(),
+            unit: "МГц".into(),
+            current: 100,
+            min: -200,
+            max: 300,
+            default_known: true,
+            default: 0,
+            saved_known: false,
+            saved: 0,
+        },
+        NvidiaRow {
+            field: 1,
+            label: "Частота памяти".into(),
+            unit: "МГц".into(),
+            current: 200,
+            min: -500,
+            max: 1000,
+            default_known: true,
+            default: 0,
+            saved_known: false,
+            saved: 0,
+        },
+        NvidiaRow {
+            field: 2,
+            label: "Лимит мощности".into(),
+            unit: "W".into(),
+            current: 115,
+            min: 60,
+            max: 140,
+            default_known: true,
+            default: 115,
+            saved_known: false,
+            saved: 0,
+        },
+    ])));
+    component.set_aura_rainbow_supported(true);
+    component.set_aura_breathe_supported(true);
+    component.set_aura_static_supported(true);
+    component.set_aura_star_supported(true);
 
     component.set_device_name("ASUS TUF Gaming A17 FA707NV".into());
     component.set_device_board("FA707NV".into());
