@@ -2765,6 +2765,64 @@ fn wire_keyboard_timeout(
     });
 }
 
+fn wire_panel_brightness(
+    app: &AppWindow,
+    runtime: tokio::runtime::Handle,
+    panel: std::sync::Arc<dyn orbis_providers::PanelLight>,
+) {
+    fn show(app: &AppWindow, read: Result<orbis_providers::PanelBrightness, String>) {
+        match read {
+            Ok(state) => {
+                app.set_panel_brightness_known(true);
+                app.set_panel_brightness(i32::from(state.percent()));
+            }
+            Err(message) => {
+                app.set_panel_brightness_known(false);
+                tracing::debug!("panel brightness unavailable: {message}");
+            }
+        }
+    }
+
+    let poll_panel = panel.clone();
+    let poll_weak = app.as_weak();
+    runtime.spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(3));
+        loop {
+            tick.tick().await;
+            let read = poll_panel.read().await.map_err(|error| error.to_string());
+            if poll_weak
+                .upgrade_in_event_loop(move |app| show(&app, read))
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+
+    let weak = app.as_weak();
+    let spawn_runtime = runtime.clone();
+    app.on_panel_brightness_requested(move |percent| {
+        let panel = panel.clone();
+        let weak = weak.clone();
+        let percent = u8::try_from(percent.clamp(1, 100)).unwrap_or(100);
+        spawn_runtime.spawn(async move {
+            let write = panel.set_percent(percent).await;
+            let read = panel.read().await.map_err(|error| error.to_string());
+            let error = match (&write, &read) {
+                (Err(error), _) => Some(format!("Не удалось изменить яркость: {error}")),
+                (Ok(()), Ok(state)) if state.percent().abs_diff(percent) > 1 => {
+                    Some("Система не подтвердила новую яркость".to_owned())
+                }
+                _ => None,
+            };
+            let _ = weak.upgrade_in_event_loop(move |app| {
+                show(&app, read);
+                app.set_panel_brightness_error(error.unwrap_or_default().into());
+            });
+        });
+    });
+}
+
 fn wire_update_check(app: &AppWindow, runtime: tokio::runtime::Handle) {
     let weak = app.as_weak();
     app.on_update_check_requested(move || {
@@ -3008,6 +3066,7 @@ fn main() -> anyhow::Result<()> {
     let diagnostics_system_connection = system_connection.clone();
     let lifecycle_connection = system_connection.clone();
     let keyboard_light_connection = system_connection.clone();
+    let panel_light_connection = system_connection.clone();
     // Original application caller identity for the ASUS product GPU Hardware1
     // operation: the GUI owns this connection and passes it through the worker
     // FIFO. The operation stays fail-closed until polkit/backend promotion.
@@ -3056,6 +3115,13 @@ fn main() -> anyhow::Result<()> {
     show_keyboard_timeout(&app, &keyboard_timeout);
     wire_keyboard_timeout(&app, std::sync::Arc::new(timeout_tx));
     wire_update_check(&app, runtime.handle().clone());
+    wire_panel_brightness(
+        &app,
+        runtime.handle().clone(),
+        std::sync::Arc::new(orbis_providers::LogindPanelLight::new(
+            panel_light_connection,
+        )),
+    );
     let keyboard_status_app = app.as_weak();
     let keyboard_task = runtime.spawn(orbis_ui::keyboard_timeout_runtime::run_keyboard_timeout(
         timeout_rx,

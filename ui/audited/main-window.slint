@@ -120,6 +120,10 @@ export component AppWindow inherits Window {
     in property <string> keyboard-timeout-status: "";
     in property <bool> keyboard-timeout-problem: false;
     callback keyboard-timeout-requested(bool, int);
+    in property <bool> panel-brightness-known: false;
+    in property <int> panel-brightness: 0;
+    in property <string> panel-brightness-error: "";
+    callback panel-brightness-requested(int);
     in property <string> update-status: "";
     in property <bool> update-problem: false;
     in property <bool> update-busy: false;
@@ -472,6 +476,10 @@ export component AppWindow inherits Window {
                         power-rules-enabled: root.power-rules-known && root.power-rules-enabled;
                         power-rules-ac-hz: root.power-rules-ac-hz;
                         power-rules-battery-hz: root.power-rules-battery-hz;
+                        panel-brightness-known: root.panel-brightness-known;
+                        panel-brightness: root.panel-brightness;
+                        panel-brightness-error: root.panel-brightness-error;
+                        panel-brightness-requested(v) => { root.panel-brightness-requested(v); }
                         panel-refresh-requested(hz) => { root.panel-refresh-requested(hz); }
                         power-rules-refresh-requested(ac, hz) => { root.power-rules-refresh-requested(ac, hz); }
                     }

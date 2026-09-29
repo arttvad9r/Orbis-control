@@ -38,6 +38,7 @@ pub mod keyboard_dim;
 pub mod lact_telemetry;
 pub mod linux_memory;
 pub mod native_asus_eco;
+pub mod panel_brightness;
 pub mod panel_refresh;
 pub mod probes;
 pub mod readiness;
@@ -92,6 +93,7 @@ pub use linux_memory::{
     LinuxSystemMemoryProvider, SystemMemoryProvider, parse_meminfo, parse_memory_pressure,
 };
 pub use native_asus_eco::*;
+pub use panel_brightness::{LogindPanelLight, PanelBrightness, PanelLight};
 pub use panel_refresh::{KscreenDoctorPanel, PanelRefreshBackend, PanelRefreshState};
 pub use readiness::{bounded_readiness_probe, join_readiness2};
 pub use ryzenadj_diagnostics::{

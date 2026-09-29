@@ -1,6 +1,7 @@
 // Display page — observed desktop mode plus ASUS panel capabilities.
 import { ScrollView } from "std-widgets.slint";
 import { PageHeader, SectionCard, SectionTitle, LocalStatus, InfoRow, StatusPill, ActionButton, LayoutMetrics } from "../common.slint";
+import { ValueSlider } from "../../components/value-slider.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -19,6 +20,10 @@ export component DisplaySection inherits Rectangle {
     in property <bool> power-rules-enabled: false;
     in property <int> power-rules-ac-hz: 0;
     in property <int> power-rules-battery-hz: 0;
+    in property <bool> panel-brightness-known: false;
+    in property <int> panel-brightness: 0;
+    in property <string> panel-brightness-error: "";
+    callback panel-brightness-requested(int);
     callback panel-refresh-requested(int);
     callback power-rules-refresh-requested(bool, int);
 
@@ -64,6 +69,46 @@ export component DisplaySection inherits Rectangle {
                   accent: root.display-state-ready ? Palette.success : Palette.warning;
               }
           }
+                }
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 8px;
+
+                    SectionTitle {
+                        title: "Яркость экрана";
+                        detail: root.panel-brightness-known ? "Меняется через systemd-logind, как это делает рабочий стол" : "Недоступно";
+                    }
+                    if (root.panel-brightness-known) : HorizontalLayout {
+                        spacing: 12px;
+                        ValueSlider {
+                            horizontal-stretch: 1;
+                            min: 1;
+                            max: 100;
+                            value: root.panel-brightness;
+                            show-percent: false;
+                            changed(v) => { root.panel-brightness-requested(v); }
+                        }
+                        Text {
+                            width: 48px;
+                            text: root.panel-brightness + "%";
+                            font-size: 14px;
+                            font-weight: 650;
+                            color: Palette.text-primary;
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                        }
+                    }
+                    if (!root.panel-brightness-known) : LocalStatus {
+                        text: "Встроенная панель не показала управляемую подсветку.";
+                        accent: Palette.text-secondary;
+                    }
+                    if (root.panel-brightness-error != "") : LocalStatus {
+                        text: root.panel-brightness-error;
+                        accent: Palette.error;
+                    }
                 }
             }
 
