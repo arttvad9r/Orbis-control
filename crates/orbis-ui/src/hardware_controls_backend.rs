@@ -37,6 +37,7 @@ trait HardwareProductControls {
     fn set_keyboard_backlight(&self, level: u8) -> zbus::Result<u8>;
 
     fn aura_mutation_status(&self) -> zbus::Result<u8>;
+    fn aura_kernel_effect_modes(&self) -> zbus::Result<Vec<u32>>;
     fn set_aura_static_rgb(&self, r: u8, g: u8, b: u8) -> zbus::Result<AuraMutationWire>;
     fn set_aura_effect(
         &self,
@@ -64,6 +65,81 @@ trait HardwareProductControls {
 }
 
 const AURA_OUTCOME_CONFIG_CONFIRMED: u32 = 0;
+const AURA_OUTCOME_KERNEL_DISPATCHED: u32 = 1;
+
+/// Mode, speed and colours of an Aura effect as the UI shows them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AuraEffectSnapshot {
+    pub(crate) mode: u32,
+    pub(crate) speed: String,
+    pub(crate) colour1: AuraRgb,
+    pub(crate) colour2: AuraRgb,
+}
+
+/// Effect the kernel `kbd_rgb_mode` route last accepted. asusd cannot see that
+/// attribute, so its config keeps reporting the old effect; the memo is shown
+/// only while asusd's config is still what it was right after the write.
+struct KernelEffectSlot(std::sync::Mutex<Option<KernelEffectMemo>>);
+
+struct KernelEffectMemo {
+    sent: AuraEffectSnapshot,
+    asusd_baseline: Option<AuraEffectSnapshot>,
+}
+
+impl KernelEffectSlot {
+    const fn new() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+
+    fn remember(&self, sent: AuraEffectSnapshot) {
+        *self.0.lock().unwrap() = Some(KernelEffectMemo {
+            sent,
+            asusd_baseline: None,
+        });
+    }
+
+    fn forget(&self) {
+        *self.0.lock().unwrap() = None;
+    }
+
+    fn overlay(&self, asusd_now: &AuraEffectSnapshot) -> Option<AuraEffectSnapshot> {
+        let mut slot = self.0.lock().unwrap();
+        let memo = slot.as_mut()?;
+        match &memo.asusd_baseline {
+            None => memo.asusd_baseline = Some(asusd_now.clone()),
+            Some(baseline) if baseline != asusd_now => {
+                *slot = None;
+                return None;
+            }
+            Some(_) => {}
+        }
+        slot.as_ref().map(|memo| memo.sent.clone())
+    }
+}
+
+static KERNEL_EFFECT: KernelEffectSlot = KernelEffectSlot::new();
+
+pub(crate) fn forget_kernel_effect() {
+    KERNEL_EFFECT.forget();
+}
+
+/// The effect to show instead of asusd's when the kernel route owns the
+/// keyboard, or `None` when asusd's own state is authoritative.
+pub(crate) fn kernel_effect_overlay(asusd_now: &AuraEffectSnapshot) -> Option<AuraEffectSnapshot> {
+    KERNEL_EFFECT.overlay(asusd_now)
+}
+
+/// `true` when asusd's config confirmed the effect, `false` when it was only
+/// dispatched to the write-only kernel attribute.
+fn decode_aura_effect_outcome(outcome: u32) -> Result<bool, ProviderError> {
+    match outcome {
+        AURA_OUTCOME_CONFIG_CONFIRMED => Ok(true),
+        AURA_OUTCOME_KERNEL_DISPATCHED => Ok(false),
+        other => Err(ProviderError::Internal(format!(
+            "Hardware1 Aura effect returned unknown outcome {other}"
+        ))),
+    }
+}
 
 /// Effective write evidence published by Hardware1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +185,9 @@ pub(crate) struct AuraEffectObservation {
     pub(crate) colour1: AuraRgb,
     pub(crate) colour2: AuraRgb,
     pub(crate) result: ApplyResult,
+    /// True when asusd's config read-back matched; false when the effect was
+    /// only dispatched to the write-only kernel attribute.
+    pub(crate) confirmed: bool,
 }
 
 /// Narrow client over one externally-owned system-bus connection.
@@ -158,6 +237,12 @@ impl HardwareProductControlClient {
         let proxy = self.proxy().await?;
         let raw = timed("Aura mutation status", proxy.aura_mutation_status()).await?;
         decode_status(raw, "Aura")
+    }
+
+    /// Effect modes the kernel `kbd_rgb_mode` route can apply beyond asusd's list.
+    pub(crate) async fn aura_kernel_effect_modes(&self) -> Result<Vec<u32>, ProviderError> {
+        let proxy = self.proxy().await?;
+        timed("Aura kernel effect modes", proxy.aura_kernel_effect_modes()).await
     }
 
     pub(crate) async fn boot_sound_status(&self) -> Result<ProductWriteStatus, ProviderError> {
@@ -377,6 +462,7 @@ impl HardwareProductControlClient {
             )));
         }
 
+        forget_kernel_effect();
         Ok(AuraConfigObservation {
             requested,
             observed,
@@ -422,19 +508,26 @@ impl HardwareProductControlClient {
                 "Hardware1 Aura effect config read-back mismatch".into(),
             ));
         }
-        if wire.4 != AURA_OUTCOME_CONFIG_CONFIRMED {
-            return Err(ProviderError::Internal(format!(
-                "Hardware1 Aura effect returned unknown outcome {}",
-                wire.4
-            )));
-        }
-        Ok(AuraEffectObservation {
+        let confirmed = decode_aura_effect_outcome(wire.4)?;
+        let observation = AuraEffectObservation {
             mode: wire.0,
             speed: wire.1,
             colour1: observed_colour1,
             colour2: observed_colour2,
             result: ApplyResult::Accepted,
-        })
+            confirmed,
+        };
+        if confirmed {
+            KERNEL_EFFECT.forget();
+        } else {
+            KERNEL_EFFECT.remember(AuraEffectSnapshot {
+                mode: observation.mode,
+                speed: observation.speed.clone(),
+                colour1: observation.colour1,
+                colour2: observation.colour2,
+            });
+        }
+        Ok(observation)
     }
 }
 
@@ -592,6 +685,41 @@ mod tests {
         assert!(require_supported(ProductWriteStatus::PermissionDenied, "test").is_err());
         assert!(require_supported(ProductWriteStatus::Conflicted, "test").is_err());
         assert!(require_supported(ProductWriteStatus::Unknown, "test").is_err());
+    }
+
+    fn snapshot(mode: u32, r: u8) -> AuraEffectSnapshot {
+        AuraEffectSnapshot {
+            mode,
+            speed: "Med".into(),
+            colour1: AuraRgb { r, g: 0, b: 0 },
+            colour2: AuraRgb { r: 0, g: 0, b: 0 },
+        }
+    }
+
+    #[test]
+    fn kernel_effect_overlay_lasts_only_while_asusd_config_is_unchanged() {
+        let slot = KernelEffectSlot::new();
+        let asusd = snapshot(0, 10);
+        assert_eq!(slot.overlay(&asusd), None);
+
+        slot.remember(snapshot(1, 200));
+        assert_eq!(slot.overlay(&asusd), Some(snapshot(1, 200)));
+        assert_eq!(slot.overlay(&asusd), Some(snapshot(1, 200)));
+
+        assert_eq!(slot.overlay(&snapshot(0, 99)), None);
+        assert_eq!(slot.overlay(&asusd), None);
+
+        slot.remember(snapshot(3, 5));
+        assert!(slot.overlay(&asusd).is_some());
+        slot.forget();
+        assert_eq!(slot.overlay(&asusd), None);
+    }
+
+    #[test]
+    fn aura_effect_outcome_separates_confirmed_from_dispatched() {
+        assert!(decode_aura_effect_outcome(0).unwrap());
+        assert!(!decode_aura_effect_outcome(1).unwrap());
+        assert!(decode_aura_effect_outcome(2).is_err());
     }
 
     #[test]

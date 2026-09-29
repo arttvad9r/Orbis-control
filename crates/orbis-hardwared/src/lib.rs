@@ -1805,8 +1805,26 @@ impl HardwareService {
                 readback.observed.colour2.g,
                 readback.observed.colour2.b,
             ),
-            aura::AURA_OUTCOME_CONFIG_CONFIRMED,
+            match readback.route {
+                aura::AuraEffectRoute::Asusd => aura::AURA_OUTCOME_CONFIG_CONFIRMED,
+                aura::AuraEffectRoute::KernelDispatch => aura::AURA_OUTCOME_KERNEL_DISPATCHED,
+            },
         ))
+    }
+
+    /// Read-only: effect modes writable through the kernel `kbd_rgb_mode`
+    /// attribute even when asusd does not list them (AuraMode wire values).
+    fn aura_kernel_effect_modes(&self) -> Vec<u32> {
+        self.aura_backend
+            .as_deref()
+            .map(|backend| {
+                backend
+                    .kernel_effect_modes()
+                    .into_iter()
+                    .map(AuraMode::to_u32)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Read-only typed evidence about Aura Static RGB mutation backend
@@ -1886,6 +1904,7 @@ pub trait Hardware1 {
 
     /// Read-only typed Aura Static RGB mutation backend availability (wire enum).
     fn aura_mutation_status(&self) -> zbus::Result<u8>;
+    fn aura_kernel_effect_modes(&self) -> zbus::Result<Vec<u32>>;
 
     fn set_aura_effect(
         &self,

@@ -14,7 +14,8 @@ use orbis_session_protocol::clamshell;
 use slint::ComponentHandle;
 
 use crate::quick_controls_backend::hardware_controls_backend::{
-    HardwareProductControlClient, ProductWriteStatus, require_supported,
+    AuraEffectSnapshot, HardwareProductControlClient, ProductWriteStatus, kernel_effect_overlay,
+    require_supported,
 };
 use crate::{AppWindow, ClamshellState};
 
@@ -656,7 +657,14 @@ fn request_aura_effect(window: &AppWindow, request: AuraEffectRequest) {
                     window.set_aura_secondary_red(observed.colour2.r as i32);
                     window.set_aura_secondary_green(observed.colour2.g as i32);
                     window.set_aura_secondary_blue(observed.colour2.b as i32);
-                    window.set_status("Эффект Aura применён".into());
+                    window.set_status(
+                        if observed.confirmed {
+                            "Эффект Aura применён"
+                        } else {
+                            "Эффект Aura отправлен в прошивку · подтверждение недоступно"
+                        }
+                        .into(),
+                    );
                 }
                 Err(error) => window.set_status(
                     format!(
@@ -978,9 +986,21 @@ async fn bounded_aura_read() -> Result<orbis_core::aura::AuraState, ProviderErro
             ProviderError::BackendUnavailable(format!("Extra Aura system bus unavailable: {error}"))
         })?;
     let provider = AsusAuraProvider::new(connection);
-    tokio::time::timeout(READ_TIMEOUT, provider.aura_state())
+    let mut state = tokio::time::timeout(READ_TIMEOUT, provider.aura_state())
         .await
-        .map_err(|_| ProviderError::Timeout("Extra Aura read timed out".into()))?
+        .map_err(|_| ProviderError::Timeout("Extra Aura read timed out".into()))??;
+    let kernel_modes = async {
+        let client = HardwareProductControlClient::connect_system().await?;
+        client.aura_kernel_effect_modes().await
+    }
+    .await
+    .unwrap_or_default();
+    for mode in kernel_modes.into_iter().map(AuraMode::from_u32) {
+        if !matches!(mode, AuraMode::Unknown(_)) && !state.supported_modes.contains(&mode) {
+            state.supported_modes.push(mode);
+        }
+    }
+    Ok(state)
 }
 
 async fn bounded_panel_read(
@@ -1059,26 +1079,38 @@ async fn bounded_write_statuses_with(
 }
 
 fn aura_observed(result: Result<orbis_core::aura::AuraState, ProviderError>) -> AuraObserved {
+    let result = result.map(|state| {
+        let asusd_now = AuraEffectSnapshot {
+            mode: state.current_effect.mode.to_u32(),
+            speed: state.current_effect.speed.as_str().to_string(),
+            colour1: state.current_effect.colour1,
+            colour2: state.current_effect.colour2,
+        };
+        let overlay = kernel_effect_overlay(&asusd_now);
+        (state, overlay)
+    });
     match result {
-        Ok(state) => AuraObserved {
+        Ok((state, Some(sent))) => {
+            let mode = AuraMode::from_u32(sent.mode);
+            AuraObserved {
+                ready: true,
+                effect: aura_effect_index(mode),
+                speed: aura_speed_index(&sent.speed.parse().unwrap()),
+                supported_modes: aura_supported_modes(&state),
+                colour1: sent.colour1,
+                colour2: sent.colour2,
+                status: format!(
+                    "Aura mode={} speed={} (отправлено в прошивку, не подтверждено)",
+                    aura_mode_label(mode),
+                    sent.speed
+                ),
+            }
+        }
+        Ok((state, None)) => AuraObserved {
             ready: true,
             effect: aura_effect_index(state.current_mode),
             speed: aura_speed_index(&state.current_effect.speed),
-            supported_modes: [
-                state.supported_modes.contains(&AuraMode::Static),
-                state.supported_modes.contains(&AuraMode::Breathe),
-                state.supported_modes.contains(&AuraMode::RainbowCycle),
-                state.supported_modes.contains(&AuraMode::RainbowWave),
-                state.supported_modes.contains(&AuraMode::Star),
-                state.supported_modes.contains(&AuraMode::Rain),
-                state.supported_modes.contains(&AuraMode::Highlight),
-                state.supported_modes.contains(&AuraMode::Laser),
-                state.supported_modes.contains(&AuraMode::Ripple),
-                false,
-                state.supported_modes.contains(&AuraMode::Pulse),
-                state.supported_modes.contains(&AuraMode::Comet),
-                state.supported_modes.contains(&AuraMode::Flash),
-            ],
+            supported_modes: aura_supported_modes(&state),
             colour1: state.current_effect.colour1,
             colour2: state.current_effect.colour2,
             status: format!(
@@ -1097,6 +1129,16 @@ fn aura_observed(result: Result<orbis_core::aura::AuraState, ProviderError>) -> 
             status: error_status("Aura", &error),
         },
     }
+}
+
+fn aura_supported_modes(state: &orbis_core::aura::AuraState) -> [bool; 13] {
+    let mut modes = [false; 13];
+    for mode in &state.supported_modes {
+        if let Some(slot) = modes.get_mut(aura_effect_index(*mode).max(0) as usize) {
+            *slot = !matches!(mode, AuraMode::Unknown(_));
+        }
+    }
+    modes
 }
 
 fn panel_observed(result: Result<PanelOverdriveState, ProviderError>) -> PanelObserved {
@@ -1159,11 +1201,8 @@ fn apu_observed(result: Result<u8, ProviderError>) -> ApuMemoryObserved {
 
 fn aura_effect_index(mode: AuraMode) -> i32 {
     match mode {
-        AuraMode::Static => 0,
-        AuraMode::Breathe => 1,
-        AuraMode::RainbowCycle => 2,
-        AuraMode::Flash => -1,
-        _ => -1,
+        AuraMode::Unknown(_) => -1,
+        known => known.to_u32() as i32,
     }
 }
 
@@ -1649,8 +1688,9 @@ mod tests {
         assert_eq!(aura_effect_index(AuraMode::Static), 0);
         assert_eq!(aura_effect_index(AuraMode::Breathe), 1);
         assert_eq!(aura_effect_index(AuraMode::RainbowCycle), 2);
-        assert_eq!(aura_effect_index(AuraMode::Flash), -1);
-        assert_eq!(aura_effect_index(AuraMode::RainbowWave), -1);
+        assert_eq!(aura_effect_index(AuraMode::Flash), 12);
+        assert_eq!(aura_effect_index(AuraMode::RainbowWave), 3);
+        assert_eq!(aura_effect_index(AuraMode::Pulse), 10);
         assert_eq!(aura_effect_index(AuraMode::Unknown(99)), -1);
     }
 

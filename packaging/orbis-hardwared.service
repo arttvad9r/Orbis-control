@@ -46,6 +46,7 @@ ReadWritePaths=-/sys/devices/platform/asus-nb-wmi/nv_dynamic_boost
 ReadWritePaths=-/sys/devices/platform/asus-nb-wmi/nv_temp_target
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/brightness
 ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/max_brightness
+ReadWritePaths=-/sys/class/leds/asus::kbd_backlight/kbd_rgb_mode
 ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/boot_sound/current_value
 ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/apu_mem/current_value
 

@@ -27,7 +27,7 @@ use orbis_hardwared::{
     PANEL_POLKIT_ACTION, POWER_LIMIT_POLKIT_ACTION, POWER_PROFILES_DAEMON_BUS_NAME,
     PRODUCT_GPU_POLKIT_ACTION, PolkitAuthorizer,
     asus_gpu_mode::{AsusGpuMutationBackend, AsusdGpuMutationClient},
-    aura::{AsusdAuraStaticRgbMutationBackend, ZbusAsusdAuraClient},
+    aura::{AsusdAuraStaticRgbMutationBackend, SysfsKernelRgbIo, ZbusAsusdAuraClient},
     battery::{
         AsusdBatteryClient, AsusdBatteryMutationBackend, BatteryEffectiveReader,
         BatteryMutationBackend, BatteryMutationReadback, BatteryMutationStatus,
@@ -281,9 +281,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )),
     )
     .with_aura_static_rgb(
-        Box::new(AsusdAuraStaticRgbMutationBackend::new(
-            ZbusAsusdAuraClient::new(connection.clone()),
-        )),
+        Box::new(
+            AsusdAuraStaticRgbMutationBackend::new(ZbusAsusdAuraClient::new(connection.clone()))
+                .with_kernel_rgb(Box::new(SysfsKernelRgbIo::default())),
+        ),
         Box::new(PolkitAuthorizer::with_action(
             connection.clone(),
             AURA_POLKIT_ACTION,

@@ -21,10 +21,19 @@
 //! 8. вернуть честный `Accepted` (hardware state не подтверждён).
 //!
 //! Никакого generic D-Bus/sysfs writer API. Никакого optimistic success.
+//!
+//! TUF-эффекты: asusd на некоторых TUF-моделях (в т.ч. FA707NV) заявляет только
+//! Static, хотя ядро принимает Breathe/Color Cycle/Rainbow/Pulse через
+//! `kbd_rgb_mode`. Для режимов, которых asusd не заявляет, backend пишет
+//! фиксированный шестибайтный кадр `1 <mode> <r> <g> <b> <speed>` прямо в этот
+//! атрибут. Атрибут write-only, поэтому результат — `Accepted` с исходом
+//! [`AURA_OUTCOME_KERNEL_DISPATCHED`]: отправлено, подтверждения нет.
+
+use std::path::PathBuf;
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
-use orbis_core::aura::{AuraEffect, AuraMode, AuraRgb, AuraZone};
+use orbis_core::aura::{AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraZone};
 use orbis_providers::error::ProviderError;
 use zbus::Connection;
 
@@ -36,6 +45,78 @@ pub const ASUSD_AURA_DESTINATION: &str = "xyz.ljones.Asusd";
 pub const ASUSD_AURA_PATH: &str = "/xyz/ljones/aura/tuf";
 /// asusd D-Bus Aura interface.
 pub const ASUSD_AURA_INTERFACE: &str = "xyz.ljones.Aura";
+
+/// Kernel attribute that drives the TUF keyboard RGB firmware (write-only).
+pub const KBD_RGB_MODE_PATH: &str = "/sys/class/leds/asus::kbd_backlight/kbd_rgb_mode";
+
+/// Modes the TUF firmware accepts through `kbd_rgb_mode`; the mode byte equals
+/// the `AuraMode` wire value (Pulse is the firmware's strobe).
+pub const TUF_KERNEL_MODES: [AuraMode; 5] = [
+    AuraMode::Static,
+    AuraMode::Breathe,
+    AuraMode::RainbowCycle,
+    AuraMode::RainbowWave,
+    AuraMode::Pulse,
+];
+
+/// Kernel speed bytes for `kbd_rgb_mode` (asusctl `Speed` values).
+fn tuf_speed_byte(speed: &AuraSpeed) -> Option<u8> {
+    match speed {
+        AuraSpeed::Low => Some(0xe1),
+        AuraSpeed::Med => Some(0xeb),
+        AuraSpeed::High => Some(0xf5),
+        AuraSpeed::Unknown(_) => None,
+    }
+}
+
+/// Typed write access to the TUF `kbd_rgb_mode` firmware attribute.
+pub trait KernelRgbIo: Send + Sync {
+    /// Whether the attribute exists on this machine.
+    fn available(&self) -> bool;
+    /// Write one `1 <mode> <r> <g> <b> <speed>` frame.
+    fn write_frame(&self, mode: u8, rgb: AuraRgb, speed: u8) -> Result<(), ProviderError>;
+}
+
+/// Sysfs implementation of [`KernelRgbIo`].
+pub struct SysfsKernelRgbIo {
+    path: PathBuf,
+}
+
+impl Default for SysfsKernelRgbIo {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::from(KBD_RGB_MODE_PATH),
+        }
+    }
+}
+
+impl SysfsKernelRgbIo {
+    /// Construct with an explicit attribute path (tests).
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl KernelRgbIo for SysfsKernelRgbIo {
+    fn available(&self) -> bool {
+        self.path.exists()
+    }
+
+    fn write_frame(&self, mode: u8, rgb: AuraRgb, speed: u8) -> Result<(), ProviderError> {
+        let frame = format!("1 {mode} {} {} {} {speed}", rgb.r, rgb.g, rgb.b);
+        std::fs::write(&self.path, frame).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => ProviderError::Unsupported(format!(
+                "asus kbd_rgb_mode absent: {}",
+                self.path.display()
+            )),
+            std::io::ErrorKind::PermissionDenied => ProviderError::PermissionDenied(format!(
+                "asus kbd_rgb_mode write denied: {}",
+                self.path.display()
+            )),
+            _ => ProviderError::Io(error),
+        })
+    }
+}
 
 /// Wire type of `LedModeData`: struct `(uu(yyy)(yyy)ss)`.
 type AuraEffectWire = (u32, u32, (u8, u8, u8), (u8, u8, u8), String, String);
@@ -165,6 +246,18 @@ pub struct AuraEffectMutationReadback {
     pub requested: AuraEffect,
     pub observed: AuraEffect,
     pub result: ApplyResult,
+    /// Who performed the write and what confirms it.
+    pub route: AuraEffectRoute,
+}
+
+/// Which owner applied an effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuraEffectRoute {
+    /// asusd applied it; `observed` is a fresh asusd config read-back.
+    Asusd,
+    /// Written to the kernel `kbd_rgb_mode` attribute; `observed` is the frame
+    /// that was sent, not a read-back (the attribute is write-only).
+    KernelDispatch,
 }
 
 /// Typed runtime evidence for Aura Static RGB mutation backend availability.
@@ -250,17 +343,37 @@ pub trait AuraStaticRgbMutationBackend: Send + Sync {
     /// This is read-only evidence used by capability probing; it never
     /// performs I/O and never mutates hardware.
     fn mutation_status(&self) -> AuraMutationStatus;
+
+    /// Effect modes writable through the kernel attribute even when asusd does
+    /// not list them (empty when the attribute is absent).
+    fn kernel_effect_modes(&self) -> Vec<AuraMode> {
+        Vec::new()
+    }
 }
 
 /// Internal compatibility backend; it never writes the kernel directly.
 pub struct AsusdAuraStaticRgbMutationBackend<A> {
     asusd: A,
+    kernel: Option<Box<dyn KernelRgbIo>>,
 }
 
 impl<A> AsusdAuraStaticRgbMutationBackend<A> {
     /// Construct without performing I/O.
     pub fn new(asusd: A) -> Self {
-        Self { asusd }
+        Self {
+            asusd,
+            kernel: None,
+        }
+    }
+
+    /// Enable the kernel `kbd_rgb_mode` route for modes asusd does not list.
+    pub fn with_kernel_rgb(mut self, kernel: Box<dyn KernelRgbIo>) -> Self {
+        self.kernel = Some(kernel);
+        self
+    }
+
+    fn kernel(&self) -> Option<&dyn KernelRgbIo> {
+        self.kernel.as_deref().filter(|io| io.available())
     }
 }
 
@@ -277,10 +390,35 @@ where
         let current = self.asusd.led_mode_data().await?;
         let supported = self.asusd.supported_basic_modes().await?;
         if !supported.contains(&requested.mode.to_u32()) {
-            return Err(ProviderError::Unsupported(format!(
-                "asus aura: mode {:?} not supported (supported_basic_modes={supported:?})",
-                requested.mode
-            )));
+            return match self.kernel() {
+                Some(kernel) if TUF_KERNEL_MODES.contains(&requested.mode) => {
+                    let speed = tuf_speed_byte(&requested.speed).ok_or_else(|| {
+                        ProviderError::InvalidRequest(format!(
+                            "asus aura: unknown speed {:?}",
+                            requested.speed
+                        ))
+                    })?;
+                    let effect = AuraEffect {
+                        mode: requested.mode,
+                        zone: current.zone,
+                        colour1: requested.colour1,
+                        colour2: requested.colour2,
+                        speed: requested.speed,
+                        direction: current.direction,
+                    };
+                    kernel.write_frame(effect.mode.to_u32() as u8, effect.colour1, speed)?;
+                    Ok(AuraEffectMutationReadback {
+                        requested: effect.clone(),
+                        observed: effect,
+                        result: ApplyResult::Accepted,
+                        route: AuraEffectRoute::KernelDispatch,
+                    })
+                }
+                _ => Err(ProviderError::Unsupported(format!(
+                    "asus aura: mode {:?} not supported (supported_basic_modes={supported:?})",
+                    requested.mode
+                ))),
+            };
         }
         let effect = AuraEffect {
             mode: requested.mode,
@@ -301,6 +439,7 @@ where
             requested: effect,
             observed,
             result: ApplyResult::Accepted,
+            route: AuraEffectRoute::Asusd,
         })
     }
 
@@ -377,6 +516,14 @@ where
     fn mutation_status(&self) -> AuraMutationStatus {
         AuraMutationStatus::Supported
     }
+
+    fn kernel_effect_modes(&self) -> Vec<AuraMode> {
+        if self.kernel().is_some() {
+            TUF_KERNEL_MODES.to_vec()
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 /// Stable wire DTO for one Aura Static RGB mutation observation.
@@ -404,6 +551,9 @@ pub struct AuraMutationResult {
 /// Outcome: asusd accepted and config-level read-back matched; hardware state
 /// not confirmed (`kbd_rgb_mode` write-only).
 pub const AURA_OUTCOME_CONFIG_CONFIRMED: u32 = 0;
+/// Outcome: frame written to the kernel `kbd_rgb_mode` attribute; nothing
+/// confirms it (write-only attribute, asusd config is unaware of it).
+pub const AURA_OUTCOME_KERNEL_DISPATCHED: u32 = 1;
 
 /// Обработка Aura Static RGB mutation до публичного D-Bus boundary.
 ///
@@ -563,6 +713,123 @@ mod tests {
 
     fn backend(asusd: FakeAsusd) -> AsusdAuraStaticRgbMutationBackend<FakeAsusd> {
         AsusdAuraStaticRgbMutationBackend::new(asusd)
+    }
+
+    type Frames = Arc<Mutex<Vec<(u8, AuraRgb, u8)>>>;
+
+    struct FakeKernelRgb {
+        available: bool,
+        frames: Frames,
+    }
+
+    impl KernelRgbIo for FakeKernelRgb {
+        fn available(&self) -> bool {
+            self.available
+        }
+
+        fn write_frame(&self, mode: u8, rgb: AuraRgb, speed: u8) -> Result<(), ProviderError> {
+            self.frames.lock().unwrap().push((mode, rgb, speed));
+            Ok(())
+        }
+    }
+
+    fn kernel_backend(
+        asusd: FakeAsusd,
+        available: bool,
+    ) -> (AsusdAuraStaticRgbMutationBackend<FakeAsusd>, Frames) {
+        let frames = Arc::new(Mutex::new(Vec::new()));
+        let backend = AsusdAuraStaticRgbMutationBackend::new(asusd).with_kernel_rgb(Box::new(
+            FakeKernelRgb {
+                available,
+                frames: frames.clone(),
+            },
+        ));
+        (backend, frames)
+    }
+
+    fn effect_with(mode: AuraMode, speed: AuraSpeed) -> AuraEffect {
+        AuraEffect {
+            mode,
+            speed,
+            colour1: AuraRgb { r: 1, g: 2, b: 3 },
+            ..static_effect()
+        }
+    }
+
+    #[tokio::test]
+    async fn unlisted_tuf_mode_goes_to_kernel_and_is_not_confirmed() {
+        let asusd = FakeAsusd::new(static_effect(), vec![0]);
+        let (backend, frames) = kernel_backend(asusd.clone(), true);
+        let readback = backend
+            .set_effect(effect_with(AuraMode::Breathe, AuraSpeed::High))
+            .await
+            .unwrap();
+        assert_eq!(readback.route, AuraEffectRoute::KernelDispatch);
+        assert_eq!(readback.result, ApplyResult::Accepted);
+        assert_eq!(
+            frames.lock().unwrap().as_slice(),
+            &[(1, AuraRgb { r: 1, g: 2, b: 3 }, 0xf5)]
+        );
+        assert_eq!(asusd.setter_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn asusd_listed_mode_never_uses_kernel_route() {
+        let asusd = FakeAsusd::new(static_effect(), vec![0, 1]);
+        let (backend, frames) = kernel_backend(asusd.clone(), true);
+        let readback = backend
+            .set_effect(effect_with(AuraMode::Breathe, AuraSpeed::Med))
+            .await
+            .unwrap();
+        assert_eq!(readback.route, AuraEffectRoute::Asusd);
+        assert!(frames.lock().unwrap().is_empty());
+        assert_eq!(asusd.setter_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn kernel_route_rejects_absent_attribute_non_tuf_mode_and_unknown_speed() {
+        let asusd = FakeAsusd::new(static_effect(), vec![0]);
+        let (absent, frames) = kernel_backend(asusd.clone(), false);
+        assert!(absent.kernel_effect_modes().is_empty());
+        assert!(matches!(
+            absent
+                .set_effect(effect_with(AuraMode::Breathe, AuraSpeed::Med))
+                .await,
+            Err(ProviderError::Unsupported(_))
+        ));
+
+        let (present, present_frames) = kernel_backend(asusd, true);
+        assert_eq!(present.kernel_effect_modes(), TUF_KERNEL_MODES.to_vec());
+        assert!(matches!(
+            present
+                .set_effect(effect_with(AuraMode::Star, AuraSpeed::Med))
+                .await,
+            Err(ProviderError::Unsupported(_))
+        ));
+        assert!(matches!(
+            present
+                .set_effect(effect_with(
+                    AuraMode::Pulse,
+                    AuraSpeed::Unknown("Turbo".into())
+                ))
+                .await,
+            Err(ProviderError::InvalidRequest(_))
+        ));
+        assert!(frames.lock().unwrap().is_empty());
+        assert!(present_frames.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn sysfs_kernel_rgb_writes_one_fixed_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kbd_rgb_mode");
+        let io = SysfsKernelRgbIo::new(path.clone());
+        assert!(!io.available());
+        std::fs::write(&path, "").unwrap();
+        assert!(io.available());
+        io.write_frame(10, AuraRgb { r: 255, g: 0, b: 7 }, 0xeb)
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "1 10 255 0 7 235");
     }
 
     #[tokio::test]
