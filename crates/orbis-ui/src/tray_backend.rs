@@ -8,9 +8,11 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use slint::ComponentHandle;
+use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::AppWindow;
@@ -21,6 +23,62 @@ const WATCHER_SERVICE: &str = "org.kde.StatusNotifierWatcher";
 const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 const ITEM_PATH: &str = "/StatusNotifierItem";
 const RECHECK_INTERVAL: Duration = Duration::from_secs(15);
+
+static TOOLTIP_DESCRIPTION: Mutex<String> = Mutex::new(String::new());
+static TOOLTIP_CHANGED: Notify = Notify::const_new();
+
+/// Latest telemetry as shown in the UI; unknown values are "—" or empty.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TrayStats {
+    pub cpu_temp: String,
+    pub gpu_temp: String,
+    pub cpu_fan: String,
+    pub gpu_fan: String,
+    pub battery_percent: String,
+    pub on_ac: Option<bool>,
+    pub fresh: bool,
+}
+
+fn known(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty() && value != "—").then_some(value)
+}
+
+fn stats_line(label: &str, temp: &str, fan: &str) -> Option<String> {
+    let parts: Vec<&str> = [known(temp), known(fan)].into_iter().flatten().collect();
+    (!parts.is_empty()).then(|| format!("{label}: {}", parts.join(", ")))
+}
+
+fn tooltip_description(stats: &TrayStats) -> String {
+    let mut lines = Vec::new();
+    lines.extend(stats_line("CPU", &stats.cpu_temp, &stats.cpu_fan));
+    lines.extend(stats_line("GPU", &stats.gpu_temp, &stats.gpu_fan));
+    if let Some(percent) = known(&stats.battery_percent) {
+        let source = match stats.on_ac {
+            Some(true) => ", от сети",
+            Some(false) => ", от батареи",
+            None => "",
+        };
+        lines.push(format!("Батарея: {percent}{source}"));
+    }
+    if !lines.is_empty() && !stats.fresh {
+        lines.push("Данные устарели".into());
+    }
+    lines.join("<br/>")
+}
+
+/// Publish the latest telemetry to the tray tooltip; a changed text re-notifies
+/// the host. Works before the tray is registered (the text is kept).
+pub(crate) fn publish_stats(stats: &TrayStats) {
+    let description = tooltip_description(stats);
+    let mut current = TOOLTIP_DESCRIPTION
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if *current != description {
+        *current = description;
+        TOOLTIP_CHANGED.notify_one();
+    }
+}
 
 #[zbus::proxy(
     interface = "org.kde.StatusNotifierWatcher",
@@ -38,6 +96,9 @@ trait StatusNotifierWatcher {
 enum TrayCommand {
     Activate,
 }
+
+/// SNI `ToolTip`: icon name, pixmaps, title, description.
+type ToolTip = (String, Vec<(i32, i32, Vec<u8>)>, String, String);
 
 struct StatusNotifierItem {
     commands: UnboundedSender<TrayCommand>,
@@ -84,6 +145,23 @@ impl StatusNotifierItem {
     fn overlay_icon_name(&self) -> String {
         String::new()
     }
+
+    #[zbus(property)]
+    fn tool_tip(&self) -> ToolTip {
+        let description = TOOLTIP_DESCRIPTION
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        (
+            "applications-system".into(),
+            Vec::new(),
+            "Orbis Control".into(),
+            description,
+        )
+    }
+
+    #[zbus(signal)]
+    async fn new_tool_tip(emitter: &zbus::object_server::SignalEmitter<'_>) -> zbus::Result<()>;
 
     #[zbus(property)]
     fn item_is_menu(&self) -> bool {
@@ -204,6 +282,19 @@ async fn run_item_service(
     );
     connection.request_name(service_name.as_str()).await?;
 
+    let item = connection
+        .object_server()
+        .interface::<_, StatusNotifierItem>(ITEM_PATH)
+        .await?;
+    tokio::spawn(async move {
+        loop {
+            TOOLTIP_CHANGED.notified().await;
+            if let Err(error) = StatusNotifierItem::new_tool_tip(item.signal_emitter()).await {
+                tracing::debug!(error = ?error, "StatusNotifierItem tooltip signal failed");
+            }
+        }
+    });
+
     loop {
         let watcher = StatusNotifierWatcherProxy::new(&connection).await;
         match watcher {
@@ -243,6 +334,34 @@ mod tests {
         assert!(source.contains("register_status_notifier_item"));
         assert!(source.contains("is_status_notifier_host_registered"));
         assert!(source.contains("TrayCommand::Activate"));
+    }
+
+    fn stats() -> TrayStats {
+        TrayStats {
+            cpu_temp: "46°C".into(),
+            gpu_temp: "—".into(),
+            cpu_fan: "2600 rpm".into(),
+            gpu_fan: "2100 rpm".into(),
+            battery_percent: "87%".into(),
+            on_ac: Some(false),
+            fresh: true,
+        }
+    }
+
+    #[test]
+    fn tooltip_lists_known_values_only() {
+        assert_eq!(
+            tooltip_description(&stats()),
+            "CPU: 46°C, 2600 rpm<br/>GPU: 2100 rpm<br/>Батарея: 87%, от батареи"
+        );
+    }
+
+    #[test]
+    fn tooltip_marks_stale_data_and_stays_empty_without_values() {
+        let mut stale = stats();
+        stale.fresh = false;
+        assert!(tooltip_description(&stale).ends_with("<br/>Данные устарели"));
+        assert_eq!(tooltip_description(&TrayStats::default()), "");
     }
 
     #[test]

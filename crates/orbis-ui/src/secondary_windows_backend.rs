@@ -39,6 +39,22 @@ fn show_preview_dialog(kind: i32) -> Result<(), slint::PlatformError> {
     Ok(())
 }
 
+pub(crate) fn publish_tray_stats(state: &crate::controller::UiState) {
+    tray_backend::publish_stats(&tray_backend::TrayStats {
+        cpu_temp: state.cpu_temp.clone(),
+        gpu_temp: state.gpu_temp.clone(),
+        cpu_fan: state.cpu_fan_rpm.clone(),
+        gpu_fan: state.gpu_fan_rpm.clone(),
+        battery_percent: state.battery_percent.clone(),
+        on_ac: match state.ac_online.as_str() {
+            "On AC" => Some(true),
+            "On battery" => Some(false),
+            _ => None,
+        },
+        fresh: state.telemetry_fresh,
+    });
+}
+
 pub(crate) fn wire_window(app: &AppWindow) {
     tray_backend::wire_app(app);
     window_lifecycle_backend::wire_app_window(app);

@@ -2105,6 +2105,7 @@ fn handle_worker_event(
         app.set_factory_reset_available(available);
     }
     if refresh_quick_controls {
+        quick_controls_backend::publish_tray_stats(&s);
         quick_controls_backend::refresh_if_due(app, Duration::from_secs(10));
     }
     // After factory reset, enqueue a refresh for the selected fan to load observed state.
