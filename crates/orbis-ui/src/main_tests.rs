@@ -3018,7 +3018,7 @@ fn product_gpu_status_queued_target_does_not_claim_applied_mode() {
     // A consistent read proves the typed backend owns the pair: the modes
     // become selectable (polkit still decides each write).
     assert!(s.gpu_mode_writable);
-    assert_eq!(s.available_gpu_mask, 0b0111);
+    assert_eq!(s.available_gpu_mask, 0b1111);
     assert!(!s.gpu_ultimate_disabled);
 }
 
@@ -3197,9 +3197,9 @@ fn main_window_renders_queued_target_and_reboot_state() {
     assert!(source.contains("gpu-queued == 0"));
     assert!(source.contains("gpu-queued == 1"));
     assert!(source.contains("gpu-queued == 2"));
-    // Reboot-required status remains, while unsupported product modes are omitted.
+    // Reboot-required status remains and Optimized is a selectable card.
     assert!(source.contains("gpu-reboot-required"));
-    assert!(!source.contains("title: \"Optimized\""));
+    assert!(source.contains("title: \"Optimized\""));
 }
 
 /// The shell wires every sidebar item to exactly its section. Keyboard

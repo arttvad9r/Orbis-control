@@ -2,8 +2,10 @@
 //!
 //! The tracker only decides *which rule* to apply; the worker performs the
 //! writes through the same authorised paths as a manual change. The first
-//! observed power source after start never applies anything, and loading the
-//! rules never writes hardware.
+//! observed power source after start never applies a profile or refresh rule,
+//! and loading the rules never writes hardware. GPU "Optimized" is a mode
+//! rather than a rule: it also reconciles at the first observation, because
+//! the queued Eco/Standard target only takes effect after a reboot.
 
 use std::path::PathBuf;
 
@@ -18,6 +20,13 @@ use orbis_config::{
 pub struct PowerRulesView {
     pub rules: PowerRules,
     pub error: Option<String>,
+}
+
+/// What one observed power source triggers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PowerObservation {
+    pub rule: Option<PowerRule>,
+    pub gpu_ac: Option<bool>,
 }
 
 pub struct PowerRulesTracker {
@@ -61,14 +70,28 @@ impl PowerRulesTracker {
         }
     }
 
-    /// Feed one observed power source. Returns the rule to apply when the source
-    /// changed since the previous observation and rules are enabled.
-    pub fn observe(&mut self, ac_online: bool) -> Option<PowerRule> {
+    /// Feed one observed power source. The rule is set when the source changed
+    /// since the previous observation and rules are enabled; `gpu_ac` when GPU
+    /// Optimized is on and the source is new or changed.
+    pub fn observe(&mut self, ac_online: bool) -> PowerObservation {
         let previous = self.last_ac.replace(ac_online);
-        if previous.is_none() || previous == Some(ac_online) {
-            return None;
-        }
-        self.applicable(ac_online)
+        let gpu_ac = (self.rules.gpu_optimized && previous != Some(ac_online)).then_some(ac_online);
+        let rule = if previous.is_none() || previous == Some(ac_online) {
+            None
+        } else {
+            self.applicable(ac_online)
+        };
+        PowerObservation { rule, gpu_ac }
+    }
+
+    /// Currently stored rules.
+    pub fn rules(&self) -> PowerRules {
+        self.rules
+    }
+
+    /// Last observed power source, if any.
+    pub fn last_ac(&self) -> Option<bool> {
+        self.last_ac
     }
 
     /// Store new rules. Returns the rule to apply now: the current source's rule
@@ -118,6 +141,7 @@ mod tests {
             enabled,
             ac: rule(PerformanceProfile::Turbo),
             battery: rule(PerformanceProfile::Silent),
+            gpu_optimized: false,
         }
     }
 
@@ -126,13 +150,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut tracker = PowerRulesTracker::load_from_dir(dir.path().into());
         tracker.set_rules(rules(true)).unwrap();
-        assert_eq!(tracker.observe(true), None);
-        assert_eq!(tracker.observe(true), None);
+        assert_eq!(tracker.observe(true).rule, None);
+        assert_eq!(tracker.observe(true).rule, None);
         assert_eq!(
-            tracker.observe(false),
+            tracker.observe(false).rule,
             Some(rule(PerformanceProfile::Silent))
         );
-        assert_eq!(tracker.observe(true), Some(rule(PerformanceProfile::Turbo)));
+        assert_eq!(
+            tracker.observe(true).rule,
+            Some(rule(PerformanceProfile::Turbo))
+        );
     }
 
     #[test]
@@ -140,7 +167,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut tracker = PowerRulesTracker::load_from_dir(dir.path().into());
         tracker.observe(true);
-        assert_eq!(tracker.observe(false), None);
+        assert_eq!(tracker.observe(false).rule, None);
         assert_eq!(
             tracker.set_rules(rules(true)).unwrap(),
             Some(rule(PerformanceProfile::Silent))
@@ -171,6 +198,27 @@ mod tests {
             .unwrap();
         let mut reloaded = PowerRulesTracker::load_from_dir(dir.path().into());
         assert_eq!(reloaded.view().rules, rules(true));
-        assert_eq!(reloaded.observe(false), None);
+        assert_eq!(reloaded.observe(false).rule, None);
+    }
+
+    #[test]
+    fn gpu_optimized_reconciles_on_first_observation_and_on_change_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut tracker = PowerRulesTracker::load_from_dir(dir.path().into());
+        let mut optimized = rules(false);
+        optimized.gpu_optimized = true;
+        tracker.set_rules(optimized).unwrap();
+        assert_eq!(tracker.observe(false).gpu_ac, Some(false));
+        assert_eq!(tracker.observe(false).gpu_ac, None);
+        assert_eq!(tracker.observe(true).gpu_ac, Some(true));
+        assert_eq!(tracker.observe(true).rule, None);
+    }
+
+    #[test]
+    fn gpu_optimized_off_never_asks_for_a_gpu_switch() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut tracker = PowerRulesTracker::load_from_dir(dir.path().into());
+        assert_eq!(tracker.observe(false).gpu_ac, None);
+        assert_eq!(tracker.observe(true).gpu_ac, None);
     }
 }

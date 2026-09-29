@@ -15,7 +15,7 @@ pub enum GpuMode {
     Standard,
     /// Ultimate: физический MUX направлен на dGPU (обычно требует reboot).
     Ultimate,
-    /// Optimized: политика sessiond (battery -> Eco, AC -> Standard).
+    /// Optimized: политика воркера GUI (battery -> Eco, AC -> Standard).
     Optimized,
 }
 

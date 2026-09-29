@@ -61,6 +61,8 @@ export component AppWindow inherits Window {
 
     callback perf-clicked(int);
     callback gpu-clicked(int);
+    in property <bool> gpu-optimized: false;
+    callback gpu-optimized-requested(bool);
     callback charge-changed(float);
     in property <bool> display-state-ready: false;
     in property <string> display-status: "Недоступно";
@@ -423,7 +425,9 @@ export component AppWindow inherits Window {
                     }
                     if (root.active-section == Section.Graphics) : GraphicsSection {
                         ui-state <=> root.ui-state;
+                        gpu-optimized: root.gpu-optimized;
                         gpu-clicked(i) => { root.gpu-clicked(i); }
+                        gpu-optimized-requested(on) => { root.gpu-optimized-requested(on); }
                     }
                     if (root.active-section == Section.Backlight) : BacklightSection {
                         keyboard-state-ready <=> root.keyboard-state-ready;

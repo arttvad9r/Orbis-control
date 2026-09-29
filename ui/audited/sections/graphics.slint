@@ -9,6 +9,8 @@ import { Palette } from "../../themes/dark.slint";
 export component GraphicsSection inherits Rectangle {
     in property <UiState> ui-state;
     callback gpu-clicked(int);
+    in property <bool> gpu-optimized: false;
+    callback gpu-optimized-requested(bool);
 
     function bit-set(mask: int, bit: int) -> bool {
         let shifted = Math.floor(mask / bit);
@@ -142,10 +144,10 @@ export component GraphicsSection inherits Rectangle {
                             description: "Только интегрированная графика";
                             icon-kind: 4;
                             accent: Palette.eco;
-                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0;
+                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0 && !root.gpu-optimized;
                             pending: root.ui-state.gpu-queued == 0;
                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
-                            clicked => { root.gpu-clicked(0); }
+                            clicked => { if (root.gpu-optimized) { root.gpu-optimized-requested(false); } root.gpu-clicked(0); }
                         }
                         if (root.bit-set(root.ui-state.available-gpu-mask, 2)) : ModeCard {
                             horizontal-stretch: 1;
@@ -153,10 +155,10 @@ export component GraphicsSection inherits Rectangle {
                             description: "Гибридный режим";
                             icon-kind: 4;
                             accent: Palette.standard;
-                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1;
+                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1 && !root.gpu-optimized;
                             pending: root.ui-state.gpu-queued == 1;
                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
-                            clicked => { root.gpu-clicked(1); }
+                            clicked => { if (root.gpu-optimized) { root.gpu-optimized-requested(false); } root.gpu-clicked(1); }
                         }
                         if (root.bit-set(root.ui-state.available-gpu-mask, 4)) : ModeCard {
                             horizontal-stretch: 1;
@@ -164,10 +166,20 @@ export component GraphicsSection inherits Rectangle {
                             description: "Прямой вывод через dGPU";
                             icon-kind: 4;
                             accent: Palette.ultimate;
-                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2;
+                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2 && !root.gpu-optimized;
                             pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2;
                             disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || root.ui-state.gpu-ultimate-disabled;
-                            clicked => { root.gpu-clicked(2); }
+                            clicked => { if (root.gpu-optimized) { root.gpu-optimized-requested(false); } root.gpu-clicked(2); }
+                        }
+                        if (root.bit-set(root.ui-state.available-gpu-mask, 8)) : ModeCard {
+                            horizontal-stretch: 1;
+                            title: "Optimized";
+                            description: "Eco от батареи, Standard от сети";
+                            icon-kind: 4;
+                            accent: Palette.optimized;
+                            selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.gpu-optimized;
+                            disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
+                            clicked => { root.gpu-optimized-requested(true); }
                         }
                     }
 
@@ -178,6 +190,10 @@ export component GraphicsSection inherits Rectangle {
                     if (root.ui-state.gpu-mode-unconfirmed) : LocalStatus {
                         text: "Результат неизвестен · обновите состояние перед новой записью";
                         accent: Palette.warning;
+                    }
+                    if (root.gpu-optimized) : LocalStatus {
+                        text: "Optimized: при смене источника питания в очередь ставится Eco (батарея) или Standard (сеть); переключение вступает после перезагрузки";
+                        accent: Palette.text-secondary;
                     }
                     if (root.ui-state.gpu-reboot-required && !root.ui-state.gpu-section-error) : LocalStatus {
                         text: "Переключение поставлено в очередь и завершится после перезагрузки или выключения";

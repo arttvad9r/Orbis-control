@@ -1368,9 +1368,9 @@ fn apply_product_gpu_result(
     }
 }
 
-/// Eco | Standard | Ultimate: every mode the typed ASUS pair can queue.
-/// Optimized needs an automation owner and stays unavailable.
-const PRODUCT_GPU_WRITABLE_MASK: i32 = 0b0111;
+/// Eco | Standard | Ultimate | Optimized. Optimized is not a hardware state:
+/// the worker queues Eco or Standard from the power source.
+const PRODUCT_GPU_WRITABLE_MASK: i32 = 0b1111;
 
 /// Wire outcome encoding of `Hardware1.ProductGpuStatus` (orbis-hardwared).
 const PRODUCT_STATUS_OUTCOME_ALREADY_ACTIVE: u32 = 0;
@@ -2089,6 +2089,7 @@ fn handle_worker_event(
         app.set_power_rules_ac_hz(view.rules.ac.refresh_hz.map_or(0, |hz| hz as i32));
         app.set_power_rules_battery_hz(view.rules.battery.refresh_hz.map_or(0, |hz| hz as i32));
         app.set_power_rules_enabled(view.rules.enabled);
+        app.set_gpu_optimized(view.rules.gpu_optimized);
         app.set_power_rules_ac(power_rule_profile_to_int(view.rules.ac.profile));
         app.set_power_rules_battery(power_rule_profile_to_int(view.rules.battery.profile));
         app.set_power_rules_error(view.error.clone().unwrap_or_default().into());
@@ -2249,6 +2250,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                     profile: power_rule_profile_from_int(app.get_power_rules_battery()),
                     refresh_hz: hz(app.get_power_rules_battery_hz()),
                 },
+                gpu_optimized: app.get_gpu_optimized(),
             };
             edit(&mut rules);
             if let Err(error) = tx.send(WorkerCommand::SetPowerRules(rules)) {
@@ -2278,6 +2280,15 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                             rules.battery.profile = profile;
                         }
                     });
+                }
+            });
+        }
+        {
+            let app_weak = app_weak.clone();
+            let send_rules = send_rules.clone();
+            app.on_gpu_optimized_requested(move |on| {
+                if let Some(app) = app_weak.upgrade() {
+                    send_rules(&app, &|rules| rules.gpu_optimized = on);
                 }
             });
         }

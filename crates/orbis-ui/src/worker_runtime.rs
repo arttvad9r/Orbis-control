@@ -314,13 +314,20 @@ async fn apply_panel_refresh<F>(
     });
 }
 
+/// Backends a power-source change may write through.
+#[derive(Clone, Copy)]
+struct SourceBackends<'a> {
+    cpu_tuning: Option<&'a dyn CpuTuningBackend>,
+    panel_refresh: Option<&'a dyn PanelRefreshBackend>,
+    product_gpu: Option<&'a dyn HardwareProductGpuSource>,
+}
+
 /// Feed the observed power source to the rules engine and apply a triggered rule.
 async fn observe_power_source<G, B, R, F>(
     runtime: &ApplicationRuntime<G, B, R>,
     power_rules: &mut PowerRulesTracker,
     profile_limits: &mut ProfileLimitsTracker,
-    cpu_tuning: Option<&dyn CpuTuningBackend>,
-    panel_refresh: Option<&dyn PanelRefreshBackend>,
+    backends: SourceBackends<'_>,
     ac_online: Option<bool>,
     emit: &mut F,
 ) where
@@ -329,17 +336,75 @@ async fn observe_power_source<G, B, R, F>(
     R: PerformanceServiceRuntime,
     F: FnMut(WorkerEvent),
 {
-    if let Some(rule) = ac_online.and_then(|ac| power_rules.observe(ac)) {
+    let Some(observation) = ac_online.map(|ac| power_rules.observe(ac)) else {
+        return;
+    };
+    if let Some(rule) = observation.rule {
         apply_power_rule(
             runtime,
             profile_limits,
-            cpu_tuning,
-            panel_refresh,
+            backends.cpu_tuning,
+            backends.panel_refresh,
             rule,
             emit,
         )
         .await;
     }
+    if let Some(ac) = observation.gpu_ac {
+        apply_gpu_optimized(backends.product_gpu, ac, false, emit).await;
+    }
+}
+
+/// Wire value of `Hybrid` (Standard) and `Integrated` (Eco) in `Hardware1`.
+const PRODUCT_GPU_HYBRID: u32 = 0;
+const PRODUCT_GPU_INTEGRATED: u32 = 1;
+const PRODUCT_GPU_ULTIMATE: u32 = 2;
+const PRODUCT_GPU_NONE: u32 = u32::MAX;
+
+/// GPU "Optimized": queue Standard on AC and Eco on battery through the same
+/// typed, authorised path as a manual choice. The status is read first, so an
+/// already effective (current or queued) target writes nothing; an unreadable
+/// status writes nothing; an automatic switch never leaves Ultimate (MUX), only
+/// an explicit request does. A failed or unknown write is reported, never
+/// retried.
+async fn apply_gpu_optimized<F>(
+    product_gpu: Option<&dyn HardwareProductGpuSource>,
+    ac: bool,
+    explicit: bool,
+    emit: &mut F,
+) where
+    F: FnMut(WorkerEvent),
+{
+    let Some(source) = product_gpu else {
+        return;
+    };
+    let status = product_gpu_status_read(Some(source)).await;
+    let Ok(reply) = &status else {
+        emit(WorkerEvent::ProductGpuStatusRefresh(status));
+        return;
+    };
+    let readable = matches!(reply.outcome, 0 | 1);
+    let effective = if reply.queued_mode == PRODUCT_GPU_NONE {
+        reply.current_mode
+    } else {
+        reply.queued_mode
+    };
+    let target = if ac {
+        PRODUCT_GPU_HYBRID
+    } else {
+        PRODUCT_GPU_INTEGRATED
+    };
+    let skip = !readable
+        || effective == target
+        || effective == PRODUCT_GPU_NONE
+        || (!explicit && effective == PRODUCT_GPU_ULTIMATE);
+    if skip {
+        emit(WorkerEvent::ProductGpuStatusRefresh(status));
+        return;
+    }
+    emit(WorkerEvent::ProductGpu(
+        source.set_product_gpu_mode(target).await,
+    ));
 }
 
 async fn bounded_performance_state<R>(performance: &R) -> Result<PerformanceState, ProviderError>
@@ -637,8 +702,11 @@ async fn run_worker_inner<G, B, R, F>(
                                     &runtime,
                                     &mut power_rules,
                                     &mut profile_limits,
-                                    cpu_tuning.as_deref(),
-                                    panel_refresh.as_deref(),
+                                    SourceBackends {
+                                        cpu_tuning: cpu_tuning.as_deref(),
+                                        panel_refresh: panel_refresh.as_deref(),
+                                        product_gpu: product_gpu.as_deref(),
+                                    },
                                     ac_online,
                                     &mut emit,
                                 )
@@ -765,8 +833,11 @@ async fn run_worker_inner<G, B, R, F>(
                 &runtime,
                 &mut power_rules,
                 &mut profile_limits,
-                cpu_tuning.as_deref(),
-                panel_refresh.as_deref(),
+                SourceBackends {
+                    cpu_tuning: cpu_tuning.as_deref(),
+                    panel_refresh: panel_refresh.as_deref(),
+                    product_gpu: product_gpu.as_deref(),
+                },
                 ac_online,
                 &mut emit,
             )
@@ -886,8 +957,14 @@ async fn run_worker_inner<G, B, R, F>(
                 continue;
             }
             WorkerCommand::SetPowerRules(rules) => {
+                let gpu_was_optimized = power_rules.rules().gpu_optimized;
                 let apply = power_rules.set_rules(rules);
                 emit(WorkerEvent::PowerRules(power_rules.view()));
+                if apply.is_ok() && rules.gpu_optimized && !gpu_was_optimized {
+                    if let Some(ac) = power_rules.last_ac() {
+                        apply_gpu_optimized(product_gpu.as_deref(), ac, true, &mut emit).await;
+                    }
+                }
                 if let Ok(Some(rule)) = apply {
                     apply_power_rule(
                         &runtime,
@@ -1031,10 +1108,11 @@ mod tests {
     }
 
     #[test]
-    fn product_gpu_request_is_fifo_only_and_never_automated() {
+    fn product_gpu_writes_go_through_the_typed_source_only() {
         let source = production_source();
         assert!(source.contains("WorkerCommand::SetProductGpuMode { raw }"));
         assert!(source.contains("source.set_product_gpu_mode(raw).await"));
+        assert!(source.contains("source.set_product_gpu_mode(target).await"));
         assert!(!source.contains("set_product_gpu_mode_for_automation"));
     }
 
@@ -2007,6 +2085,7 @@ mod tests {
             enabled: true,
             ac: rule(PerformanceProfile::Turbo),
             battery: rule(PerformanceProfile::Silent),
+            gpu_optimized: false,
         };
         let mut power_rules = PowerRulesTracker::load_from_dir(dir.path().to_path_buf());
         power_rules.set_rules(rules).unwrap();
@@ -2086,6 +2165,127 @@ mod tests {
         assert_eq!(state.read().await.profile, PerformanceProfile::Balanced);
     }
 
+    /// Stateful fake asusd pair: a queued target replaces the previous queue and
+    /// re-selecting the current mode clears it.
+    struct QueueingProductGpu {
+        state: StdMutex<(u32, u32)>,
+        sets: StdMutex<Vec<u32>>,
+    }
+
+    impl QueueingProductGpu {
+        fn reply(&self, requested: u32) -> ProductGpuMutationResult {
+            let (current, queued) = *self.state.lock().unwrap();
+            let pending = queued != u32::MAX && queued != current;
+            ProductGpuMutationResult {
+                requested_mode: requested,
+                current_mode: current,
+                queued_mode: if pending { queued } else { u32::MAX },
+                outcome: u32::from(pending),
+                reboot_required: pending,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl HardwareProductGpuSource for QueueingProductGpu {
+        async fn set_product_gpu_mode(
+            &self,
+            requested_mode: u32,
+        ) -> Result<ProductGpuMutationResult, ProviderError> {
+            self.sets.lock().unwrap().push(requested_mode);
+            self.state.lock().unwrap().1 = requested_mode;
+            Ok(self.reply(requested_mode))
+        }
+
+        async fn product_gpu_status(&self) -> Result<ProductGpuMutationResult, ProviderError> {
+            Ok(self.reply(0))
+        }
+    }
+
+    #[tokio::test]
+    async fn gpu_optimized_queues_eco_on_battery_and_standard_on_ac() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let gpu = Arc::new(QueueingProductGpu {
+            state: StdMutex::new((0, u32::MAX)),
+            sets: StdMutex::new(Vec::new()),
+        });
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let source: Arc<dyn HardwareProductGpuSource> = gpu.clone();
+        tokio::spawn(run_worker_inner(
+            mock_runtime_with_state(state.clone()),
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            Some(source),
+            LocalBackends::default(),
+            Trackers {
+                profile_limits: ProfileLimitsTracker::load_from_dir(dir.path().to_path_buf()),
+                power_rules: PowerRulesTracker::load_from_dir(dir.path().to_path_buf()),
+            },
+        ));
+
+        // The worker is sequential: once a refresh answers, everything sent
+        // before it has been processed.
+        async fn settle(
+            tx: &UnboundedSender<WorkerCommand>,
+            rx: &mut tokio::sync::mpsc::UnboundedReceiver<WorkerEvent>,
+        ) {
+            tx.send(WorkerCommand::RefreshPerformance).unwrap();
+            loop {
+                let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                    .await
+                    .expect("worker event")
+                    .expect("worker alive");
+                if matches!(event, WorkerEvent::PerformanceRefresh(_)) {
+                    return;
+                }
+            }
+        }
+        let sets = || gpu.sets.lock().unwrap().clone();
+        let rules = |gpu_optimized| PowerRules {
+            gpu_optimized,
+            ..PowerRules::default()
+        };
+
+        state.write().await.telemetry.ac_online = Some(false);
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        settle(&tx, &mut event_rx).await;
+        assert!(
+            sets().is_empty(),
+            "GPU Optimized is off: nothing is written"
+        );
+
+        tx.send(WorkerCommand::SetPowerRules(rules(true))).unwrap();
+        settle(&tx, &mut event_rx).await;
+        assert_eq!(sets(), [1], "enabling on battery queues Eco");
+
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        settle(&tx, &mut event_rx).await;
+        assert_eq!(sets(), [1], "an unchanged source and target write nothing");
+
+        state.write().await.telemetry.ac_online = Some(true);
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        settle(&tx, &mut event_rx).await;
+        assert_eq!(sets(), [1, 0], "AC replaces the queued Eco with Standard");
+
+        *gpu.state.lock().unwrap() = (2, u32::MAX);
+        state.write().await.telemetry.ac_online = Some(false);
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        settle(&tx, &mut event_rx).await;
+        assert_eq!(sets(), [1, 0], "an automatic switch never leaves Ultimate");
+
+        tx.send(WorkerCommand::SetPowerRules(rules(false))).unwrap();
+        *gpu.state.lock().unwrap() = (0, u32::MAX);
+        state.write().await.telemetry.ac_online = Some(true);
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        settle(&tx, &mut event_rx).await;
+        assert_eq!(sets(), [1, 0], "disabled again: nothing is written");
+    }
+
     struct FakePanel {
         state: Arc<StdMutex<(u32, Vec<u32>)>>,
         calls: Arc<StdMutex<Vec<u32>>>,
@@ -2136,6 +2336,7 @@ mod tests {
                     profile: None,
                     refresh_hz: Some(60),
                 },
+                gpu_optimized: false,
             })
             .unwrap();
         let (tx, rx) = command_channel();

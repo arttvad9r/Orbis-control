@@ -47,6 +47,10 @@ pub struct PowerRules {
     /// Applied when running on battery.
     #[serde(default)]
     pub battery: PowerRule,
+    /// GPU "Optimized" mode: queue Eco on battery and Standard on AC. Independent
+    /// of the master switch, like the GPU mode itself.
+    #[serde(default)]
+    pub gpu_optimized: bool,
 }
 
 impl PowerRules {
@@ -159,6 +163,7 @@ mod tests {
                 profile: Some(PerformanceProfile::Silent),
                 refresh_hz: Some(60),
             },
+            gpu_optimized: true,
         };
         save_power_rules_to_dir(&rules, dir.path()).unwrap();
         assert_eq!(load_power_rules_from_dir(dir.path()).unwrap(), rules);
