@@ -27,6 +27,7 @@ export component SystemSection inherits Rectangle {
     in property <bool> status-led-state-ready: false;
     in property <bool> status-led-control-ready: false;
     in property <ClamshellState> auto-clamshell-state: ClamshellState.Loading;
+    in property <string> lid-other-handler: "";
     in property <bool> standby-networking-control-ready: false;
     in property <bool> hibernate-control-ready: false;
     in property <bool> core-count-control-ready: false;
@@ -207,7 +208,9 @@ export component SystemSection inherits Rectangle {
 
                     if (root.clamshell-visible()) : RequestToggleRow {
                         label: "Не засыпать при закрытой крышке";
-                        description: root.auto-clamshell-state == ClamshellState.Inactive || root.auto-clamshell-state == ClamshellState.Active
+                        description: root.auto-clamshell-state == ClamshellState.Active && root.lid-other-handler != ""
+                            ? root.lid-other-handler + " тоже обрабатывает крышку и может усыпить ноутбук: задайте ему «Ничего не делать» при закрытии крышки"
+                            : root.auto-clamshell-state == ClamshellState.Inactive || root.auto-clamshell-state == ClamshellState.Active
                             ? "Для работы с внешним монитором при закрытой крышке"
                             : root.clamshell-state-label();
                         checked: root.auto-clamshell-state == ClamshellState.Active;

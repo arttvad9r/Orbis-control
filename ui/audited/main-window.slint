@@ -158,6 +158,7 @@ export component AppWindow inherits Window {
     in property <bool> status-led-state-ready: false;
     in property <bool> status-led-control-ready: false;
     in property <ClamshellState> auto-clamshell-state: ClamshellState.Loading;
+    in property <string> lid-other-handler: "";
     in property <bool> standby-networking-control-ready: false;
     in property <bool> hibernate-control-ready: false;
     in property <bool> core-count-control-ready: false;
@@ -527,6 +528,7 @@ export component AppWindow inherits Window {
                         status-led-state-ready <=> root.status-led-state-ready;
                         status-led-control-ready <=> root.status-led-control-ready;
                         auto-clamshell-state <=> root.auto-clamshell-state;
+                        lid-other-handler <=> root.lid-other-handler;
                         standby-networking-control-ready <=> root.standby-networking-control-ready;
                         hibernate-control-ready <=> root.hibernate-control-ready;
                         core-count-control-ready <=> root.core-count-control-ready;

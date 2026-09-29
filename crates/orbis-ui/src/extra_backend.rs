@@ -755,16 +755,29 @@ fn request_clamshell(window: &AppWindow, enabled: bool) {
     let clamshell = context.clamshell.clone();
     context.runtime.spawn(async move {
         let result = clamshell.set_clamshell(enabled).await;
+        let lid_handler = lid_handler_name(clamshell.as_ref()).await;
         completion.store(false, Ordering::Release);
         if let Err(error) = weak.upgrade_in_event_loop(move |window| {
             window.set_applying(false);
             let state = clamshell_ui_state(result);
             window.set_auto_clamshell_state(state);
+            window.set_lid_other_handler(lid_handler.into());
             window.set_status(clamshell_status(state).into());
         }) {
             tracing::warn!(error = ?error, "failed to publish clamshell result");
         }
     });
+}
+
+async fn lid_handler_name(source: &dyn SessionClamshellSource) -> String {
+    match tokio::time::timeout(READ_TIMEOUT, source.other_lid_handler()).await {
+        Ok(Ok(name)) => name.unwrap_or_default(),
+        Ok(Err(error)) => {
+            tracing::debug!(error = ?error, "lid handler lookup unavailable");
+            String::new()
+        }
+        Err(_) => String::new(),
+    }
 }
 
 fn clamshell_ui_state(result: Result<u8, ProviderError>) -> ClamshellState {
@@ -825,10 +838,11 @@ fn refresh_with_status(
     let weak = window.as_weak();
     let completion = context.refreshing.clone();
     context.runtime.spawn(async move {
-        let (refresh_results, write_statuses, clamshell_result) = tokio::join!(
+        let (refresh_results, write_statuses, clamshell_result, lid_handler) = tokio::join!(
             (context.refresh_reads)(),
             (context.write_statuses)(),
             context.clamshell.read_clamshell(),
+            lid_handler_name(context.clamshell.as_ref()),
         );
         let (aura_result, panel_result, boot_sound_result, apu_result, aspm_result) =
             refresh_results;
@@ -865,6 +879,7 @@ fn refresh_with_status(
 
             let clamshell_state = clamshell_ui_state(clamshell_result);
             window.set_auto_clamshell_state(clamshell_state);
+            window.set_lid_other_handler(lid_handler.into());
 
             if let Some(context) = CONTEXT.with(|slot| slot.borrow().clone()) {
                 let boot_observed = boot_sound.ready.then_some(boot_sound.enabled);

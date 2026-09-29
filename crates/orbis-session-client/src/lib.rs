@@ -280,6 +280,28 @@ pub trait SessionClamshellSource: Send + Sync {
     async fn read_clamshell(&self) -> Result<u8, ProviderError>;
     /// Request lifecycle state and return the resulting state.
     async fn set_clamshell(&self, enabled: bool) -> Result<u8, ProviderError>;
+    /// Name of another program that holds a blocking `handle-lid-switch`
+    /// inhibitor (for example KDE PowerDevil): it acts on lid events itself,
+    /// so Orbis' inhibitor alone does not stop it from suspending.
+    async fn other_lid_handler(&self) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
+}
+
+const ORBIS_INHIBITOR_WHO: &str = "Orbis Control";
+
+/// One `org.freedesktop.login1.Manager.ListInhibitors` row: what, who, why, mode, uid, pid.
+type LogindInhibitor = (String, String, String, String, u32, u32);
+
+fn other_lid_handler_name(inhibitors: &[LogindInhibitor]) -> Option<String> {
+    inhibitors
+        .iter()
+        .find(|(what, who, _, mode, _, _)| {
+            mode == "block"
+                && who != ORBIS_INHIBITOR_WHO
+                && what.split(':').any(|item| item == "handle-lid-switch")
+        })
+        .map(|(_, who, _, _, _, _)| who.clone())
 }
 
 /// zbus implementation of [`SessionClamshellSource`].
@@ -332,6 +354,25 @@ impl SessionClamshellSource for ZbusSessionClamshellSource {
                 .await
                 .map_err(zbus_error_to_provider)?,
         )
+    }
+
+    async fn other_lid_handler(&self) -> Result<Option<String>, ProviderError> {
+        let system = zbus::Connection::system()
+            .await
+            .map_err(zbus_error_to_provider)?;
+        let reply = system
+            .call_method(
+                Some("org.freedesktop.login1"),
+                "/org/freedesktop/login1",
+                Some("org.freedesktop.login1.Manager"),
+                "ListInhibitors",
+                &(),
+            )
+            .await
+            .map_err(zbus_error_to_provider)?;
+        let inhibitors: Vec<LogindInhibitor> =
+            reply.body().deserialize().map_err(zbus_error_to_provider)?;
+        Ok(other_lid_handler_name(&inhibitors))
     }
 }
 
@@ -2660,6 +2701,30 @@ mod tests {
     use orbis_core::newtypes::{FanPwm, TemperatureC};
 
     use super::*;
+
+    fn inhibitor(what: &str, who: &str, mode: &str) -> LogindInhibitor {
+        (what.into(), who.into(), "why".into(), mode.into(), 1000, 1)
+    }
+
+    #[test]
+    fn other_lid_handler_ignores_orbis_and_non_blocking_holders() {
+        let rows = [
+            inhibitor("handle-lid-switch", ORBIS_INHIBITOR_WHO, "block"),
+            inhibitor("sleep", "NetworkManager", "delay"),
+            inhibitor("handle-lid-switch", "Other", "delay"),
+            inhibitor("shutdown", "Foo", "block"),
+        ];
+        assert_eq!(other_lid_handler_name(&rows), None);
+        let rows = [
+            inhibitor("handle-lid-switch", ORBIS_INHIBITOR_WHO, "block"),
+            inhibitor(
+                "handle-power-key:handle-suspend-key:handle-lid-switch",
+                "PowerDevil",
+                "block",
+            ),
+        ];
+        assert_eq!(other_lid_handler_name(&rows).as_deref(), Some("PowerDevil"));
+    }
 
     fn ppd_entry(
         pairs: &[(&str, &str)],
