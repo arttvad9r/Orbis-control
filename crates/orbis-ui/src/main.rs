@@ -2765,6 +2765,32 @@ fn wire_keyboard_timeout(
     });
 }
 
+fn wire_update_check(app: &AppWindow, runtime: tokio::runtime::Handle) {
+    let weak = app.as_weak();
+    app.on_update_check_requested(move || {
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        if app.get_update_busy() {
+            return;
+        }
+        app.set_update_busy(true);
+        let weak = weak.clone();
+        runtime.spawn(async move {
+            let status = tokio::task::spawn_blocking(orbis_ui::update_check::check_for_update)
+                .await
+                .unwrap_or_else(|_| {
+                    orbis_ui::update_check::UpdateStatus::Failed("проверка прервана".into())
+                });
+            let _ = weak.upgrade_in_event_loop(move |app| {
+                app.set_update_status(status.text().into());
+                app.set_update_problem(status.is_problem());
+                app.set_update_busy(false);
+            });
+        });
+    });
+}
+
 fn wire_settings_section(app: &AppWindow) {
     {
         let app_weak = app.as_weak();
@@ -3029,6 +3055,7 @@ fn main() -> anyhow::Result<()> {
     let (keyboard_stop_tx, keyboard_stop_rx) = tokio::sync::oneshot::channel();
     show_keyboard_timeout(&app, &keyboard_timeout);
     wire_keyboard_timeout(&app, std::sync::Arc::new(timeout_tx));
+    wire_update_check(&app, runtime.handle().clone());
     let keyboard_status_app = app.as_weak();
     let keyboard_task = runtime.spawn(orbis_ui::keyboard_timeout_runtime::run_keyboard_timeout(
         timeout_rx,

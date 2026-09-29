@@ -1,11 +1,15 @@
 // About page — product identity, scope and version.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, InfoRow, StatusPill, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, InfoRow, StatusPill, ActionButton, LocalStatus, LayoutMetrics } from "../common.slint";
 import { AppMark } from "../../components/app-mark.slint";
 import { Palette } from "../../themes/dark.slint";
 
 export component AboutSection inherits Rectangle {
     in property <string> version: "0.0.0";
+    in property <string> update-status: "";
+    in property <bool> update-problem: false;
+    in property <bool> update-busy: false;
+    callback update-check-requested();
 
     ScrollView {
         VerticalLayout {
@@ -104,6 +108,31 @@ export component AboutSection inherits Rectangle {
                     InfoRow { label: "Версия"; value: root.version; }
                     InfoRow { label: "Платформа"; value: "Linux · Arch first"; }
                     InfoRow { label: "Лицензия"; value: "GPL-3.0-or-later"; }
+                }
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 10px;
+                    SectionTitle {
+                        title: "Обновления";
+                        detail: "Проверка идёт только по нажатию и только читает список релизов на GitHub. Установка — через pacman.";
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        ActionButton {
+                            width: 190px;
+                            label: root.update-busy ? "Проверяю…" : "Проверить обновления";
+                            disabled: root.update-busy;
+                            clicked => { root.update-check-requested(); }
+                        }
+                        if (root.update-status != "") : LocalStatus {
+                            horizontal-stretch: 1;
+                            text: root.update-status;
+                            accent: root.update-problem ? Palette.warning : Palette.text-secondary;
+                        }
+                    }
                 }
             }
 

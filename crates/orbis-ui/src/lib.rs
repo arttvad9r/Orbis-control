@@ -18,5 +18,6 @@ pub mod keyboard_timeout_runtime;
 pub mod power_rules_runtime;
 pub mod product_mutation_promotion;
 pub mod profile_limits_runtime;
+pub mod update_check;
 #[path = "worker_runtime.rs"]
 pub mod worker;

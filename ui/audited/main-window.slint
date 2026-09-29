@@ -120,6 +120,10 @@ export component AppWindow inherits Window {
     in property <string> keyboard-timeout-status: "";
     in property <bool> keyboard-timeout-problem: false;
     callback keyboard-timeout-requested(bool, int);
+    in property <string> update-status: "";
+    in property <bool> update-problem: false;
+    in property <bool> update-busy: false;
+    callback update-check-requested();
     callback aura-static-rgb-requested(int, int, int);
 
     in property <bool> backend-ready: false;
@@ -543,6 +547,10 @@ export component AppWindow inherits Window {
                     }
                     if (root.active-section == Section.About) : AboutSection {
                         version: root.ui-state.version;
+                        update-status: root.update-status;
+                        update-problem: root.update-problem;
+                        update-busy: root.update-busy;
+                        update-check-requested => { root.update-check-requested(); }
                     }
                 }
             }
