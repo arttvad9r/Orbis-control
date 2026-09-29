@@ -13,6 +13,7 @@ use orbis_config::{
 };
 use orbis_core::cpu_tuning::EnergyPreference;
 use orbis_core::limits::PowerLimitField;
+use orbis_core::nvidia_tuning::NvidiaField;
 use orbis_core::profile::PerformanceProfile;
 
 /// What the UI shows about the currently active profile.
@@ -23,6 +24,8 @@ pub struct ProfileLimitsView {
     pub saved: Vec<(PowerLimitField, i32)>,
     pub epp: Option<EnergyPreference>,
     pub cpu_boost: Option<bool>,
+    pub nvidia: Vec<(NvidiaField, i32)>,
+    pub curve_optimizer: Option<i32>,
     pub error: Option<String>,
 }
 
@@ -32,11 +35,17 @@ pub struct ProfileReplay {
     pub limits: Vec<(PowerLimitField, i32)>,
     pub epp: Option<EnergyPreference>,
     pub cpu_boost: Option<bool>,
+    pub nvidia: Vec<(NvidiaField, i32)>,
+    pub curve_optimizer: Option<i32>,
 }
 
 impl ProfileReplay {
     pub fn is_empty(&self) -> bool {
-        self.limits.is_empty() && self.epp.is_none() && self.cpu_boost.is_none()
+        self.limits.is_empty()
+            && self.epp.is_none()
+            && self.cpu_boost.is_none()
+            && self.nvidia.is_empty()
+            && self.curve_optimizer.is_none()
     }
 }
 
@@ -87,6 +96,8 @@ impl ProfileLimitsTracker {
             saved: set.entries(),
             epp: set.epp,
             cpu_boost: set.cpu_boost,
+            nvidia: set.nvidia_entries(),
+            curve_optimizer: set.curve_optimizer,
             error: self.error.clone(),
         })
     }
@@ -105,6 +116,8 @@ impl ProfileLimitsTracker {
                 limits: set.entries(),
                 epp: set.epp,
                 cpu_boost: set.cpu_boost,
+                nvidia: set.nvidia_entries(),
+                curve_optimizer: set.curve_optimizer,
             }
         } else {
             ProfileReplay::default()
@@ -149,6 +162,20 @@ impl ProfileLimitsTracker {
         self.record(
             |set| set.cpu_boost != Some(enabled),
             |set| set.cpu_boost = Some(enabled),
+        );
+    }
+
+    pub fn record_curve_optimizer(&mut self, offset: i32) {
+        self.record(
+            |set| set.curve_optimizer != Some(offset),
+            |set| set.curve_optimizer = Some(offset),
+        );
+    }
+
+    pub fn record_nvidia(&mut self, field: NvidiaField, value: i32) {
+        self.record(
+            |set| set.nvidia(field) != Some(value),
+            |set| set.set_nvidia(field, value),
         );
     }
 
@@ -216,6 +243,8 @@ mod tests {
             limits: vec![(PowerLimitField::Spl, 40)],
             epp: Some(EnergyPreference::Power),
             cpu_boost: Some(false),
+            nvidia: Vec::new(),
+            curve_optimizer: None,
         };
         assert_eq!(tracker.observe(PerformanceProfile::Balanced), expected);
         assert!(tracker.observe(PerformanceProfile::Balanced).is_empty());

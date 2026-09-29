@@ -66,6 +66,13 @@ export component PerformanceSection inherits Rectangle {
     in property <string> cpu-tuning-error: "";
     callback cpu-epp-requested(int);
     callback cpu-boost-requested(bool);
+    in property <bool> cpu-co-supported: false;
+    in property <bool> cpu-co-writable: false;
+    in property <bool> cpu-co-applied-known: false;
+    in property <int> cpu-co-applied: 0;
+    callback cpu-co-requested(int);
+    property <int> co-draft: 0;
+    property <bool> co-confirming: false;
     in property <bool> power-rules-known: false;
     in property <bool> power-rules-enabled: false;
     in property <int> power-rules-ac: 0;
@@ -350,7 +357,7 @@ export component PerformanceSection inherits Rectangle {
 
                     SectionTitle {
                         title: "Процессор";
-                        detail: root.cpu-epp-writable || root.cpu-boost-writable ? "Запись доступна" : "Только чтение";
+                        detail: root.cpu-epp-writable || root.cpu-boost-writable || root.cpu-co-writable ? "Запись доступна" : "Только чтение";
                     }
                     if (root.cpu-epp-supported) : VerticalLayout {
                         spacing: 6px;
@@ -395,6 +402,74 @@ export component PerformanceSection inherits Rectangle {
                         disabled: !root.cpu-boost-writable;
                         toggled(value) => { root.cpu-boost-requested(value); }
                     }
+                    if (root.cpu-co-supported) : VerticalLayout {
+                        spacing: 6px;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            Text {
+                                horizontal-stretch: 1;
+                                text: "Curve Optimizer (все ядра)";
+                                font-size: 13.5px;
+                                font-weight: 550;
+                                color: Palette.text-primary;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.co-draft + " шагов";
+                                font-size: 14px;
+                                font-weight: 650;
+                                color: Palette.text-primary;
+                                vertical-alignment: center;
+                            }
+                        }
+                        ValueSlider {
+                            min: -30;
+                            max: 0;
+                            step: 1;
+                            value: root.co-draft;
+                            unit: "";
+                            show-percent: false;
+                            disabled: !root.cpu-co-writable;
+                            changed(v) => { root.co-draft = Math.round(v); root.co-confirming = false; }
+                        }
+                        Text {
+                            text: "Отрицательное значение снижает напряжение. Слишком глубокое приводит к сбоям и перезагрузке. "
+                                + "Текущее значение прочитать нельзя: "
+                                + (root.cpu-co-applied-known ? "в этом сеансе применено " + root.cpu-co-applied + "." : "в этом сеансе ничего не применялось.");
+                            font-size: 11.5px;
+                            color: Palette.text-secondary;
+                            wrap: word-wrap;
+                        }
+                        if (root.co-confirming) : LocalStatus {
+                            text: "Значение ниже −15 часто нестабильно. Сохраните работу: при сбое система перезагрузится, настройка сбросится.";
+                            accent: Palette.warning;
+                        }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            ActionButton {
+                                label: root.co-confirming ? "Подтвердить и применить" : "Применить";
+                                accent: true;
+                                disabled: !root.cpu-co-writable || (root.cpu-co-applied-known && root.cpu-co-applied == root.co-draft) || (!root.cpu-co-applied-known && root.co-draft == 0);
+                                clicked => {
+                                    if (root.co-draft < -15 && !root.co-confirming) {
+                                        root.co-confirming = true;
+                                    } else {
+                                        root.co-confirming = false;
+                                        root.cpu-co-requested(root.co-draft);
+                                    }
+                                }
+                            }
+                            ActionButton {
+                                label: "Сбросить в 0";
+                                disabled: !root.cpu-co-writable || !root.cpu-co-applied-known || root.cpu-co-applied == 0;
+                                clicked => {
+                                    root.co-confirming = false;
+                                    root.co-draft = 0;
+                                    root.cpu-co-requested(0);
+                                }
+                            }
+                        }
+                    }
                     if (root.cpu-tuning-error != "") : LocalStatus {
                         text: root.cpu-tuning-error;
                         accent: Palette.error;
@@ -402,7 +477,7 @@ export component PerformanceSection inherits Rectangle {
                 }
             }
 
-            if (root.profile-limits-known && (root.ui-state.power-limits-writable || root.cpu-epp-writable || root.cpu-boost-writable)) : SectionCard {
+            if (root.profile-limits-known && (root.ui-state.power-limits-writable || root.cpu-epp-writable || root.cpu-boost-writable || root.cpu-co-writable)) : SectionCard {
                 VerticalLayout {
                     padding: LayoutMetrics.card-padding;
                     RequestToggleRow {

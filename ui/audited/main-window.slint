@@ -1,7 +1,7 @@
 // Orbis Control single-window shell. The shell owns product navigation and
 // stable window geometry; hardware state remains in UiState and backend-owned
 // callbacks keep their existing semantics.
-import { UiState, Section, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState, ClamshellState } from "model.slint";
+import { UiState, NvidiaRow, Section, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState, ClamshellState } from "model.slint";
 import { TitleBar } from "../components/title-bar.slint";
 import { NavItem } from "../components/nav-item.slint";
 import { ThemeBridge, LayoutMetrics } from "common.slint";
@@ -63,6 +63,12 @@ export component AppWindow inherits Window {
     callback gpu-clicked(int);
     in property <bool> gpu-optimized: false;
     callback gpu-optimized-requested(bool);
+    in property <bool> nvidia-visible: false;
+    in property <bool> nvidia-writable: false;
+    in property <string> nvidia-status: "";
+    in property <string> nvidia-error: "";
+    in property <[NvidiaRow]> nvidia-rows: [];
+    callback nvidia-tuning-requested(int, int);
     callback charge-changed(float);
     in property <bool> display-state-ready: false;
     in property <string> display-status: "Недоступно";
@@ -102,6 +108,11 @@ export component AppWindow inherits Window {
     in property <string> cpu-tuning-error: "";
     callback cpu-epp-requested(int);
     callback cpu-boost-requested(bool);
+    in property <bool> cpu-co-supported: false;
+    in property <bool> cpu-co-writable: false;
+    in property <bool> cpu-co-applied-known: false;
+    in property <int> cpu-co-applied: 0;
+    callback cpu-co-requested(int);
     in property <bool> power-rules-known: false;
     in property <bool> power-rules-enabled: false;
     in property <int> power-rules-ac: 0;
@@ -398,6 +409,11 @@ export component AppWindow inherits Window {
                         cpu-tuning-error: root.cpu-tuning-error;
                         cpu-epp-requested(v) => { root.cpu-epp-requested(v); }
                         cpu-boost-requested(v) => { root.cpu-boost-requested(v); }
+                        cpu-co-supported: root.cpu-co-supported;
+                        cpu-co-writable: root.cpu-co-writable;
+                        cpu-co-applied-known: root.cpu-co-applied-known;
+                        cpu-co-applied: root.cpu-co-applied;
+                        cpu-co-requested(v) => { root.cpu-co-requested(v); }
                         power-rules-known: root.power-rules-known;
                         power-rules-enabled: root.power-rules-enabled;
                         power-rules-ac: root.power-rules-ac;
@@ -428,6 +444,12 @@ export component AppWindow inherits Window {
                         gpu-optimized: root.gpu-optimized;
                         gpu-clicked(i) => { root.gpu-clicked(i); }
                         gpu-optimized-requested(on) => { root.gpu-optimized-requested(on); }
+                        nvidia-visible: root.nvidia-visible;
+                        nvidia-writable: root.nvidia-writable;
+                        nvidia-status: root.nvidia-status;
+                        nvidia-error: root.nvidia-error;
+                        nvidia-rows: root.nvidia-rows;
+                        nvidia-tuning-requested(f, v) => { root.nvidia-tuning-requested(f, v); }
                     }
                     if (root.active-section == Section.Backlight) : BacklightSection {
                         keyboard-state-ready <=> root.keyboard-state-ready;

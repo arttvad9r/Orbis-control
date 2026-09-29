@@ -23,6 +23,7 @@ use orbis_providers::asus_gpu_mode::{AsusGpuMode, ProductGpuOutcome};
 use orbis_providers::error::ProviderError;
 use orbis_providers::supergfxd::{SupergfxdMode, SupergfxdStagedState, SupergfxdUserAction};
 
+pub mod amd_tuning;
 pub mod aspm;
 pub mod asus_gpu_mode;
 pub mod aura;
@@ -31,6 +32,7 @@ pub mod cpu_tuning;
 pub mod fans;
 pub mod firmware;
 pub mod keyboard_backlight;
+pub mod nvidia_tuning;
 pub mod panel;
 pub mod power_limits;
 pub mod supergfxd;
@@ -252,6 +254,11 @@ pub const ASPM_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-aspm";
 
 /// Polkit action id for CPU energy-preference and boost mutation.
 pub const CPU_TUNING_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-cpu-tuning";
+/// Polkit action id for NVIDIA clock-offset and power-limit mutation.
+pub const NVIDIA_TUNING_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-nvidia-tuning";
+/// Polkit action id for AMD Curve Optimizer mutation.
+pub const CURVE_OPTIMIZER_POLKIT_ACTION: &str =
+    "io.github.orbiscontrol.hardware.set-curve-optimizer";
 /// Polkit action id for Battery charge-limit mutation.
 pub const BATTERY_POLKIT_ACTION: &str = "io.github.orbiscontrol.hardware.set-charge-limit";
 /// Polkit action id for the injectable GPU mutation boundary.
@@ -543,6 +550,68 @@ pub async fn handle_set_cpu_boost(
     })?;
     writer.set_boost(enabled).map_err(provider_error_to_dbus)?;
     Ok(enabled)
+}
+
+pub async fn handle_set_nvidia_tuning(
+    authorizer: &dyn Authorizer,
+    driver: std::sync::Arc<dyn orbis_providers::nvidia_tuning::NvidiaTuningDriver>,
+    field: orbis_core::nvidia_tuning::NvidiaField,
+    value: i32,
+    sender: &str,
+) -> zbus::fdo::Result<i32> {
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+    tracing::info!(?field, value, "NVIDIA tuning Hardware1 request");
+    run_blocking("nvidia-tuning", move || {
+        orbis_providers::nvidia_tuning::apply_setting(driver.as_ref(), field, value)
+    })
+    .await
+}
+
+pub async fn handle_set_curve_optimizer(
+    authorizer: &dyn Authorizer,
+    runner: std::sync::Arc<dyn orbis_providers::amd_tuning::RyzenAdjRunner>,
+    offset: i32,
+    sender: &str,
+) -> zbus::fdo::Result<i32> {
+    orbis_providers::amd_tuning::curve_optimizer_argument(offset)
+        .map_err(provider_error_to_dbus)?;
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+    tracing::info!(offset, "Curve Optimizer Hardware1 request");
+    run_blocking("curve-optimizer", move || {
+        let result = orbis_providers::amd_tuning::apply_curve_optimizer(runner.as_ref(), offset);
+        amd_tuning::note_result(&result);
+        result
+    })
+    .await
+}
+
+/// The zbus executor has no Tokio reactor, so `spawn_blocking` is unavailable;
+/// a plain thread keeps a slow driver or subprocess call off the executor.
+async fn run_blocking<T: Send + 'static>(
+    name: &str,
+    work: impl FnOnce() -> Result<T, ProviderError> + Send + 'static,
+) -> zbus::fdo::Result<T> {
+    let (done, result) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            let _ = done.send(work());
+        })
+        .map_err(|error| {
+            zbus::fdo::Error::Failed(format!("hardwared: {name} thread not started: {error}"))
+        })?;
+    result
+        .await
+        .map_err(|_| {
+            zbus::fdo::Error::Failed(format!("hardwared: {name} task ended without a result"))
+        })?
+        .map_err(provider_error_to_dbus)
 }
 
 /// Обработка Battery mutation до публичного D-Bus boundary.
@@ -905,6 +974,8 @@ pub struct HardwareService {
     authorizer: Box<dyn Authorizer>,
     aspm_authorizer: Box<dyn Authorizer>,
     cpu_tuning_authorizer: Box<dyn Authorizer>,
+    nvidia_tuning_authorizer: Box<dyn Authorizer>,
+    curve_optimizer_authorizer: Box<dyn Authorizer>,
     writer: PlatformProfileWriter<StdProfileIo>,
     battery_authorizer: Box<dyn Authorizer>,
     battery_backend: Option<Box<dyn BatteryMutationBackend>>,
@@ -935,6 +1006,8 @@ impl HardwareService {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
             cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
+            nvidia_tuning_authorizer: Box::new(DisabledAuthorizer),
+            curve_optimizer_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -969,6 +1042,8 @@ impl HardwareService {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
             cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
+            nvidia_tuning_authorizer: Box::new(DisabledAuthorizer),
+            curve_optimizer_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -1005,6 +1080,8 @@ impl HardwareService {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
             cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
+            nvidia_tuning_authorizer: Box::new(DisabledAuthorizer),
+            curve_optimizer_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -1039,6 +1116,8 @@ impl HardwareService {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
             cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
+            nvidia_tuning_authorizer: Box::new(DisabledAuthorizer),
+            curve_optimizer_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -1077,6 +1156,8 @@ impl HardwareService {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
             cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
+            nvidia_tuning_authorizer: Box::new(DisabledAuthorizer),
+            curve_optimizer_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer,
             battery_backend: Some(battery_backend),
@@ -1112,6 +1193,8 @@ impl HardwareService {
             authorizer,
             aspm_authorizer: Box::new(DisabledAuthorizer),
             cpu_tuning_authorizer: Box::new(DisabledAuthorizer),
+            nvidia_tuning_authorizer: Box::new(DisabledAuthorizer),
+            curve_optimizer_authorizer: Box::new(DisabledAuthorizer),
             writer: PlatformProfileWriter::default(),
             battery_authorizer: Box::new(DisabledAuthorizer),
             battery_backend: None,
@@ -1218,6 +1301,16 @@ impl HardwareService {
 
     pub fn with_cpu_tuning_authorizer(mut self, authorizer: Box<dyn Authorizer>) -> Self {
         self.cpu_tuning_authorizer = authorizer;
+        self
+    }
+
+    pub fn with_nvidia_tuning_authorizer(mut self, authorizer: Box<dyn Authorizer>) -> Self {
+        self.nvidia_tuning_authorizer = authorizer;
+        self
+    }
+
+    pub fn with_curve_optimizer_authorizer(mut self, authorizer: Box<dyn Authorizer>) -> Self {
+        self.curve_optimizer_authorizer = authorizer;
         self
     }
 
@@ -1347,6 +1440,57 @@ impl HardwareService {
 
     fn cpu_boost_mutation_status(&self) -> u8 {
         cpu_tuning::mutation_wire::to_wire(cpu_tuning::CpuTuningWriter::default().boost_status())
+    }
+
+    async fn set_nvidia_tuning(
+        &self,
+        field: u8,
+        value: i32,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<i32> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let field = orbis_core::nvidia_tuning::NvidiaField::from_wire(field).ok_or_else(|| {
+            zbus::fdo::Error::InvalidArgs(format!("hardwared: неизвестное поле NVIDIA {field}"))
+        })?;
+        handle_set_nvidia_tuning(
+            self.nvidia_tuning_authorizer.as_ref(),
+            std::sync::Arc::new(orbis_providers::nvidia_tuning::NvmlDriver),
+            field,
+            value,
+            &sender,
+        )
+        .await
+    }
+
+    fn nvidia_tuning_mutation_status(&self) -> u8 {
+        nvidia_tuning::mutation_status(std::path::Path::new(
+            orbis_providers::nvidia_tuning::SYSFS_ROOT,
+        ))
+    }
+
+    async fn set_curve_optimizer(
+        &self,
+        offset: i32,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<i32> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        handle_set_curve_optimizer(
+            self.curve_optimizer_authorizer.as_ref(),
+            std::sync::Arc::new(orbis_providers::amd_tuning::SystemRyzenAdj),
+            offset,
+            &sender,
+        )
+        .await
+    }
+
+    fn curve_optimizer_mutation_status(&self) -> u8 {
+        amd_tuning::mutation_status(&orbis_providers::amd_tuning::SystemRyzenAdj)
     }
 
     fn aspm_disabled(&self) -> zbus::fdo::Result<bool> {
@@ -1860,6 +2004,11 @@ pub trait Hardware1 {
     fn set_cpu_boost(&self, enabled: bool) -> zbus::Result<bool>;
     fn cpu_epp_mutation_status(&self) -> zbus::Result<u8>;
     fn cpu_boost_mutation_status(&self) -> zbus::Result<u8>;
+    /// Set one NVIDIA setting (`NvidiaField` wire) and return the read-back.
+    fn set_nvidia_tuning(&self, field: u8, value: i32) -> zbus::Result<i32>;
+    fn nvidia_tuning_mutation_status(&self) -> zbus::Result<u8>;
+    fn set_curve_optimizer(&self, offset: i32) -> zbus::Result<i32>;
+    fn curve_optimizer_mutation_status(&self) -> zbus::Result<u8>;
 
     /// Установить Battery configured threshold; возвращает подтверждённый
     /// configured percent, effective value остаётся отдельным read-model field.
@@ -1917,8 +2066,8 @@ pub trait Hardware1 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
@@ -2924,6 +3073,154 @@ mod tests {
         assert_eq!(confirmed, 3);
         assert_eq!(backend.reset_calls.load(Ordering::SeqCst), 1);
         assert_eq!(auth.last_sender(), Some(":1.8".into()));
+    }
+
+    struct FakeNvidia {
+        writes: AtomicUsize,
+        offset: Mutex<i32>,
+    }
+
+    impl orbis_providers::nvidia_tuning::NvidiaTuningDriver for FakeNvidia {
+        fn read(
+            &self,
+            field: orbis_core::nvidia_tuning::NvidiaField,
+        ) -> Result<orbis_core::nvidia_tuning::NvidiaSetting, ProviderError> {
+            if field != orbis_core::nvidia_tuning::NvidiaField::CoreOffset {
+                return Err(ProviderError::Unsupported("fake".into()));
+            }
+            Ok(orbis_core::nvidia_tuning::NvidiaSetting {
+                current: *self.offset.lock().unwrap(),
+                min: -1000,
+                max: 1000,
+                default: None,
+            })
+        }
+
+        fn write(
+            &self,
+            _: orbis_core::nvidia_tuning::NvidiaField,
+            value: i32,
+        ) -> Result<(), ProviderError> {
+            self.writes.fetch_add(1, Ordering::SeqCst);
+            *self.offset.lock().unwrap() = value;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn nvidia_tuning_runs_on_an_executor_without_a_tokio_reactor() {
+        use orbis_core::nvidia_tuning::NvidiaField;
+        let driver = Arc::new(FakeNvidia {
+            writes: AtomicUsize::new(0),
+            offset: Mutex::new(0),
+        });
+        let allowed = FakeAuthorizer::new(AuthOutcome::Ok);
+        let confirmed = zbus::block_on(handle_set_nvidia_tuning(
+            &allowed,
+            driver,
+            NvidiaField::CoreOffset,
+            50,
+            ":1.9",
+        ))
+        .expect("applied without Tokio");
+        assert_eq!(confirmed, 50);
+    }
+
+    #[tokio::test]
+    async fn nvidia_tuning_requires_authorisation_and_confirms_by_read_back() {
+        use orbis_core::nvidia_tuning::NvidiaField;
+        let driver = Arc::new(FakeNvidia {
+            writes: AtomicUsize::new(0),
+            offset: Mutex::new(0),
+        });
+        let denied = FakeAuthorizer::new(AuthOutcome::Denied);
+        let result = handle_set_nvidia_tuning(
+            &denied,
+            driver.clone(),
+            NvidiaField::CoreOffset,
+            100,
+            ":1.9",
+        )
+        .await;
+        assert!(matches!(result, Err(zbus::fdo::Error::AccessDenied(_))));
+        assert_eq!(driver.writes.load(Ordering::SeqCst), 0);
+
+        let allowed = FakeAuthorizer::new(AuthOutcome::Ok);
+        let confirmed = handle_set_nvidia_tuning(
+            &allowed,
+            driver.clone(),
+            NvidiaField::CoreOffset,
+            100,
+            ":1.9",
+        )
+        .await
+        .expect("applied");
+        assert_eq!(confirmed, 100);
+        let out_of_range = handle_set_nvidia_tuning(
+            &allowed,
+            driver.clone(),
+            NvidiaField::CoreOffset,
+            5000,
+            ":1.9",
+        )
+        .await;
+        assert!(matches!(
+            out_of_range,
+            Err(zbus::fdo::Error::InvalidArgs(_))
+        ));
+        assert_eq!(driver.writes.load(Ordering::SeqCst), 1);
+    }
+
+    struct FakeRyzenAdj(Mutex<Vec<Vec<String>>>);
+
+    impl orbis_providers::amd_tuning::RyzenAdjRunner for FakeRyzenAdj {
+        fn run(
+            &self,
+            args: &[String],
+        ) -> Result<orbis_providers::amd_tuning::RyzenAdjOutput, ProviderError> {
+            self.0.lock().unwrap().push(args.to_vec());
+            Ok(orbis_providers::amd_tuning::RyzenAdjOutput {
+                success: true,
+                text: String::new(),
+            })
+        }
+    }
+
+    #[test]
+    fn curve_optimizer_is_authorised_bounded_and_runs_without_a_tokio_reactor() {
+        let runner = Arc::new(FakeRyzenAdj(Mutex::new(Vec::new())));
+        let denied = FakeAuthorizer::new(AuthOutcome::Denied);
+        let result = zbus::block_on(handle_set_curve_optimizer(
+            &denied,
+            runner.clone(),
+            -10,
+            ":1.9",
+        ));
+        assert!(matches!(result, Err(zbus::fdo::Error::AccessDenied(_))));
+        let allowed = FakeAuthorizer::new(AuthOutcome::Ok);
+        let out_of_range = zbus::block_on(handle_set_curve_optimizer(
+            &allowed,
+            runner.clone(),
+            -31,
+            ":1.9",
+        ));
+        assert!(matches!(
+            out_of_range,
+            Err(zbus::fdo::Error::InvalidArgs(_))
+        ));
+        assert!(runner.0.lock().unwrap().is_empty());
+        let applied = zbus::block_on(handle_set_curve_optimizer(
+            &allowed,
+            runner.clone(),
+            -10,
+            ":1.9",
+        ))
+        .expect("applied");
+        assert_eq!(applied, -10);
+        assert_eq!(
+            runner.0.lock().unwrap().as_slice(),
+            [vec!["--set-coall=1048566".to_string()]]
+        );
     }
 
     #[test]

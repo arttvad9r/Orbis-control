@@ -11,8 +11,10 @@ use std::time::Duration;
 use orbis_core::action::ApplyResult;
 use orbis_core::aura::AuraRgb;
 use orbis_core::cpu_tuning::EnergyPreference;
+use orbis_core::nvidia_tuning::{NvidiaAvailability, NvidiaField, NvidiaTuningState};
 use orbis_providers::error::ProviderError;
 use orbis_ui::cpu_tuning_runtime::{CpuTuningBackend, CpuTuningState};
+use orbis_ui::nvidia_tuning_runtime::NvidiaTuningBackend;
 use zbus::proxy::CacheProperties;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -55,6 +57,11 @@ trait HardwareProductControls {
     fn cpu_boost_mutation_status(&self) -> zbus::Result<u8>;
     fn set_cpu_epp(&self, preference: u8) -> zbus::Result<u8>;
     fn set_cpu_boost(&self, enabled: bool) -> zbus::Result<bool>;
+    fn curve_optimizer_mutation_status(&self) -> zbus::Result<u8>;
+    fn set_curve_optimizer(&self, offset: i32) -> zbus::Result<i32>;
+
+    fn nvidia_tuning_mutation_status(&self) -> zbus::Result<u8>;
+    fn set_nvidia_tuning(&self, field: u8, value: i32) -> zbus::Result<i32>;
 
     fn boot_sound_mutation_status(&self) -> zbus::Result<u8>;
     fn set_boot_sound(&self, enabled: bool) -> zbus::Result<u8>;
@@ -285,6 +292,34 @@ impl HardwareProductControlClient {
         )
     }
 
+    pub(crate) async fn curve_optimizer_status(&self) -> Result<ProductWriteStatus, ProviderError> {
+        let proxy = self.proxy().await?;
+        decode_status(
+            timed(
+                "Curve Optimizer mutation status",
+                proxy.curve_optimizer_mutation_status(),
+            )
+            .await?,
+            "Curve Optimizer",
+        )
+    }
+
+    pub(crate) async fn set_curve_optimizer(&self, offset: i32) -> Result<(), ProviderError> {
+        require_supported(self.curve_optimizer_status().await?, "Curve Optimizer")?;
+        let proxy = self.proxy().await?;
+        let confirmed = timed(
+            "Curve Optimizer mutation",
+            proxy.set_curve_optimizer(offset),
+        )
+        .await?;
+        if confirmed != offset {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "Hardware1 Curve Optimizer mismatch: requested={offset}, returned={confirmed}"
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) async fn set_cpu_epp(
         &self,
         preference: EnergyPreference,
@@ -308,6 +343,39 @@ impl HardwareProductControlClient {
         if confirmed != enabled {
             return Err(ProviderError::BackendUnavailable(format!(
                 "Hardware1 CPU boost read-back mismatch: requested={enabled}, returned={confirmed}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn nvidia_tuning_status(&self) -> Result<ProductWriteStatus, ProviderError> {
+        let proxy = self.proxy().await?;
+        decode_status(
+            timed(
+                "NVIDIA tuning mutation status",
+                proxy.nvidia_tuning_mutation_status(),
+            )
+            .await?,
+            "NVIDIA tuning",
+        )
+    }
+
+    pub(crate) async fn set_nvidia_tuning(
+        &self,
+        field: NvidiaField,
+        value: i32,
+    ) -> Result<(), ProviderError> {
+        require_supported(self.nvidia_tuning_status().await?, "NVIDIA tuning")?;
+        let proxy = self.proxy().await?;
+        let confirmed = timed(
+            "NVIDIA tuning mutation",
+            proxy.set_nvidia_tuning(field.wire(), value),
+        )
+        .await?;
+        if confirmed != value {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "Hardware1 NVIDIA {} read-back mismatch: requested={value}, returned={confirmed}",
+                field.label()
             )));
         }
         Ok(())
@@ -601,6 +669,7 @@ const CPU_SYSFS_ROOT: &str = "/sys/devices/system/cpu";
 pub(crate) struct SystemCpuTuning {
     client: HardwareProductControlClient,
     root: PathBuf,
+    curve_optimizer_applied: std::sync::Mutex<Option<i32>>,
 }
 
 impl SystemCpuTuning {
@@ -608,6 +677,7 @@ impl SystemCpuTuning {
         Self {
             client: HardwareProductControlClient::new(connection),
             root: PathBuf::from(CPU_SYSFS_ROOT),
+            curve_optimizer_applied: Default::default(),
         }
     }
 }
@@ -625,7 +695,24 @@ impl CpuTuningBackend for SystemCpuTuning {
             "0" => Some(false),
             _ => None,
         });
+        let curve_optimizer_applied = *self.curve_optimizer_applied.lock().unwrap();
+        let installed = orbis_providers::amd_tuning::is_installed(
+            std::path::Path::new(orbis_providers::amd_tuning::RYZENADJ_EXECUTABLE),
+            std::path::Path::new(orbis_providers::amd_tuning::SMU_SYSFS_ROOT),
+        );
+        let co_status = if installed {
+            Some(self.client.curve_optimizer_status().await)
+        } else {
+            None
+        };
         CpuTuningState {
+            curve_optimizer_supported: co_status
+                .as_ref()
+                .is_some_and(|status| !matches!(status, Ok(ProductWriteStatus::Unsupported))),
+            curve_optimizer_applied,
+            curve_optimizer_writable: co_status
+                .as_ref()
+                .is_some_and(|status| status.as_ref().is_ok_and(|s| s.is_supported())),
             epp: epp_raw.as_deref().and_then(EnergyPreference::from_sysfs),
             epp_supported,
             epp_writable: epp_supported
@@ -650,6 +737,61 @@ impl CpuTuningBackend for SystemCpuTuning {
 
     async fn set_boost(&self, enabled: bool) -> Result<(), ProviderError> {
         self.client.set_cpu_boost(enabled).await
+    }
+
+    async fn set_curve_optimizer(&self, offset: i32) -> Result<(), ProviderError> {
+        self.client.set_curve_optimizer(offset).await?;
+        *self.curve_optimizer_applied.lock().unwrap() = Some(offset);
+        Ok(())
+    }
+}
+
+/// Production NVIDIA tuning backend: NVML reads (never on a sleeping GPU),
+/// typed Hardware1 writes.
+pub(crate) struct SystemNvidiaTuning {
+    client: HardwareProductControlClient,
+}
+
+impl SystemNvidiaTuning {
+    pub(crate) fn new(connection: zbus::Connection) -> Self {
+        Self {
+            client: HardwareProductControlClient::new(connection),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl NvidiaTuningBackend for SystemNvidiaTuning {
+    async fn read(&self) -> NvidiaTuningState {
+        let root = std::path::Path::new(orbis_providers::nvidia_tuning::SYSFS_ROOT);
+        let mut state = tokio::task::spawn_blocking(|| {
+            orbis_providers::nvidia_tuning::read_state(
+                std::path::Path::new(orbis_providers::nvidia_tuning::SYSFS_ROOT),
+                &orbis_providers::nvidia_tuning::NvmlDriver,
+            )
+        })
+        .await
+        .unwrap_or_else(|_| NvidiaTuningState {
+            availability: orbis_providers::nvidia_tuning::availability(root),
+            ..NvidiaTuningState::default()
+        });
+        state.writable = state.has_settings()
+            && self
+                .client
+                .nvidia_tuning_status()
+                .await
+                .is_ok_and(|status| status.is_supported());
+        state
+    }
+
+    async fn availability(&self) -> NvidiaAvailability {
+        orbis_providers::nvidia_tuning::availability(std::path::Path::new(
+            orbis_providers::nvidia_tuning::SYSFS_ROOT,
+        ))
+    }
+
+    async fn set(&self, field: NvidiaField, value: i32) -> Result<(), ProviderError> {
+        self.client.set_nvidia_tuning(field, value).await
     }
 }
 

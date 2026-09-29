@@ -40,6 +40,7 @@ pub mod lighting;
 pub mod limits;
 pub mod mutation_audit;
 pub mod newtypes;
+pub mod nvidia_tuning;
 pub mod pending_transitions;
 pub mod platform_profile;
 pub mod power;

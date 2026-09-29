@@ -9,6 +9,7 @@ use crate::composition::{
     PerformanceServiceRuntime,
 };
 use crate::cpu_tuning_runtime::{CpuTuningBackend, CpuTuningState};
+use crate::nvidia_tuning_runtime::NvidiaTuningBackend;
 use crate::power_rules_runtime::{PowerRulesTracker, PowerRulesView};
 use crate::profile_limits_runtime::{ProfileLimitsTracker, ProfileLimitsView};
 use orbis_application::{
@@ -20,6 +21,7 @@ use orbis_config::{PowerRule, PowerRules};
 use orbis_core::action::ApplyResult;
 use orbis_core::fan::{FanCurve, FanId};
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
+use orbis_core::nvidia_tuning::{NvidiaAvailability, NvidiaField, NvidiaTuningState};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_providers::error::ProviderError;
 use orbis_providers::traits::FanCurvePoints;
@@ -92,6 +94,15 @@ pub enum WorkerCommand {
     SetCpuEpp(orbis_core::cpu_tuning::EnergyPreference),
     /// Enable or disable CPU boost through Hardware1.
     SetCpuBoost(bool),
+    /// Set the AMD all-core Curve Optimizer offset through Hardware1.
+    SetCpuCurveOptimizer(i32),
+    /// Set one NVIDIA clock offset or the power limit through Hardware1.
+    SetNvidiaTuning {
+        field: NvidiaField,
+        value: i32,
+    },
+    /// Read the NVIDIA tuning state (never wakes a suspended GPU).
+    RefreshNvidiaTuning,
     /// Read the internal panel refresh state from the compositor.
     RefreshPanelRefresh,
     /// Switch the internal panel to this whole-hertz rate.
@@ -104,6 +115,11 @@ pub enum WorkerEvent {
     /// Observed CPU tuning state; `error` is set when a requested write failed.
     CpuTuning {
         state: CpuTuningState,
+        error: Option<String>,
+    },
+    /// Observed NVIDIA tuning state; `error` is set when a requested write failed.
+    NvidiaTuning {
+        state: NvidiaTuningState,
         error: Option<String>,
     },
     /// Observed internal panel refresh state; `write_error` is set when a
@@ -217,12 +233,14 @@ pub async fn run_worker_with_product_gpu<G, B, R, F>(
         product_gpu,
         None,
         None,
+        None,
     )
     .await;
 }
 
 /// Worker entry point that also owns the CPU tuning (EPP/boost) and the
 /// internal panel refresh backends.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_worker_with_cpu_tuning<G, B, R, F>(
     runtime: ApplicationRuntime<G, B, R>,
     receiver: UnboundedReceiver<WorkerCommand>,
@@ -230,6 +248,7 @@ pub async fn run_worker_with_cpu_tuning<G, B, R, F>(
     poll_interval: Option<Duration>,
     product_gpu: Option<std::sync::Arc<dyn HardwareProductGpuSource>>,
     cpu_tuning: Option<Arc<dyn CpuTuningBackend>>,
+    nvidia_tuning: Option<Arc<dyn NvidiaTuningBackend>>,
     panel_refresh: Option<Arc<dyn PanelRefreshBackend>>,
 ) where
     G: GpuServicesRuntime + 'static,
@@ -245,6 +264,7 @@ pub async fn run_worker_with_cpu_tuning<G, B, R, F>(
         product_gpu,
         LocalBackends {
             cpu_tuning,
+            nvidia_tuning,
             panel_refresh,
         },
         Trackers {
@@ -255,12 +275,19 @@ pub async fn run_worker_with_cpu_tuning<G, B, R, F>(
     .await;
 }
 
+/// CPU and NVIDIA tuning backends that a profile or power-source change re-applies.
+#[derive(Clone, Copy, Default)]
+struct Tuning<'a> {
+    cpu: Option<&'a dyn CpuTuningBackend>,
+    nvidia: Option<&'a dyn NvidiaTuningBackend>,
+}
+
 /// Apply one power-source rule through the same authorised paths as a manual
 /// change. A failed or unknown outcome is reported and never retried.
 async fn apply_power_rule<G, B, R, F>(
     runtime: &ApplicationRuntime<G, B, R>,
     profile_limits: &mut ProfileLimitsTracker,
-    cpu_tuning: Option<&dyn CpuTuningBackend>,
+    tuning: Tuning<'_>,
     panel_refresh: Option<&dyn PanelRefreshBackend>,
     rule: PowerRule,
     emit: &mut F,
@@ -275,7 +302,7 @@ async fn apply_power_rule<G, B, R, F>(
         let observed = result.as_ref().ok().map(|outcome| outcome.state.current);
         emit(WorkerEvent::Performance(result));
         if let Some(profile) = observed {
-            observe_profile_limits(runtime, profile_limits, cpu_tuning, profile, emit).await;
+            observe_profile_limits(runtime, profile_limits, tuning, profile, emit).await;
         }
     }
     if rule.refresh_hz.is_some() {
@@ -317,7 +344,7 @@ async fn apply_panel_refresh<F>(
 /// Backends a power-source change may write through.
 #[derive(Clone, Copy)]
 struct SourceBackends<'a> {
-    cpu_tuning: Option<&'a dyn CpuTuningBackend>,
+    tuning: Tuning<'a>,
     panel_refresh: Option<&'a dyn PanelRefreshBackend>,
     product_gpu: Option<&'a dyn HardwareProductGpuSource>,
 }
@@ -343,7 +370,7 @@ async fn observe_power_source<G, B, R, F>(
         apply_power_rule(
             runtime,
             profile_limits,
-            backends.cpu_tuning,
+            backends.tuning,
             backends.panel_refresh,
             rule,
             emit,
@@ -549,7 +576,7 @@ where
 async fn observe_profile_limits<G, B, R, F>(
     runtime: &ApplicationRuntime<G, B, R>,
     tracker: &mut ProfileLimitsTracker,
-    cpu_tuning: Option<&dyn CpuTuningBackend>,
+    tuning: Tuning<'_>,
     profile: PerformanceProfile,
     emit: &mut F,
 ) where
@@ -578,7 +605,7 @@ async fn observe_profile_limits<G, B, R, F>(
             break;
         }
     }
-    if let (false, Some(backend)) = (failed, cpu_tuning) {
+    if let (false, Some(backend)) = (failed, tuning.cpu) {
         if let Some(preference) = replay.epp {
             if let Err(error) = backend.set_epp(preference).await {
                 cpu_error = Some(format!("EPP: {error}"));
@@ -588,15 +615,27 @@ async fn observe_profile_limits<G, B, R, F>(
         if let (false, Some(enabled)) = (failed, replay.cpu_boost) {
             if let Err(error) = backend.set_boost(enabled).await {
                 cpu_error = Some(format!("boost: {error}"));
+                failed = true;
+            }
+        }
+        if let (false, Some(offset)) = (failed, replay.curve_optimizer) {
+            if let Err(error) = backend.set_curve_optimizer(offset).await {
+                cpu_error = Some(format!("Curve Optimizer: {error}"));
+                failed = true;
             }
         }
     }
-    if let Some(backend) = cpu_tuning {
+    if let Some(backend) = tuning.cpu {
         if profile_changed {
             emit(WorkerEvent::CpuTuning {
                 state: backend.read().await,
                 error: cpu_error,
             });
+        }
+    }
+    if let (false, Some(backend)) = (failed, tuning.nvidia) {
+        if !replay.nvidia.is_empty() {
+            replay_nvidia(backend, &replay.nvidia, emit).await;
         }
     }
     let after = tracker.view();
@@ -605,6 +644,47 @@ async fn observe_profile_limits<G, B, R, F>(
             emit(WorkerEvent::ProfileLimits(view));
         }
     }
+}
+
+/// Re-apply the stored NVIDIA values. NVML forgets them on reboot or driver
+/// reload, so this runs on a profile change; a GPU that is not there is skipped
+/// quietly and a failed write stops the replay without a retry.
+async fn replay_nvidia<F>(
+    backend: &dyn NvidiaTuningBackend,
+    values: &[(NvidiaField, i32)],
+    emit: &mut F,
+) where
+    F: FnMut(WorkerEvent),
+{
+    if backend.availability().await == NvidiaAvailability::Absent {
+        return;
+    }
+    let mut error = None;
+    for (field, value) in values {
+        if let Err(failure) = backend.set(*field, *value).await {
+            error = Some(format!("NVIDIA, {}: {failure}", field.label()));
+            break;
+        }
+    }
+    emit(WorkerEvent::NvidiaTuning {
+        state: backend.read().await,
+        error,
+    });
+}
+
+async fn emit_nvidia_tuning<F>(
+    backend: Option<&dyn NvidiaTuningBackend>,
+    error: Option<String>,
+    emit: &mut F,
+) -> Option<NvidiaAvailability>
+where
+    F: FnMut(WorkerEvent),
+{
+    let backend = backend?;
+    let state = backend.read().await;
+    let availability = state.availability;
+    emit(WorkerEvent::NvidiaTuning { state, error });
+    Some(availability)
 }
 
 async fn emit_cpu_tuning<F>(
@@ -626,6 +706,7 @@ async fn emit_cpu_tuning<F>(
 #[derive(Default)]
 struct LocalBackends {
     cpu_tuning: Option<Arc<dyn CpuTuningBackend>>,
+    nvidia_tuning: Option<Arc<dyn NvidiaTuningBackend>>,
     panel_refresh: Option<Arc<dyn PanelRefreshBackend>>,
 }
 
@@ -651,8 +732,14 @@ async fn run_worker_inner<G, B, R, F>(
 {
     let LocalBackends {
         cpu_tuning,
+        nvidia_tuning,
         panel_refresh,
     } = backends;
+    let tuning = Tuning {
+        cpu: cpu_tuning.as_deref(),
+        nvidia: nvidia_tuning.as_deref(),
+    };
+    let mut nvidia_availability: Option<NvidiaAvailability> = None;
     let Trackers {
         mut profile_limits,
         mut power_rules,
@@ -703,7 +790,7 @@ async fn run_worker_inner<G, B, R, F>(
                                     &mut power_rules,
                                     &mut profile_limits,
                                     SourceBackends {
-                                        cpu_tuning: cpu_tuning.as_deref(),
+                                        tuning,
                                         panel_refresh: panel_refresh.as_deref(),
                                         product_gpu: product_gpu.as_deref(),
                                     },
@@ -742,7 +829,7 @@ async fn run_worker_inner<G, B, R, F>(
                                     observe_profile_limits(
                         &runtime,
                         &mut profile_limits,
-                        cpu_tuning.as_deref(),
+                        tuning,
                         profile,
                         &mut emit,
                     )
@@ -778,6 +865,16 @@ async fn run_worker_inner<G, B, R, F>(
                                 panel_refresh_counter = 0;
                                 apply_panel_refresh(panel_refresh.as_deref(), None, &mut emit)
                                     .await;
+                                // Only sysfs is polled here; NVML is read when the GPU
+                                // appears, sleeps or wakes, so it never keeps it awake.
+                                if let Some(backend) = tuning.nvidia {
+                                    let now = backend.availability().await;
+                                    if nvidia_availability != Some(now) {
+                                        nvidia_availability =
+                                            emit_nvidia_tuning(Some(backend), None, &mut emit)
+                                                .await;
+                                    }
+                                }
                             }
                             continue;
                         }
@@ -813,6 +910,29 @@ async fn run_worker_inner<G, B, R, F>(
             continue;
         }
 
+        if matches!(command, WorkerCommand::RefreshNvidiaTuning) {
+            nvidia_availability = emit_nvidia_tuning(tuning.nvidia, None, &mut emit).await;
+            continue;
+        }
+
+        if let WorkerCommand::SetNvidiaTuning { field, value } = command {
+            let error = match tuning.nvidia {
+                Some(backend) => match backend.set(field, value).await {
+                    Ok(()) => {
+                        profile_limits.record_nvidia(field, value);
+                        None
+                    }
+                    Err(error) => Some(error.to_string()),
+                },
+                None => Some("NVIDIA tuning backend unavailable".into()),
+            };
+            nvidia_availability = emit_nvidia_tuning(tuning.nvidia, error, &mut emit).await;
+            if let Some(view) = profile_limits.view() {
+                emit(WorkerEvent::ProfileLimits(view));
+            }
+            continue;
+        }
+
         if let WorkerCommand::SetPanelRefresh(hz) = command {
             apply_panel_refresh(panel_refresh.as_deref(), Some(hz), &mut emit).await;
             continue;
@@ -834,7 +954,7 @@ async fn run_worker_inner<G, B, R, F>(
                 &mut power_rules,
                 &mut profile_limits,
                 SourceBackends {
-                    cpu_tuning: cpu_tuning.as_deref(),
+                    tuning,
                     panel_refresh: panel_refresh.as_deref(),
                     product_gpu: product_gpu.as_deref(),
                 },
@@ -872,7 +992,7 @@ async fn run_worker_inner<G, B, R, F>(
                     observe_profile_limits(
                         &runtime,
                         &mut profile_limits,
-                        cpu_tuning.as_deref(),
+                        tuning,
                         profile,
                         &mut emit,
                     )
@@ -956,6 +1076,23 @@ async fn run_worker_inner<G, B, R, F>(
                 }
                 continue;
             }
+            WorkerCommand::SetCpuCurveOptimizer(offset) => {
+                let error = match cpu_tuning.as_deref() {
+                    Some(backend) => match backend.set_curve_optimizer(offset).await {
+                        Ok(()) => {
+                            profile_limits.record_curve_optimizer(offset);
+                            None
+                        }
+                        Err(error) => Some(error.to_string()),
+                    },
+                    None => Some("CPU tuning backend unavailable".into()),
+                };
+                emit_cpu_tuning(cpu_tuning.as_deref(), error, &mut emit).await;
+                if let Some(view) = profile_limits.view() {
+                    emit(WorkerEvent::ProfileLimits(view));
+                }
+                continue;
+            }
             WorkerCommand::SetPowerRules(rules) => {
                 let gpu_was_optimized = power_rules.rules().gpu_optimized;
                 let apply = power_rules.set_rules(rules);
@@ -969,7 +1106,7 @@ async fn run_worker_inner<G, B, R, F>(
                     apply_power_rule(
                         &runtime,
                         &mut profile_limits,
-                        cpu_tuning.as_deref(),
+                        tuning,
                         panel_refresh.as_deref(),
                         rule,
                         &mut emit,
@@ -1021,7 +1158,7 @@ async fn run_worker_inner<G, B, R, F>(
                     observe_profile_limits(
                         &runtime,
                         &mut profile_limits,
-                        cpu_tuning.as_deref(),
+                        tuning,
                         profile,
                         &mut emit,
                     )
@@ -1046,6 +1183,8 @@ async fn run_worker_inner<G, B, R, F>(
             | WorkerCommand::RefreshTelemetry
             | WorkerCommand::RefreshPowerLimits
             | WorkerCommand::RefreshPanelRefresh
+            | WorkerCommand::RefreshNvidiaTuning
+            | WorkerCommand::SetNvidiaTuning { .. }
             | WorkerCommand::SetPanelRefresh(_) => {
                 unreachable!("handled before service dispatch")
             }
@@ -1978,6 +2117,10 @@ mod tests {
             self.calls.lock().unwrap().push(format!("boost={enabled}"));
             Ok(())
         }
+        async fn set_curve_optimizer(&self, offset: i32) -> Result<(), ProviderError> {
+            self.calls.lock().unwrap().push(format!("co={offset}"));
+            Ok(())
+        }
     }
 
     #[tokio::test]
@@ -2011,6 +2154,7 @@ mod tests {
             LocalBackends {
                 cpu_tuning: Some(backend),
                 panel_refresh: None,
+                ..Default::default()
             },
             Trackers {
                 profile_limits: tracker,
@@ -2048,22 +2192,146 @@ mod tests {
         tx.send(WorkerCommand::SetCpuEpp(EnergyPreference::Power))
             .unwrap();
         tx.send(WorkerCommand::SetCpuBoost(false)).unwrap();
-        let view = next_view(&mut event_rx, |v| v.cpu_boost == Some(false)).await;
+        tx.send(WorkerCommand::SetCpuCurveOptimizer(-12)).unwrap();
+        let view = next_view(&mut event_rx, |v| v.curve_optimizer == Some(-12)).await;
         assert_eq!(view.epp, Some(EnergyPreference::Power));
-        assert_eq!(*calls.lock().unwrap(), ["epp=power", "boost=false"]);
+        assert_eq!(
+            *calls.lock().unwrap(),
+            ["epp=power", "boost=false", "co=-12"]
+        );
 
         tx.send(WorkerCommand::SetPerformance(other)).unwrap();
         next_view(&mut event_rx, |v| v.profile == other).await;
         assert_eq!(
             calls.lock().unwrap().len(),
-            2,
+            3,
             "nothing stored for the other profile"
         );
         tx.send(WorkerCommand::SetPerformance(initial)).unwrap();
         next_view(&mut event_rx, |v| v.profile == initial).await;
         assert_eq!(
             *calls.lock().unwrap(),
-            ["epp=power", "boost=false", "epp=power", "boost=false"]
+            [
+                "epp=power",
+                "boost=false",
+                "co=-12",
+                "epp=power",
+                "boost=false",
+                "co=-12"
+            ]
+        );
+    }
+
+    struct FakeNvidia {
+        calls: Arc<StdMutex<Vec<String>>>,
+        availability: NvidiaAvailability,
+    }
+
+    #[async_trait::async_trait]
+    impl NvidiaTuningBackend for FakeNvidia {
+        async fn read(&self) -> NvidiaTuningState {
+            NvidiaTuningState {
+                availability: self.availability,
+                ..NvidiaTuningState::default()
+            }
+        }
+        async fn availability(&self) -> NvidiaAvailability {
+            self.availability
+        }
+        async fn set(&self, field: NvidiaField, value: i32) -> Result<(), ProviderError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("{}={value}", field.label()));
+            Ok(())
+        }
+    }
+
+    async fn nvidia_replay_calls(availability: NvidiaAvailability) -> Vec<String> {
+        let owner = PrivatePowerLimitHardware {
+            values: Arc::new(StdMutex::new(Default::default())),
+            calls: Arc::new(StdMutex::new(Vec::new())),
+        };
+        let (_server, connection) = private_power_limit_peer(owner).await;
+        let runtime = power_limit_runtime(
+            orbis_session_client::ZbusHardwarePowerLimitSource::new(connection),
+            Arc::new(StdMutex::new(Default::default())),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let calls = Arc::new(StdMutex::new(Vec::new()));
+        let backend: Arc<dyn NvidiaTuningBackend> = Arc::new(FakeNvidia {
+            calls: calls.clone(),
+            availability,
+        });
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(run_worker_inner(
+            runtime,
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            None,
+            LocalBackends {
+                nvidia_tuning: Some(backend),
+                ..Default::default()
+            },
+            Trackers {
+                profile_limits: ProfileLimitsTracker::load_from_dir(dir.path().to_path_buf()),
+                power_rules: PowerRulesTracker::load_from_dir(dir.path().to_path_buf()),
+            },
+        ));
+        async fn next_view(
+            rx: &mut tokio::sync::mpsc::UnboundedReceiver<WorkerEvent>,
+            pick: impl Fn(&ProfileLimitsView) -> bool,
+        ) -> ProfileLimitsView {
+            loop {
+                let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                    .await
+                    .expect("worker event")
+                    .expect("worker alive");
+                if let WorkerEvent::ProfileLimits(view) = event {
+                    if pick(&view) {
+                        return view;
+                    }
+                }
+            }
+        }
+
+        tx.send(WorkerCommand::RefreshPerformance).unwrap();
+        let initial = next_view(&mut event_rx, |_| true).await.profile;
+        let other = [PerformanceProfile::Silent, PerformanceProfile::Turbo]
+            .into_iter()
+            .find(|p| *p != initial)
+            .unwrap();
+        tx.send(WorkerCommand::SetProfileLimitsAutoApply { enabled: true })
+            .unwrap();
+        next_view(&mut event_rx, |v| v.auto_apply).await;
+        tx.send(WorkerCommand::SetNvidiaTuning {
+            field: NvidiaField::CoreOffset,
+            value: 120,
+        })
+        .unwrap();
+        let view = next_view(&mut event_rx, |v| !v.nvidia.is_empty()).await;
+        assert_eq!(view.nvidia, [(NvidiaField::CoreOffset, 120)]);
+        tx.send(WorkerCommand::SetPerformance(other)).unwrap();
+        next_view(&mut event_rx, |v| v.profile == other).await;
+        tx.send(WorkerCommand::SetPerformance(initial)).unwrap();
+        next_view(&mut event_rx, |v| v.profile == initial).await;
+        calls.lock().unwrap().clone()
+    }
+
+    #[tokio::test]
+    async fn nvidia_offsets_are_remembered_per_profile_and_replayed_only_with_a_gpu() {
+        assert_eq!(
+            nvidia_replay_calls(NvidiaAvailability::Ready).await,
+            ["смещение частоты ядра=120", "смещение частоты ядра=120"]
+        );
+        assert_eq!(
+            nvidia_replay_calls(NvidiaAvailability::Absent).await,
+            ["смещение частоты ядра=120"],
+            "only the explicit user write; no replay without a GPU"
         );
     }
 
@@ -2350,8 +2618,8 @@ mod tests {
             None,
             None,
             LocalBackends {
-                cpu_tuning: None,
                 panel_refresh: Some(panel),
+                ..Default::default()
             },
             Trackers {
                 profile_limits: ProfileLimitsTracker::load_from_dir(dir.path().to_path_buf()),

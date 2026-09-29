@@ -1,7 +1,8 @@
 // Graphics page — product GPU mode with explicit current/queued semantics and
 // observed dGPU hardware state.
 import { ScrollView } from "std-widgets.slint";
-import { UiState, GpuHwState, GpuModeHwState } from "../model.slint";
+import { UiState, GpuHwState, GpuModeHwState, NvidiaRow } from "../model.slint";
+import { ValueSlider } from "../../components/value-slider.slint";
 import { PageHeader, SectionCard, SectionTitle, InfoRow, StatusPill, LocalStatus, LayoutMetrics } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { Palette } from "../../themes/dark.slint";
@@ -11,6 +12,12 @@ export component GraphicsSection inherits Rectangle {
     callback gpu-clicked(int);
     in property <bool> gpu-optimized: false;
     callback gpu-optimized-requested(bool);
+    in property <bool> nvidia-visible: false;
+    in property <bool> nvidia-writable: false;
+    in property <string> nvidia-status: "";
+    in property <string> nvidia-error: "";
+    in property <[NvidiaRow]> nvidia-rows: [];
+    callback nvidia-tuning-requested(int, int);
 
     function bit-set(mask: int, bit: int) -> bool {
         let shifted = Math.floor(mask / bit);
@@ -213,6 +220,79 @@ export component GraphicsSection inherits Rectangle {
                     InfoRow { label: "Питание dGPU"; value: root.power-label(); }
                     InfoRow { label: "Физический MUX"; value: root.mux-label(); }
                     InfoRow { label: "Доступ к dGPU"; value: root.access-label(); }
+                }
+            }
+
+            if (root.nvidia-visible) : SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        height: 30px;
+                        SectionTitle {
+                            horizontal-stretch: 1;
+                            title: "NVIDIA: частоты и мощность";
+                        }
+                        StatusPill {
+                            text: root.nvidia-rows.length == 0 ? "Недоступно" : root.nvidia-writable ? "Доступно" : "Только чтение";
+                            accent: root.nvidia-rows.length == 0 ? Palette.warning : root.nvidia-writable ? Palette.success : Palette.text-secondary;
+                        }
+                    }
+                    Text {
+                        text: "Действуют до перезагрузки; при включённом автоприменении повторяются при смене профиля.";
+                        font-size: 11.5px;
+                        color: Palette.text-secondary;
+                        wrap: word-wrap;
+                    }
+                    if (root.nvidia-status != "") : LocalStatus {
+                        text: root.nvidia-status;
+                        accent: Palette.text-secondary;
+                    }
+                    for row in root.nvidia-rows : VerticalLayout {
+                        spacing: 2px;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            Text {
+                                horizontal-stretch: 1;
+                                text: row.label;
+                                font-size: 13.5px;
+                                font-weight: 550;
+                                color: Palette.text-primary;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: (row.current > 0 && row.unit == "МГц" ? "+" : "") + row.current + " " + row.unit;
+                                font-size: 14px;
+                                font-weight: 650;
+                                color: Palette.text-primary;
+                                vertical-alignment: center;
+                            }
+                        }
+                        HorizontalLayout {
+                            ValueSlider {
+                                horizontal-stretch: 1;
+                                min: row.min;
+                                max: row.max;
+                                value: row.current;
+                                unit: row.unit;
+                                show-percent: false;
+                                disabled: !root.nvidia-writable;
+                                changed(v) => { root.nvidia-tuning-requested(row.field, Math.round(v)); }
+                            }
+                        }
+                        Text {
+                            text: "Диапазон драйвера: " + row.min + " … " + row.max + " " + row.unit
+                                + (row.default-known ? " · по умолчанию " + row.default : "")
+                                + (row.saved-known ? " · сохранено для профиля: " + row.saved : "");
+                            font-size: 11.5px;
+                            color: Palette.text-secondary;
+                        }
+                    }
+                    if (root.nvidia-error != "") : LocalStatus {
+                        text: root.nvidia-error;
+                        accent: Palette.error;
+                    }
                 }
             }
 

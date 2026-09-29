@@ -22,18 +22,24 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-PrivateDevices=true
+# NVML needs the NVIDIA character devices; every other device stays closed.
+DevicePolicy=closed
+DeviceAllow=char-nvidia rw
+DeviceAllow=char-nvidiactl rw
 ProtectControlGroups=true
 RestrictAddressFamilies=AF_UNIX
 MemoryDenyWriteExecute=true
 AmbientCapabilities=
-CapabilityBoundingSet=
+# NVML refuses clock-offset writes without CAP_SYS_ADMIN (NVIDIA RM privilege check).
+CapabilityBoundingSet=CAP_SYS_ADMIN
 
 # /sys stays read-only except the exact capability-owned write paths.
 ReadOnlyPaths=/sys
 ReadWritePaths=-/sys/firmware/acpi/platform_profile
 ReadWritePaths=-/sys/module/pcie_aspm/parameters/policy
 ReadWritePaths=-/sys/devices/system/cpu
+# ryzenadj talks to the SMU through the ryzen_smu command/argument files.
+ReadWritePaths=-/sys/kernel/ryzen_smu_drv
 ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl1_spl/current_value
 ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl2_sppt/current_value
 ReadWritePaths=-/sys/class/firmware-attributes/asus-armoury/attributes/ppt_pl3_fppt/current_value

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use orbis_core::cpu_tuning::EnergyPreference;
 use orbis_core::limits::PowerLimitField;
+use orbis_core::nvidia_tuning::NvidiaField;
 use orbis_core::profile::PerformanceProfile;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -35,9 +36,51 @@ pub struct ProfileLimitSet {
     /// Explicitly applied CPU boost state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu_boost: Option<bool>,
+    /// Explicitly applied NVIDIA graphics clock offset (MHz).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nvidia_core: Option<i32>,
+    /// Explicitly applied NVIDIA memory clock offset (MHz).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nvidia_memory: Option<i32>,
+    /// Explicitly applied NVIDIA power limit (W).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nvidia_power: Option<i32>,
+    /// Explicitly applied AMD all-core Curve Optimizer offset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curve_optimizer: Option<i32>,
 }
 
 impl ProfileLimitSet {
+    fn nvidia_slot(&mut self, field: NvidiaField) -> &mut Option<i32> {
+        match field {
+            NvidiaField::CoreOffset => &mut self.nvidia_core,
+            NvidiaField::MemoryOffset => &mut self.nvidia_memory,
+            NvidiaField::PowerLimit => &mut self.nvidia_power,
+        }
+    }
+
+    /// Stored NVIDIA value for a field, if any.
+    pub fn nvidia(&self, field: NvidiaField) -> Option<i32> {
+        match field {
+            NvidiaField::CoreOffset => self.nvidia_core,
+            NvidiaField::MemoryOffset => self.nvidia_memory,
+            NvidiaField::PowerLimit => self.nvidia_power,
+        }
+    }
+
+    /// Remember an explicitly applied NVIDIA value.
+    pub fn set_nvidia(&mut self, field: NvidiaField, value: i32) {
+        *self.nvidia_slot(field) = Some(value);
+    }
+
+    /// Stored NVIDIA (field, value) pairs in display order.
+    pub fn nvidia_entries(&self) -> Vec<(NvidiaField, i32)> {
+        NvidiaField::ALL
+            .into_iter()
+            .filter_map(|field| self.nvidia(field).map(|value| (field, value)))
+            .collect()
+    }
+
     /// Stored value for a field, if any.
     pub fn value(&self, field: &PowerLimitField) -> Option<i32> {
         limit_key(field).and_then(|key| self.values.get(key).copied())
@@ -209,6 +252,7 @@ mod tests {
         turbo.values.insert("gpu_temp_target".into(), 80);
         turbo.epp = Some(EnergyPreference::BalancePerformance);
         turbo.cpu_boost = Some(false);
+        turbo.set_nvidia(NvidiaField::MemoryOffset, 1800);
         save_profile_limits_to_dir(&limits, dir.path()).unwrap();
         let loaded = load_profile_limits_from_dir(dir.path()).unwrap();
         assert_eq!(loaded, limits);
@@ -218,6 +262,10 @@ mod tests {
                 (PowerLimitField::Spl, 80),
                 (PowerLimitField::GpuTempTarget, 80)
             ]
+        );
+        assert_eq!(
+            loaded.turbo.nvidia_entries(),
+            vec![(NvidiaField::MemoryOffset, 1800)]
         );
         assert!(!loaded.silent.auto_apply);
     }

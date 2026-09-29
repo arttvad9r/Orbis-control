@@ -15,6 +15,13 @@ pub struct CpuTuningState {
     pub epp_writable: bool,
     pub boost: Option<bool>,
     pub boost_writable: bool,
+    /// The Curve Optimizer tool and SMU driver are installed. The offset itself
+    /// cannot be read back, so no current value is carried.
+    pub curve_optimizer_supported: bool,
+    pub curve_optimizer_writable: bool,
+    /// Offset the SMU last acknowledged in this session (not an observation of
+    /// the hardware); `None` until one was applied.
+    pub curve_optimizer_applied: Option<i32>,
 }
 
 #[async_trait]
@@ -22,4 +29,6 @@ pub trait CpuTuningBackend: Send + Sync {
     async fn read(&self) -> CpuTuningState;
     async fn set_epp(&self, preference: EnergyPreference) -> Result<(), ProviderError>;
     async fn set_boost(&self, enabled: bool) -> Result<(), ProviderError>;
+    /// All-core Curve Optimizer offset, `-30..=0`.
+    async fn set_curve_optimizer(&self, offset: i32) -> Result<(), ProviderError>;
 }

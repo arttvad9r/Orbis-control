@@ -1788,6 +1788,7 @@ fn apply_performance_event(state: &mut controller::UiState, event: WorkerEvent) 
         WorkerEvent::ProfileLimits(_)
         | WorkerEvent::PowerRules(_)
         | WorkerEvent::CpuTuning { .. }
+        | WorkerEvent::NvidiaTuning { .. }
         | WorkerEvent::PanelRefresh { .. } => {}
         WorkerEvent::ChargeLimitRefresh(result) => apply_charge_limit_refresh(state, result),
         WorkerEvent::GpuPowerRefresh(result) => apply_gpu_power_refresh(state, result),
@@ -1988,7 +1989,12 @@ fn profile_limits_summary(view: &ProfileLimitsView) -> String {
     if let Some(error) = &view.error {
         return format!("Сохранённые лимиты недоступны: {error}");
     }
-    if view.saved.is_empty() && view.epp.is_none() && view.cpu_boost.is_none() {
+    if view.saved.is_empty()
+        && view.epp.is_none()
+        && view.cpu_boost.is_none()
+        && view.nvidia.is_empty()
+        && view.curve_optimizer.is_none()
+    {
         return format!(
             "Профиль «{profile}»: значений нет — включите и примените настройки, они применятся при смене профиля"
         );
@@ -2015,7 +2021,86 @@ fn profile_limits_summary(view: &ProfileLimitsView) -> String {
     if let Some(boost) = view.cpu_boost {
         values.push(format!("буст {}", if boost { "вкл" } else { "выкл" }));
     }
+    if let Some(offset) = view.curve_optimizer {
+        values.push(format!("Curve Optimizer {offset}"));
+    }
+    for (field, value) in &view.nvidia {
+        values.push(format!(
+            "NVIDIA {} {value} {}",
+            field.label(),
+            nvidia_unit(*field)
+        ));
+    }
     format!("Профиль «{profile}»: {}", values.join(", "))
+}
+
+fn nvidia_unit(field: orbis_core::nvidia_tuning::NvidiaField) -> &'static str {
+    match field {
+        orbis_core::nvidia_tuning::NvidiaField::PowerLimit => "Вт",
+        _ => "МГц",
+    }
+}
+
+thread_local! {
+    static NVIDIA_VIEW: std::cell::RefCell<(
+        orbis_core::nvidia_tuning::NvidiaTuningState,
+        Vec<(orbis_core::nvidia_tuning::NvidiaField, i32)>,
+    )> = std::cell::RefCell::new(Default::default());
+}
+
+fn render_nvidia(app: &AppWindow, error: Option<&str>) {
+    use orbis_core::nvidia_tuning::NvidiaAvailability;
+    NVIDIA_VIEW.with(|cell| {
+        let (state, saved) = &*cell.borrow();
+        let rows: Vec<NvidiaRow> = orbis_core::nvidia_tuning::NvidiaField::ALL
+            .into_iter()
+            .filter_map(|field| {
+                let setting = state.setting(field)?;
+                let saved = saved.iter().find(|(f, _)| *f == field).map(|(_, v)| *v);
+                Some(NvidiaRow {
+                    field: i32::from(field.wire()),
+                    label: {
+                        let label = field.label();
+                        let mut chars = label.chars();
+                        let head: String = chars
+                            .next()
+                            .into_iter()
+                            .flat_map(char::to_uppercase)
+                            .collect();
+                        format!("{head}{}", chars.as_str()).into()
+                    },
+                    unit: nvidia_unit(field).into(),
+                    current: setting.current,
+                    min: setting.min,
+                    max: setting.max,
+                    default_known: setting.default.is_some(),
+                    default: setting.default.unwrap_or(0),
+                    saved_known: saved.is_some(),
+                    saved: saved.unwrap_or(0),
+                })
+            })
+            .collect();
+        let status = match state.availability {
+            NvidiaAvailability::Absent => "",
+            NvidiaAvailability::Asleep => {
+                "Дискретная GPU спит: значения не читаются, чтобы её не будить."
+            }
+            NvidiaAvailability::Unreadable => {
+                "Драйвер NVIDIA не отдаёт настройки частот и мощности."
+            }
+            NvidiaAvailability::Ready => "",
+        };
+        app.set_nvidia_visible(state.availability != NvidiaAvailability::Absent);
+        app.set_nvidia_writable(state.writable);
+        app.set_nvidia_status(status.into());
+        app.set_nvidia_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+        app.set_nvidia_error(
+            error
+                .map(|message| format!("Не удалось применить настройку NVIDIA: {message}"))
+                .unwrap_or_default()
+                .into(),
+        );
+    });
 }
 
 fn factory_reset_profile_for_refresh(event: &WorkerEvent) -> Option<AsusdFanProfile> {
@@ -2044,7 +2129,13 @@ fn handle_worker_event(
         diagnostics_backend::replace_capabilities(snapshot.clone());
     }
     if let WorkerEvent::CpuTuning { state, error } = &event {
-        app.set_cpu_tuning_ready(state.epp_supported || state.boost.is_some());
+        app.set_cpu_tuning_ready(
+            state.epp_supported || state.boost.is_some() || state.curve_optimizer_supported,
+        );
+        app.set_cpu_co_supported(state.curve_optimizer_supported);
+        app.set_cpu_co_writable(state.curve_optimizer_writable);
+        app.set_cpu_co_applied_known(state.curve_optimizer_applied.is_some());
+        app.set_cpu_co_applied(state.curve_optimizer_applied.unwrap_or(0));
         app.set_cpu_epp(state.epp.map_or(0, |epp| i32::from(epp.wire())));
         app.set_cpu_epp_supported(state.epp_supported);
         app.set_cpu_epp_writable(state.epp_writable);
@@ -2058,6 +2149,10 @@ fn handle_worker_event(
                 .unwrap_or_default()
                 .into(),
         );
+    }
+    if let WorkerEvent::NvidiaTuning { state, error } = &event {
+        NVIDIA_VIEW.with(|cell| cell.borrow_mut().0 = *state);
+        render_nvidia(app, error.as_deref());
     }
     if let WorkerEvent::PanelRefresh { state, write_error } = &event {
         match state {
@@ -2098,6 +2193,8 @@ fn handle_worker_event(
         app.set_profile_limits_known(true);
         app.set_profile_limits_auto_apply(view.auto_apply);
         app.set_profile_limits_summary(profile_limits_summary(view).into());
+        NVIDIA_VIEW.with(|cell| cell.borrow_mut().1 = view.nvidia.clone());
+        render_nvidia(app, None);
     }
     let mut s = from_slint(&app.get_ui_state());
     apply_performance_event(&mut s, event);
@@ -2224,10 +2321,36 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
     }
     {
         let worker_tx = worker_tx.clone();
+        app.on_nvidia_tuning_requested(move |field, value| {
+            let Some(field) = u8::try_from(field)
+                .ok()
+                .and_then(orbis_core::nvidia_tuning::NvidiaField::from_wire)
+            else {
+                return;
+            };
+            if let Some(tx) = &worker_tx {
+                if let Err(error) = tx.send(WorkerCommand::SetNvidiaTuning { field, value }) {
+                    tracing::warn!("worker closed, NVIDIA tuning request not sent: {error:?}");
+                }
+            }
+        });
+    }
+    {
+        let worker_tx = worker_tx.clone();
         app.on_cpu_boost_requested(move |enabled| {
             if let Some(tx) = &worker_tx {
                 if let Err(error) = tx.send(WorkerCommand::SetCpuBoost(enabled)) {
                     tracing::warn!("worker closed, CPU boost request not sent: {error:?}");
+                }
+            }
+        });
+    }
+    {
+        let worker_tx = worker_tx.clone();
+        app.on_cpu_co_requested(move |offset| {
+            if let Some(tx) = &worker_tx {
+                if let Err(error) = tx.send(WorkerCommand::SetCpuCurveOptimizer(offset)) {
+                    tracing::warn!("worker closed, Curve Optimizer request not sent: {error:?}");
                 }
             }
         });
@@ -3089,6 +3212,13 @@ fn main() -> anyhow::Result<()> {
                 system_connection.clone(),
             ),
         );
+    let nvidia_tuning_backend: std::sync::Arc<
+        dyn orbis_ui::nvidia_tuning_runtime::NvidiaTuningBackend,
+    > = std::sync::Arc::new(
+        quick_controls_backend::hardware_controls_backend::SystemNvidiaTuning::new(
+            system_connection.clone(),
+        ),
+    );
     let (application_runtime, _hardware_owner, delegated_ready) = runtime.block_on(
         build_production_runtime(session_connection, system_connection),
     )?;
@@ -3187,10 +3317,15 @@ fn main() -> anyhow::Result<()> {
         Some(poll_interval),
         Some(product_gpu_source),
         Some(cpu_tuning_backend),
+        Some(nvidia_tuning_backend),
         Some(std::sync::Arc::new(
             orbis_providers::KscreenDoctorPanel::default(),
         )),
     ));
+
+    if let Err(e) = worker_tx.send(WorkerCommand::RefreshNvidiaTuning) {
+        tracing::warn!("worker закрыт, initial NVIDIA tuning refresh не отправлен: {e:?}");
+    }
 
     if let Err(e) = worker_tx.send(WorkerCommand::RefreshPanelRefresh) {
         tracing::warn!("worker закрыт, initial panel refresh не отправлен: {e:?}");

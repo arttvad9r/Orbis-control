@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod amd_tuning;
 pub mod asus_armoury;
 /// Read-only ASUS Armoury CPU package-limit evidence.
 pub mod asus_armoury_power_limits;
@@ -38,6 +39,7 @@ pub mod keyboard_dim;
 pub mod lact_telemetry;
 pub mod linux_memory;
 pub mod native_asus_eco;
+pub mod nvidia_tuning;
 pub mod panel_brightness;
 pub mod panel_refresh;
 pub mod probes;
