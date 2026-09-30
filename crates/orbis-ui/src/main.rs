@@ -10,6 +10,7 @@ mod diagnostics_backend;
 mod launch_context;
 mod preferences_backend;
 mod quick_controls_backend;
+mod telemetry_history;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
@@ -840,6 +841,12 @@ fn apply_device_identity(app: &AppWindow) {
         app.set_bios_version(identity.bios_version.into());
         app.set_bios_date(identity.bios_date.into());
     }
+    let summary = orbis_ui::system_summary::SystemSummary::read();
+    app.set_cpu_model(summary.cpu_model.into());
+    app.set_cpu_detail(summary.cpu_detail.into());
+    app.set_memory_total(summary.memory_total.into());
+    app.set_kernel_release(summary.kernel_release.into());
+    app.set_gpu_model(summary.gpu_model.into());
     app.set_fan_eco_profile_available(platform_offers_low_power(
         std::fs::read_to_string("/sys/firmware/acpi/platform_profile_choices")
             .ok()
@@ -2209,6 +2216,7 @@ fn handle_worker_event(
         app.set_factory_reset_available(available);
     }
     if refresh_quick_controls {
+        telemetry_history::record(app, &s);
         quick_controls_backend::publish_tray_stats(&s);
         quick_controls_backend::refresh_if_due(app, Duration::from_secs(10));
     }

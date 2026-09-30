@@ -19,7 +19,7 @@ export component ModeCard inherits Rectangle {
     min-width: 0px;
     preferred-width: 0px;
     horizontal-stretch: 1;
-    min-height: 84px;
+    min-height: 96px;
     border-radius: 12px;
     border-width: root.filled || root.pending ? 1.5px : 1px;
     border-color: root.pending ? Palette.warning
@@ -43,14 +43,14 @@ export component ModeCard inherits Rectangle {
 
     VerticalLayout {
         padding: 10px;
-        spacing: 8px;
+        spacing: 10px;
         alignment: center;
 
         HorizontalLayout {
             alignment: center;
             Icon {
-                width: 22px;
-                height: 22px;
+                width: 30px;
+                height: 30px;
                 kind: root.icon-kind;
                 tint: root.filled ? Palette.text-on-accent
                     : root.disabled ? Palette.text-disabled
@@ -60,7 +60,7 @@ export component ModeCard inherits Rectangle {
         }
         Text {
             text: root.title;
-            font-size: 13.5px;
+            font-size: 15px;
             font-weight: root.filled ? 600 : 500;
             color: root.filled ? Palette.text-on-accent
                 : root.disabled ? Palette.text-disabled

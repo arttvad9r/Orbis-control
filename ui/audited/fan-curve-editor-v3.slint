@@ -96,58 +96,10 @@ export component FanCurveEditor inherits Rectangle {
     callback pwm-point-changed(int, int);
 
     background: transparent;
-    min-height: 390px;
+    min-height: 380px;
 
     VerticalLayout {
         spacing: 14px;
-
-        HorizontalLayout {
-            height: 36px;
-            spacing: 6px;
-            ChoiceButton {
-                width: 96px;
-                height: 36px;
-                label: "CPU";
-                selected: root.fan-selected == 0;
-                clicked => { root.fan-changed(0); }
-            }
-            ChoiceButton {
-                width: 96px;
-                height: 36px;
-                label: "GPU";
-                selected: root.fan-selected == 1;
-                clicked => { root.fan-changed(1); }
-            }
-            Rectangle { horizontal-stretch: 1; }
-            ChoiceButton {
-                width: 104px;
-                height: 36px;
-                label: "Баланс";
-                selected: root.profile-selected == 0;
-                clicked => { root.profile-changed(0); }
-            }
-            ChoiceButton {
-                width: 104px;
-                height: 36px;
-                label: "Турбо";
-                selected: root.profile-selected == 1;
-                clicked => { root.profile-changed(1); }
-            }
-            ChoiceButton {
-                width: 104px;
-                height: 36px;
-                label: "Тихий";
-                selected: root.profile-selected == 2;
-                clicked => { root.profile-changed(2); }
-            }
-            if (root.eco-profile-available || root.profile-selected == 3) : ChoiceButton {
-                width: 104px;
-                height: 36px;
-                label: "Эко";
-                selected: root.profile-selected == 3;
-                clicked => { root.profile-changed(3); }
-            }
-        }
 
         FanCurveChart {
             vertical-stretch: 1;

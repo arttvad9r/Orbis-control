@@ -1,27 +1,150 @@
-// Main product dashboard: device identity, daily modes, telemetry and the
-// three most-used quick controls on one symmetric grid.
+// Main product dashboard (reference 1): device hero, profile tiles, live
+// telemetry with sparklines and three quick cards (fans, display, actions).
 import { ScrollView } from "std-widgets.slint";
 import { UiState, ChargeLimitState, PerformanceHwState } from "../model.slint";
-import { SectionCard, SectionTitle, ActionButton, ChoiceButton, Divider, StatusPill, LocalStatus, LayoutMetrics } from "../common.slint";
+import { SectionCard, StatusPill, LocalStatus, LayoutMetrics } from "../common.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { MetricCard } from "../../components/metric-card.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
-import { Icon } from "../../components/icon.slint";
-import { AppMark } from "../../components/app-mark.slint";
+import { Icon, Icons } from "../../components/icon.slint";
 import { Palette } from "../../themes/dark.slint";
+
+// One hardware fact under the device name: icon + value + caption.
+component SpecItem inherits HorizontalLayout {
+    in property <int> icon-kind;
+    in property <string> value;
+    in property <string> caption;
+    horizontal-stretch: 0;
+    spacing: 12px;
+    Rectangle {
+        width: 30px;
+        Icon {
+            width: 30px;
+            height: 30px;
+            y: (parent.height - self.height) / 2;
+            kind: root.icon-kind;
+            tint: Palette.text-primary;
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        Text { text: root.value; font-size: 13.5px; font-weight: 550; color: Palette.text-primary; overflow: elide; }
+        if (root.caption != "") : Text { text: root.caption; font-size: 12px; color: Palette.text-secondary; overflow: elide; }
+    }
+}
+
+// Card title row with a leading tinted icon.
+component CardTitle inherits HorizontalLayout {
+    in property <int> icon-kind;
+    in property <string> title;
+    in property <color> tint: Palette.text-primary;
+    height: 30px;
+    spacing: 14px;
+    Icon { width: 28px; height: 28px; y: 1px; kind: root.icon-kind; tint: root.tint; }
+    Text {
+        horizontal-stretch: 1;
+        text: root.title;
+        font-size: 17px;
+        font-weight: 650;
+        color: Palette.text-primary;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    @children
+}
+
+// Framed quick-action row (reference: "Быстрые действия").
+component ActionRow inherits Rectangle {
+    in property <int> icon-kind;
+    in property <string> title;
+    in property <bool> clickable: false;
+    callback clicked;
+    height: 46px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Palette.border-default;
+    background: root.clickable && touch.has-hover ? Palette.surface-hover : Palette.surface-raised;
+
+    touch := TouchArea {
+        enabled: root.clickable;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 10px;
+        spacing: 12px;
+        Icon { width: 22px; height: 22px; y: (parent.height - self.height) / 2; kind: root.icon-kind; tint: Palette.text-primary; }
+        Text {
+            horizontal-stretch: 1;
+            text: root.title;
+            font-size: 13.5px;
+            font-weight: 500;
+            color: Palette.text-primary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        @children
+    }
+}
+
+component MiniChoice inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    in property <bool> disabled;
+    callback clicked;
+    width: 32px;
+    height: 28px;
+    y: 9px;
+    border-radius: 8px;
+    background: root.selected ? Palette.accent-fill
+        : touch.has-hover && !root.disabled ? Palette.surface-hover
+        : Palette.surface-muted;
+    Text {
+        text: root.label;
+        font-size: 12px;
+        font-weight: root.selected ? 650 : 500;
+        color: root.selected ? Palette.text-on-accent : root.disabled ? Palette.text-disabled : Palette.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { enabled: !root.disabled; clicked => { root.clicked(); } }
+}
 
 export component DashboardSection inherits Rectangle {
     in property <UiState> ui-state;
     in property <string> device-name: "";
     in property <string> device-board: "";
+    in property <string> cpu-model: "";
+    in property <string> cpu-detail: "";
+    in property <string> memory-total: "";
+    in property <string> kernel-release: "";
+    in property <string> gpu-model: "";
     in property <bool> keyboard-state-ready: false;
     in property <bool> keyboard-control-ready: false;
     in property <int> keyboard-brightness: -1;
     in property <string> keyboard-mutation-error: "";
+    in property <image> cpu-temp-spark;
+    in property <image> gpu-temp-spark;
+    in property <image> battery-spark;
+    in property <image> power-spark;
+    in property <image> cpu-fan-spark;
+    in property <image> gpu-fan-spark;
+    // Fan speed relative to a typical laptop maximum (0..1, negative unknown).
+    in property <float> cpu-fan-level: -1;
+    in property <float> gpu-fan-level: -1;
+    in property <bool> display-state-ready: false;
+    in property <string> display-status: "";
+    in property <string> display-resolution: "";
+    in property <bool> panel-refresh-known: false;
+    in property <int> panel-refresh-current: 0;
+    in property <bool> panel-overdrive-state-ready: false;
+    in property <bool> panel-overdrive: false;
     callback keyboard-brightness-requested(int);
     callback perf-clicked(int);
     callback charge-changed(float);
     callback cooling-open-requested;
+    callback display-open-requested;
 
     function bit-set(mask: int, bit: int) -> bool {
         let shifted = Math.floor(mask / bit);
@@ -46,33 +169,34 @@ export component DashboardSection inherits Rectangle {
         return "Ноутбук ASUS";
     }
 
-    function device-subtitle() -> string {
-        if (root.device-board != "") { return root.device-board; }
-        return "—";
+    function device-line() -> string {
+        let board = root.device-board != "" ? root.device-board + "   ·   " : "";
+        let kernel = root.kernel-release != "" ? "Linux " + root.kernel-release + "   ·   " : "";
+        return board + kernel + "Orbis Control " + root.ui-state.version;
+    }
+
+    function charging() -> bool {
+        return root.ui-state.battery-status == "Charging" || root.ui-state.battery-status == "charging";
     }
 
     function battery-status-label() -> string {
-        if (root.ui-state.battery-status == "") { return "—"; }
-        if (root.ui-state.battery-status == "Charging" || root.ui-state.battery-status == "charging") { return "Зарядка"; }
-        if (root.ui-state.battery-status == "Discharging" || root.ui-state.battery-status == "discharging") { return "От батареи"; }
-        if (root.ui-state.battery-status == "Full" || root.ui-state.battery-status == "full") { return "Заряжен"; }
+        if (root.ui-state.battery-status == "") { return root.ac-status-label(); }
+        if (root.charging()) { return root.ui-state.ac-online == "On AC" ? "Заряжается от сети" : "Заряжается"; }
+        if (root.ui-state.battery-status == "Discharging" || root.ui-state.battery-status == "discharging") { return "Работа от батареи"; }
+        if (root.ui-state.battery-status == "Full" || root.ui-state.battery-status == "full") { return "Полностью заряжена"; }
         if (root.ui-state.battery-status == "Not charging" || root.ui-state.battery-status == "Not Charging") { return "Не заряжается"; }
         return root.ui-state.battery-status;
-    }
-
-    function battery-status-color() -> color {
-        if (root.ui-state.battery-status == "Charging" || root.ui-state.battery-status == "charging"
-            || root.ui-state.battery-status == "Full" || root.ui-state.battery-status == "full") {
-            return Palette.success;
-        }
-        return Palette.text-secondary;
     }
 
     function ac-status-label() -> string {
         if (root.ui-state.ac-online == "On AC") { return "От сети"; }
         if (root.ui-state.ac-online == "On battery") { return "От батареи"; }
-        if (root.ui-state.ac-online == "—") { return "—"; }
-        return root.ui-state.ac-online;
+        return "—";
+    }
+
+    function refresh-label() -> string {
+        if (root.panel-refresh-known && root.panel-refresh-current > 0) { return root.panel-refresh-current + " Гц"; }
+        return root.display-state-ready ? root.display-status : "—";
     }
 
     ScrollView {
@@ -80,99 +204,94 @@ export component DashboardSection inherits Rectangle {
             width: root.width - 2 * LayoutMetrics.page-margin;
             x: LayoutMetrics.page-margin;
             spacing: LayoutMetrics.page-gap;
-            padding-top: LayoutMetrics.page-margin;
+            padding-top: 20px;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
-            // Device identity + battery at a glance.
-            SectionCard {
-                height: 128px;
-                HorizontalLayout {
-                    padding-left: 24px;
-                    padding-right: 24px;
-                    spacing: 20px;
+            // Device hero: illustration, identity and key specs.
+            HorizontalLayout {
+                height: 186px;
+                spacing: 26px;
 
-                    Rectangle {
-                        width: 64px;
-                        AppMark {
-                            width: 64px;
-                            height: 64px;
-                            y: (parent.height - self.height) / 2;
-                        }
+                if (root.width >= 900px) : Rectangle {
+                    width: 270px;
+                    Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: @image-url("../../assets/laptop.svg");
+                        image-fit: contain;
                     }
+                }
 
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        alignment: center;
-                        spacing: 6px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    spacing: 8px;
+                    Text {
+                        text: root.device-title();
+                        font-size: 28px;
+                        font-weight: 700;
+                        color: Palette.text-primary;
+                        overflow: elide;
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
                         Text {
-                            text: root.device-title();
-                            font-size: 22px;
-                            font-weight: 700;
-                            color: Palette.text-primary;
+                            text: root.device-line();
+                            font-size: 15px;
+                            color: Palette.text-secondary;
+                            vertical-alignment: center;
                             overflow: elide;
                         }
-                        HorizontalLayout {
-                            spacing: 10px;
-                            Text {
-                                text: root.device-subtitle();
-                                font-size: 13.5px;
-                                color: Palette.text-secondary;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                            if (!root.ui-state.telemetry-fresh) : StatusPill {
-                                width: 150px;
-                                text: "Данные обновляются";
-                                accent: Palette.warning;
-                            }
-                            Rectangle { horizontal-stretch: 1; }
+                        if (!root.ui-state.telemetry-fresh) : StatusPill {
+                            width: 160px;
+                            text: "Данные обновляются";
+                            accent: Palette.warning;
                         }
                     }
-
-                    for stat[i] in [
-                        { label: "Источник", value: root.ac-status-label(), detail: root.battery-status-label() },
-                        { label: "Здоровье", value: root.ui-state.battery-health, detail: root.ui-state.battery-cycles + " циклов" },
-                    ] : HorizontalLayout {
-                        spacing: 20px;
-                        Divider { width: 1px; }
-                        VerticalLayout {
-                            width: 108px;
-                            alignment: center;
-                            spacing: 4px;
-                            Text { text: stat.label; font-size: 12.5px; color: Palette.text-secondary; }
-                            Text { text: stat.value; font-size: 20px; font-weight: 700; color: Palette.text-primary; overflow: elide; }
-                            Text {
-                                text: stat.detail;
-                                font-size: 12px;
-                                color: i == 0 ? root.battery-status-color() : Palette.text-secondary;
-                                overflow: elide;
-                            }
+                    Rectangle { height: 12px; }
+                    HorizontalLayout {
+                        spacing: 26px;
+                        if (root.cpu-model != "") : SpecItem {
+                            icon-kind: Icons.cpu;
+                            value: root.cpu-model;
+                            caption: root.cpu-detail;
                         }
+                        if (root.gpu-model != "") : SpecItem {
+                            icon-kind: Icons.gpu;
+                            value: root.gpu-model;
+                            caption: "NVIDIA · дискретная";
+                        }
+                        if (root.memory-total != "") : SpecItem {
+                            icon-kind: Icons.ram;
+                            value: root.memory-total;
+                            caption: "Оперативная память";
+                        }
+                        Rectangle { horizontal-stretch: 1; }
                     }
                 }
             }
 
             // Performance profile tiles.
             HorizontalLayout {
-                height: 92px;
-                spacing: 12px;
+                height: 96px;
+                spacing: 14px;
                 ModeCard {
                     title: "Тихий";
-                    icon-kind: 16;
+                    icon-kind: Icons.leaf;
                     selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 0;
                     disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 1);
                     clicked => { root.perf-clicked(0); }
                 }
                 ModeCard {
                     title: "Баланс";
-                    icon-kind: 17;
+                    icon-kind: Icons.target;
                     selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 1;
                     disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 2);
                     clicked => { root.perf-clicked(1); }
                 }
                 ModeCard {
                     title: "Турбо";
-                    icon-kind: 18;
+                    icon-kind: Icons.flame;
                     selected: root.ui-state.perf-state == PerformanceHwState.Ready && root.ui-state.perf-selected == 2;
                     disabled: root.ui-state.perf-state != PerformanceHwState.Ready || !root.ui-state.perf-writable || !root.bit-set(root.ui-state.available-perf-mask, 4);
                     clicked => { root.perf-clicked(2); }
@@ -187,131 +306,230 @@ export component DashboardSection inherits Rectangle {
             HorizontalLayout {
                 spacing: LayoutMetrics.page-gap;
                 MetricCard {
+                    compact: root.width < 900px;
                     label: "Процессор";
                     value: root.ui-state.cpu-temp;
-                    detail: "Вентилятор " + root.ui-state.cpu-fan-rpm;
-                    icon-kind: 10;
+                    detail: "Вентилятор";
+                    detail-2: root.ui-state.cpu-fan-rpm;
+                    icon-kind: Icons.cpu;
                     accent: Palette.accent-default;
                     progress: root.ui-state.cpu-temp-value >= 0 ? root.ui-state.cpu-temp-value / 100 : -1;
+                    spark: root.cpu-temp-spark;
                 }
                 MetricCard {
+                    compact: root.width < 900px;
                     label: "Графика";
                     // A suspended dGPU reports no temperature; show the iGPU then.
                     value: root.ui-state.gpu-temp != "—" || root.ui-state.igpu-temp == "—" ? root.ui-state.gpu-temp : root.ui-state.igpu-temp;
-                    detail: root.ui-state.gpu-temp == "—" && root.ui-state.igpu-temp != "—" ? "iGPU · dGPU спит" : "Вентилятор " + root.ui-state.gpu-fan-rpm;
-                    icon-kind: 4;
+                    detail: root.ui-state.gpu-temp == "—" && root.ui-state.igpu-temp != "—" ? "Встроенная" : "Вентилятор";
+                    detail-2: root.ui-state.gpu-temp == "—" && root.ui-state.igpu-temp != "—" ? "dGPU спит" : root.ui-state.gpu-fan-rpm;
+                    icon-kind: Icons.gpu;
                     accent: Palette.success;
                     progress: root.gpu-temp-value() >= 0 ? root.gpu-temp-value() / 100 : -1;
+                    spark: root.gpu-temp-spark;
                 }
                 MetricCard {
-                    label: "Батарея";
-                    value: root.ui-state.battery-percent;
-                    detail: root.ui-state.charge-limit-state == ChargeLimitState.Ready ? "Лимит " + root.ui-state.charge-limit + "%" : root.battery-status-label();
-                    icon-kind: 2;
-                    accent: Palette.success;
-                    progress: root.ui-state.battery-percent-value >= 0 ? root.ui-state.battery-percent-value / 100 : -1;
-                }
-                MetricCard {
+                    compact: root.width < 900px;
                     label: "Потребление";
                     // Not every laptop reports adapter power; fall back to the
                     // GPU that is actually awake.
                     value: root.ui-state.power-ac-mw != "—" ? root.ui-state.power-ac-mw
                         : root.ui-state.gpu-power != "—" ? root.ui-state.gpu-power
                         : root.ui-state.igpu-power;
-                    detail: root.ui-state.power-ac-mw != "—" ? "dGPU " + root.ui-state.gpu-power
-                        : root.ui-state.gpu-power != "—" ? "Дискретная графика"
-                        : root.ui-state.igpu-power != "—" ? "Встроенная графика" : "Нет датчика";
-                    icon-kind: 13;
+                    detail: root.ui-state.power-ac-mw != "—" ? "Система" : root.ui-state.gpu-power != "—" ? "Дискретная" : root.ui-state.igpu-power != "—" ? "Встроенная" : "Нет датчика";
+                    detail-2: root.ui-state.power-ac-mw != "—" && root.ui-state.gpu-power != "—" ? "dGPU " + root.ui-state.gpu-power : "";
+                    icon-kind: Icons.zap;
                     accent: Palette.violet;
+                    spark: root.power-spark;
+                }
+                MetricCard {
+                    compact: root.width < 900px;
+                    label: "Батарея";
+                    value: root.ui-state.battery-percent;
+                    detail: root.battery-status-label();
+                    detail-2: root.ui-state.charge-limit-state == ChargeLimitState.Ready ? "Лимит " + root.ui-state.charge-limit + "%" : "";
+                    detail-color: root.charging() ? Palette.success : Palette.text-secondary;
+                    icon-kind: Icons.battery;
+                    accent: Palette.success;
+                    progress: root.ui-state.battery-percent-value >= 0 ? root.ui-state.battery-percent-value / 100 : -1;
                 }
             }
 
-            // Quick controls: three equal cards.
+            // Quick cards: fans, display, actions.
             HorizontalLayout {
                 spacing: LayoutMetrics.page-gap;
-                height: 152px;
+                height: 214px;
 
                 SectionCard {
-                    width: (parent.width - 2 * LayoutMetrics.page-gap) / 3;
+                    width: (parent.width - 2 * LayoutMetrics.page-gap) * 0.31;
                     VerticalLayout {
                         padding: LayoutMetrics.card-padding;
-                        spacing: 12px;
-                        HorizontalLayout {
-                            height: 30px;
-                            SectionTitle { horizontal-stretch: 1; title: "Вентиляторы"; }
-                            ActionButton {
-                                width: 36px;
-                                height: 30px;
-                                label: "›";
-                                clicked => { root.cooling-open-requested(); }
+                        spacing: 14px;
+                        CardTitle {
+                            icon-kind: Icons.fan;
+                            title: "Вентиляторы";
+                            Rectangle {
+                                width: 30px;
+                                border-radius: 8px;
+                                background: fan-touch.has-hover ? Palette.surface-hover : transparent;
+                                Icon { width: 18px; height: 18px; x: 6px; y: 6px; kind: Icons.chevron-right; tint: Palette.text-secondary; }
+                                fan-touch := TouchArea { clicked => { root.cooling-open-requested(); } }
                             }
                         }
                         HorizontalLayout {
-                            spacing: 16px;
+                            vertical-stretch: 1;
+                            spacing: 14px;
                             for fan[i] in [
-                                { label: "CPU", rpm: root.ui-state.cpu-fan-rpm },
-                                { label: "GPU", rpm: root.ui-state.gpu-fan-rpm },
-                            ] : VerticalLayout {
+                                { label: "CPU", rpm: root.ui-state.cpu-fan-rpm, spark: root.cpu-fan-spark, level: root.cpu-fan-level },
+                                { label: "GPU", rpm: root.ui-state.gpu-fan-rpm, spark: root.gpu-fan-spark, level: root.gpu-fan-level },
+                            ] : HorizontalLayout {
                                 horizontal-stretch: 1;
-                                spacing: 4px;
-                                alignment: center;
-                                HorizontalLayout {
-                                    spacing: 8px;
-                                    Icon { kind: 3; tint: Palette.accent-default; }
-                                    Text { text: fan.label; font-size: 12.5px; color: Palette.text-secondary; vertical-alignment: center; }
-                                    Rectangle { horizontal-stretch: 1; }
+                                spacing: 14px;
+                                if (i == 1) : Rectangle { width: 1px; background: Palette.border-default; }
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: 6px;
+                                    Text { text: fan.label; font-size: 13px; color: Palette.text-secondary; }
+                                    Text { text: fan.rpm; font-size: 18px; font-weight: 650; color: Palette.text-primary; overflow: elide; }
+                                    Rectangle {
+                                        vertical-stretch: 1;
+                                        if (fan.spark.width > 0) : Image {
+                                            width: parent.width;
+                                            // 5:2 like the SVG (see sparkline.rs).
+                                            height: self.width * 0.4;
+                                            y: parent.height - self.height;
+                                            source: fan.spark;
+                                            colorize: Palette.accent-default;
+                                            image-fit: fill;
+                                        }
+                                    }
+                                    Rectangle {
+                                        height: 6px;
+                                        border-radius: 3px;
+                                        background: Palette.border-default;
+                                        Rectangle {
+                                            x: 0px;
+                                            width: parent.width * Math.min(Math.max(fan.level, 0), 1);
+                                            border-radius: 3px;
+                                            background: Palette.accent-fill;
+                                        }
+                                    }
                                 }
-                                Text { text: fan.rpm; font-size: 18px; font-weight: 650; color: Palette.text-primary; overflow: elide; }
                             }
                         }
                     }
                 }
 
                 SectionCard {
-                    width: (parent.width - 2 * LayoutMetrics.page-gap) / 3;
+                    width: (parent.width - 2 * LayoutMetrics.page-gap) * 0.27;
+                    clip: true;
+                    Image {
+                        x: parent.width * 0.18;
+                        y: parent.height * 0.34;
+                        width: parent.width * 1.1;
+                        height: parent.height * 0.9;
+                        source: @image-url("../../assets/waves.svg");
+                        image-fit: fill;
+                        opacity: 0.8;
+                    }
+                    display-touch := TouchArea { clicked => { root.display-open-requested(); } }
                     VerticalLayout {
                         padding: LayoutMetrics.card-padding;
-                        spacing: 12px;
-                        SectionTitle {
+                        spacing: 14px;
+                        CardTitle { icon-kind: Icons.monitor; title: "Экран"; }
+                        HorizontalLayout {
+                            Rectangle {
+                                width: 136px;
+                                height: 70px;
+                                border-radius: 10px;
+                                border-width: 1px;
+                                border-color: Palette.border-strong;
+                                background: Palette.surface-muted.transparentize(0.2);
+                                VerticalLayout {
+                                    padding-left: 14px;
+                                    alignment: center;
+                                    spacing: 3px;
+                                    Text { text: root.refresh-label(); font-size: 20px; font-weight: 650; color: Palette.text-primary; overflow: elide; }
+                                    if (root.display-resolution != "") : Text { text: root.display-resolution; font-size: 12.5px; color: Palette.text-secondary; }
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        if (root.panel-overdrive-state-ready) : HorizontalLayout {
+                            Rectangle {
+                                width: 150px;
+                                height: 36px;
+                                border-radius: 10px;
+                                border-width: 1px;
+                                border-color: Palette.border-strong;
+                                background: Palette.surface-muted.transparentize(0.2);
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 12px;
+                                    spacing: 8px;
+                                    Icon { width: 18px; height: 18px; y: 9px; kind: Icons.sync; tint: root.panel-overdrive ? Palette.accent-default : Palette.text-secondary; }
+                                    Text {
+                                        text: root.panel-overdrive ? "Overdrive вкл." : "Overdrive выкл.";
+                                        font-size: 12.5px;
+                                        color: Palette.text-primary;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+                }
+
+                SectionCard {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        padding-top: 18px;
+                        spacing: 8px;
+                        CardTitle { icon-kind: Icons.zap; title: "Быстрые действия"; }
+                        ActionRow {
+                            icon-kind: Icons.keyboard;
+                            title: root.keyboard-mutation-error != "" ? root.keyboard-mutation-error : "Подсветка";
+                            if (root.keyboard-state-ready) : HorizontalLayout {
+                                spacing: 4px;
+                                for level in 4: MiniChoice {
+                                    label: level == 0 ? "—" : level + "";
+                                    selected: root.keyboard-brightness == level;
+                                    disabled: !root.keyboard-control-ready;
+                                    clicked => { root.keyboard-brightness-requested(level); }
+                                }
+                            }
+                            if (!root.keyboard-state-ready) : Text {
+                                text: "Чтение…";
+                                font-size: 12.5px;
+                                color: Palette.text-secondary;
+                                vertical-alignment: center;
+                            }
+                        }
+                        ActionRow {
+                            icon-kind: Icons.battery;
                             title: "Лимит заряда";
-                            detail: root.ui-state.charge-limit-state == ChargeLimitState.Ready && !root.ui-state.charge-limit-writable ? "Только чтение" : "";
-                        }
-                        if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : ValueSlider {
-                            min: 20; max: 100; step: 1; value: root.ui-state.charge-limit;
-                            disabled: !root.ui-state.charge-limit-writable;
-                            changed(v) => { root.charge-changed(v); }
-                        }
-                        if (root.ui-state.charge-limit-state != ChargeLimitState.Ready) : LocalStatus {
-                            text: root.ui-state.charge-limit-state == ChargeLimitState.Loading ? "Чтение…" : "Недоступно";
-                            accent: root.ui-state.charge-limit-state == ChargeLimitState.Loading ? Palette.text-secondary : Palette.warning;
-                        }
-                    }
-                }
-
-                SectionCard {
-                    width: (parent.width - 2 * LayoutMetrics.page-gap) / 3;
-                    VerticalLayout {
-                        padding: LayoutMetrics.card-padding;
-                        spacing: 12px;
-                        SectionTitle {
-                            title: "Подсветка";
-                            detail: root.keyboard-mutation-error != "" ? root.keyboard-mutation-error
-                                : root.keyboard-state-ready && !root.keyboard-control-ready ? "Только чтение" : "";
-                            detail-color: root.keyboard-mutation-error != "" ? Palette.warning : Palette.text-secondary;
-                        }
-                        if (root.keyboard-state-ready) : HorizontalLayout {
-                            spacing: 6px;
-                            for level in 4: ChoiceButton {
-                                min-width: 0px;
-                                label: level == 0 ? "Выкл" : level + "";
-                                selected: root.keyboard-brightness == level;
-                                disabled: !root.keyboard-control-ready;
-                                clicked => { root.keyboard-brightness-requested(level); }
+                            if (root.ui-state.charge-limit-state == ChargeLimitState.Ready) : ValueSlider {
+                                width: 148px;
+                                y: 3px;
+                                min: 20; max: 100; step: 1; value: root.ui-state.charge-limit;
+                                disabled: !root.ui-state.charge-limit-writable;
+                                changed(v) => { root.charge-changed(v); }
+                            }
+                            if (root.ui-state.charge-limit-state != ChargeLimitState.Ready) : Text {
+                                text: root.ui-state.charge-limit-state == ChargeLimitState.Loading ? "Чтение…" : "Недоступно";
+                                font-size: 12.5px;
+                                color: Palette.text-secondary;
+                                vertical-alignment: center;
                             }
                         }
-                        if (!root.keyboard-state-ready) : LocalStatus {
-                            text: "Чтение…";
-                            accent: Palette.text-secondary;
+                        ActionRow {
+                            icon-kind: Icons.fan;
+                            title: "Кривые вентиляторов";
+                            clickable: true;
+                            clicked => { root.cooling-open-requested(); }
+                            Icon { width: 18px; height: 18px; y: 14px; kind: Icons.chevron-right; tint: Palette.text-secondary; }
                         }
                     }
                 }

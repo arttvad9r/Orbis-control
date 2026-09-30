@@ -215,6 +215,14 @@ fn demo_state(component: &AppWindow) {
     component.set_aura_static_supported(true);
     component.set_aura_star_supported(true);
 
+    demo_history(component);
+    component.set_cpu_model("AMD Ryzen 7 7735HS".into());
+    component.set_cpu_detail("16 потоков".into());
+    component.set_gpu_model("GeForce RTX 4060".into());
+    component.set_memory_total("16 ГБ".into());
+    component.set_kernel_release("6.16.8-arch1-1".into());
+    component.set_display_resolution("1920 × 1080".into());
+    component.set_battery_health_value(89);
     component.set_device_name("ASUS TUF Gaming A17 FA707NV".into());
     component.set_device_board("FA707NV".into());
     component.set_bios_version("FA707NV.318".into());
@@ -264,6 +272,60 @@ fn demo_state(component: &AppWindow) {
     component.set_export_enabled(true);
     component.set_diagnostics_summary("Orbis diagnostics review state".into());
     component.set_diagnostics_status("Диагностика актуальна".into());
+}
+
+/// Deterministic telemetry history so sparklines and the temperature chart
+/// render as they do after a couple of minutes of real polling.
+fn demo_history(component: &AppWindow) {
+    use orbis_ui::sparkline::{CHART, Range, SPARK, line_chart_svg};
+    let wave = |base: f32, amp: f32, phase: f32, n: usize| -> Vec<i32> {
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / 6.0 + phase;
+                (base + amp * (t.sin() * 0.7 + (t * 2.3).cos() * 0.3) + i as f32 * amp / 40.0)
+                    .round() as i32
+            })
+            .collect()
+    };
+    let image = |values: &[i32], range: Range, canvas| {
+        line_chart_svg(values, range, canvas)
+            .and_then(|svg| slint::Image::load_from_svg_data(svg.as_bytes()).ok())
+            .unwrap_or_default()
+    };
+    let cpu = wave(52.0, 4.0, 0.0, 60);
+    let gpu = wave(46.0, 3.0, 1.3, 60);
+    let auto = Range::Auto { min_span: 8.0 };
+    component.set_cpu_temp_spark(image(&cpu, auto, SPARK));
+    component.set_gpu_temp_spark(image(&gpu, auto, SPARK));
+    component.set_power_spark(image(
+        &wave(23.0, 3.0, 2.1, 60),
+        Range::Auto { min_span: 6.0 },
+        SPARK,
+    ));
+    component.set_battery_spark(image(
+        &(0..60).map(|i| 70 + i / 8).collect::<Vec<_>>(),
+        Range::Auto { min_span: 4.0 },
+        SPARK,
+    ));
+    component.set_cpu_fan_spark(image(
+        &wave(2300.0, 180.0, 0.4, 60),
+        Range::Auto { min_span: 600.0 },
+        SPARK,
+    ));
+    component.set_gpu_fan_spark(image(
+        &wave(2100.0, 160.0, 2.4, 60),
+        Range::Auto { min_span: 600.0 },
+        SPARK,
+    ));
+    component.set_cpu_fan_level(2300.0 / 6000.0);
+    component.set_gpu_fan_level(2100.0 / 6000.0);
+    let axis = Range::Fixed {
+        min: 20.0,
+        max: 100.0,
+    };
+    component.set_cpu_temp_chart(image(&cpu, axis, CHART));
+    component.set_gpu_temp_chart(image(&gpu, axis, CHART));
+    component.set_history_span("−2 мин".into());
 }
 
 fn apply_snapshot_state(

@@ -1,13 +1,17 @@
-// Display page — built-in panel brightness, refresh rate and overdrive.
+// Display page (reference 6) — built-in panel brightness, refresh rate and
+// overdrive as icon rows, with a preview card showing the active mode.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, LocalStatus, ChoiceButton, FieldRow, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, CardHeader, IconRow, LocalStatus, ChoiceButton, FieldRow, LayoutMetrics } from "../common.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
+import { Icon, Icons } from "../../components/icon.slint";
 import { Palette } from "../../themes/dark.slint";
 
 export component DisplaySection inherits Rectangle {
     in property <bool> display-state-ready: false;
     in property <string> display-status: "Недоступно";
+    in property <string> display-resolution: "";
+    in property <string> device-name: "";
     in property <bool> panel-overdrive-state-ready: false;
     in property <bool> panel-overdrive-control-ready: false;
     in-out property <bool> panel-overdrive: false;
@@ -35,47 +39,48 @@ export component DisplaySection inherits Rectangle {
             padding-top: LayoutMetrics.page-margin;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
+            PageHeader { title: "Экран"; subtitle: "Яркость, частота обновления и отклик встроенной панели"; }
+
             HorizontalLayout {
-                PageHeader { horizontal-stretch: 1; title: "Экран"; }
-                Text {
-                    text: root.display-state-ready ? root.display-status : "";
-                    font-size: 15px;
-                    font-weight: 600;
-                    color: Palette.text-secondary;
-                    vertical-alignment: center;
-                }
-            }
+                spacing: LayoutMetrics.page-gap;
 
-            SectionCard {
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 12px;
+                SectionCard {
+                    width: (parent.width - LayoutMetrics.page-gap) * 0.56;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        padding-top: 12px;
+                        spacing: 0px;
 
-                    SectionTitle { title: "Встроенная панель"; }
-
-                    FieldRow {
-                        label: "Яркость";
-                        muted: !root.panel-brightness-known;
-                        if (root.panel-brightness-known) : ValueSlider {
-                            horizontal-stretch: 1;
-                            min: 1;
-                            max: 100;
-                            value: root.panel-brightness;
-                            changed(v) => { root.panel-brightness-requested(v); }
+                        IconRow {
+                            icon-kind: Icons.sun;
+                            title: "Яркость";
+                            muted: !root.panel-brightness-known;
+                            label-width: 120px;
+                            if (root.panel-brightness-known) : ValueSlider {
+                                horizontal-stretch: 1;
+                                min: 1;
+                                max: 100;
+                                value: root.panel-brightness;
+                                changed(v) => { root.panel-brightness-requested(v); }
+                            }
+                            if (!root.panel-brightness-known) : Text {
+                                text: "Недоступно";
+                                font-size: 13.5px;
+                                color: Palette.text-disabled;
+                                vertical-alignment: center;
+                            }
                         }
-                        if (!root.panel-brightness-known) : Text {
-                            text: "Недоступно";
-                            font-size: 13.5px;
-                            color: Palette.text-disabled;
-                            vertical-alignment: center;
-                        }
-                    }
 
-                    FieldRow {
-                        label: "Частота";
-                        muted: !root.panel-refresh-known;
+                        IconRow {
+                            separator: true;
+                            icon-kind: Icons.monitor;
+                            title: "Частота обновления";
+                            description: root.panel-refresh-known ? "" : "Управляется рабочим столом";
+                            muted: !root.panel-refresh-known;
+                        }
                         if (root.panel-refresh-known) : HorizontalLayout {
-                            horizontal-stretch: 1;
+                            padding-left: 42px;
+                            padding-bottom: 12px;
                             spacing: 6px;
                             for hz in root.panel-refresh-rates : ChoiceButton {
                                 min-width: 0px;
@@ -84,29 +89,87 @@ export component DisplaySection inherits Rectangle {
                                 clicked => { root.panel-refresh-requested(hz); }
                             }
                         }
-                        if (!root.panel-refresh-known) : Text {
-                            text: "Управляется рабочим столом";
-                            font-size: 13.5px;
-                            color: Palette.text-disabled;
-                            vertical-alignment: center;
+
+                        if (root.panel-overdrive-state-ready) : RequestToggleRow {
+                            separator: true;
+                            icon-kind: Icons.sync;
+                            label: "Overdrive";
+                            description: "Ускоренный отклик матрицы, меньше шлейфов в динамике";
+                            checked: root.panel-overdrive;
+                            disabled: !root.panel-overdrive-control-ready || root.applying;
+                            toggled(value) => { root.panel-overdrive-requested(value); }
                         }
-                    }
 
-                    if (root.panel-overdrive-state-ready) : RequestToggleRow {
-                        label: "Overdrive";
-                        description: "Ускоренный отклик матрицы";
-                        checked: root.panel-overdrive;
-                        disabled: !root.panel-overdrive-control-ready || root.applying;
-                        toggled(value) => { root.panel-overdrive-requested(value); }
+                        if (root.panel-brightness-error != "") : LocalStatus {
+                            text: root.panel-brightness-error;
+                            accent: Palette.error;
+                        }
+                        if (root.panel-refresh-error != "") : LocalStatus {
+                            text: root.panel-refresh-error;
+                            accent: Palette.error;
+                        }
+                        Rectangle { vertical-stretch: 1; }
                     }
+                }
 
-                    if (root.panel-brightness-error != "") : LocalStatus {
-                        text: root.panel-brightness-error;
-                        accent: Palette.error;
-                    }
-                    if (root.panel-refresh-error != "") : LocalStatus {
-                        text: root.panel-refresh-error;
-                        accent: Palette.error;
+                SectionCard {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 14px;
+                        CardHeader { title: "Предпросмотр"; divider: false; }
+                        Rectangle {
+                            height: 200px;
+                            border-radius: 12px;
+                            border-width: 1px;
+                            border-color: Palette.border-default;
+                            background: @radial-gradient(circle, Palette.glow.transparentize(0.55) 0%, Palette.surface-muted 70%);
+                            clip: true;
+                            Image {
+                                x: parent.width * 0.06;
+                                y: 12px;
+                                width: parent.width * 0.88;
+                                height: parent.height - 16px;
+                                source: @image-url("../../assets/laptop.svg");
+                                image-fit: contain;
+                            }
+                        }
+                        Rectangle {
+                            height: 76px;
+                            border-radius: 12px;
+                            background: Palette.surface-raised;
+                            HorizontalLayout {
+                                padding-left: 18px;
+                                padding-right: 18px;
+                                spacing: 18px;
+                                Icon { width: 34px; height: 34px; y: (parent.height - self.height) / 2; kind: Icons.monitor; tint: Palette.text-primary; }
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text {
+                                        text: root.display-resolution != "" ? "Разрешение" : "Экран";
+                                        font-size: 13px;
+                                        color: Palette.text-secondary;
+                                    }
+                                    Text {
+                                        text: root.display-resolution != "" ? root.display-resolution
+                                            : root.display-state-ready ? root.display-status : "Нет данных";
+                                        font-size: 18px;
+                                        font-weight: 600;
+                                        color: Palette.text-primary;
+                                        overflow: elide;
+                                    }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                if (root.panel-refresh-known && root.panel-refresh-current > 0) : VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text { text: "Частота"; font-size: 13px; color: Palette.text-secondary; horizontal-alignment: right; }
+                                    Text { text: root.panel-refresh-current + " Гц"; font-size: 18px; font-weight: 600; color: Palette.text-primary; horizontal-alignment: right; }
+                                }
+                            }
+                        }
+                        Rectangle { vertical-stretch: 1; }
                     }
                 }
             }
@@ -115,7 +178,7 @@ export component DisplaySection inherits Rectangle {
                 VerticalLayout {
                     padding: LayoutMetrics.card-padding;
                     spacing: 12px;
-                    SectionTitle { title: "Частота по источнику питания"; }
+                    CardHeader { title: "Частота по источнику питания"; icon-kind: Icons.plug; }
                     FieldRow {
                         label: "От сети";
                         ChoiceButton { min-width: 0px; label: "Не менять"; selected: root.power-rules-ac-hz == 0; clicked => { root.power-rules-refresh-requested(true, 0); } }

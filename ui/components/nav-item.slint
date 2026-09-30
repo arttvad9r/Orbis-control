@@ -1,6 +1,6 @@
-// Sidebar navigation item: two-line row, solid accent pill when active
-// (docs/references/orbis-visual-2026-09-24/). Geometry is absolute so the icon
-// column and label x are identical on every row.
+// Sidebar navigation item: large line icon, title and a one/two-line hint.
+// The active row is a deep-blue gradient pill with a bright hairline border
+// (docs/references/orbis-visual-2026-09-24/).
 import { Icon } from "icon.slint";
 import { Palette } from "../themes/dark.slint";
 
@@ -11,14 +11,17 @@ export component NavItem inherits Rectangle {
     in property <bool> selected: false;
     callback clicked;
 
-    out property <length> row-inset: 14px;
-    out property <length> icon-size: 20px;
-    out property <length> spacing-icon-label: 14px;
+    out property <length> row-inset: 16px;
+    out property <length> icon-size: 26px;
+    out property <length> spacing-icon-label: 18px;
 
-    height: root.sublabel == "" ? 42px : 54px;
+    min-height: root.sublabel == "" ? 48px : 56px;
+    vertical-stretch: 0;
     border-radius: 10px;
-    background: root.selected ? Palette.accent-fill
-        : touch.has-hover ? Palette.surface-hover
+    border-width: root.selected ? 1px : 0px;
+    border-color: Palette.accent-border.transparentize(0.35);
+    background: root.selected ? @linear-gradient(180deg, Palette.nav-selected-top 0%, Palette.nav-selected-bottom 100%)
+        : touch.has-hover ? Palette.surface-hover.transparentize(0.3)
         : transparent;
 
     Icon {
@@ -27,26 +30,28 @@ export component NavItem inherits Rectangle {
         width: root.icon-size;
         height: root.icon-size;
         kind: root.icon-kind;
-        tint: root.selected ? Palette.text-on-accent : Palette.text-secondary;
+        tint: root.selected ? Palette.text-on-accent : Palette.text-primary.transparentize(0.1);
     }
 
     VerticalLayout {
         x: root.row-inset + root.icon-size + root.spacing-icon-label;
         width: parent.width - self.x - 10px;
-        spacing: 2px;
+        padding-top: 9px;
+        padding-bottom: 9px;
+        spacing: 3px;
         alignment: center;
 
         Text {
             text: root.label;
-            font-size: 13.5px;
+            font-size: 14.5px;
             font-weight: root.selected ? 600 : 500;
             color: root.selected ? Palette.text-on-accent : Palette.text-primary;
             overflow: elide;
         }
         if (root.sublabel != "") : Text {
             text: root.sublabel;
-            font-size: 11px;
-            color: root.selected ? Palette.text-on-accent.transparentize(0.2) : Palette.text-disabled;
+            font-size: 11.5px;
+            color: root.selected ? Palette.text-on-accent.transparentize(0.18) : Palette.text-secondary;
             overflow: elide;
         }
     }

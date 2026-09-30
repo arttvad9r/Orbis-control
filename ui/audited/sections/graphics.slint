@@ -3,9 +3,74 @@
 import { ScrollView } from "std-widgets.slint";
 import { UiState, GpuHwState, GpuModeHwState, NvidiaRow } from "../model.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
-import { PageHeader, SectionCard, SectionTitle, InfoRow, LocalStatus, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, CardHeader, InfoRow, LocalStatus, LayoutMetrics } from "../common.slint";
+import { Icon, Icons } from "../../components/icon.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { Palette } from "../../themes/dark.slint";
+
+// Display path diagram: iGPU ─ MUX ─ dGPU with the side that drives the
+// internal panel lit (from the observed MUX state, never assumed).
+component MuxDiagram inherits Rectangle {
+    // 0 = hybrid (iGPU drives the panel), 1 = discrete, -1 = unknown.
+    in property <int> route: -1;
+    in property <bool> dgpu-active: false;
+    property <color> igpu-tint: root.route == 0 ? Palette.accent-default : Palette.text-disabled;
+    property <color> dgpu-tint: root.route == 1 ? Palette.success : root.dgpu-active ? Palette.success.transparentize(0.4) : Palette.text-disabled;
+    height: 120px;
+    background: transparent;
+
+    // Traces.
+    for i in 3 : Rectangle {
+        x: 100px;
+        y: parent.height / 2 - 18px + i * 18px - 1px;
+        width: parent.width / 2 - 144px;
+        height: 2px;
+        background: root.igpu-tint.transparentize(i == 1 ? 0 : 0.5);
+    }
+    for i in 3 : Rectangle {
+        x: parent.width / 2 + 44px;
+        y: parent.height / 2 - 18px + i * 18px - 1px;
+        width: parent.width / 2 - 144px;
+        height: 2px;
+        background: root.dgpu-tint.transparentize(i == 1 ? 0 : 0.5);
+    }
+    // Chips.
+    for chip[i] in [
+        { label: "iGPU", tint: root.igpu-tint },
+        { label: "dGPU", tint: root.dgpu-tint },
+    ] : Rectangle {
+        x: i == 0 ? 0px : parent.width - 100px;
+        y: (parent.height - 56px) / 2;
+        width: 100px;
+        height: 56px;
+        border-radius: 12px;
+        border-width: 1.5px;
+        border-color: chip.tint;
+        background: chip.tint.transparentize(0.88);
+        Text { text: chip.label; font-size: 16px; font-weight: 650; color: chip.tint; horizontal-alignment: center; vertical-alignment: center; }
+    }
+    Rectangle {
+        x: parent.width / 2 - 44px;
+        y: (parent.height - 88px) / 2;
+        width: 88px;
+        height: 88px;
+        border-radius: 14px;
+        border-width: 2px;
+        border-color: root.route == 0 ? Palette.accent-default : root.route == 1 ? Palette.success : Palette.border-strong;
+        background: @linear-gradient(180deg, #1C2436 0%, #0E1320 100%);
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text { text: "MUX"; font-size: 18px; font-weight: 700; color: Palette.text-primary; horizontal-alignment: center; }
+            Text {
+                text: root.route == 0 ? "гибрид" : root.route == 1 ? "прямой" : "—";
+                font-size: 11.5px;
+                color: Palette.text-secondary;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}
 
 export component GraphicsSection inherits Rectangle {
     in property <UiState> ui-state;
@@ -65,14 +130,14 @@ export component GraphicsSection inherits Rectangle {
             padding-top: LayoutMetrics.page-margin;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
-            PageHeader { title: "Графика"; }
+            PageHeader { title: "Графика"; subtitle: "Режим GPU, MUX и разгон NVIDIA"; }
 
             HorizontalLayout {
                 height: 92px;
                 spacing: 12px;
                 if (root.bit-set(root.ui-state.available-gpu-mask, 1)) : ModeCard {
                     title: "Eco";
-                    icon-kind: 16;
+                    icon-kind: Icons.leaf;
                     selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 0 && !root.gpu-optimized;
                     pending: root.ui-state.gpu-queued == 0;
                     disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
@@ -80,7 +145,7 @@ export component GraphicsSection inherits Rectangle {
                 }
                 if (root.bit-set(root.ui-state.available-gpu-mask, 2)) : ModeCard {
                     title: "Standard";
-                    icon-kind: 4;
+                    icon-kind: Icons.gpu;
                     selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 1 && !root.gpu-optimized;
                     pending: root.ui-state.gpu-queued == 1;
                     disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
@@ -88,7 +153,7 @@ export component GraphicsSection inherits Rectangle {
                 }
                 if (root.bit-set(root.ui-state.available-gpu-mask, 4)) : ModeCard {
                     title: "Ultimate";
-                    icon-kind: 18;
+                    icon-kind: Icons.rocket;
                     selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.ui-state.gpu-selected == 2 && !root.gpu-optimized;
                     pending: root.ui-state.gpu-ultimate-pending || root.ui-state.gpu-queued == 2;
                     disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed || root.ui-state.gpu-ultimate-disabled;
@@ -96,7 +161,7 @@ export component GraphicsSection inherits Rectangle {
                 }
                 if (root.bit-set(root.ui-state.available-gpu-mask, 8)) : ModeCard {
                     title: "Optimized";
-                    icon-kind: 13;
+                    icon-kind: Icons.sync;
                     selected: root.ui-state.gpu-mode-state == GpuModeHwState.Ready && root.gpu-optimized;
                     disabled: root.ui-state.gpu-mode-state != GpuModeHwState.Ready || !root.ui-state.gpu-mode-writable || root.ui-state.gpu-mode-pending || root.ui-state.gpu-mode-unconfirmed;
                     clicked => { root.gpu-optimized-requested(true); }
@@ -143,8 +208,11 @@ export component GraphicsSection inherits Rectangle {
                     VerticalLayout {
                         padding: LayoutMetrics.card-padding;
                         spacing: 2px;
-                        SectionTitle { title: "Состояние"; }
-                        Rectangle { height: 6px; }
+                        CardHeader { title: "Состояние"; icon-kind: Icons.swap; }
+                        if (root.ui-state.gpu-mux-state == GpuHwState.Ready) : MuxDiagram {
+                            route: root.ui-state.gpu-mux-value == 0 ? 0 : root.ui-state.gpu-mux-value == 1 ? 1 : -1;
+                            dgpu-active: root.ui-state.gpu-power-state == GpuHwState.Ready && root.ui-state.gpu-power-value == 0;
+                        }
                         InfoRow { label: "Текущий режим"; value: root.mode-label(root.ui-state.gpu-selected); }
                         InfoRow { label: "Питание dGPU"; value: root.power-label(); }
                         InfoRow { label: "MUX"; value: root.mux-label(); }
@@ -159,8 +227,10 @@ export component GraphicsSection inherits Rectangle {
                     VerticalLayout {
                         padding: LayoutMetrics.card-padding;
                         spacing: 8px;
-                        SectionTitle {
+                        CardHeader {
                             title: "NVIDIA";
+                            icon-kind: Icons.gpu;
+                            icon-tint: Palette.success;
                             detail: root.nvidia-rows.length == 0 ? "Недоступно" : root.nvidia-writable ? "" : "Только чтение";
                         }
                         if (root.nvidia-status != "") : LocalStatus {
@@ -173,8 +243,8 @@ export component GraphicsSection inherits Rectangle {
                             Text {
                                 width: 128px;
                                 text: row.label;
-                                font-size: 13.5px;
-                                color: Palette.text-secondary;
+                                font-size: 14px;
+                                color: Palette.text-primary;
                                 vertical-alignment: center;
                                 overflow: elide;
                             }

@@ -5,8 +5,27 @@ import { ScrollView, TextEdit } from "std-widgets.slint";
 import { OptionStepper } from "../../components/steppers.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { UiState, ClamshellState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, InfoRow, LocalStatus, ActionButton, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, CardHeader, IconBadge, InfoRow, LocalStatus, ActionButton, LayoutMetrics } from "../common.slint";
+import { Icon, Icons } from "../../components/icon.slint";
 import { Palette } from "../../themes/dark.slint";
+
+component SpecCell inherits HorizontalLayout {
+    in property <int> icon-kind;
+    in property <string> value;
+    in property <string> caption;
+    spacing: 14px;
+    Rectangle {
+        width: 30px;
+        Icon { width: 30px; height: 30px; y: (parent.height - self.height) / 2; kind: root.icon-kind; tint: Palette.text-primary; }
+    }
+    VerticalLayout {
+        horizontal-stretch: 1;
+        alignment: center;
+        spacing: 2px;
+        Text { text: root.value; font-size: 14px; font-weight: 550; color: Palette.text-primary; overflow: elide; }
+        if (root.caption != "") : Text { text: root.caption; font-size: 12px; color: Palette.text-secondary; overflow: elide; }
+    }
+}
 
 export component SystemSection inherits Rectangle {
     in property <UiState> ui-state;
@@ -14,6 +33,11 @@ export component SystemSection inherits Rectangle {
     in property <string> device-board: "";
     in property <string> bios-version: "";
     in property <string> bios-date: "";
+    in property <string> cpu-model: "";
+    in property <string> cpu-detail: "";
+    in property <string> memory-total: "";
+    in property <string> kernel-release: "";
+    in property <string> gpu-model: "";
 
     in property <bool> backend-ready: false;
     in property <bool> applying: false;
@@ -141,40 +165,118 @@ export component SystemSection inherits Rectangle {
             padding-top: LayoutMetrics.page-margin;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
-            PageHeader { title: "Система"; }
+            HorizontalLayout {
+                spacing: 16px;
+                PageHeader {
+                    horizontal-stretch: 1;
+                    title: "Система";
+                    subtitle: "Устройство, параметры ASUS и диагностика";
+                }
+                Rectangle {
+                    width: 300px;
+                    height: 66px;
+                    border-radius: 12px;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    background: Palette.surface-default;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 14px;
+                        Rectangle {
+                            width: 18px;
+                            Rectangle {
+                                y: (parent.height - self.height) / 2;
+                                width: 18px;
+                                height: 18px;
+                                border-radius: 9px;
+                                background: root.backend-ready ? Palette.success : Palette.warning;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 3px;
+                            Text {
+                                text: root.backend-ready ? "Службы подключены" : "Ожидание службы";
+                                font-size: 15px;
+                                font-weight: 600;
+                                color: Palette.text-primary;
+                            }
+                            Text {
+                                text: root.backend-ready ? "Hardware1 и сессия отвечают" : "Функции управления пока недоступны";
+                                font-size: 12px;
+                                color: Palette.text-secondary;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Device hero: illustration, identity and spec grid.
+            SectionCard {
+                height: 216px;
+                HorizontalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 26px;
+                    Rectangle {
+                        width: 290px;
+                        Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: @image-url("../../assets/laptop.svg");
+                            image-fit: contain;
+                        }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 6px;
+                        Text { text: root.device-label(); font-size: 22px; font-weight: 700; color: Palette.text-primary; overflow: elide; }
+                        Text {
+                            text: root.board-label() + (root.kernel-release != "" ? "   ·   Linux " + root.kernel-release : "") + "   ·   Orbis Control " + root.ui-state.version;
+                            font-size: 14px;
+                            color: Palette.text-secondary;
+                            overflow: elide;
+                        }
+                        Rectangle { height: 8px; }
+                        Rectangle { height: 1px; background: Palette.border-default; }
+                        Rectangle { height: 6px; }
+                        GridLayout {
+                            spacing-horizontal: 24px;
+                            spacing-vertical: 12px;
+                            Row {
+                                SpecCell { icon-kind: Icons.cpu; value: root.cpu-model != "" ? root.cpu-model : "Процессор"; caption: root.cpu-detail; }
+                                SpecCell { icon-kind: Icons.gpu; value: root.gpu-model != "" ? root.gpu-model : "Графика"; caption: root.gpu-model != "" ? "Дискретная графика" : "Модель не определена"; }
+                            }
+                            Row {
+                                SpecCell { icon-kind: Icons.ram; value: root.memory-total != "" ? root.memory-total : "—"; caption: "Оперативная память"; }
+                                SpecCell { icon-kind: Icons.memory-chip; value: root.bios-label(); caption: "Версия BIOS"; }
+                            }
+                        }
+                    }
+                }
+            }
 
             HorizontalLayout {
                 spacing: LayoutMetrics.page-gap;
 
-                SectionCard {
-                    width: root.advanced-visible() ? (parent.width - LayoutMetrics.page-gap) / 2 : parent.width;
-                    VerticalLayout {
-                        padding: LayoutMetrics.card-padding;
-                        spacing: 2px;
-                        SectionTitle { title: "Устройство"; }
-                        Rectangle { height: 6px; }
-                        InfoRow { label: "Модель"; value: root.device-label(); }
-                        InfoRow { label: "Плата"; value: root.board-label(); }
-                        InfoRow { label: "BIOS"; value: root.bios-label(); }
-                        InfoRow { label: "Orbis Control"; value: root.ui-state.version; }
-                        Rectangle { vertical-stretch: 1; }
-                    }
-                }
-
                 if (root.advanced-visible()) : SectionCard {
-                    width: (parent.width - LayoutMetrics.page-gap) / 2;
+                    horizontal-stretch: 1;
                     VerticalLayout {
                         padding: LayoutMetrics.card-padding;
                         spacing: 4px;
 
-                        SectionTitle {
+                        CardHeader {
                             title: "Параметры ASUS";
+                            icon-kind: Icons.sliders;
                             detail: root.applying ? "Применение…" : root.backend-ready ? "" : "Чтение…";
                         }
 
                         if (root.status != "") : LocalStatus { text: root.status; accent: Palette.text-secondary; }
 
                         if (root.boot-sound-state-ready) : RequestToggleRow {
+                            icon-kind: Icons.volume;
                             label: "Звук при включении";
                             checked: root.boot-sound;
                             disabled: !root.boot-sound-control-ready || root.applying;
@@ -182,6 +284,7 @@ export component SystemSection inherits Rectangle {
                         }
 
                         if (root.aspm-state-ready) : RequestToggleRow {
+                            icon-kind: Icons.pci;
                             label: "Без энергосбережения PCIe";
                             description: "До перезагрузки";
                             checked: root.disable-aspm;
@@ -190,9 +293,10 @@ export component SystemSection inherits Rectangle {
                         }
 
                         if (root.igpu-memory-state-ready) : HorizontalLayout {
-                            height: 48px;
-                            spacing: 12px;
-                            Text { horizontal-stretch: 1; text: "Память iGPU"; font-size: 13.5px; font-weight: 500; color: Palette.text-primary; vertical-alignment: center; }
+                            height: 50px;
+                            spacing: 16px;
+                            Rectangle { width: 26px; Icon { width: 24px; height: 24px; y: 12px; kind: Icons.memory-chip; tint: Palette.text-primary; } }
+                            Text { horizontal-stretch: 1; text: "Память iGPU"; font-size: 14.5px; font-weight: 550; color: Palette.text-primary; vertical-alignment: center; }
                             OptionStepper {
                                 y: 4px;
                                 label: root.igpu-memory-pending ? root.igpu-label(root.igpu-memory) + " · после перезагрузки" : root.igpu-label(root.igpu-memory);
@@ -205,6 +309,7 @@ export component SystemSection inherits Rectangle {
                         }
 
                         if (root.clamshell-visible()) : RequestToggleRow {
+                            icon-kind: Icons.lid;
                             label: "Не засыпать при закрытой крышке";
                             description: root.auto-clamshell-state == ClamshellState.Active && root.lid-other-handler != ""
                                 ? root.lid-other-handler + " тоже обрабатывает крышку: задайте ему «Ничего не делать»"
@@ -240,9 +345,9 @@ export component SystemSection inherits Rectangle {
                     padding: LayoutMetrics.card-padding;
                     spacing: 12px;
                     HorizontalLayout {
-                        height: 36px;
+                        height: 46px;
                         spacing: 8px;
-                        SectionTitle { horizontal-stretch: 1; title: "Диагностика"; detail: root.diagnostics-status; }
+                        CardHeader { horizontal-stretch: 1; title: "Диагностика"; subtitle: root.diagnostics-status; icon-kind: Icons.file; divider: false; }
                         ActionButton { width: 120px; label: root.refresh-pending ? "Обновление…" : "Обновить"; disabled: !root.refresh-enabled || root.refresh-pending; clicked => { root.diagnostics-refresh-requested(); } }
                         ActionButton {
                             width: 120px;

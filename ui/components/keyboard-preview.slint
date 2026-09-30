@@ -1,0 +1,109 @@
+// Stylized laptop keyboard lit with the current backlight state: the key
+// outlines and legends glow in the Aura color (a hue sweep for rainbow-type
+// effects) and dim with the brightness level. Purely a preview; it never
+// claims per-key control.
+import { Palette } from "../themes/dark.slint";
+
+struct Key { l: string, w: float }
+
+export component KeyboardPreview inherits Rectangle {
+    in property <color> glow: #ff2d3a;
+    // Rainbow-type effects sweep the hue across the deck.
+    in property <bool> rainbow: false;
+    // 0 = off … 3 = full; negative = unknown (shown at full).
+    in property <int> level: 3;
+
+    property <float> intensity: root.level < 0 ? 1 : root.level == 0 ? 0.12 : 0.35 + 0.65 * root.level / 3;
+    property <[[Key]]> rows: [
+        [{l:"ESC",w:1},{l:"F1",w:1},{l:"F2",w:1},{l:"F3",w:1},{l:"F4",w:1},{l:"F5",w:1},{l:"F6",w:1},{l:"F7",w:1},{l:"F8",w:1},{l:"F9",w:1},{l:"F10",w:1},{l:"F11",w:1},{l:"F12",w:1},{l:"DEL",w:1.6}],
+        [{l:"`",w:1},{l:"1",w:1},{l:"2",w:1},{l:"3",w:1},{l:"4",w:1},{l:"5",w:1},{l:"6",w:1},{l:"7",w:1},{l:"8",w:1},{l:"9",w:1},{l:"0",w:1},{l:"-",w:1},{l:"=",w:1},{l:"⌫",w:1.6}],
+        [{l:"TAB",w:1.3},{l:"Q",w:1},{l:"W",w:1},{l:"E",w:1},{l:"R",w:1},{l:"T",w:1},{l:"Y",w:1},{l:"U",w:1},{l:"I",w:1},{l:"O",w:1},{l:"P",w:1},{l:"[",w:1},{l:"]",w:1},{l:"\\",w:1.3}],
+        [{l:"CAPS",w:1.6},{l:"A",w:1},{l:"S",w:1},{l:"D",w:1},{l:"F",w:1},{l:"G",w:1},{l:"H",w:1},{l:"J",w:1},{l:"K",w:1},{l:"L",w:1},{l:";",w:1},{l:"'",w:1},{l:"ENTER",w:2}],
+        [{l:"SHIFT",w:2.1},{l:"Z",w:1},{l:"X",w:1},{l:"C",w:1},{l:"V",w:1},{l:"B",w:1},{l:"N",w:1},{l:"M",w:1},{l:",",w:1},{l:".",w:1},{l:"/",w:1},{l:"SHIFT",w:2.5}],
+        [{l:"CTRL",w:1.3},{l:"FN",w:1},{l:"⊞",w:1},{l:"ALT",w:1.2},{l:"",w:4.7},{l:"ALT",w:1.2},{l:"CTRL",w:1.2},{l:"◂",w:1},{l:"▴▾",w:1},{l:"▸",w:1}],
+    ];
+    // Row width in key units (all rows sum to 14.6).
+    property <float> units: 14.6;
+    property <length> gap: 5px;
+    property <length> unit: (keys.width - 13 * root.gap) / root.units;
+    property <length> row-h: (keys.height - 5 * root.gap) / 6.2;
+
+    background: transparent;
+    border-radius: 18px;
+    clip: true;
+
+    // Deck and ambient glow.
+    Rectangle {
+        border-radius: 18px;
+        background: @linear-gradient(180deg, #151B28 0%, #0B0F18 100%);
+        border-width: 1px;
+        border-color: #262E40;
+    }
+    Rectangle {
+        x: parent.width * 0.1;
+        width: parent.width * 0.8;
+        y: 16px;
+        height: parent.height - 32px;
+        border-radius: 60px;
+        background: @radial-gradient(circle, (root.rainbow ? #7a5cff : root.glow).transparentize(1 - 0.28 * root.intensity) 0%, transparent 70%);
+    }
+
+    keys := Rectangle {
+        x: 26px;
+        y: 22px;
+        width: parent.width - 52px;
+        height: parent.height - 44px;
+
+        for row[r] in root.rows : Rectangle {
+            y: r == 0 ? 0px : root.row-h * 0.7 + root.gap + (r - 1) * (root.row-h + root.gap);
+            height: r == 0 ? root.row-h * 0.7 : root.row-h;
+            // Cumulative x per key is derived from the preceding widths.
+            for key[k] in row : Rectangle {
+                property <float> offset: k == 0 ? 0 : root.prefix(row, k);
+                property <float> hue: 360 * (self.offset + key.w / 2) / root.units;
+                property <color> tint: root.rainbow ? hsv(self.hue, 0.85, 1) : root.glow;
+                x: self.offset * root.unit + k * root.gap;
+                // The last key absorbs rounding so every row ends flush.
+                width: k == row.length - 1 ? keys.width - self.x : key.w * root.unit;
+                border-radius: 6px;
+                border-width: 1.5px;
+                border-color: self.tint.transparentize(1 - 0.9 * root.intensity);
+                background: @linear-gradient(180deg, #1A2130 0%, #10151F 100%);
+                Rectangle {
+                    x: 2px;
+                    y: parent.height - 5px;
+                    width: parent.width - 4px;
+                    height: 3px;
+                    border-radius: 1.5px;
+                    background: parent.tint.transparentize(1 - 0.5 * root.intensity);
+                }
+                Text {
+                    text: key.l;
+                    font-size: r == 0 ? 9px : 11px;
+                    font-weight: 700;
+                    color: parent.tint.transparentize(1 - root.intensity);
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    pure function prefix(row: [Key], count: int) -> float {
+        let a = count > 0 ? row[0].w : 0;
+        let b = count > 1 ? row[1].w : 0;
+        let c = count > 2 ? row[2].w : 0;
+        let d = count > 3 ? row[3].w : 0;
+        let e = count > 4 ? row[4].w : 0;
+        let f = count > 5 ? row[5].w : 0;
+        let g = count > 6 ? row[6].w : 0;
+        let h = count > 7 ? row[7].w : 0;
+        let i = count > 8 ? row[8].w : 0;
+        let j = count > 9 ? row[9].w : 0;
+        let k = count > 10 ? row[10].w : 0;
+        let l = count > 11 ? row[11].w : 0;
+        let m = count > 12 ? row[12].w : 0;
+        let n = count > 13 ? row[13].w : 0;
+        return a + b + c + d + e + f + g + h + i + j + k + l + m + n;
+    }
+}

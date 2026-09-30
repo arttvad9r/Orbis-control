@@ -37,6 +37,8 @@ thread_local! {
 struct DisplayUiState {
     state_ready: bool,
     status: String,
+    /// `2560 × 1600` for a single active output, empty otherwise.
+    resolution: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,6 +273,7 @@ fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
         if let Err(error) = weak.upgrade_in_event_loop(move |app| {
             app.set_display_state_ready(display.state_ready);
             app.set_display_status(display.status.into());
+            app.set_display_resolution(display.resolution.into());
 
             app.set_keyboard_state_ready(keyboard.state_ready);
             app.set_keyboard_control_ready(keyboard.control_ready);
@@ -312,6 +315,7 @@ fn display_state(result: Result<DisplayOutputSnapshot, ProviderError>) -> Displa
         Err(error) => DisplayUiState {
             state_ready: false,
             status: read_error_status("Экран", &error),
+            resolution: String::new(),
         },
     }
 }
@@ -321,17 +325,23 @@ fn display_state_from_snapshot(snapshot: &DisplayOutputSnapshot) -> DisplayUiSta
         [] => DisplayUiState {
             state_ready: true,
             status: "Нет активных экранов".into(),
+            resolution: String::new(),
         },
         [output] => {
             let refresh_mhz = output.current_mode.current.refresh.get();
             DisplayUiState {
                 state_ready: true,
                 status: format!("{} · {}", output.id, refresh_label(refresh_mhz)),
+                resolution: format!(
+                    "{} × {}",
+                    output.current_mode.current.width, output.current_mode.current.height
+                ),
             }
         }
         outputs => DisplayUiState {
             state_ready: true,
             status: format!("Экранов: {} · основной не определён", outputs.len()),
+            resolution: String::new(),
         },
     }
 }

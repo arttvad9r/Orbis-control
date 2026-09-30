@@ -1,6 +1,7 @@
 // About page — product identity, scope and version.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, InfoRow, ActionButton, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, CardHeader, IconBadge, InfoRow, ActionButton, LayoutMetrics } from "../common.slint";
+import { Icons } from "../../components/icon.slint";
 import { AppMark } from "../../components/app-mark.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -19,20 +20,20 @@ export component AboutSection inherits Rectangle {
             padding-top: LayoutMetrics.page-margin;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
-            PageHeader { title: "О программе"; }
+            PageHeader { title: "О программе"; subtitle: "Версия, обновления и сведения о проекте"; }
 
             SectionCard {
-                height: 140px;
+                height: 150px;
                 HorizontalLayout {
                     padding-left: 24px;
                     padding-right: 24px;
                     spacing: 20px;
 
                     Rectangle {
-                        width: 72px;
+                        width: 88px;
                         AppMark {
-                            width: 72px;
-                            height: 72px;
+                            width: 88px;
+                            height: 88px;
                             y: (parent.height - self.height) / 2;
                         }
                     }
@@ -43,7 +44,7 @@ export component AboutSection inherits Rectangle {
                         spacing: 6px;
                         Text {
                             text: "Orbis Control";
-                            font-size: 24px;
+                            font-size: 28px;
                             font-weight: 700;
                             color: Palette.text-primary;
                         }
@@ -79,8 +80,8 @@ export component AboutSection inherits Rectangle {
                 VerticalLayout {
                     padding: LayoutMetrics.card-padding;
                     spacing: 2px;
-                    SectionTitle { title: "Приложение"; }
-                    Rectangle { height: 6px; }
+                    CardHeader { title: "Приложение"; icon-kind: Icons.info; }
+                    Rectangle { height: 4px; }
                     InfoRow { label: "Платформа"; value: "Linux"; }
                     InfoRow { label: "Устройства"; value: "ASUS ROG / TUF / Zephyrus"; }
                     InfoRow { label: "Лицензия"; value: "GPL-3.0-or-later"; }

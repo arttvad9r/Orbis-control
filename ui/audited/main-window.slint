@@ -4,6 +4,7 @@
 import { UiState, NvidiaRow, Section, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState, ClamshellState } from "model.slint";
 import { TitleBar } from "../components/title-bar.slint";
 import { NavItem } from "../components/nav-item.slint";
+import { Icons } from "../components/icon.slint";
 import { ThemeBridge, LayoutMetrics } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 import { DashboardSection } from "sections/dashboard.slint";
@@ -50,6 +51,24 @@ export component AppWindow inherits Window {
     in property <string> device-board: "";
     in property <string> bios-version: "";
     in property <string> bios-date: "";
+    in property <string> cpu-model: "";
+    in property <string> cpu-detail: "";
+    in property <string> memory-total: "";
+    in property <string> kernel-release: "";
+    in property <string> gpu-model: "";
+    // Telemetry history rendered by the runtime (white SVG, tinted in UI).
+    in property <image> cpu-temp-spark;
+    in property <image> gpu-temp-spark;
+    in property <image> battery-spark;
+    in property <image> power-spark;
+    in property <image> cpu-fan-spark;
+    in property <image> gpu-fan-spark;
+    in property <float> cpu-fan-level: -1;
+    in property <int> battery-health-value: -1;
+    in property <float> gpu-fan-level: -1;
+    in property <image> cpu-temp-chart;
+    in property <image> gpu-temp-chart;
+    in property <string> history-span: "";
 
     in-out property <Section> active-section: Section.Dashboard;
     callback section-selected(Section);
@@ -72,6 +91,7 @@ export component AppWindow inherits Window {
     callback charge-changed(float);
     in property <bool> display-state-ready: false;
     in property <string> display-status: "Недоступно";
+    in property <string> display-resolution: "";
     in property <bool> keyboard-state-ready: false;
     in property <bool> keyboard-control-ready: false;
     in property <int> keyboard-brightness: -1;
@@ -263,14 +283,14 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         padding-left: 12px;
                         padding-right: 12px;
-                        padding-top: 6px;
+                        padding-top: 4px;
                         padding-bottom: 14px;
-                        spacing: 4px;
+                        spacing: 3px;
 
                         NavItem {
                             label: "Главная";
                             sublabel: "Обзор и быстрые действия";
-                            icon-kind: 0;
+                            icon-kind: Icons.home;
                             selected: root.active-section == Section.Dashboard;
                             clicked => { root.open-section(Section.Dashboard); }
                         }
@@ -279,49 +299,49 @@ export component AppWindow inherits Window {
                         NavItem {
                             label: "Производительность";
                             sublabel: "Профили и лимиты мощности";
-                            icon-kind: 1;
+                            icon-kind: Icons.gauge;
                             selected: root.active-section == Section.Performance;
                             clicked => { root.open-section(Section.Performance); }
                         }
                         NavItem {
                             label: "Питание";
-                            sublabel: "Батарея и лимит заряда";
-                            icon-kind: 2;
+                            sublabel: "Заряд и здоровье батареи";
+                            icon-kind: Icons.battery;
                             selected: root.active-section == Section.Power;
                             clicked => { root.open-section(Section.Power); }
                         }
                         NavItem {
                             label: "Охлаждение";
                             sublabel: "Кривые вентиляторов";
-                            icon-kind: 3;
+                            icon-kind: Icons.fan;
                             selected: root.active-section == Section.Cooling;
                             clicked => { root.open-section(Section.Cooling); }
                         }
                         NavItem {
                             label: "Графика";
-                            sublabel: "Режим GPU и NVIDIA";
-                            icon-kind: 4;
+                            sublabel: "Режим GPU, MUX и NVIDIA";
+                            icon-kind: Icons.gpu;
                             selected: root.active-section == Section.Graphics;
                             clicked => { root.open-section(Section.Graphics); }
                         }
                         NavItem {
                             label: "Подсветка";
-                            sublabel: "Клавиатура и Aura";
-                            icon-kind: 5;
+                            sublabel: "Клавиатура, эффекты Aura";
+                            icon-kind: Icons.keyboard;
                             selected: root.active-section == Section.Backlight;
                             clicked => { root.open-section(Section.Backlight); }
                         }
                         NavItem {
                             label: "Экран";
-                            sublabel: "Яркость и частота";
-                            icon-kind: 6;
+                            sublabel: "Яркость, частота, Overdrive";
+                            icon-kind: Icons.monitor;
                             selected: root.active-section == Section.Display;
                             clicked => { root.open-section(Section.Display); }
                         }
                         NavItem {
                             label: "Система";
-                            sublabel: "Устройство и диагностика";
-                            icon-kind: 7;
+                            sublabel: "Устройство, BIOS, диагностика";
+                            icon-kind: Icons.cog;
                             selected: root.active-section == Section.System;
                             clicked => { root.open-section(Section.System); }
                         }
@@ -329,15 +349,15 @@ export component AppWindow inherits Window {
                         Rectangle { vertical-stretch: 1; background: transparent; }
                         NavItem {
                             label: "Настройки";
-                            sublabel: "Внешний вид и запуск";
-                            icon-kind: 8;
+                            sublabel: "Внешний вид и автозапуск";
+                            icon-kind: Icons.sliders;
                             selected: root.active-section == Section.Settings;
                             clicked => { root.open-section(Section.Settings); }
                         }
                         NavItem {
                             label: "О программе";
                             sublabel: "Версия и обновления";
-                            icon-kind: 9;
+                            icon-kind: Icons.info;
                             selected: root.active-section == Section.About;
                             clicked => { root.open-section(Section.About); }
                         }
@@ -347,10 +367,10 @@ export component AppWindow inherits Window {
                 Rectangle {
                     horizontal-stretch: 1;
                     clip: true;
-                    border-top-left-radius: 16px;
+                    border-top-left-radius: 18px;
                     border-width: 1px;
                     border-color: Palette.border-default;
-                    background: Palette.window-background;
+                    background: @linear-gradient(170deg, Palette.window-background.brighter(0.08) 0%, Palette.window-background 45%, Palette.window-background.darker(0.1) 100%);
 
                     if (root.active-section == Section.Dashboard) : DashboardSection {
                         ui-state <=> root.ui-state;
@@ -364,6 +384,27 @@ export component AppWindow inherits Window {
                         perf-clicked(i) => { root.perf-clicked(i); }
                         charge-changed(v) => { root.charge-changed(v); }
                         cooling-open-requested => { root.open-section(Section.Cooling); }
+                        display-open-requested => { root.open-section(Section.Display); }
+                        cpu-model: root.cpu-model;
+                        cpu-detail: root.cpu-detail;
+                        memory-total: root.memory-total;
+                        kernel-release: root.kernel-release;
+                        gpu-model: root.gpu-model;
+                        cpu-temp-spark: root.cpu-temp-spark;
+                        gpu-temp-spark: root.gpu-temp-spark;
+                        battery-spark: root.battery-spark;
+                        power-spark: root.power-spark;
+                        cpu-fan-spark: root.cpu-fan-spark;
+                        gpu-fan-spark: root.gpu-fan-spark;
+                        cpu-fan-level: root.cpu-fan-level;
+                        gpu-fan-level: root.gpu-fan-level;
+                        display-status: root.display-status;
+                        display-resolution: root.display-resolution;
+                        display-state-ready: root.display-state-ready;
+                        panel-refresh-known: root.panel-refresh-known;
+                        panel-refresh-current: root.panel-refresh-current;
+                        panel-overdrive-state-ready: root.panel-overdrive-state-ready;
+                        panel-overdrive: root.panel-overdrive;
                     }
                     if (root.active-section == Section.Performance) : PerformanceSection {
                         ui-state <=> root.ui-state;
@@ -397,9 +438,14 @@ export component AppWindow inherits Window {
                         power-rules-enabled-toggled(v) => { root.power-rules-enabled-toggled(v); }
                         power-rules-profile-requested(ac, p) => { root.power-rules-profile-requested(ac, p); }
                         graphics-open-requested => { root.open-section(Section.Graphics); }
+                        cpu-temp-chart: root.cpu-temp-chart;
+                        gpu-temp-chart: root.gpu-temp-chart;
+                        history-span: root.history-span;
                     }
                     if (root.active-section == Section.Power) : PowerSection {
                         ui-state <=> root.ui-state;
+                        battery-spark: root.battery-spark;
+                        battery-health-value: root.battery-health-value;
                         charge-changed(v) => { root.charge-changed(v); }
                     }
                     if (root.active-section == Section.Cooling) : CoolingSection {
@@ -465,6 +511,8 @@ export component AppWindow inherits Window {
                     if (root.active-section == Section.Display) : DisplaySection {
                         display-state-ready <=> root.display-state-ready;
                         display-status <=> root.display-status;
+                        device-name: root.device-name;
+                        display-resolution: root.display-resolution;
                         panel-overdrive-state-ready <=> root.panel-overdrive-state-ready;
                         panel-overdrive-control-ready <=> root.panel-overdrive-control-ready;
                         panel-overdrive <=> root.panel-overdrive;
@@ -490,6 +538,11 @@ export component AppWindow inherits Window {
                         device-board: root.device-board;
                         bios-version: root.bios-version;
                         bios-date: root.bios-date;
+                        cpu-model: root.cpu-model;
+                        cpu-detail: root.cpu-detail;
+                        memory-total: root.memory-total;
+                        kernel-release: root.kernel-release;
+                        gpu-model: root.gpu-model;
                         backend-ready <=> root.backend-ready;
                         applying <=> root.applying;
                         status <=> root.status;

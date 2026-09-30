@@ -1355,7 +1355,7 @@ fn charge_limit_unconfirmed_preserves_observed_value_and_requires_refresh() {
     assert_eq!(s.charge_limit, 75);
     assert!(s.charge_limit_unconfirmed);
     assert!(!s.charge_limit_pending);
-    assert!(!s.charge_limit_error.is_some());
+    assert!(s.charge_limit_error.is_none());
 }
 
 #[test]

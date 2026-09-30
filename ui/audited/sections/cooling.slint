@@ -1,9 +1,107 @@
 // Cooling page — fan curve workspace: selectors, chart, points and one action bar.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, FanCurveHwState } from "../model.slint";
-import { PageHeader, SectionCard, ActionButton, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, CardHeader, ActionButton, ChoiceButton, InfoRow, LayoutMetrics } from "../common.slint";
+import { Icon, Icons } from "../../components/icon.slint";
 import { FanCurveEditor } from "../fan-curve-editor-v3.slint";
 import { Palette } from "../../themes/dark.slint";
+
+component ValuesCard inherits SectionCard {
+    in property <UiState> ui-state;
+    VerticalLayout {
+        padding: LayoutMetrics.card-padding;
+        spacing: 2px;
+        CardHeader { title: "Текущие значения"; }
+        Rectangle { height: 4px; }
+        InfoRow { label: "Вентилятор CPU"; value: root.ui-state.cpu-fan-rpm; }
+        InfoRow { label: "Вентилятор GPU"; value: root.ui-state.gpu-fan-rpm; }
+        InfoRow { label: "Температура CPU"; value: root.ui-state.cpu-temp; }
+        InfoRow {
+            label: "Температура GPU";
+            value: root.ui-state.gpu-temp != "—" || root.ui-state.igpu-temp == "—" ? root.ui-state.gpu-temp : root.ui-state.igpu-temp;
+        }
+    }
+}
+
+component ApplyCard inherits SectionCard {
+    in property <string> status-text;
+    in property <color> status-color;
+    in property <bool> apply-accent;
+    in property <bool> apply-disabled;
+    in property <bool> reset-disabled;
+    callback apply();
+    callback reset();
+    VerticalLayout {
+        padding: LayoutMetrics.card-padding;
+        spacing: 12px;
+        CardHeader { title: "Применение"; }
+        if (root.status-text != "") : HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: 8px;
+                Rectangle { y: 6px; width: 8px; height: 8px; border-radius: 4px; background: root.status-color; }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.status-text;
+                font-size: 13px;
+                color: Palette.text-secondary;
+                wrap: word-wrap;
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+        ActionButton {
+            height: 40px;
+            label: "Применить кривую";
+            accent: root.apply-accent;
+            disabled: root.apply-disabled;
+            clicked => { root.apply(); }
+        }
+        ActionButton {
+            height: 40px;
+            label: "Заводские значения";
+            disabled: root.reset-disabled;
+            clicked => { root.reset(); }
+        }
+    }
+}
+
+// "Current values" and "apply" cards; beside the chart on wide windows,
+// below it (side by side) on narrow ones.
+component CoolingSide inherits VerticalLayout {
+    in property <UiState> ui-state;
+    in property <bool> as-row: false;
+    in property <string> status-text;
+    in property <color> status-color;
+    in property <bool> apply-accent;
+    in property <bool> apply-disabled;
+    in property <bool> reset-disabled;
+    callback apply();
+    callback reset();
+
+    if (!root.as-row) : VerticalLayout {
+        spacing: LayoutMetrics.page-gap;
+        ValuesCard { ui-state: root.ui-state; }
+        ApplyCard {
+            vertical-stretch: 1;
+            status-text: root.status-text; status-color: root.status-color;
+            apply-accent: root.apply-accent; apply-disabled: root.apply-disabled; reset-disabled: root.reset-disabled;
+            apply => { root.apply(); }
+            reset => { root.reset(); }
+        }
+    }
+    if (root.as-row) : HorizontalLayout {
+        spacing: LayoutMetrics.page-gap;
+        ValuesCard { horizontal-stretch: 1; ui-state: root.ui-state; }
+        ApplyCard {
+            horizontal-stretch: 1;
+            status-text: root.status-text; status-color: root.status-color;
+            apply-accent: root.apply-accent; apply-disabled: root.apply-disabled; reset-disabled: root.reset-disabled;
+            apply => { root.apply(); }
+            reset => { root.reset(); }
+        }
+    }
+}
 
 export component CoolingSection inherits Rectangle {
     in property <UiState> ui-state;
@@ -41,6 +139,22 @@ export component CoolingSection inherits Rectangle {
         return root.ui-state.fan-curve-enabled ? Palette.success : Palette.text-secondary;
     }
 
+    function apply-disabled() -> bool {
+        return root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
+    }
+
+    function reset-disabled() -> bool {
+        return root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed;
+    }
+
+    function apply() {
+        let reset = root.factory-reset-pending;
+        root.fan-apply-clicked(reset);
+        if (reset) { root.factory-reset-pending = false; }
+    }
+
+    function fan-label() -> string { return root.ui-state.fan-selected == 0 ? "CPU" : "GPU"; }
+
     ScrollView {
         VerticalLayout {
             width: root.width - 2 * LayoutMetrics.page-margin;
@@ -49,86 +163,112 @@ export component CoolingSection inherits Rectangle {
             padding-top: LayoutMetrics.page-margin;
             padding-bottom: LayoutMetrics.page-bottom-padding;
 
+            PageHeader { title: "Охлаждение"; subtitle: "Кривые вентиляторов для каждого профиля производительности"; }
+
+            // Fan tabs (joined segment) and the profile whose curve is edited.
             HorizontalLayout {
-                PageHeader { horizontal-stretch: 1; title: "Охлаждение"; }
-                for fan in [
-                    { label: "CPU", rpm: root.ui-state.cpu-fan-rpm },
-                    { label: "GPU", rpm: root.ui-state.gpu-fan-rpm },
-                ] : HorizontalLayout {
-                    padding-left: 20px;
-                    spacing: 8px;
-                    Text { text: fan.label; font-size: 13px; color: Palette.text-secondary; vertical-alignment: center; }
-                    Text { text: fan.rpm; font-size: 15px; font-weight: 650; color: Palette.text-primary; vertical-alignment: center; }
+                height: 46px;
+                spacing: 16px;
+                Rectangle {
+                    width: root.width < 900px ? 180px : 260px;
+                    border-radius: 10px;
+                    border-width: 1px;
+                    border-color: Palette.border-default;
+                    background: Palette.surface-raised;
+                    HorizontalLayout {
+                        padding: 3px;
+                        spacing: 3px;
+                        for fan[i] in ["CPU", "GPU"] : Rectangle {
+                            border-radius: 8px;
+                            border-width: root.ui-state.fan-selected == i ? 1px : 0px;
+                            border-color: Palette.accent-border;
+                            background: root.ui-state.fan-selected == i ? Palette.accent-fill
+                                : tab-touch.has-hover ? Palette.surface-hover : transparent;
+                            Text {
+                                text: fan;
+                                font-size: 14.5px;
+                                font-weight: root.ui-state.fan-selected == i ? 650 : 500;
+                                color: root.ui-state.fan-selected == i ? Palette.text-on-accent : Palette.text-primary;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            tab-touch := TouchArea { clicked => { root.factory-reset-pending = false; root.fan-changed(i); } }
+                        }
+                    }
+                }
+                Rectangle { horizontal-stretch: 0.01; }
+                Text { text: "Профиль"; font-size: 14px; color: Palette.text-secondary; vertical-alignment: center; }
+                HorizontalLayout {
+                    horizontal-stretch: 1;
+                    max-width: 420px;
+                    spacing: 6px;
+                    ChoiceButton { min-width: 0px; max-width: 100px; label: "Баланс"; selected: root.ui-state.fan-profile-selected == 0; clicked => { root.factory-reset-pending = false; root.fan-profile-changed(0); } }
+                    ChoiceButton { min-width: 0px; max-width: 100px; label: "Турбо"; selected: root.ui-state.fan-profile-selected == 1; clicked => { root.factory-reset-pending = false; root.fan-profile-changed(1); } }
+                    ChoiceButton { min-width: 0px; max-width: 100px; label: "Тихий"; selected: root.ui-state.fan-profile-selected == 2; clicked => { root.factory-reset-pending = false; root.fan-profile-changed(2); } }
+                    if (root.fan-eco-profile-available || root.ui-state.fan-profile-selected == 3) : ChoiceButton {
+                        min-width: 0px;
+                        max-width: 100px;
+                        label: "Эко";
+                        selected: root.ui-state.fan-profile-selected == 3;
+                        clicked => { root.factory-reset-pending = false; root.fan-profile-changed(3); }
+                    }
                 }
             }
 
-            SectionCard {
-                min-height: 540px;
-                VerticalLayout {
-                    padding: LayoutMetrics.card-padding;
-                    spacing: 16px;
+            HorizontalLayout {
+                spacing: LayoutMetrics.page-gap;
 
-                    FanCurveEditor {
-                        vertical-stretch: 1;
-                        state: root.ui-state.fan-curve-state;
-                        eco-profile-available: root.fan-eco-profile-available;
-                        writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked && !root.ui-state.fan-curve-pending && !root.ui-state.fan-curve-unconfirmed;
-                        error-state: root.ui-state.fan-curve-error;
-                        dirty: root.ui-state.fan-curve-dirty;
-                        fan-selected: root.ui-state.fan-selected;
-                        profile-selected: root.ui-state.fan-profile-selected;
-                        temp-0: root.ui-state.fan-temp-0; temp-1: root.ui-state.fan-temp-1; temp-2: root.ui-state.fan-temp-2; temp-3: root.ui-state.fan-temp-3;
-                        temp-4: root.ui-state.fan-temp-4; temp-5: root.ui-state.fan-temp-5; temp-6: root.ui-state.fan-temp-6; temp-7: root.ui-state.fan-temp-7;
-                        pwm-0: root.ui-state.fan-pwm-0; pwm-1: root.ui-state.fan-pwm-1; pwm-2: root.ui-state.fan-pwm-2; pwm-3: root.ui-state.fan-pwm-3;
-                        pwm-4: root.ui-state.fan-pwm-4; pwm-5: root.ui-state.fan-pwm-5; pwm-6: root.ui-state.fan-pwm-6; pwm-7: root.ui-state.fan-pwm-7;
-                        fan-changed(i) => { root.factory-reset-pending = false; root.fan-changed(i); }
-                        profile-changed(i) => { root.factory-reset-pending = false; root.fan-profile-changed(i); }
-                        temp-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-temp-point-changed(i, v); }
-                        pwm-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-pwm-point-changed(i, v); }
-                    }
-
-                    Rectangle { height: 1px; background: Palette.border-default; }
-
-                    HorizontalLayout {
-                        height: 36px;
-                        spacing: 10px;
-                        if (root.status-text() != "") : Rectangle {
-                            width: 8px;
-                            Rectangle {
-                                y: (parent.height - self.height) / 2;
-                                width: 8px;
-                                height: 8px;
-                                border-radius: 4px;
-                                background: root.status-color();
-                            }
-                        }
-                        Text {
-                            horizontal-stretch: 1;
-                            text: root.status-text();
-                            font-size: 13px;
-                            color: Palette.text-secondary;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                        ActionButton {
-                            width: 170px;
-                            label: "Заводские значения";
-                            disabled: root.mutation-safety-blocked || !root.factory-reset-available || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed;
-                            clicked => { root.factory-reset-pending = true; }
-                        }
-                        ActionButton {
-                            width: 170px;
-                            label: "Применить";
-                            accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
-                            disabled: root.mutation-safety-blocked || !root.ui-state.fan-curve-writable || root.ui-state.fan-curve-error || root.ui-state.fan-curve-pending || root.ui-state.fan-curve-unconfirmed || (!root.factory-reset-pending && !root.ui-state.fan-curve-dirty);
-                            clicked => {
-                                let reset = root.factory-reset-pending;
-                                root.fan-apply-clicked(reset);
-                                if (reset) { root.factory-reset-pending = false; }
-                            }
+                SectionCard {
+                    horizontal-stretch: 1;
+                    min-height: 520px;
+                    VerticalLayout {
+                        padding: LayoutMetrics.card-padding;
+                        spacing: 14px;
+                        CardHeader { title: "Кривая вентилятора (" + root.fan-label() + ")"; divider: false; }
+                        FanCurveEditor {
+                            vertical-stretch: 1;
+                            state: root.ui-state.fan-curve-state;
+                            eco-profile-available: root.fan-eco-profile-available;
+                            writable: root.ui-state.fan-curve-writable && !root.mutation-safety-blocked && !root.ui-state.fan-curve-pending && !root.ui-state.fan-curve-unconfirmed;
+                            error-state: root.ui-state.fan-curve-error;
+                            dirty: root.ui-state.fan-curve-dirty;
+                            fan-selected: root.ui-state.fan-selected;
+                            profile-selected: root.ui-state.fan-profile-selected;
+                            temp-0: root.ui-state.fan-temp-0; temp-1: root.ui-state.fan-temp-1; temp-2: root.ui-state.fan-temp-2; temp-3: root.ui-state.fan-temp-3;
+                            temp-4: root.ui-state.fan-temp-4; temp-5: root.ui-state.fan-temp-5; temp-6: root.ui-state.fan-temp-6; temp-7: root.ui-state.fan-temp-7;
+                            pwm-0: root.ui-state.fan-pwm-0; pwm-1: root.ui-state.fan-pwm-1; pwm-2: root.ui-state.fan-pwm-2; pwm-3: root.ui-state.fan-pwm-3;
+                            pwm-4: root.ui-state.fan-pwm-4; pwm-5: root.ui-state.fan-pwm-5; pwm-6: root.ui-state.fan-pwm-6; pwm-7: root.ui-state.fan-pwm-7;
+                            fan-changed(i) => { root.factory-reset-pending = false; root.fan-changed(i); }
+                            profile-changed(i) => { root.factory-reset-pending = false; root.fan-profile-changed(i); }
+                            temp-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-temp-point-changed(i, v); }
+                            pwm-point-changed(i, v) => { root.factory-reset-pending = false; root.fan-pwm-point-changed(i, v); }
                         }
                     }
                 }
+
+                if (root.width >= 940px) : CoolingSide {
+                    width: 290px;
+                    ui-state: root.ui-state;
+                    status-text: root.status-text();
+                    status-color: root.status-color();
+                    apply-accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
+                    apply-disabled: root.apply-disabled();
+                    reset-disabled: root.reset-disabled();
+                    apply => { root.apply(); }
+                    reset => { root.factory-reset-pending = true; }
+                }
+            }
+
+            if (root.width < 940px) : CoolingSide {
+                as-row: true;
+                ui-state: root.ui-state;
+                status-text: root.status-text();
+                status-color: root.status-color();
+                apply-accent: root.factory-reset-pending || root.ui-state.fan-curve-dirty;
+                apply-disabled: root.apply-disabled();
+                reset-disabled: root.reset-disabled();
+                apply => { root.apply(); }
+                reset => { root.factory-reset-pending = true; }
             }
         }
     }

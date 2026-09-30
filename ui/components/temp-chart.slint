@@ -1,0 +1,108 @@
+// Temperature history chart: fixed 20–100 °C axis with grid and labels drawn
+// here, CPU/GPU lines supplied by the runtime as white SVG images and tinted
+// per series (the software renderer has no Path support).
+import { Palette } from "../themes/dark.slint";
+
+component Legend inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <color> tint;
+    spacing: 8px;
+    Rectangle {
+        width: 12px;
+        Rectangle { y: (parent.height - self.height) / 2; width: 12px; height: 12px; border-radius: 6px; background: root.tint; }
+    }
+    Text { text: root.label; font-size: 14px; color: Palette.text-primary; vertical-alignment: center; }
+    Text { text: root.value; font-size: 14px; font-weight: 600; color: Palette.text-secondary; vertical-alignment: center; }
+}
+
+export component TempChart inherits Rectangle {
+    in property <image> cpu-chart;
+    in property <image> gpu-chart;
+    in property <string> cpu-value: "—";
+    in property <string> gpu-value: "—";
+    in property <string> span: "";
+    in property <color> cpu-color: Palette.accent-default;
+    in property <color> gpu-color: Palette.error;
+
+    property <bool> has-data: root.cpu-chart.width > 0 || root.gpu-chart.width > 0;
+
+    background: transparent;
+
+    VerticalLayout {
+        spacing: 10px;
+        HorizontalLayout {
+            height: 22px;
+            spacing: 26px;
+            Legend { label: "CPU"; value: root.cpu-value; tint: root.cpu-color; }
+            Legend { label: "GPU"; value: root.gpu-value; tint: root.gpu-color; }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            VerticalLayout {
+                width: 30px;
+                padding-top: 0px;
+                padding-bottom: 26px;
+                alignment: space-between;
+                for label in ["100", "80", "60", "40", "20"] : Text {
+                    text: label;
+                    font-size: 12px;
+                    color: Palette.text-secondary;
+                    horizontal-alignment: right;
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                // The plot keeps the chart SVG's 11:5 proportions, so the
+                // line is rasterized at its displayed size (see sparkline.rs).
+                height: self.width * 5 / 11 + 34px;
+                plot := Rectangle {
+                    x: 0px;
+                    y: 7px;
+                    width: parent.width;
+                    height: self.width * 5 / 11;
+                    for i in 5 : Rectangle {
+                        y: parent.height * i / 4;
+                        height: 1px;
+                        background: Palette.border-default.transparentize(i == 4 ? 0 : 0.35);
+                    }
+                    for i in 7 : Rectangle {
+                        x: parent.width * i / 6;
+                        width: 1px;
+                        background: Palette.border-default.transparentize(0.55);
+                    }
+                    Rectangle { x: 0px; width: 1px; background: Palette.border-strong; }
+                    if (root.gpu-chart.width > 0) : Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.gpu-chart;
+                        colorize: root.gpu-color;
+                        image-fit: fill;
+                    }
+                    if (root.cpu-chart.width > 0) : Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.cpu-chart;
+                        colorize: root.cpu-color;
+                        image-fit: fill;
+                    }
+                    if (!root.has-data) : Text {
+                        text: "Накопление данных…";
+                        font-size: 13px;
+                        color: Palette.text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                HorizontalLayout {
+                    y: plot.y + plot.height + 8px;
+                    height: 16px;
+                    Text { text: root.span; font-size: 12px; color: Palette.text-secondary; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text { text: "сейчас"; font-size: 12px; color: Palette.text-secondary; }
+                }
+            }
+        }
+    }
+}

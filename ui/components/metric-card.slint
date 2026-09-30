@@ -1,5 +1,6 @@
-// Telemetry tile: tinted icon + label, large value, one detail line and an
-// optional level bar (progress in 0..1, negative hides it).
+// Telemetry tile (reference dashboard row): tinted icon + label, large value,
+// two detail lines beside a live sparkline and a level bar at the bottom
+// (progress in 0..1, negative hides it).
 import { Icon } from "icon.slint";
 import { Palette } from "../themes/dark.slint";
 
@@ -7,16 +8,23 @@ export component MetricCard inherits Rectangle {
     in property <string> label;
     in property <string> value: "—";
     in property <string> detail: "";
+    in property <string> detail-2: "";
     in property <int> icon-kind: 10;
     in property <color> accent: Palette.accent-default;
     in property <color> value-color: Palette.text-primary;
     in property <color> detail-color: Palette.text-secondary;
     in property <float> progress: -1;
+    // White-on-transparent sparkline rendered by the runtime; tinted here.
+    in property <image> spark;
+    // Narrow windows: the value drops its label-aligned indent.
+    in property <bool> compact: false;
+
+    property <bool> has-spark: root.spark.width > 0;
 
     horizontal-stretch: 1;
     min-width: 0px;
     preferred-width: 0px;
-    height: 132px;
+    height: 176px;
     border-radius: 14px;
     border-width: 1px;
     border-color: Palette.border-default;
@@ -24,55 +32,86 @@ export component MetricCard inherits Rectangle {
 
     VerticalLayout {
         padding: 18px;
-        spacing: 6px;
+        padding-top: 16px;
+        spacing: 4px;
 
         HorizontalLayout {
-            height: 22px;
-            spacing: 10px;
+            height: 30px;
+            spacing: 14px;
             Icon {
-                width: 20px;
-                height: 20px;
-                y: 1px;
+                width: 30px;
+                height: 30px;
                 kind: root.icon-kind;
                 tint: root.accent;
             }
             Text {
                 horizontal-stretch: 1;
                 text: root.label;
-                font-size: 13.5px;
-                font-weight: 500;
-                color: Palette.text-secondary;
+                font-size: 15px;
+                font-weight: 550;
+                color: Palette.text-primary;
                 vertical-alignment: center;
                 overflow: elide;
             }
         }
 
-        Text {
-            text: root.value;
-            font-size: 26px;
-            font-weight: 700;
-            color: root.value-color;
-            overflow: elide;
-        }
-        Text {
-            text: root.detail;
-            font-size: 12px;
-            color: root.detail-color;
-            overflow: elide;
+        HorizontalLayout {
+            // Value aligns with the label; narrow cards reclaim the indent.
+            padding-left: root.compact ? 0px : 44px;
+            Text {
+                text: root.value;
+                font-size: 30px;
+                font-weight: 700;
+                color: root.value-color;
+                overflow: elide;
+            }
         }
 
-        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 8px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                min-width: 0px;
+                alignment: center;
+                spacing: 4px;
+                Text {
+                    text: root.detail;
+                    font-size: 13px;
+                    color: root.detail-color;
+                    overflow: elide;
+                }
+                if (root.detail-2 != "") : Text {
+                    text: root.detail-2;
+                    font-size: 13px;
+                    color: Palette.text-secondary;
+                    overflow: elide;
+                }
+            }
+            if (root.has-spark) : Rectangle {
+                width: 48%;
+                // Keep the sparkline's 5:2 proportions (see sparkline.rs).
+                Image {
+                    width: parent.width;
+                    height: self.width * 0.4;
+                    y: (parent.height - self.height) / 2;
+                    source: root.spark;
+                    colorize: root.accent;
+                    image-fit: fill;
+                }
+            }
+        }
 
         Rectangle {
-            height: 5px;
-            border-radius: 2.5px;
+            height: 7px;
+            border-radius: 3.5px;
             background: root.progress >= 0 ? Palette.border-default : transparent;
             Rectangle {
                 x: 0px;
                 width: parent.width * Math.min(Math.max(root.progress, 0), 1);
                 height: parent.height;
-                border-radius: 2.5px;
-                background: root.progress >= 0 ? root.accent : transparent;
+                border-radius: 3.5px;
+                background: root.progress >= 0 ? @linear-gradient(90deg, root.accent.darker(0.15) 0%, root.accent 100%) : transparent;
             }
         }
     }
