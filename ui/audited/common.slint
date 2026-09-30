@@ -257,6 +257,8 @@ export component IconRow inherits Rectangle {
 export component Switch inherits Rectangle {
     in property <bool> checked: false;
     in property <bool> disabled: false;
+    // Screen-reader name (the row's label).
+    in property <string> label: "";
     callback toggled(bool);
 
     property <bool> pressed: touch.pressed;
@@ -272,6 +274,8 @@ export component Switch inherits Rectangle {
         : root.disabled ? Palette.surface-muted
         : Palette.surface-pressed;
     accessible-role: switch;
+    accessible-label: root.label;
+    accessible-enabled: !root.disabled;
     accessible-checked: root.checked;
     accessible-action-default => { if (!root.disabled) { root.toggled(!root.checked); } }
     animate background, border-color { duration: Motion.normal; easing: ease-out; }

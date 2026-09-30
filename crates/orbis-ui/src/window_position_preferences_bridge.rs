@@ -136,15 +136,8 @@ pub(crate) fn wire(app: &AppWindow) {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn bridge_is_request_only_and_gates_only_tray_specific_action() {
+    fn bridge_has_no_hardware_or_process_surface() {
         let source = include_str!("window_position_preferences_bridge.rs");
-        assert!(source.contains("persist_remember_position"));
-        assert!(source.contains("persist_position"));
-        assert!(source.contains("position_runtime_supported"));
-        assert!(source.contains("persist_close_action"));
-        assert!(source.contains("set_hide_to_tray_enabled"));
-        assert!(source.contains("0 => CloseAction::Quit"));
-        assert!(source.contains("tray_backend::is_ready"));
         assert!(!source.contains(&["WorkerCommand::", "Set"].concat()));
         assert!(!source.contains(&["Command", "::new"].concat()));
     }

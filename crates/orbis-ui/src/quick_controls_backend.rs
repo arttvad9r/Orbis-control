@@ -488,15 +488,6 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_mutation_is_status_gated_and_readback_driven() {
-        let source = include_str!("quick_controls_backend.rs");
-        assert!(source.contains("read_keyboard_write_status"));
-        assert!(source.contains("get_keyboard_control_ready"));
-        assert!(source.contains("set_keyboard_backlight(level)"));
-        assert!(source.contains("refresh(&app, None)"));
-    }
-
-    #[test]
     fn keyboard_mutation_error_status_is_user_visible() {
         assert_eq!(
             keyboard_mutation_error_status(&ProviderError::PermissionDenied("denied".into())),

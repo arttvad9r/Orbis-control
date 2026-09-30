@@ -1326,45 +1326,12 @@ mod tests {
     }
 
     #[test]
-    fn product_gpu_writes_go_through_the_typed_source_only() {
-        let source = production_source();
-        assert!(source.contains("WorkerCommand::SetProductGpuMode { raw }"));
-        assert!(source.contains("source.set_product_gpu_mode(raw).await"));
-        assert!(source.contains("source.set_product_gpu_mode(target).await"));
-        assert!(!source.contains("set_product_gpu_mode_for_automation"));
-    }
-
-    #[test]
-    fn capability_refresh_has_one_canonical_status_requery_path() {
-        let source = production_source();
-        assert_eq!(
-            source
-                .matches("runtime.requery_mutation_statuses().await")
-                .count(),
-            1,
-            "mutation status re-query must have one canonical owner"
-        );
-        assert_eq!(
-            source
-                .matches("refresh_capability_registry(&mut runtime).await")
-                .count(),
-            2,
-            "periodic and explicit refresh must use the same helper"
-        );
-        assert!(!source.contains("run_capability_refresh"));
-    }
-
-    #[test]
     fn worker_authoritative_reads_use_bounded_helpers_where_provider_identity_exists() {
         let source = production_source();
         assert!(!source.contains("runtime.gpu.refresh_gpu_capabilities().await"));
         assert!(!source.contains("runtime.battery.charge_limit().await"));
         assert!(!source.contains("runtime.performance.performance_state().await"));
         assert!(!source.contains("runtime.fan.fan_curve_for_profile"));
-        assert!(source.contains("bounded_gpu_capabilities(&runtime.gpu).await"));
-        assert!(source.contains("bounded_charge_limit(&runtime.battery).await"));
-        assert!(source.contains("bounded_performance_state(&runtime.performance).await"));
-        assert!(source.contains("bounded_fan_curve(runtime.fan.as_ref(), profile, &fan).await"));
     }
 
     // --- Read-only product GPU status: real worker-loop coverage (D2) ---

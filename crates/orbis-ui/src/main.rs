@@ -3581,3 +3581,6 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod main_tests;
+
+#[cfg(test)]
+mod ui_behavior_tests;

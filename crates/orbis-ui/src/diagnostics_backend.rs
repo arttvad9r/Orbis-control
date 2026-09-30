@@ -333,6 +333,11 @@ mod tests {
             ["set_", "gpu_mode"].concat(),
             ["set_", "charge_limit"].concat(),
             ["set_", "performance"].concat(),
+            // Export goes to the checked XDG state dir, copy stays in-app.
+            ["std::env::", "current_dir"].concat(),
+            ["Command", "::new"].concat(),
+            ["wl", "-copy"].concat(),
+            ["x", "clip"].concat(),
         ];
         for needle in forbidden {
             assert!(
@@ -368,39 +373,5 @@ mod tests {
             assert_eq!(first_mode, 0o600);
             assert_eq!(second_mode, 0o600);
         }
-    }
-
-    #[test]
-    fn export_host_path_is_fixed_under_checked_xdg_state() {
-        let source = include_str!("diagnostics_backend.rs");
-        assert!(source.contains("state_dir_checked"));
-        assert!(source.contains("EXPORT_DIR_NAME"));
-        assert!(!source.contains(&["std::env::", "current_dir"].concat()));
-        assert!(!source.contains(&["Command", "::new"].concat()));
-    }
-
-    #[test]
-    fn refresh_and_export_are_mutually_exclusive_in_host_bridge() {
-        let source = include_str!("diagnostics_backend.rs");
-        assert!(source.contains("window.set_refresh_enabled(false);"));
-        assert!(source.contains("window.set_export_enabled(false);"));
-        assert!(source.contains("window.set_refresh_enabled(true);"));
-        assert!(source.contains("if window.get_refresh_pending()"));
-    }
-
-    #[test]
-    fn successful_refresh_fills_summary_for_in_section_copy() {
-        let source = include_str!("diagnostics_backend.rs");
-        assert!(source.contains("window.set_diagnostics_summary(summary);"));
-        assert!(source.contains("use orbis_ui::diagnostics_export::{report_json, summary_text};"));
-        assert!(!source.contains(&["wl", "-copy"].concat()));
-        assert!(!source.contains(&["x", "clip"].concat()));
-    }
-
-    #[test]
-    fn export_failure_stays_fail_closed_until_refresh() {
-        let source = include_str!("diagnostics_backend.rs");
-        assert!(source.contains("Не удалось сохранить отчёт · обновите сведения и повторите"));
-        assert!(source.contains("export_path_available"));
     }
 }

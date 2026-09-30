@@ -108,23 +108,4 @@ mod tests {
             );
         }
     }
-
-    #[test]
-    fn coordinator_wires_only_surviving_surfaces() {
-        let source = include_str!("secondary_windows_backend.rs");
-        assert!(source.contains("tray_backend::wire_app(app)"));
-        assert!(source.contains("wire_app_window(app)"));
-        assert!(source.contains("extra_backend::wire_window(app)"));
-        assert!(source.contains("window_position_preferences_bridge::wire(app)"));
-        assert!(source.contains("app.on_preview_dialog_clicked"));
-        assert!(source.contains("app.on_quit_clicked"));
-        assert!(source.contains("slint::quit_event_loop()"));
-        assert!(!source.contains(&["on_", "extra_clicked"].concat()));
-        assert!(!source.contains(&["on_", "automation_clicked"].concat()));
-        assert!(!source.contains(&["on_", "preferences_clicked"].concat()));
-        assert!(!source.contains(&["on_", "updates_clicked"].concat()));
-        assert!(!source.contains(&["app.on_", "perf_clicked"].concat()));
-        assert!(!source.contains(&["app.on_", "charge_changed"].concat()));
-        assert!(!source.contains(&["app.on_", "fans_clicked"].concat()));
-    }
 }

@@ -172,14 +172,8 @@ pub(crate) fn wire_app_window(app: &AppWindow) {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn position_and_tray_lifecycle_fail_closed() {
+    fn lifecycle_starts_no_processes() {
         let source = include_str!("window_lifecycle_backend.rs");
-        assert!(source.contains("WAYLAND_DISPLAY"));
-        assert!(source.contains("tray_backend::is_ready"));
-        assert!(source.contains("KeepWindowShown"));
-        assert!(source.contains("load_window_state"));
-        assert!(source.contains("save_window_state"));
-        assert!(source.contains("slint::quit_event_loop()"));
         assert!(!source.contains(&["Command", "::new"].concat()));
     }
 }

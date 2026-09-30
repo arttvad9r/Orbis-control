@@ -2103,56 +2103,11 @@ mod tests {
     }
 
     #[test]
-    fn direct_controls_are_hardware1_gated_and_request_only() {
+    fn advanced_controls_have_no_gpu_fan_or_legacy_rgb_write() {
         let source = include_str!("extra_backend.rs");
-        assert!(source.contains("HardwareProductControlClient"));
-        assert!(source.contains("keyboard_status()"));
-        assert!(source.contains("panel_status()"));
-        assert!(source.contains("set_keyboard_backlight(level)"));
-        assert!(source.contains("set_panel_overdrive(enabled)"));
-        assert!(source.contains("get_keyboard_control_ready()"));
-        assert!(source.contains("get_panel_overdrive_control_ready()"));
-        assert!(source.contains("refresh(&window)"));
-    }
-
-    #[test]
-    fn boot_sound_uses_typed_hardware1_and_unrelated_draft_stays_disabled() {
-        let source = include_str!("extra_backend.rs");
-        assert!(source.contains("AsusBootSoundProvider"));
-        assert!(source.contains("set_boot_sound_state_ready"));
-        assert!(source.contains("set_backend_ready(false)"));
-        assert!(source.contains("set_aura_control_ready(false)"));
         assert!(!source.contains(&["set_aura", "_static_rgb"].concat()));
-        assert!(source.contains("set_boot_sound(enabled)"));
-        assert!(source.contains("boot_sound_status()"));
         assert!(!source.contains(&["set_gpu", "_mode"].concat()));
         assert!(!source.contains(&["set_fan", "_curve"].concat()));
-    }
-
-    #[test]
-    fn system_ui_renders_owned_advanced_rows_only_behind_capability_gates() {
-        let source = include_str!("../../../ui/audited/sections/system.slint");
-        for owner_less in [
-            "Светодиоды состояния",
-            "современном режиме ожидания",
-            "Гибернация через",
-            "Активные ядра CPU",
-            "КЛАВИШИ M1–M5",
-        ] {
-            assert!(!source.contains(owner_less), "no typed owner: {owner_less}");
-        }
-        for gated_row in [
-            "if (root.boot-sound-state-ready) : RequestToggleRow",
-            "if (root.aspm-state-ready) : RequestToggleRow",
-            "if (root.igpu-memory-state-ready) : HorizontalLayout",
-            "if (root.clamshell-visible()) : RequestToggleRow",
-            "if (root.advanced-visible()) : SectionCard",
-        ] {
-            assert!(
-                source.contains(gated_row),
-                "missing capability gate: {gated_row}"
-            );
-        }
     }
 
     #[test]

@@ -325,17 +325,6 @@ async fn run_item_service(
 mod tests {
     use super::*;
 
-    #[test]
-    fn service_matches_status_notifier_contract_and_is_host_gated() {
-        let source = include_str!("tray_backend.rs");
-        assert!(source.contains(WATCHER_SERVICE));
-        assert!(source.contains(WATCHER_PATH));
-        assert!(source.contains(ITEM_PATH));
-        assert!(source.contains("register_status_notifier_item"));
-        assert!(source.contains("is_status_notifier_host_registered"));
-        assert!(source.contains("TrayCommand::Activate"));
-    }
-
     fn stats() -> TrayStats {
         TrayStats {
             cpu_temp: "46°C".into(),

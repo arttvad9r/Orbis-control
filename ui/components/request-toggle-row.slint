@@ -65,6 +65,7 @@ export component RequestToggleRow inherits Rectangle {
             width: 50px;
             Switch {
                 y: (parent.height - self.height) / 2;
+                label: root.label;
                 checked: root.checked;
                 disabled: root.disabled;
                 toggled(value) => { root.toggled(value); }

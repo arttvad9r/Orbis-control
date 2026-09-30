@@ -17,7 +17,10 @@ fn main() {
     // ComboBox/SpinBox/ScrollView consistent with Orbis dark/light theme logic.
     let config = slint_build::CompilerConfiguration::new()
         .with_include_paths(vec![ui_dir])
-        .with_style("fluent".into());
+        .with_style("fluent".into())
+        // Element names for the headless UI tests (ElementHandle queries);
+        // release builds stay without it.
+        .with_debug_info(std::env::var("PROFILE").as_deref() == Ok("debug"));
 
     slint_build::compile_with_config(&entry_str, config).expect("slint compile");
 }
