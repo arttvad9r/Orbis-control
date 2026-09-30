@@ -226,6 +226,8 @@ export component AppWindow inherits Window {
     callback aura-effect-requested(int, int, int, int, int, int, int, int);
     callback start-minimized-changed(bool);
     callback remember-position-changed(bool);
+    callback mode-notifications-changed(bool);
+    in property <bool> mode-notifications: true;
     callback close-action-changed(int);
     in property <bool> start-minimized: false;
     in property <bool> start-minimized-enabled: false;
@@ -591,6 +593,8 @@ export component AppWindow inherits Window {
                         remember-position <=> root.remember-position;
                         remember-position-enabled <=> root.remember-position-enabled;
                         remember-position-changed(v) => { root.remember-position-changed(v); }
+                        mode-notifications: root.mode-notifications;
+                        mode-notifications-changed(v) => { root.mode-notifications-changed(v); }
                         close-action <=> root.close-action;
                         close-action-enabled <=> root.close-action-enabled;
                         hide-to-tray-enabled <=> root.hide-to-tray-enabled;

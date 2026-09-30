@@ -15,6 +15,8 @@ export component SettingsSection inherits PageSurface {
     in property <bool> start-minimized: false;
     in property <bool> start-minimized-enabled: false;
     callback remember-position-changed(bool);
+    in property <bool> mode-notifications: true;
+    callback mode-notifications-changed(bool);
     in property <bool> remember-position: false;
     in property <bool> remember-position-enabled: false;
     callback close-action-changed(int);
@@ -78,6 +80,14 @@ export component SettingsSection inherits PageSurface {
                             checked: root.remember-position;
                             disabled: !root.remember-position-enabled;
                             toggled(value) => { root.remember-position-changed(value); }
+                        }
+                        RequestToggleRow {
+                            separator: true;
+                            icon-kind: Icons.bell;
+                            label: "Уведомления о смене режима";
+                            description: "Всплывающее сообщение при Fn+F5, правилах питания и горячих клавишах";
+                            checked: root.mode-notifications;
+                            toggled(value) => { root.mode-notifications-changed(value); }
                         }
                         Rectangle { vertical-stretch: 1; }
                     }
@@ -148,6 +158,48 @@ export component SettingsSection inherits PageSurface {
                                     Text { text: "Выйти из Orbis"; font-size: 14px; font-weight: 550; color: Palette.text-primary; vertical-alignment: center; }
                                 }
                                 quit-touch := TouchArea { clicked => { root.quit-requested(); } }
+                            }
+                        }
+                    }
+                }
+            }
+
+            SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 0px;
+                    CardHeader {
+                        title: "Горячие клавиши";
+                        subtitle: "Работают во всей системе · изменить можно в настройках комбинаций клавиш рабочего стола";
+                        icon-kind: Icons.keyboard;
+                    }
+                    for shortcut[i] in [
+                        { icon: Icons.gauge, title: "Следующий профиль производительности", keys: ["Ctrl", "Shift", "F5"] },
+                        { icon: Icons.window, title: "Показать или скрыть Orbis Control", keys: ["Ctrl", "Shift", "F12"] },
+                        { icon: Icons.leaf, title: "Переключение профиля клавиатурой ноутбука", keys: ["Fn", "F5"] },
+                    ] : IconRow {
+                        separator: i > 0;
+                        icon-kind: shortcut.icon;
+                        title: shortcut.title;
+                        for key[k] in shortcut.keys : HorizontalLayout {
+                            spacing: 8px;
+                            if (k > 0) : Text { text: "+"; font-size: 13px; color: Palette.text-secondary; vertical-alignment: center; }
+                            Rectangle {
+                                width: max(34px, key-text.preferred-width + 20px);
+                                height: 30px;
+                                y: 5px;
+                                border-radius: 7px;
+                                border-width: 1px;
+                                border-color: Palette.border-strong;
+                                background: Palette.surface-raised;
+                                key-text := Text {
+                                    text: key;
+                                    font-size: 12.5px;
+                                    font-weight: 600;
+                                    color: Palette.text-primary;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
                             }
                         }
                     }

@@ -68,6 +68,13 @@ pub struct WindowPreferences {
     pub start_minimized: bool,
     /// Whether separately stored window geometry may be restored.
     pub remember_position: bool,
+    /// Toast profile / GPU mode changes that happen outside the window.
+    #[serde(default = "enabled_by_default")]
+    pub mode_notifications: bool,
+}
+
+fn enabled_by_default() -> bool {
+    true
 }
 
 impl Default for WindowPreferences {
@@ -76,6 +83,7 @@ impl Default for WindowPreferences {
             close_action: CloseAction::default(),
             start_minimized: false,
             remember_position: true,
+            mode_notifications: true,
         }
     }
 }
@@ -568,6 +576,7 @@ fn import_legacy_preferences(text: &str) -> Result<PreferencesConfig, Preference
             },
             start_minimized: legacy.ui.start_minimized,
             remember_position: legacy.ui.remember_position,
+            mode_notifications: true,
         },
     })
 }
@@ -683,6 +692,7 @@ mod tests {
                 close_action: CloseAction::Ask,
                 start_minimized: true,
                 remember_position: false,
+                mode_notifications: false,
             },
         };
 

@@ -3339,3 +3339,15 @@ fn eco_fan_tab_requires_a_firmware_low_power_profile() {
     )));
     assert!(!super::platform_offers_low_power(None));
 }
+
+#[test]
+fn profile_shortcut_cycles_through_available_profiles_only() {
+    use orbis_core::profile::PerformanceProfile;
+    // All three available.
+    assert_eq!(next_profile(0, 0b111), Some(PerformanceProfile::Balanced));
+    assert_eq!(next_profile(2, 0b111), Some(PerformanceProfile::Silent));
+    // Balanced missing: Silent → Turbo.
+    assert_eq!(next_profile(0, 0b101), Some(PerformanceProfile::Turbo));
+    // Nothing available.
+    assert_eq!(next_profile(1, 0), None);
+}

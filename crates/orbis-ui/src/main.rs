@@ -6,7 +6,9 @@
 
 #[allow(dead_code)]
 mod controller;
+mod desktop_notify;
 mod diagnostics_backend;
+mod global_shortcuts;
 mod launch_context;
 mod preferences_backend;
 mod quick_controls_backend;
@@ -1048,6 +1050,8 @@ fn apply_window_preferences_state_to_window(
     window.set_remember_position_enabled(state.remember_position_writable);
     window.set_close_action(state.close_action);
     window.set_close_action_enabled(state.close_action_writable);
+    window.set_mode_notifications(state.mode_notifications);
+    desktop_notify::set_enabled(state.mode_notifications);
     window.set_settings_local_status(state.status.into());
 }
 
@@ -1096,6 +1100,68 @@ fn show_preview_dialog(kind: i32) -> Result<(), slint::PlatformError> {
         window.global::<ThemeState>().set_mode(current_theme_mode());
         window.show()
     })
+}
+
+/// Run one global-shortcut action on the UI thread.
+fn handle_shortcut(
+    app: &AppWindow,
+    action: global_shortcuts::ShortcutAction,
+    worker_tx: &UnboundedSender<WorkerCommand>,
+) {
+    match action {
+        global_shortcuts::ShortcutAction::ToggleWindow => {
+            let window = app.window();
+            if window.is_visible() && !window.is_minimized() && quick_controls_backend::tray_ready()
+            {
+                let _ = window.hide();
+            } else {
+                window.set_minimized(false);
+                let _ = window.show();
+            }
+        }
+        global_shortcuts::ShortcutAction::CycleProfile => {
+            let state = from_slint(&app.get_ui_state());
+            match next_profile(state.perf_selected, state.available_perf_mask) {
+                Some(next) if state.perf_state == controller::PerformanceHwState::Ready => {
+                    if let Err(error) = worker_tx.send(WorkerCommand::SetPerformance(next)) {
+                        tracing::warn!("worker closed, shortcut profile not sent: {error:?}");
+                    }
+                }
+                _ => tracing::debug!("profile shortcut ignored: profiles not ready"),
+            }
+        }
+    }
+}
+
+/// Next available profile after `current` (Тихий → Баланс → Турбо → Тихий).
+fn next_profile(current: i32, available_mask: i32) -> Option<PerformanceProfile> {
+    (1..=3)
+        .map(|step| (current + step).rem_euclid(3))
+        .find(|index| available_mask & (1 << index) != 0)
+        .and_then(performance_profile_from_index)
+}
+
+/// Toast a profile change or a newly queued GPU mode that did not come from
+/// the window (Fn+F5, power rules, shortcuts). The first observation after
+/// start is not a change.
+fn announce_mode_changes(
+    (perf_state, perf_selected, gpu_queued): (controller::PerformanceHwState, i32, i32),
+    after: &controller::UiState,
+) {
+    let was_ready = perf_state == controller::PerformanceHwState::Ready;
+    if was_ready
+        && after.perf_state == controller::PerformanceHwState::Ready
+        && after.perf_selected != perf_selected
+    {
+        if let Some((summary, body)) = desktop_notify::profile_text(after.perf_selected) {
+            desktop_notify::mode_changed(summary, body);
+        }
+    }
+    if after.gpu_queued != gpu_queued && after.gpu_queued >= 0 {
+        if let Some((summary, body)) = desktop_notify::gpu_queued_text(after.gpu_queued) {
+            desktop_notify::mode_changed(summary, body);
+        }
+    }
 }
 
 fn performance_profile_from_index(index: i32) -> Option<PerformanceProfile> {
@@ -2217,7 +2283,9 @@ fn handle_worker_event(
         render_nvidia(app, None);
     }
     let mut s = from_slint(&app.get_ui_state());
+    let before = (s.perf_state, s.perf_selected, s.gpu_queued);
     apply_performance_event(&mut s, event);
+    announce_mode_changes(before, &s);
     app.set_ui_state(to_slint(&s));
     if let Some(available) = factory_reset_available {
         app.set_factory_reset_available(available);
@@ -2267,6 +2335,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
         let worker_tx = worker_tx.clone();
         let app_weak = app.as_weak();
         app.on_perf_clicked(move |i| {
+            desktop_notify::note_ui_request();
             let Some(app) = app_weak.upgrade() else {
                 tracing::warn!("perf-clicked после уничтожения окна: {i}");
                 return;
@@ -2432,6 +2501,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             let app_weak = app_weak.clone();
             let send_rules = send_rules.clone();
             app.on_gpu_optimized_requested(move |on| {
+                desktop_notify::note_ui_request();
                 if let Some(app) = app_weak.upgrade() {
                     send_rules(&app, &|rules| rules.gpu_optimized = on);
                 }
@@ -2505,6 +2575,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
         let worker_tx = worker_tx.clone();
         let app_weak = app.as_weak();
         app.on_gpu_clicked(move |i| {
+            desktop_notify::note_ui_request();
             let Some(raw) = gpu_mode_from_index(i) else {
                 tracing::warn!("gpu-clicked с неизвестным/непродуктовым индексом: {i}");
                 return;
@@ -3116,6 +3187,26 @@ fn wire_settings_section(app: &AppWindow) {
         });
     }
 
+    {
+        let app_weak = app.as_weak();
+        app.on_mode_notifications_changed(move |enabled| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            match preferences_backend::persist_mode_notifications(enabled) {
+                Ok(preferences) => {
+                    let enabled = preferences.window.mode_notifications;
+                    app.set_mode_notifications(enabled);
+                    desktop_notify::set_enabled(enabled);
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "mode-notification preference save failed");
+                    apply_preferences_state(&app);
+                }
+            }
+        });
+    }
+
     quick_controls_backend::wire_position_preferences_bridge(app);
     diagnostics_backend::wire_window(app);
     apply_preferences_state(app);
@@ -3263,6 +3354,7 @@ fn main() -> anyhow::Result<()> {
         .block_on(zbus::Connection::system())
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
     quick_controls_backend::initialize(runtime.handle().clone(), session_connection.clone());
+    desktop_notify::initialize(runtime.handle().clone(), session_connection.clone());
     let diagnostics_session_connection = session_connection.clone();
     let diagnostics_system_connection = system_connection.clone();
     let lifecycle_connection = system_connection.clone();
@@ -3287,7 +3379,7 @@ fn main() -> anyhow::Result<()> {
         ),
     );
     let (application_runtime, _hardware_owner, delegated_ready) = runtime.block_on(
-        build_production_runtime(session_connection, system_connection),
+        build_production_runtime(session_connection.clone(), system_connection),
     )?;
     let mut state = state;
     state.performance_delegated_ready = delegated_ready;
@@ -3443,6 +3535,17 @@ fn main() -> anyhow::Result<()> {
         });
     });
 
+    {
+        let app_weak = app.as_weak();
+        let worker_tx = worker_tx.clone();
+        let connection = session_connection.clone();
+        runtime.spawn(global_shortcuts::run(connection, move |action| {
+            let worker_tx = worker_tx.clone();
+            let _ = app_weak.upgrade_in_event_loop(move |app| {
+                handle_shortcut(&app, action, &worker_tx);
+            });
+        }));
+    }
     if let Err(error) = orbis_config::upgrade_legacy_autostart() {
         tracing::debug!(?error, "autostart entry not upgraded");
     }

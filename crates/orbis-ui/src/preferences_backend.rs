@@ -21,6 +21,7 @@ pub(crate) struct WindowPreferencesUiState {
     pub remember_position_writable: bool,
     pub close_action: i32,
     pub close_action_writable: bool,
+    pub mode_notifications: bool,
     pub status: &'static str,
 }
 
@@ -110,6 +111,7 @@ pub(crate) fn map_window_preferences(load: PreferencesLoad) -> WindowPreferences
         remember_position: load.preferences.window.remember_position,
         remember_position_writable: position_writable,
         close_action: close_action_index(load.preferences.window.close_action),
+        mode_notifications: load.preferences.window.mode_notifications,
         // Persisting the safe Quit action does not require a tray host. The
         // Preferences lifecycle bridge gates HideToTray as a separate runtime
         // capability while preserving this storage-writability evidence.
@@ -166,6 +168,14 @@ pub(crate) fn persist_remember_position(
     }
     mutate_preferences_with(load_preferences, save_preferences, |preferences| {
         preferences.window.remember_position = enabled;
+    })
+}
+
+pub(crate) fn persist_mode_notifications(
+    enabled: bool,
+) -> Result<PreferencesConfig, PreferencesMutationError> {
+    mutate_preferences_with(load_preferences, save_preferences, |preferences| {
+        preferences.window.mode_notifications = enabled;
     })
 }
 
