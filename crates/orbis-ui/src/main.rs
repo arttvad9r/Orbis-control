@@ -32,7 +32,7 @@ use orbis_config::{
 use orbis_core::action::{ActionRequirement, ApplyResult};
 use orbis_core::battery::ChargeLimit;
 use orbis_core::gpu::{GpuAccessPolicy, GpuMode, GpuMuxState, GpuPowerState};
-use orbis_core::limits::{PowerLimitField, PowerLimitValue, PowerLimits, Unit};
+use orbis_core::limits::{PowerLimitField, Unit};
 use orbis_core::profile::{AsusdFanProfile, PerformanceProfile};
 use orbis_providers::error::ProviderError;
 use orbis_session_client::{
@@ -86,6 +86,10 @@ async fn watch_resume_lifecycle(
 }
 
 thread_local! {
+    /// The UI state owned by Rust; the window only gets its projection
+    /// (`to_slint`), so nothing is decoded back from Slint.
+    static UI_STATE: RefCell<controller::UiState> =
+        RefCell::new(controller::UiState::production_initial());
     static PREVIEW_DIALOG_WINDOW: RefCell<Option<PreviewDialogWindow>> = const { RefCell::new(None) };
     static THEME_LIGHT: Cell<bool> = const { Cell::new(false) };
 }
@@ -484,145 +488,6 @@ fn unit_label(unit: Unit) -> String {
     .into()
 }
 
-fn unit_from_label(label: &str) -> Unit {
-    match label {
-        "Вт" => Unit::Watts,
-        "°C" => Unit::DegreesC,
-        "%" => Unit::Percent,
-        _ => Unit::Unknown,
-    }
-}
-
-fn read_power_value(
-    value: i32,
-    min: i32,
-    max: i32,
-    step: i32,
-    unit: &str,
-    default: &str,
-) -> Option<PowerLimitValue> {
-    if unit.is_empty() {
-        // An empty projected unit marks a field the backend did not report
-        // (the Slint contract renders no LimitRow for it). Reconstructing it
-        // from the projection defaults would resurrect "0 ?" rows for fields
-        // the authoritative snapshot never contained.
-        return None;
-    }
-    PowerLimitValue::new(
-        value,
-        min,
-        max,
-        step,
-        default.parse().ok(),
-        unit_from_label(unit),
-    )
-    .ok()
-}
-
-fn power_limits_from_slint(state: &UiState) -> PowerLimits {
-    let mut fields = std::collections::BTreeMap::new();
-    if state.power_limits_ready {
-        let entries = [
-            (
-                PowerLimitField::Spl,
-                read_power_value(
-                    state.spl_value,
-                    state.spl_min,
-                    state.spl_max,
-                    state.spl_step,
-                    &state.spl_unit,
-                    &state.spl_default,
-                ),
-            ),
-            (
-                PowerLimitField::Sppt,
-                read_power_value(
-                    state.sppt_value,
-                    state.sppt_min,
-                    state.sppt_max,
-                    state.sppt_step,
-                    &state.sppt_unit,
-                    &state.sppt_default,
-                ),
-            ),
-            (
-                PowerLimitField::Fppt,
-                read_power_value(
-                    state.fppt_value,
-                    state.fppt_min,
-                    state.fppt_max,
-                    state.fppt_step,
-                    &state.fppt_unit,
-                    &state.fppt_default,
-                ),
-            ),
-            (
-                PowerLimitField::CpuTempLimit,
-                read_power_value(
-                    state.cpu_temp_limit_value,
-                    state.cpu_temp_limit_min,
-                    state.cpu_temp_limit_max,
-                    state.cpu_temp_limit_step,
-                    &state.cpu_temp_limit_unit,
-                    &state.cpu_temp_limit_default,
-                ),
-            ),
-            (
-                PowerLimitField::GpuDynamicBoost,
-                read_power_value(
-                    state.gpu_dynamic_boost_value,
-                    state.gpu_dynamic_boost_min,
-                    state.gpu_dynamic_boost_max,
-                    state.gpu_dynamic_boost_step,
-                    &state.gpu_dynamic_boost_unit,
-                    &state.gpu_dynamic_boost_default,
-                ),
-            ),
-            (
-                PowerLimitField::GpuTempTarget,
-                read_power_value(
-                    state.gpu_temp_target_value,
-                    state.gpu_temp_target_min,
-                    state.gpu_temp_target_max,
-                    state.gpu_temp_target_step,
-                    &state.gpu_temp_target_unit,
-                    &state.gpu_temp_target_default,
-                ),
-            ),
-        ];
-        for (field, value) in entries {
-            if let Some(value) = value {
-                fields.insert(field, value);
-            }
-        }
-    }
-    PowerLimits { fields }
-}
-
-fn power_drafts_from_slint(state: &UiState) -> std::collections::BTreeMap<PowerLimitField, i32> {
-    let values = [
-        (PowerLimitField::Spl, state.spl_draft, 1),
-        (PowerLimitField::Sppt, state.sppt_draft, 2),
-        (PowerLimitField::Fppt, state.fppt_draft, 4),
-        (PowerLimitField::CpuTempLimit, state.cpu_temp_limit_draft, 8),
-        (
-            PowerLimitField::GpuDynamicBoost,
-            state.gpu_dynamic_boost_draft,
-            16,
-        ),
-        (
-            PowerLimitField::GpuTempTarget,
-            state.gpu_temp_target_draft,
-            32,
-        ),
-    ];
-    values
-        .into_iter()
-        .filter(|(_, _, bit)| state.power_limit_dirty_mask & bit != 0)
-        .map(|(field, value, _)| (field, value))
-        .collect()
-}
-
 /// Update only the UI draft; hardware mutation exists only on explicit Apply.
 fn update_power_limit_draft(
     state: &mut controller::UiState,
@@ -648,179 +513,15 @@ fn update_power_limit_draft(
     true
 }
 
-/// Inverse of [`power_limit_pending_mask`]: decode a UI bitmask into the
-/// typed field set.
-fn power_limit_fields_from_mask(mask: i32) -> std::collections::BTreeSet<PowerLimitField> {
-    let mut fields = std::collections::BTreeSet::new();
-    if mask & 1 != 0 {
-        fields.insert(PowerLimitField::Spl);
-    }
-    if mask & 2 != 0 {
-        fields.insert(PowerLimitField::Sppt);
-    }
-    if mask & 4 != 0 {
-        fields.insert(PowerLimitField::Fppt);
-    }
-    if mask & 8 != 0 {
-        fields.insert(PowerLimitField::CpuTempLimit);
-    }
-    if mask & 16 != 0 {
-        fields.insert(PowerLimitField::GpuDynamicBoost);
-    }
-    if mask & 32 != 0 {
-        fields.insert(PowerLimitField::GpuTempTarget);
-    }
-    fields
+/// Current UI state (Rust-owned).
+fn current_ui_state() -> controller::UiState {
+    UI_STATE.with(|state| state.borrow().clone())
 }
 
-/// Decode the UI `fan-curve-invalid-draft` string into the typed
-/// `Option<String>`; an empty UI string means "no invalid draft".
-fn fan_curve_invalid_draft_from_slint(state: &UiState) -> Option<String> {
-    let text = state.fan_curve_invalid_draft.to_string();
-    if text.is_empty() { None } else { Some(text) }
-}
-
-fn from_slint(state: &UiState) -> controller::UiState {
-    controller::UiState {
-        capability_generation: state.capability_generation.max(0) as u64,
-        perf_selected: state.perf_selected,
-        available_perf_mask: state.available_perf_mask,
-        perf_state: match state.perf_state {
-            PerformanceHwState::Loading => controller::PerformanceHwState::Loading,
-            PerformanceHwState::Ready => controller::PerformanceHwState::Ready,
-            PerformanceHwState::Unavailable => controller::PerformanceHwState::Unavailable,
-        },
-        perf_writable: state.perf_writable,
-        performance_delegated_ready: state.performance_delegated_ready,
-        performance_delegated_pending: state.performance_delegated_pending,
-        performance_delegated_error: state.performance_delegated_error.to_string().into(),
-        gpu_selected: state.gpu_selected,
-        available_gpu_mask: state.available_gpu_mask,
-        gpu_ultimate_pending: state.gpu_ultimate_pending,
-        gpu_ultimate_disabled: state.gpu_ultimate_disabled,
-        gpu_section_error: state.gpu_section_error,
-        gpu_mode_state: match state.gpu_mode_state {
-            GpuModeHwState::Loading => controller::GpuModeHwState::Loading,
-            GpuModeHwState::Ready => controller::GpuModeHwState::Ready,
-            GpuModeHwState::Unavailable => controller::GpuModeHwState::Unavailable,
-        },
-        gpu_mode_writable: state.gpu_mode_writable,
-        gpu_mode_pending: state.gpu_mode_pending,
-        gpu_mode_unconfirmed: state.gpu_mode_unconfirmed,
-        gpu_queued: state.gpu_queued,
-        gpu_reboot_required: state.gpu_reboot_required,
-        charge_limit: state.charge_limit,
-        charge_limit_enabled: state.charge_limit_enabled,
-        charge_limit_writable: state.charge_limit_writable,
-        charge_limit_state: match state.charge_limit_state {
-            ChargeLimitState::Loading => controller::ChargeLimitState::Loading,
-            ChargeLimitState::Ready => controller::ChargeLimitState::Ready,
-            ChargeLimitState::Unavailable => controller::ChargeLimitState::Unavailable,
-        },
-        charge_limit_pending: state.charge_limit_pending,
-        charge_limit_unconfirmed: state.charge_limit_unconfirmed,
-        charge_limit_error: (!state.charge_limit_error.is_empty())
-            .then(|| state.charge_limit_error.to_string()),
-        gpu_power: match state.gpu_power_state {
-            GpuHwState::Loading => controller::GpuHwState::Loading,
-            GpuHwState::Ready => controller::GpuHwState::Ready,
-            GpuHwState::Unavailable => controller::GpuHwState::Unavailable,
-        },
-        gpu_mux: match state.gpu_mux_state {
-            GpuHwState::Loading => controller::GpuHwState::Loading,
-            GpuHwState::Ready => controller::GpuHwState::Ready,
-            GpuHwState::Unavailable => controller::GpuHwState::Unavailable,
-        },
-        gpu_access: match state.gpu_access_state {
-            GpuHwState::Loading => controller::GpuHwState::Loading,
-            GpuHwState::Ready => controller::GpuHwState::Ready,
-            GpuHwState::Unavailable => controller::GpuHwState::Unavailable,
-        },
-        gpu_power_value: state.gpu_power_value,
-        gpu_mux_value: state.gpu_mux_value,
-        gpu_access_value: state.gpu_access_value,
-        cpu_temp: state.cpu_temp.to_string(),
-        gpu_temp: state.gpu_temp.to_string(),
-        igpu_temp: state.igpu_temp.to_string(),
-        igpu_power_display: state.igpu_power.to_string(),
-        cpu_fan_rpm: state.cpu_fan_rpm.to_string(),
-        gpu_fan_rpm: state.gpu_fan_rpm.to_string(),
-        battery_percent: state.battery_percent.to_string(),
-        battery_percent_value: state.battery_percent_value,
-        cpu_temp_value: state.cpu_temp_value,
-        gpu_temp_value: state.gpu_temp_value,
-        igpu_temp_value: state.igpu_temp_value,
-        power_ac: state.power_ac_mw.to_string(),
-        version: state.version.to_string(),
-        mock_profile: state.mock_profile.to_string(),
-        perf_capability: controller::CapabilityAvailability::Unknown,
-        power_limits: power_limits_from_slint(state),
-        power_limit_drafts: power_drafts_from_slint(state),
-        power_limit_snapshot_identity: state.power_limit_snapshot_identity.parse().unwrap_or(0),
-        power_limit_pending: power_limit_fields_from_mask(state.power_limit_pending_mask),
-        power_limit_awaiting_verification: power_limit_fields_from_mask(
-            state.power_limit_verification_mask,
-        ),
-        power_limits_stale: state.power_limits_stale,
-        power_limits_writable: state.power_limits_writable,
-        power_limit_error: state.power_limit_error,
-        power_limits_unavailable_reason: state
-            .power_limits_stale
-            .then(|| state.power_limits_reason.to_string()),
-        perf_unavailable_reason: None,
-        charge_limit_capability: controller::CapabilityAvailability::Unknown,
-        charge_limit_unavailable_reason: None,
-        gpu_power_capability: controller::CapabilityAvailability::Unknown,
-        gpu_mux_capability: controller::CapabilityAvailability::Unknown,
-        gpu_access_capability: controller::CapabilityAvailability::Unknown,
-        battery_health: state.battery_health.to_string(),
-        battery_cycles: state.battery_cycles.to_string(),
-        battery_status: state.battery_status.to_string(),
-        ac_online: state.ac_online.to_string(),
-        gpu_power_display: state.gpu_power.to_string(),
-        telemetry_fresh: state.telemetry_fresh,
-        // Fan Curve Editor
-        fan_curve_state: match state.fan_curve_state {
-            FanCurveHwState::Loading => controller::FanCurveHwState::Loading,
-            FanCurveHwState::Ready => controller::FanCurveHwState::Ready,
-            FanCurveHwState::Unavailable => controller::FanCurveHwState::Unavailable,
-        },
-        fan_curve_writable: state.fan_curve_writable,
-        fan_curve_unavailable_reason: None,
-        fan_curve_error: state.fan_curve_error,
-        fan_curve_invalid_draft: fan_curve_invalid_draft_from_slint(state),
-        fan_curve_pending: state.fan_curve_pending,
-        fan_curve_unconfirmed: state.fan_curve_unconfirmed,
-        fan_curve_dirty: state.fan_curve_dirty,
-        fan_curve_enabled: if state.fan_curve_enabled_known {
-            Some(state.fan_curve_enabled)
-        } else {
-            None
-        },
-        fan_selected: state.fan_selected,
-        fan_profile_selected: state.fan_profile_selected,
-        fan_curve_temps: [
-            state.fan_temp_0,
-            state.fan_temp_1,
-            state.fan_temp_2,
-            state.fan_temp_3,
-            state.fan_temp_4,
-            state.fan_temp_5,
-            state.fan_temp_6,
-            state.fan_temp_7,
-        ],
-        fan_curve_pwms: [
-            state.fan_pwm_0,
-            state.fan_pwm_1,
-            state.fan_pwm_2,
-            state.fan_pwm_3,
-            state.fan_pwm_4,
-            state.fan_pwm_5,
-            state.fan_pwm_6,
-            state.fan_pwm_7,
-        ],
-        fan_curve_capability: controller::CapabilityAvailability::Unknown,
-    }
+/// Store the new UI state and render it into the window.
+fn publish_ui_state(app: &AppWindow, state: &controller::UiState) {
+    app.set_ui_state(to_slint(state));
+    UI_STATE.with(|slot| *slot.borrow_mut() = state.clone());
 }
 
 fn build_app(
@@ -829,7 +530,7 @@ fn build_app(
 ) -> Result<AppWindow, slint::PlatformError> {
     let app = AppWindow::new()?;
     app.global::<ThemeState>().set_mode(current_theme_mode());
-    app.set_ui_state(to_slint(state));
+    publish_ui_state(&app, state);
     apply_device_identity(&app);
     wire_callbacks(&app, worker_tx);
     quick_controls_backend::wire_window(&app);
@@ -1120,7 +821,7 @@ fn handle_shortcut(
             }
         }
         global_shortcuts::ShortcutAction::CycleProfile => {
-            let state = from_slint(&app.get_ui_state());
+            let state = current_ui_state();
             match next_profile(state.perf_selected, state.available_perf_mask) {
                 Some(next) if state.perf_state == controller::PerformanceHwState::Ready => {
                     if let Err(error) = worker_tx.send(WorkerCommand::SetPerformance(next)) {
@@ -2282,11 +1983,11 @@ fn handle_worker_event(
         NVIDIA_VIEW.with(|cell| cell.borrow_mut().1 = view.nvidia.clone());
         render_nvidia(app, None);
     }
-    let mut s = from_slint(&app.get_ui_state());
+    let mut s = current_ui_state();
     let before = (s.perf_state, s.perf_selected, s.gpu_queued);
     apply_performance_event(&mut s, event);
     announce_mode_changes(before, &s);
-    app.set_ui_state(to_slint(&s));
+    publish_ui_state(app, &s);
     if let Some(available) = factory_reset_available {
         app.set_factory_reset_available(available);
     }
@@ -2340,7 +2041,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 tracing::warn!("perf-clicked после уничтожения окна: {i}");
                 return;
             };
-            let state = from_slint(&app.get_ui_state());
+            let state = current_ui_state();
             let Some(command) = performance_command_for_click(&state, i) else {
                 tracing::warn!("perf-clicked игнорирован: Performance недоступен/read-only: {i}");
                 return;
@@ -2352,7 +2053,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                     } else {
                         let mut pending = state;
                         pending.performance_delegated_pending = true;
-                        app.set_ui_state(to_slint(&pending));
+                        publish_ui_state(&app, &pending);
                     }
                 }
                 None => {
@@ -2379,7 +2080,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             let Some(app) = app_weak.upgrade() else {
                 return;
             };
-            let mut state = from_slint(&app.get_ui_state());
+            let mut state = current_ui_state();
             if state.power_limits_stale || state.power_limit_pending.contains(&field) {
                 tracing::warn!("power-limit change ignored: snapshot stale or mutation pending");
                 return;
@@ -2390,7 +2091,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 );
                 return;
             }
-            app.set_ui_state(to_slint(&state));
+            publish_ui_state(&app, &state);
         });
     }
     {
@@ -2548,7 +2249,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             let Some(app) = app_weak.upgrade() else {
                 return;
             };
-            let mut state = from_slint(&app.get_ui_state());
+            let mut state = current_ui_state();
             if state.power_limits_stale || state.power_limit_drafts.is_empty() {
                 tracing::warn!("power-limit apply ignored: no fresh dirty draft");
                 return;
@@ -2568,7 +2269,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                     tracing::warn!("worker closed, power-limit command not sent: {error:?}");
                 }
             }
-            app.set_ui_state(to_slint(&state));
+            publish_ui_state(&app, &state);
         });
     }
     {
@@ -2580,8 +2281,8 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 tracing::warn!("gpu-clicked с неизвестным/непродуктовым индексом: {i}");
                 return;
             };
-            if let Some(app) = app_weak.upgrade() {
-                let s = from_slint(&app.get_ui_state());
+            if app_weak.upgrade().is_some() {
+                let s = current_ui_state();
                 if !gpu_mode_click_allowed(&s) {
                     tracing::warn!(
                         "gpu-clicked игнорирован: product GPU mode недоступен/read-only"
@@ -2598,9 +2299,9 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                     if let Err(e) = tx.send(WorkerCommand::SetProductGpuMode { raw }) {
                         tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
                     } else if let Some(app) = app_weak.upgrade() {
-                        let mut pending = from_slint(&app.get_ui_state());
+                        let mut pending = current_ui_state();
                         pending.gpu_mode_pending = true;
-                        app.set_ui_state(to_slint(&pending));
+                        publish_ui_state(&app, &pending);
                     }
                 }
                 None => {
@@ -2617,8 +2318,8 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 tracing::warn!("charge-changed с недопустимым значением: {v}");
                 return;
             };
-            if let Some(app) = app_weak.upgrade() {
-                let s = from_slint(&app.get_ui_state());
+            if app_weak.upgrade().is_some() {
+                let s = current_ui_state();
                 if !charge_mutation_allowed(&s) {
                     tracing::warn!("charge-changed игнорирован: ChargeLimit недоступен/read-only");
                     return;
@@ -2630,9 +2331,9 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                     if let Err(e) = tx.send(WorkerCommand::SetChargeLimit { percent }) {
                         tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
                     } else if let Some(app) = app_weak.upgrade() {
-                        let mut pending = from_slint(&app.get_ui_state());
+                        let mut pending = current_ui_state();
                         pending.charge_limit_pending = true;
-                        app.set_ui_state(to_slint(&pending));
+                        publish_ui_state(&app, &pending);
                     }
                 }
                 None => {
@@ -2667,7 +2368,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 tracing::warn!("fan-changed после уничтожения окна: {i}");
                 return;
             };
-            let mut s = from_slint(&app.get_ui_state());
+            let mut s = current_ui_state();
             if matches!(
                 controller::UiState::fan_selection_transition(
                     s.fan_curve_dirty,
@@ -2695,7 +2396,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 return;
             };
             s.fan_selected = i;
-            app.set_ui_state(to_slint(&s));
+            publish_ui_state(&app, &s);
             match &worker_tx {
                 Some(tx) => {
                     if let Err(e) = tx.send(WorkerCommand::RefreshFanCurve {
@@ -2716,7 +2417,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             let Some(app) = app_weak.upgrade() else {
                 return;
             };
-            let mut s = from_slint(&app.get_ui_state());
+            let mut s = current_ui_state();
             if matches!(
                 controller::UiState::fan_selection_transition(
                     s.fan_curve_dirty,
@@ -2737,7 +2438,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 return;
             };
             s.fan_profile_selected = i;
-            app.set_ui_state(to_slint(&s));
+            publish_ui_state(&app, &s);
             match &worker_tx {
                 Some(tx) => {
                     if let Err(e) = tx.send(WorkerCommand::RefreshFanCurve {
@@ -2766,9 +2467,9 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 tracing::warn!("fan-selection-discarded: invalid profile index {profile_index}");
                 return;
             };
-            let mut s = from_slint(&app.get_ui_state());
+            let mut s = current_ui_state();
             controller::UiState::discard_fan_selection(&mut s, fan_index, profile_index);
-            app.set_ui_state(to_slint(&s));
+            publish_ui_state(&app, &s);
             match &worker_tx {
                 Some(tx) => {
                     if let Err(e) = tx.send(WorkerCommand::RefreshFanCurve { profile, fan }) {
@@ -2785,13 +2486,13 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             let Some(app) = app_weak.upgrade() else {
                 return;
             };
-            let mut s = from_slint(&app.get_ui_state());
+            let mut s = current_ui_state();
             if (0..8).contains(&index) {
                 s.fan_curve_temps[index as usize] = value;
                 s.fan_curve_dirty = true;
                 s.fan_curve_invalid_draft = None;
             }
-            app.set_ui_state(to_slint(&s));
+            publish_ui_state(&app, &s);
         });
     }
     {
@@ -2800,13 +2501,13 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             let Some(app) = app_weak.upgrade() else {
                 return;
             };
-            let mut s = from_slint(&app.get_ui_state());
+            let mut s = current_ui_state();
             if (0..8).contains(&index) {
                 s.fan_curve_pwms[index as usize] = value;
                 s.fan_curve_dirty = true;
                 s.fan_curve_invalid_draft = None;
             }
-            app.set_ui_state(to_slint(&s));
+            publish_ui_state(&app, &s);
         });
     }
     {
@@ -2816,7 +2517,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             let Some(app) = app_weak.upgrade() else {
                 return;
             };
-            let s = from_slint(&app.get_ui_state());
+            let s = current_ui_state();
 
             if reset_defaults {
                 if s.fan_curve_state != controller::FanCurveHwState::Ready
@@ -2845,7 +2546,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                     } else {
                         let mut pending = s;
                         pending.fan_curve_pending = true;
-                        app.set_ui_state(to_slint(&pending));
+                        publish_ui_state(&app, &pending);
                     }
                 } else {
                     tracing::warn!("fan factory reset unavailable outside interactive mode");
@@ -2890,9 +2591,9 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                             "Кривая не проходит проверку: значения вне допустимого диапазона"
                                 .to_string()
                         });
-                    let mut state = from_slint(&app.get_ui_state());
+                    let mut state = current_ui_state();
                     state.fan_curve_invalid_draft = Some(reason);
-                    app.set_ui_state(to_slint(&state));
+                    publish_ui_state(&app, &state);
                 }
                 return;
             }
@@ -2924,7 +2625,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                     } else {
                         let mut pending = s;
                         pending.fan_curve_pending = true;
-                        app.set_ui_state(to_slint(&pending));
+                        publish_ui_state(&app, &pending);
                     }
                 }
                 None => tracing::warn!("fan-apply вне интерактивного режима"),

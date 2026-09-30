@@ -263,13 +263,10 @@ fn production_initial_power_limits_are_unknown_not_fake_defaults() {
 }
 
 #[test]
-fn absent_power_limit_fields_do_not_resurrect_through_ui_round_trip() {
-    // The approved composition renders one LimitRow per field the backend
-    // actually reports (performance.slint: unit != "" gates). The per-event
-    // from_slint/to_slint round trip must not turn the projection defaults of
-    // absent fields (0/0/step 1/empty unit) back into authoritative entries —
-    // otherwise "0 ?" rows appear for backend-unreported fields after any
-    // unrelated worker event.
+fn absent_power_limit_fields_project_as_hidden_rows() {
+    // The page renders one LimitRow per field the backend actually reports
+    // (a row is gated on a non-empty unit), so an absent field must project
+    // an empty unit rather than a "0 ?" row.
     let mut state = base_state();
     state.power_limits.fields.clear();
     state.power_limits.fields.insert(
@@ -291,56 +288,6 @@ fn absent_power_limit_fields_do_not_resurrect_through_ui_round_trip() {
         rendered.sppt_unit, "",
         "absent SPPT must project an empty unit"
     );
-    let round_tripped = from_slint(&rendered);
-    assert_eq!(
-        round_tripped.power_limits.fields.len(),
-        1,
-        "only backend-reported fields may exist after a round trip"
-    );
-    assert!(
-        round_tripped
-            .power_limits
-            .get(&PowerLimitField::Spl)
-            .is_some()
-    );
-    assert!(
-        round_tripped
-            .power_limits
-            .get(&PowerLimitField::Sppt)
-            .is_none()
-    );
-    assert!(
-        round_tripped
-            .power_limits
-            .get(&PowerLimitField::Fppt)
-            .is_none()
-    );
-    assert!(
-        round_tripped
-            .power_limits
-            .get(&PowerLimitField::CpuTempLimit)
-            .is_none()
-    );
-    assert!(
-        round_tripped
-            .power_limits
-            .get(&PowerLimitField::GpuDynamicBoost)
-            .is_none()
-    );
-    assert!(
-        round_tripped
-            .power_limits
-            .get(&PowerLimitField::GpuTempTarget)
-            .is_none()
-    );
-
-    // The reported field must survive the round trip unchanged.
-    let spl = round_tripped
-        .power_limits
-        .get(&PowerLimitField::Spl)
-        .expect("reported field survives");
-    assert_eq!(spl.value, 45);
-    assert_eq!(spl.unit, orbis_core::limits::Unit::Watts);
 }
 
 #[test]
@@ -2350,8 +2297,6 @@ fn fan_curve_enabled_roundtrips_through_slint_state() {
     let slint = to_slint(&s);
     assert!(slint.fan_curve_enabled_known);
     assert!(slint.fan_curve_enabled);
-    let back = from_slint(&slint);
-    assert_eq!(back.fan_curve_enabled, Some(true));
 
     // enabled=false round-trips as known+false
     let mut s = base_state();
@@ -2365,7 +2310,6 @@ fn fan_curve_enabled_roundtrips_through_slint_state() {
     let slint = to_slint(&s);
     assert!(slint.fan_curve_enabled_known);
     assert!(!slint.fan_curve_enabled);
-    assert_eq!(from_slint(&slint).fan_curve_enabled, Some(false));
 
     // None: unknown, not silently converted to a known disabled state
     let mut s = base_state();
@@ -2379,7 +2323,6 @@ fn fan_curve_enabled_roundtrips_through_slint_state() {
     let slint = to_slint(&s);
     assert!(!slint.fan_curve_enabled_known);
     assert!(!slint.fan_curve_enabled);
-    assert_eq!(from_slint(&slint).fan_curve_enabled, None);
 }
 
 #[test]
