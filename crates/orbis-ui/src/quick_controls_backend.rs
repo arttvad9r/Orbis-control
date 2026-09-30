@@ -70,6 +70,10 @@ pub(crate) fn publish_tray_stats(state: &crate::controller::UiState) {
     secondary_windows_backend::publish_tray_stats(state);
 }
 
+pub(crate) fn tray_ready() -> bool {
+    secondary_windows_backend::tray_ready()
+}
+
 pub(crate) fn handle_close_request(app: &AppWindow) {
     secondary_windows_backend::handle_close_request(app);
 }

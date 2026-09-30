@@ -39,13 +39,12 @@ pub enum ThemePreference {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CloseAction {
-    /// Hide the application to its tray integration.
+    /// Hide the application to its tray integration. Default: power rules,
+    /// one-time full charge and backlight timeouts keep working in the tray
+    /// (as in G-Helper). Without a tray host the window quits instead.
+    #[default]
     HideToTray,
     /// Quit the application.
-    ///
-    /// Until tray behavior is production-wired, Quit is the conservative
-    /// standalone default. Legacy close_to_tray=true is imported explicitly.
-    #[default]
     Quit,
     /// Ask the user each time.
     Ask,

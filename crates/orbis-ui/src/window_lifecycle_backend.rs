@@ -146,21 +146,20 @@ pub(crate) fn handle_close_request(app: &AppWindow) -> CloseRequestResponse {
             }
             CloseRequestResponse::HideWindow
         }
-        CloseAction::HideToTray if super::tray_backend::is_ready() => {
+        // `Ask` has no dialog; it behaves like the tray default.
+        CloseAction::HideToTray | CloseAction::Ask if super::tray_backend::is_ready() => {
             tracing::debug!("main window closing to registered StatusNotifier tray");
             CloseRequestResponse::HideWindow
         }
-        CloseAction::HideToTray => {
-            tracing::warn!(
-                "HideToTray requested but no StatusNotifier host is registered; keeping window shown"
-            );
-            CloseRequestResponse::KeepWindowShown
-        }
-        CloseAction::Ask => {
-            tracing::warn!(
-                "CloseAction::Ask has no typed close-confirmation context; keeping window shown"
-            );
-            CloseRequestResponse::KeepWindowShown
+        CloseAction::HideToTray | CloseAction::Ask => {
+            // Without a tray host a hidden window could never come back, and
+            // a close button that does nothing is worse: quit instead.
+            tracing::warn!("no StatusNotifier host is registered; closing quits");
+            if let Err(error) = slint::quit_event_loop() {
+                tracing::warn!(error = ?error, "close could not terminate Slint event loop");
+                return CloseRequestResponse::KeepWindowShown;
+            }
+            CloseRequestResponse::HideWindow
         }
     }
 }

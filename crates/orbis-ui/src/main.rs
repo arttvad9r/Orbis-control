@@ -93,12 +93,14 @@ struct Args {
     ui_state: String,
     ui_section: Option<String>,
     screenshot: Option<String>,
+    background: bool,
 }
 
 fn parse_args() -> Args {
     let mut ui_state = "default".to_string();
     let mut ui_section = None;
     let mut screenshot = None;
+    let mut background = false;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -108,6 +110,9 @@ fn parse_args() -> Args {
                 }
             }
             "--screenshot" => screenshot = it.next(),
+            // Login autostart: stay in the tray (the window shows anyway when
+            // no tray host appears, so the app is never invisible).
+            "--background" => background = true,
             "--ui-section" => {
                 if let Some(v) = it.next() {
                     ui_section = Some(v);
@@ -120,6 +125,7 @@ fn parse_args() -> Args {
         ui_state,
         ui_section,
         screenshot,
+        background,
     }
 }
 
@@ -3242,6 +3248,7 @@ fn main() -> anyhow::Result<()> {
         controller::UiState::production_initial()
     };
 
+    let background = args.background;
     if let Some(path) = args.screenshot {
         return render_screenshot(&state, &path, args.ui_section.as_deref());
     }
@@ -3436,8 +3443,26 @@ fn main() -> anyhow::Result<()> {
         });
     });
 
-    app.show()?;
-    slint::run_event_loop()?;
+    if let Err(error) = orbis_config::upgrade_legacy_autostart() {
+        tracing::debug!(?error, "autostart entry not upgraded");
+    }
+    if background {
+        // Give the tray host a moment to register; without one, show the window.
+        let app_weak = app.as_weak();
+        slint::Timer::single_shot(Duration::from_secs(3), move || {
+            if !quick_controls_backend::tray_ready() {
+                if let Some(app) = app_weak.upgrade() {
+                    let _ = app.show();
+                }
+            }
+        });
+    } else {
+        app.show()?;
+    }
+    // Keep running with every window hidden: closing to the tray must not
+    // end the process (power rules and timers live here). Quit paths call
+    // `slint::quit_event_loop` explicitly.
+    slint::run_event_loop_until_quit()?;
 
     PREVIEW_DIALOG_WINDOW.with(|slot| *slot.borrow_mut() = None);
     diagnostics_backend::clear();

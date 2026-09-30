@@ -24,6 +24,11 @@ pub(crate) fn initialize(runtime: tokio::runtime::Handle, session_connection: zb
     tray_backend::initialize(runtime);
 }
 
+/// True once a StatusNotifier host has registered the tray icon.
+pub(crate) fn tray_ready() -> bool {
+    tray_backend::is_ready()
+}
+
 pub(crate) fn clear() {
     tray_backend::clear();
     extra_backend::clear();

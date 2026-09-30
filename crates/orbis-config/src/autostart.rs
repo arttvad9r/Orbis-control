@@ -17,8 +17,13 @@ use thiserror::Error;
 /// Owned desktop-entry filename used for user autostart.
 pub const AUTOSTART_FILE_NAME: &str = "io.github.orbiscontrol.Orbis.desktop";
 
-/// Canonical desktop entry written by the backend.
-pub const AUTOSTART_ENTRY: &str =
+/// Canonical desktop entry written by the backend. `--background` starts in
+/// the tray so power automation runs from login without an open window.
+pub const AUTOSTART_ENTRY: &str = "[Desktop Entry]\nType=Application\nName=Orbis Control\nExec=orbis-control --background\nTerminal=false\n";
+
+/// Entry written by earlier versions (window shown at login). Still ours:
+/// reported as enabled and upgraded by [`upgrade_legacy_autostart`].
+pub const LEGACY_AUTOSTART_ENTRY: &str =
     "[Desktop Entry]\nType=Application\nName=Orbis Control\nExec=orbis-control\nTerminal=false\n";
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -128,10 +133,26 @@ pub fn disable_autostart() -> Result<bool, AutostartError> {
 pub fn autostart_status_from_dir(dir: &Path) -> Result<AutostartStatus, AutostartError> {
     let path = dir.join(AUTOSTART_FILE_NAME);
     match fs::read_to_string(&path) {
-        Ok(text) if text == AUTOSTART_ENTRY => Ok(AutostartStatus::Enabled),
+        Ok(text) if text == AUTOSTART_ENTRY || text == LEGACY_AUTOSTART_ENTRY => {
+            Ok(AutostartStatus::Enabled)
+        }
         Ok(_) => Ok(AutostartStatus::Invalid),
         Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(AutostartStatus::Missing),
         Err(source) => Err(io_failure("read autostart entry", path, source)),
+    }
+}
+
+/// Rewrite an entry from an earlier version to the current canonical one.
+/// Anything else (missing, current or foreign) is left untouched.
+pub fn upgrade_legacy_autostart() -> Result<bool, AutostartError> {
+    upgrade_legacy_autostart_from_dir(&autostart_dir()?)
+}
+
+/// [`upgrade_legacy_autostart`] for an explicit directory.
+pub fn upgrade_legacy_autostart_from_dir(dir: &Path) -> Result<bool, AutostartError> {
+    match fs::read_to_string(dir.join(AUTOSTART_FILE_NAME)) {
+        Ok(text) if text == LEGACY_AUTOSTART_ENTRY => enable_autostart_from_dir(dir).map(|_| true),
+        _ => Ok(false),
     }
 }
 
@@ -259,6 +280,26 @@ fn io_failure(operation: &'static str, path: PathBuf, source: io::Error) -> Auto
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_entry_counts_as_enabled_and_is_upgraded_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(AUTOSTART_FILE_NAME);
+        fs::write(&path, LEGACY_AUTOSTART_ENTRY).unwrap();
+        assert_eq!(
+            autostart_status_from_dir(dir.path()).unwrap(),
+            AutostartStatus::Enabled
+        );
+        assert!(upgrade_legacy_autostart_from_dir(dir.path()).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), AUTOSTART_ENTRY);
+        assert!(!upgrade_legacy_autostart_from_dir(dir.path()).unwrap());
+
+        fs::write(&path, "[Desktop Entry]\nExec=something-else\n").unwrap();
+        assert!(
+            !upgrade_legacy_autostart_from_dir(dir.path()).unwrap(),
+            "foreign entry kept"
+        );
+    }
 
     #[test]
     fn xdg_config_and_home_fallback_resolve_only_user_autostart() {

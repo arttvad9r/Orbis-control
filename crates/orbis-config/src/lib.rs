@@ -25,6 +25,7 @@ pub use autostart::{
     AUTOSTART_ENTRY, AUTOSTART_FILE_NAME, AutostartError, AutostartPathError, AutostartStatus,
     autostart_dir, autostart_dir_with, autostart_file, autostart_status, autostart_status_from_dir,
     disable_autostart, disable_autostart_from_dir, enable_autostart, enable_autostart_from_dir,
+    upgrade_legacy_autostart, upgrade_legacy_autostart_from_dir,
 };
 pub use desired_state::{
     DESIRED_STATE_FILE, DESIRED_STATE_SCHEMA_VERSION, DesiredStateDocument, DesiredStateError,
