@@ -877,12 +877,6 @@ where
         ))
     }
 
-    async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
-        Err(ProviderError::Unsupported(
-            "session protocol read-only: one_shot_full_charge недоступна".into(),
-        ))
-    }
-
     fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
         ValidationResult::invalid(
             "session protocol read-only: запись charge limit не поддерживается",
@@ -2069,12 +2063,6 @@ where
         Ok(ApplyResult::Applied)
     }
 
-    async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
-        Err(ProviderError::Unsupported(
-            "Hardware1 Battery provider: one_shot_full_charge недоступна".into(),
-        ))
-    }
-
     fn validate_charge_limit(&self, percent: u8) -> ValidationResult {
         match validate_charge_limit(percent) {
             Ok(()) => ValidationResult::ok(),
@@ -2938,13 +2926,6 @@ mod tests {
                 .set_charge_limit(40)
                 .await
                 .expect_err("set unsupported"),
-            ProviderError::Unsupported(_)
-        ));
-        assert!(matches!(
-            provider
-                .one_shot_full_charge()
-                .await
-                .expect_err("oneshot unsupported"),
             ProviderError::Unsupported(_)
         ));
         assert_eq!(provider.source.reads(), 0);

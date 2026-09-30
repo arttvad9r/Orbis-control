@@ -45,9 +45,6 @@ impl BatteryProvider for UnsupportedBatteryProvider {
     async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {
         Err(ProviderError::Unsupported("read-only".into()))
     }
-    async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
-        Err(ProviderError::Unsupported("read-only".into()))
-    }
     fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
         ValidationResult::invalid("read-only")
     }
@@ -154,9 +151,6 @@ impl BatteryProvider for ReadyBatteryProvider {
         Ok(limit(60))
     }
     async fn set_charge_limit(&self, _percent: u8) -> Result<ApplyResult, ProviderError> {
-        Err(ProviderError::Unsupported("read-only".into()))
-    }
-    async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
         Err(ProviderError::Unsupported("read-only".into()))
     }
     fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {

@@ -2,7 +2,7 @@
 // health and the charge limit.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, ChargeLimitState } from "../model.slint";
-import { PageHeader, SectionCard, CardHeader, InfoRow, LocalStatus, LayoutMetrics, PageSurface } from "../common.slint";
+import { PageHeader, SectionCard, CardHeader, InfoRow, LocalStatus, ActionButton, LayoutMetrics, PageSurface } from "../common.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
 import { Icon, Icons } from "../../components/icon.slint";
 import { Palette } from "../../themes/dark.slint";
@@ -67,6 +67,8 @@ export component PowerSection inherits PageSurface {
     // Capacity relative to design capacity, percent (-1 unknown).
     in property <int> battery-health-value: -1;
     callback charge-changed(float);
+    in property <int> full-charge-restore: -1;
+    callback full-charge-requested(bool);
 
     function ac-label() -> string {
         if (root.ui-state.ac-online == "On AC") { return "Сеть (AC)"; }
@@ -246,6 +248,39 @@ export component PowerSection inherits PageSurface {
                         font-size: 12.5px;
                         color: Palette.text-secondary;
                         wrap: word-wrap;
+                    }
+                    if (root.ui-state.charge-limit-state == ChargeLimitState.Ready && root.ui-state.charge-limit-writable) : Rectangle {
+                        height: 1px;
+                        background: Palette.border-default;
+                    }
+                    if (root.ui-state.charge-limit-state == ChargeLimitState.Ready && root.ui-state.charge-limit-writable) : HorizontalLayout {
+                        spacing: 16px;
+                        Rectangle {
+                            width: 26px;
+                            Icon { width: 24px; height: 24px; y: (parent.height - self.height) / 2; kind: Icons.zap; tint: root.full-charge-restore >= 0 ? Palette.success : Palette.text-primary; }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 3px;
+                            Text { text: "Зарядить до 100 % один раз"; font-size: 14.5px; font-weight: 550; color: Palette.text-primary; }
+                            Text {
+                                text: root.full-charge-restore >= 0
+                                    ? "Идёт полная зарядка · лимит вернётся к " + root.full-charge-restore + " % после заряда или отключения зарядки"
+                                    : "Перед поездкой: лимит временно снимается и возвращается сам";
+                                font-size: 12.5px;
+                                color: root.full-charge-restore >= 0 ? Palette.success : Palette.text-secondary;
+                                wrap: word-wrap;
+                            }
+                        }
+                        ActionButton {
+                            width: 150px;
+                            y: 4px;
+                            label: root.full-charge-restore >= 0 ? "Отменить" : "Зарядить";
+                            accent: root.full-charge-restore < 0;
+                            disabled: root.ui-state.charge-limit-pending || root.ui-state.charge-limit-unconfirmed;
+                            clicked => { root.full-charge-requested(root.full-charge-restore < 0); }
+                        }
                     }
                     if (root.ui-state.charge-limit-pending || root.ui-state.charge-limit-unconfirmed || root.ui-state.charge-limit-error != "") : LocalStatus {
                         text: root.ui-state.charge-limit-pending ? "Ожидание подтверждения"

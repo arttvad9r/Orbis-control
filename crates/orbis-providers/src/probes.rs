@@ -664,10 +664,6 @@ mod tests {
             Err(ProviderError::Unsupported("probe must not write".into()))
         }
 
-        async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
-            Err(ProviderError::Unsupported("probe must not write".into()))
-        }
-
         fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
             if self.write_supported {
                 ValidationResult::ok()

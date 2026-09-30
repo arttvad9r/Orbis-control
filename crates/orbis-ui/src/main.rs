@@ -2201,6 +2201,7 @@ fn handle_worker_event(
         app.set_power_rules_ac(power_rule_profile_to_int(view.rules.ac.profile));
         app.set_power_rules_battery(power_rule_profile_to_int(view.rules.battery.profile));
         app.set_power_rules_error(view.error.clone().unwrap_or_default().into());
+        app.set_full_charge_restore(view.rules.full_charge_restore.map_or(-1, i32::from));
     }
     if let WorkerEvent::ProfileLimits(view) = &event {
         app.set_profile_limits_known(true);
@@ -2388,6 +2389,7 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                     refresh_hz: hz(app.get_power_rules_battery_hz()),
                 },
                 gpu_optimized: app.get_gpu_optimized(),
+                full_charge_restore: None,
             };
             edit(&mut rules);
             if let Err(error) = tx.send(WorkerCommand::SetPowerRules(rules)) {
@@ -2559,6 +2561,24 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 None => {
                     tracing::warn!("charge-changed вне интерактивного режима (worker отсутствует)")
                 }
+            }
+        });
+    }
+    {
+        let worker_tx = worker_tx.clone();
+        app.on_full_charge_requested(move |start| {
+            let command = if start {
+                WorkerCommand::StartFullCharge
+            } else {
+                WorkerCommand::StopFullCharge
+            };
+            match &worker_tx {
+                Some(tx) => {
+                    if let Err(e) = tx.send(command) {
+                        tracing::warn!("worker закрыт, команда не отправлена: {e:?}");
+                    }
+                }
+                None => tracing::warn!("full-charge вне интерактивного режима"),
             }
         });
     }
@@ -2874,6 +2894,28 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 // The compositor swallows the release that ends the move;
                 // without this the title bar keeps the pointer grab and the
                 // whole window stops answering clicks.
+                orbis_ui::window_chrome::end_system_move(&app);
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        app.on_resize_started(move |edge| {
+            use slint::winit_030::winit::window::ResizeDirection;
+            let direction = match edge {
+                0 => ResizeDirection::North,
+                1 => ResizeDirection::South,
+                2 => ResizeDirection::East,
+                3 => ResizeDirection::West,
+                4 => ResizeDirection::NorthEast,
+                5 => ResizeDirection::NorthWest,
+                6 => ResizeDirection::SouthEast,
+                _ => ResizeDirection::SouthWest,
+            };
+            if let Some(app) = app_weak.upgrade() {
+                let _ = app.window().with_winit_window(|winit_window| {
+                    let _ = winit_window.drag_resize_window(direction);
+                });
                 orbis_ui::window_chrome::end_system_move(&app);
             }
         });

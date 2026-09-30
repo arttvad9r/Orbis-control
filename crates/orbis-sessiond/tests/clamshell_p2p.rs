@@ -45,9 +45,6 @@ impl BatteryProvider for Battery {
     async fn set_charge_limit(&self, _: u8) -> Result<ApplyResult, ProviderError> {
         Err(ProviderError::Unsupported("unused".into()))
     }
-    async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
-        Err(ProviderError::Unsupported("unused".into()))
-    }
     fn validate_charge_limit(&self, _: u8) -> ValidationResult {
         ValidationResult::invalid("unused")
     }

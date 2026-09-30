@@ -187,9 +187,6 @@ impl orbis_providers::traits::BatteryProvider for NoBattery {
     ) -> Result<orbis_core::action::ApplyResult, ProviderError> {
         Err(ProviderError::Unsupported("no battery".into()))
     }
-    async fn one_shot_full_charge(&self) -> Result<orbis_core::action::ApplyResult, ProviderError> {
-        Err(ProviderError::Unsupported("no battery".into()))
-    }
     fn validate_charge_limit(&self, _percent: u8) -> orbis_providers::error::ValidationResult {
         orbis_providers::error::ValidationResult::invalid("no battery")
     }

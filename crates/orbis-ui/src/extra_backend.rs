@@ -259,14 +259,8 @@ fn reset_readiness(window: &AppWindow) {
     window.set_igpu_memory_state_ready(false);
     window.set_igpu_memory_control_ready(false);
     window.set_aspm_control_ready(false);
-    window.set_standby_networking_control_ready(false);
-    window.set_hibernate_control_ready(false);
-    window.set_core_count_control_ready(false);
-    window.set_binding_control_ready(false);
     window.set_advanced_apply_ready(false);
     window.set_igpu_memory_pending(false);
-    window.set_status_led_state_ready(false);
-    window.set_status_led_control_ready(false);
     window.set_aspm_state_ready(false);
     window.set_aspm_control_ready(false);
 }

@@ -106,12 +106,6 @@ impl BatteryProvider for ScriptedBatteryProvider {
         ))
     }
 
-    async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
-        Err(ProviderError::Unsupported(
-            "scripted read-only backend: one_shot_full_charge недоступна".into(),
-        ))
-    }
-
     fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
         ValidationResult::invalid("read-only backend: запись charge limit не поддерживается")
     }

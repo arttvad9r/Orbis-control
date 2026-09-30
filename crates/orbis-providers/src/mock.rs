@@ -554,16 +554,6 @@ impl BatteryProvider for MockProvider {
         .await
     }
 
-    async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
-        self.mutate(|s| {
-            let max = s.charge_limit.bounds.expect("mock bounds").max;
-            s.charge_limit.configured_percent = Some(max);
-            s.charge_limit.effective_percent = Some(max);
-            Ok(ApplyResult::Applied)
-        })
-        .await
-    }
-
     fn validate_charge_limit(&self, percent: u8) -> ValidationResult {
         if (40..=100).contains(&percent) {
             ValidationResult::Valid

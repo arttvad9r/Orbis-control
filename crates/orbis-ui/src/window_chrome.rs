@@ -3,7 +3,7 @@
 use slint::platform::{PointerEventButton, WindowEvent};
 
 /// Call right after handing an interactive move to the compositor
-/// (`winit::Window::drag_window`).
+/// (`winit::Window::drag_window` / `drag_resize_window`).
 ///
 /// The compositor consumes the pointer release that ends the move, so Slint
 /// never sees it and keeps the pointer grabbed by the title bar: every later

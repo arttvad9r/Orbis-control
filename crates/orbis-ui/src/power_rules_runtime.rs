@@ -97,6 +97,11 @@ impl PowerRulesTracker {
     /// Store new rules. Returns the rule to apply now: the current source's rule
     /// when rules were just enabled or that rule was edited.
     pub fn set_rules(&mut self, new: PowerRules) -> Result<Option<PowerRule>, String> {
+        // The pending full-charge restore belongs to the worker, not the editor.
+        let new = PowerRules {
+            full_charge_restore: self.rules.full_charge_restore,
+            ..new
+        };
         let saved = match &self.dir {
             Some(dir) => save_power_rules_to_dir(&new, dir),
             None => save_power_rules(&new),
@@ -118,6 +123,59 @@ impl PowerRulesTracker {
         }
     }
 
+    /// Remember the limit to restore and persist it before the limit is
+    /// raised, so a crash or restart still restores it later.
+    pub fn begin_full_charge(&mut self, restore_to: u8) -> Result<(), String> {
+        let rules = PowerRules {
+            full_charge_restore: Some(restore_to),
+            ..self.rules
+        };
+        self.store(rules)
+    }
+
+    /// The limit to restore when a one-time full charge should end now: the
+    /// battery reports full, or the charger is gone. Clears the pending state
+    /// (the restore is attempted once; its outcome is reported, never retried).
+    pub fn full_charge_due(&mut self, ac_online: Option<bool>, battery_full: bool) -> Option<u8> {
+        let restore = self.rules.full_charge_restore?;
+        let due = battery_full || ac_online == Some(false);
+        if !due {
+            return None;
+        }
+        self.finish_full_charge().ok().flatten().or(Some(restore))
+    }
+
+    /// End a one-time full charge now; returns the limit to restore.
+    pub fn finish_full_charge(&mut self) -> Result<Option<u8>, String> {
+        let Some(restore) = self.rules.full_charge_restore else {
+            return Ok(None);
+        };
+        let rules = PowerRules {
+            full_charge_restore: None,
+            ..self.rules
+        };
+        self.store(rules).map(|()| Some(restore))
+    }
+
+    fn store(&mut self, rules: PowerRules) -> Result<(), String> {
+        let saved = match &self.dir {
+            Some(dir) => save_power_rules_to_dir(&rules, dir),
+            None => save_power_rules(&rules),
+        };
+        match saved {
+            Ok(()) => {
+                self.rules = rules;
+                self.error = None;
+                Ok(())
+            }
+            Err(error) => {
+                let message = error.to_string();
+                self.error = Some(message.clone());
+                Err(message)
+            }
+        }
+    }
+
     fn applicable(&self, ac: bool) -> Option<PowerRule> {
         let rule = self.rules.rule(ac);
         (self.rules.enabled && !rule.is_empty()).then_some(rule)
@@ -127,6 +185,52 @@ impl PowerRulesTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn full_charge_restores_once_when_full_or_unplugged_and_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut tracker = PowerRulesTracker::load_from_dir(dir.path().to_path_buf());
+        tracker.begin_full_charge(80).unwrap();
+        assert_eq!(
+            tracker.full_charge_due(Some(true), false),
+            None,
+            "still charging"
+        );
+
+        // Restart keeps the pending restore.
+        let mut tracker = PowerRulesTracker::load_from_dir(dir.path().to_path_buf());
+        assert_eq!(tracker.rules().full_charge_restore, Some(80));
+        assert_eq!(
+            tracker.full_charge_due(Some(true), true),
+            Some(80),
+            "battery full"
+        );
+        assert_eq!(
+            tracker.full_charge_due(Some(false), true),
+            None,
+            "restored once"
+        );
+
+        tracker.begin_full_charge(60).unwrap();
+        assert_eq!(
+            tracker.full_charge_due(Some(false), false),
+            Some(60),
+            "unplugged"
+        );
+
+        tracker.begin_full_charge(70).unwrap();
+        assert_eq!(tracker.finish_full_charge(), Ok(Some(70)), "cancel");
+        assert_eq!(tracker.finish_full_charge(), Ok(None));
+    }
+
+    #[test]
+    fn editing_rules_keeps_a_pending_full_charge() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut tracker = PowerRulesTracker::load_from_dir(dir.path().to_path_buf());
+        tracker.begin_full_charge(80).unwrap();
+        tracker.set_rules(PowerRules::default()).unwrap();
+        assert_eq!(tracker.rules().full_charge_restore, Some(80));
+    }
     use orbis_core::profile::PerformanceProfile;
 
     fn rule(profile: PerformanceProfile) -> PowerRule {
@@ -142,6 +246,7 @@ mod tests {
             ac: rule(PerformanceProfile::Turbo),
             battery: rule(PerformanceProfile::Silent),
             gpu_optimized: false,
+            full_charge_restore: None,
         }
     }
 

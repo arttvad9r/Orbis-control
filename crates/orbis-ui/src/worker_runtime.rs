@@ -56,6 +56,11 @@ pub enum WorkerCommand {
     SetChargeLimit {
         percent: u8,
     },
+    /// One-time charge to 100 %: remember the current limit, raise it to
+    /// 100 % and restore it once the battery is full or the charger is gone.
+    StartFullCharge,
+    /// End a one-time full charge now and restore the remembered limit.
+    StopFullCharge,
     /// Apply one typed SPL/SPPT/FPPT value through Hardware1.
     SetPowerLimit {
         field: orbis_core::limits::PowerLimitField,
@@ -355,7 +360,7 @@ async fn observe_power_source<G, B, R, F>(
     power_rules: &mut PowerRulesTracker,
     profile_limits: &mut ProfileLimitsTracker,
     backends: SourceBackends<'_>,
-    ac_online: Option<bool>,
+    facts: PowerFacts,
     emit: &mut F,
 ) where
     G: GpuServicesRuntime,
@@ -363,6 +368,10 @@ async fn observe_power_source<G, B, R, F>(
     R: PerformanceServiceRuntime,
     F: FnMut(WorkerEvent),
 {
+    let ac_online = facts.ac_online;
+    if let Some(restore) = power_rules.full_charge_due(ac_online, facts.battery_full) {
+        restore_after_full_charge(runtime, power_rules, restore, emit).await;
+    }
     let Some(observation) = ac_online.map(|ac| power_rules.observe(ac)) else {
         return;
     };
@@ -380,6 +389,47 @@ async fn observe_power_source<G, B, R, F>(
     if let Some(ac) = observation.gpu_ac {
         apply_gpu_optimized(backends.product_gpu, ac, false, emit).await;
     }
+}
+
+/// Power facts from one telemetry snapshot.
+#[derive(Debug, Clone, Copy, Default)]
+struct PowerFacts {
+    ac_online: Option<bool>,
+    battery_full: bool,
+}
+
+impl PowerFacts {
+    fn from_snapshot(snapshot: &Result<orbis_core::telemetry::Telemetry, ProviderError>) -> Self {
+        let Ok(telemetry) = snapshot else {
+            return Self::default();
+        };
+        let battery_full = telemetry.battery.as_ref().is_some_and(|battery| {
+            battery.percent.get() >= 100 || battery.state.eq_ignore_ascii_case("full")
+        });
+        Self {
+            ac_online: telemetry.ac_online,
+            battery_full,
+        }
+    }
+}
+
+/// Put the remembered limit back after a one-time full charge, through the
+/// same authorised path as a manual change. The attempt is made once.
+async fn restore_after_full_charge<G, B, R, F>(
+    runtime: &ApplicationRuntime<G, B, R>,
+    power_rules: &PowerRulesTracker,
+    restore: u8,
+    emit: &mut F,
+) where
+    G: GpuServicesRuntime,
+    B: BatteryServiceRuntime,
+    R: PerformanceServiceRuntime,
+    F: FnMut(WorkerEvent),
+{
+    emit(WorkerEvent::ChargeLimit(
+        runtime.battery.set_charge_limit(restore).await,
+    ));
+    emit(WorkerEvent::PowerRules(power_rules.view()));
 }
 
 /// Wire value of `Hybrid` (Standard) and `Integrated` (Eco) in `Hardware1`.
@@ -782,7 +832,7 @@ async fn run_worker_inner<G, B, R, F>(
                         command = receiver.recv() => command,
                         snapshot = snapshot_rx.recv(), if poll_in_progress => {
                             if let Some(snapshot) = snapshot {
-                                let ac_online = snapshot.as_ref().ok().and_then(|t| t.ac_online);
+                                let facts = PowerFacts::from_snapshot(&snapshot);
                                 emit(WorkerEvent::TelemetryRefresh(snapshot));
                                 poll_in_progress = false;
                                 observe_power_source(
@@ -794,7 +844,7 @@ async fn run_worker_inner<G, B, R, F>(
                                         panel_refresh: panel_refresh.as_deref(),
                                         product_gpu: product_gpu.as_deref(),
                                     },
-                                    ac_online,
+                                    facts,
                                     &mut emit,
                                 )
                                 .await;
@@ -947,7 +997,7 @@ async fn run_worker_inner<G, B, R, F>(
 
         if matches!(command, WorkerCommand::RefreshTelemetry) {
             let snapshot = runtime.telemetry.snapshot().await;
-            let ac_online = snapshot.as_ref().ok().and_then(|t| t.ac_online);
+            let facts = PowerFacts::from_snapshot(&snapshot);
             emit(WorkerEvent::TelemetryRefresh(snapshot));
             observe_power_source(
                 &runtime,
@@ -958,7 +1008,7 @@ async fn run_worker_inner<G, B, R, F>(
                     panel_refresh: panel_refresh.as_deref(),
                     product_gpu: product_gpu.as_deref(),
                 },
-                ac_online,
+                facts,
                 &mut emit,
             )
             .await;
@@ -1140,6 +1190,35 @@ async fn run_worker_inner<G, B, R, F>(
                 }
                 WorkerEvent::ChargeLimit(runtime.battery.set_charge_limit(latest_percent).await)
             }
+            WorkerCommand::StartFullCharge => {
+                let current = bounded_charge_limit(&runtime.battery).await;
+                let restore = current.as_ref().ok().and_then(|limit| {
+                    limit
+                        .effective_percent
+                        .or(limit.configured_percent)
+                        .map(|percent| percent.get())
+                });
+                match restore {
+                    // Already charging to 100 %: nothing to raise or restore.
+                    Some(100) => WorkerEvent::ChargeLimitRefresh(current),
+                    Some(restore) => match power_rules.begin_full_charge(restore) {
+                        Ok(()) => {
+                            emit(WorkerEvent::PowerRules(power_rules.view()));
+                            WorkerEvent::ChargeLimit(runtime.battery.set_charge_limit(100).await)
+                        }
+                        // Without a persisted restore point the limit is not raised.
+                        Err(_) => WorkerEvent::PowerRules(power_rules.view()),
+                    },
+                    None => WorkerEvent::ChargeLimitRefresh(current),
+                }
+            }
+            WorkerCommand::StopFullCharge => match power_rules.finish_full_charge() {
+                Ok(Some(restore)) => {
+                    emit(WorkerEvent::PowerRules(power_rules.view()));
+                    WorkerEvent::ChargeLimit(runtime.battery.set_charge_limit(restore).await)
+                }
+                _ => WorkerEvent::PowerRules(power_rules.view()),
+            },
             WorkerCommand::RefreshChargeLimit => {
                 WorkerEvent::ChargeLimitRefresh(bounded_charge_limit(&runtime.battery).await)
             }
@@ -2336,6 +2415,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn one_time_full_charge_raises_the_limit_and_restores_it_once() {
+        let state = build_state_arc("zephyrus-full").expect("profile exists");
+        let limit = |state: &orbis_providers::mock::MockState| {
+            state.charge_limit.effective_percent.map(|p| p.get())
+        };
+        {
+            let mut guard = state.write().await;
+            guard.telemetry.ac_online = Some(true);
+            guard.charge_limit = orbis_core::battery::ChargeLimit::new(
+                true,
+                Some(orbis_core::newtypes::Percent::new(80).unwrap()),
+                Some(orbis_core::newtypes::Percent::new(80).unwrap()),
+                guard.charge_limit.bounds,
+            )
+            .unwrap();
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(run_worker_inner(
+            mock_runtime_with_state(state.clone()),
+            rx,
+            move |event| {
+                let _ = event_tx.send(event);
+            },
+            None,
+            None,
+            LocalBackends::default(),
+            Trackers {
+                profile_limits: ProfileLimitsTracker::load_from_dir(dir.path().to_path_buf()),
+                power_rules: PowerRulesTracker::load_from_dir(dir.path().to_path_buf()),
+            },
+        ));
+        async fn next_charge(rx: &mut tokio::sync::mpsc::UnboundedReceiver<WorkerEvent>) {
+            loop {
+                let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                    .await
+                    .expect("worker event")
+                    .expect("worker alive");
+                if let WorkerEvent::ChargeLimit(result) = event {
+                    assert!(result.is_ok(), "charge limit write failed: {result:?}");
+                    return;
+                }
+            }
+        }
+
+        tx.send(WorkerCommand::StartFullCharge).unwrap();
+        next_charge(&mut event_rx).await;
+        assert_eq!(limit(&*state.read().await), Some(100), "raised to 100 %");
+        let stored = orbis_config::load_power_rules_from_dir(dir.path()).unwrap();
+        assert_eq!(
+            stored.full_charge_restore,
+            Some(80),
+            "restore point persisted"
+        );
+
+        // Still charging on AC: nothing is restored.
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        tx.send(WorkerCommand::RefreshChargeLimit).unwrap();
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            match event {
+                WorkerEvent::ChargeLimit(_) => panic!("restored too early"),
+                WorkerEvent::ChargeLimitRefresh(_) => break,
+                _ => {}
+            }
+        }
+
+        // Unplugging ends it and restores the previous limit once.
+        state.write().await.telemetry.ac_online = Some(false);
+        tx.send(WorkerCommand::RefreshTelemetry).unwrap();
+        next_charge(&mut event_rx).await;
+        assert_eq!(limit(&*state.read().await), Some(80), "limit restored");
+        let stored = orbis_config::load_power_rules_from_dir(dir.path()).unwrap();
+        assert_eq!(stored.full_charge_restore, None);
+    }
+
+    #[tokio::test]
     async fn power_source_change_applies_the_rule_but_startup_and_disabled_do_not() {
         use orbis_config::{PowerRule, PowerRules};
         let state = build_state_arc("zephyrus-full").expect("profile exists");
@@ -2354,6 +2514,7 @@ mod tests {
             ac: rule(PerformanceProfile::Turbo),
             battery: rule(PerformanceProfile::Silent),
             gpu_optimized: false,
+            full_charge_restore: None,
         };
         let mut power_rules = PowerRulesTracker::load_from_dir(dir.path().to_path_buf());
         power_rules.set_rules(rules).unwrap();
@@ -2605,6 +2766,7 @@ mod tests {
                     refresh_hz: Some(60),
                 },
                 gpu_optimized: false,
+                full_charge_restore: None,
             })
             .unwrap();
         let (tx, rx) = command_channel();

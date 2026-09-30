@@ -737,12 +737,6 @@ mod tests {
             ))
         }
 
-        async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
-            Err(ProviderError::Unsupported(
-                "scripted read-only backend: one_shot_full_charge недоступна".into(),
-            ))
-        }
-
         fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
             ValidationResult::invalid("read-only backend: запись charge limit не поддерживается")
         }
@@ -1150,13 +1144,6 @@ mod tests {
             .set_charge_limit(90)
             .await
             .expect_err("set unsupported");
-        assert!(matches!(err, ProviderError::Unsupported(_)));
-
-        // one_shot_full_charge must not be callable.
-        let err = provider
-            .one_shot_full_charge()
-            .await
-            .expect_err("oneshot unsupported");
         assert!(matches!(err, ProviderError::Unsupported(_)));
 
         // validate_charge_limit must return invalid.

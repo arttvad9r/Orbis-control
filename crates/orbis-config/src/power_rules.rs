@@ -51,6 +51,10 @@ pub struct PowerRules {
     /// of the master switch, like the GPU mode itself.
     #[serde(default)]
     pub gpu_optimized: bool,
+    /// One-time full charge in progress: the charge limit to restore once the
+    /// battery is full or the charger is unplugged. `None` when inactive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_charge_restore: Option<u8>,
 }
 
 impl PowerRules {
@@ -164,6 +168,7 @@ mod tests {
                 refresh_hz: Some(60),
             },
             gpu_optimized: true,
+            full_charge_restore: None,
         };
         save_power_rules_to_dir(&rules, dir.path()).unwrap();
         assert_eq!(load_power_rules_from_dir(dir.path()).unwrap(), rules);

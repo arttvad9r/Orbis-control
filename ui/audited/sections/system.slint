@@ -48,29 +48,13 @@ export component SystemSection inherits PageSurface {
     in property <bool> igpu-memory-state-ready: false;
     in property <bool> igpu-memory-control-ready: false;
     in property <bool> igpu-memory-pending: false;
-    in property <bool> status-led-state-ready: false;
-    in property <bool> status-led-control-ready: false;
     in property <ClamshellState> auto-clamshell-state: ClamshellState.Loading;
     in property <string> lid-other-handler: "";
-    in property <bool> standby-networking-control-ready: false;
-    in property <bool> hibernate-control-ready: false;
-    in property <bool> core-count-control-ready: false;
-    in property <bool> binding-control-ready: false;
     in property <bool> advanced-apply-ready: false;
     in property <bool> aspm-state-ready: false;
     in property <bool> aspm-control-ready: false;
-    in-out property <int> m1-action: 0;
-    in-out property <int> m2-action: 0;
-    in-out property <int> m3-action: 0;
-    in-out property <int> m4-action: 0;
-    in-out property <int> m5-action: 0;
-    in-out property <bool> status-led: false;
     in-out property <bool> disable-aspm: false;
-    in-out property <bool> disable-standby-networking: false;
     in-out property <int> igpu-memory: 0;
-    in-out property <int> hibernate-after: 0;
-    in-out property <int> p-cores: 1;
-    in-out property <int> e-cores: 0;
     callback reload-requested;
     callback boot-sound-requested(bool);
     callback igpu-memory-requested(int);
@@ -86,22 +70,6 @@ export component SystemSection inherits PageSurface {
     callback diagnostics-refresh-requested;
     callback diagnostics-export-requested;
 
-    property <int> binding-action-count: 10;
-
-    function binding-label(index: int) -> string {
-        if (index == 0) { return "По умолчанию"; }
-        if (index == 1) { return "Нет действия"; }
-        if (index == 2) { return "Mute"; }
-        if (index == 3) { return "Громкость +"; }
-        if (index == 4) { return "Громкость −"; }
-        if (index == 5) { return "Микрофон"; }
-        if (index == 6) { return "Экран"; }
-        if (index == 7) { return "Aura"; }
-        if (index == 8) { return "Производительность"; }
-        if (index == 9) { return "GPU Mode"; }
-        return "По умолчанию";
-    }
-
     function igpu-label(index: int) -> string {
         if (index == 0) { return "Авто"; }
         if (index == 1) { return "512 МБ"; }
@@ -115,12 +83,6 @@ export component SystemSection inherits PageSurface {
         return "Авто";
     }
 
-    function clamp-index(index: int, delta: int) -> int {
-        let next = index + delta;
-        if (next < 0) { return 0; }
-        if (next > root.binding-action-count - 1) { return root.binding-action-count - 1; }
-        return next;
-    }
 
     function device-label() -> string { return root.device-name != "" ? root.device-name : "—"; }
     function board-label() -> string { return root.device-board != "" ? root.device-board : "—"; }

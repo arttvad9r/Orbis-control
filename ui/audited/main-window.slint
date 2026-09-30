@@ -81,6 +81,8 @@ export component AppWindow inherits Window {
     callback titlebar-maximize-requested;
     callback titlebar-close-requested;
     callback titlebar-drag-started;
+    // Frameless window resize: 0 N, 1 S, 2 E, 3 W, 4 NE, 5 NW, 6 SE, 7 SW.
+    callback resize-started(int);
     in property <bool> maximized: false;
 
     callback perf-clicked(int);
@@ -94,6 +96,10 @@ export component AppWindow inherits Window {
     in property <[NvidiaRow]> nvidia-rows: [];
     callback nvidia-tuning-requested(int, int);
     callback charge-changed(float);
+    // One-time charge to 100 %: true starts, false cancels.
+    callback full-charge-requested(bool);
+    // Limit restored after a one-time full charge; -1 when none is running.
+    in property <int> full-charge-restore: -1;
     in property <bool> display-state-ready: false;
     in property <string> display-status: "Недоступно";
     in property <string> display-resolution: "";
@@ -180,22 +186,11 @@ export component AppWindow inherits Window {
     in property <bool> igpu-memory-state-ready: false;
     in property <bool> igpu-memory-control-ready: false;
     in property <bool> igpu-memory-pending: false;
-    in property <bool> status-led-state-ready: false;
-    in property <bool> status-led-control-ready: false;
     in property <ClamshellState> auto-clamshell-state: ClamshellState.Loading;
     in property <string> lid-other-handler: "";
-    in property <bool> standby-networking-control-ready: false;
-    in property <bool> hibernate-control-ready: false;
-    in property <bool> core-count-control-ready: false;
-    in property <bool> binding-control-ready: false;
     in property <bool> advanced-apply-ready: false;
     in property <bool> aspm-state-ready: false;
     in property <bool> aspm-control-ready: false;
-    in-out property <int> m1-action: 0;
-    in-out property <int> m2-action: 0;
-    in-out property <int> m3-action: 0;
-    in-out property <int> m4-action: 0;
-    in-out property <int> m5-action: 0;
     in-out property <int> keyboard-effect: -1;
     in-out property <int> keyboard-speed: -1;
     in-out property <int> rgb-red: 255;
@@ -217,14 +212,9 @@ export component AppWindow inherits Window {
     in-out property <int> aura-secondary-green: 0;
     in-out property <int> aura-secondary-blue: 0;
     in-out property <bool> boot-sound: false;
-    in-out property <bool> status-led: false;
     in-out property <bool> panel-overdrive: false;
     in-out property <bool> disable-aspm: false;
-    in-out property <bool> disable-standby-networking: false;
     in-out property <int> igpu-memory: 0;
-    in-out property <int> hibernate-after: 0;
-    in-out property <int> p-cores: 1;
-    in-out property <int> e-cores: 0;
     callback reload-requested;
     callback boot-sound-requested(bool);
     callback igpu-memory-requested(int);
@@ -460,6 +450,8 @@ export component AppWindow inherits Window {
                         ui-state <=> root.ui-state;
                         battery-spark: root.battery-spark;
                         battery-health-value: root.battery-health-value;
+                        full-charge-restore: root.full-charge-restore;
+                        full-charge-requested(start) => { root.full-charge-requested(start); }
                         charge-changed(v) => { root.charge-changed(v); }
                     }
                     if (root.active-section == Section.Cooling) : CoolingSection {
@@ -566,29 +558,13 @@ export component AppWindow inherits Window {
                         igpu-memory-state-ready <=> root.igpu-memory-state-ready;
                         igpu-memory-control-ready <=> root.igpu-memory-control-ready;
                         igpu-memory-pending <=> root.igpu-memory-pending;
-                        status-led-state-ready <=> root.status-led-state-ready;
-                        status-led-control-ready <=> root.status-led-control-ready;
                         auto-clamshell-state <=> root.auto-clamshell-state;
                         lid-other-handler <=> root.lid-other-handler;
-                        standby-networking-control-ready <=> root.standby-networking-control-ready;
-                        hibernate-control-ready <=> root.hibernate-control-ready;
-                        core-count-control-ready <=> root.core-count-control-ready;
-                        binding-control-ready <=> root.binding-control-ready;
                         advanced-apply-ready <=> root.advanced-apply-ready;
                         aspm-state-ready <=> root.aspm-state-ready;
                         aspm-control-ready <=> root.aspm-control-ready;
-                        m1-action <=> root.m1-action;
-                        m2-action <=> root.m2-action;
-                        m3-action <=> root.m3-action;
-                        m4-action <=> root.m4-action;
-                        m5-action <=> root.m5-action;
-                        status-led <=> root.status-led;
                         disable-aspm <=> root.disable-aspm;
-                        disable-standby-networking <=> root.disable-standby-networking;
                         igpu-memory <=> root.igpu-memory;
-                        hibernate-after <=> root.hibernate-after;
-                        p-cores <=> root.p-cores;
-                        e-cores <=> root.e-cores;
                         reload-requested => { root.reload-requested(); }
                         boot-sound-requested(v) => { root.boot-sound-requested(v); }
                         igpu-memory-requested(v) => { root.igpu-memory-requested(v); }
@@ -630,6 +606,33 @@ export component AppWindow inherits Window {
                         update-check-requested => { root.update-check-requested(); }
                     }
                 }
+            }
+        }
+    }
+
+    // Resize grips along the frameless edges (hidden while maximized).
+    // They hand the resize to the compositor like the title bar does moves.
+    property <length> grip: 6px;
+    property <length> corner: 14px;
+    for g in [
+        { d: 0, x: root.corner, y: 0px, w: root.width - 2 * root.corner, h: root.grip, c: MouseCursor.ns-resize },
+        { d: 1, x: root.corner, y: root.height - root.grip, w: root.width - 2 * root.corner, h: root.grip, c: MouseCursor.ns-resize },
+        { d: 2, x: root.width - root.grip, y: root.corner, w: root.grip, h: root.height - 2 * root.corner, c: MouseCursor.ew-resize },
+        { d: 3, x: 0px, y: root.corner, w: root.grip, h: root.height - 2 * root.corner, c: MouseCursor.ew-resize },
+        { d: 4, x: root.width - root.corner, y: 0px, w: root.corner, h: root.corner, c: MouseCursor.nesw-resize },
+        { d: 5, x: 0px, y: 0px, w: root.corner, h: root.corner, c: MouseCursor.nwse-resize },
+        { d: 6, x: root.width - root.corner, y: root.height - root.corner, w: root.corner, h: root.corner, c: MouseCursor.nwse-resize },
+        { d: 7, x: 0px, y: root.height - root.corner, w: root.corner, h: root.corner, c: MouseCursor.nesw-resize },
+    ] : TouchArea {
+        x: g.x;
+        y: g.y;
+        width: g.w;
+        height: g.h;
+        enabled: !root.maximized;
+        mouse-cursor: g.c;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                root.resize-started(g.d);
             }
         }
     }

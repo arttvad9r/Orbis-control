@@ -1198,10 +1198,6 @@ mod tests {
             Ok(ApplyResult::Applied)
         }
 
-        async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
-            Ok(ApplyResult::Applied)
-        }
-
         fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {
             ValidationResult::Valid
         }
@@ -1797,10 +1793,6 @@ mod tests {
                 ));
             };
             result
-        }
-
-        async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError> {
-            Ok(ApplyResult::Applied)
         }
 
         fn validate_charge_limit(&self, _percent: u8) -> ValidationResult {

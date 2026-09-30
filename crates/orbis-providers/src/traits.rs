@@ -236,9 +236,6 @@ pub trait BatteryProvider: Provider {
     /// Установить лимит зарядки.
     async fn set_charge_limit(&self, percent: u8) -> Result<ApplyResult, ProviderError>;
 
-    /// Одноразовая полная зарядка.
-    async fn one_shot_full_charge(&self) -> Result<ApplyResult, ProviderError>;
-
     /// Валидация лимита.
     fn validate_charge_limit(&self, percent: u8) -> ValidationResult;
 }
