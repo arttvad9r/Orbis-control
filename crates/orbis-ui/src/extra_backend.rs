@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use orbis_core::aura::{AuraMode, AuraRgb, AuraSpeed};
+use orbis_core::aura::{AuraMode, AuraPowerState, AuraRgb, AuraSpeed};
 use orbis_core::display::PanelOverdriveState;
 use orbis_core::firmware::BootSoundState;
 use orbis_providers::error::ProviderError;
@@ -66,6 +66,8 @@ struct AuraObserved {
     supported_modes: [bool; 13],
     colour1: AuraRgb,
     colour2: AuraRgb,
+    /// Keyboard zone of `LedPower`, when asusd reports it.
+    power: Option<AuraPowerState>,
     status: String,
 }
 
@@ -281,6 +283,7 @@ pub(crate) fn wire_window(window: &AppWindow) {
     window.set_aura_pulse_supported(false);
     window.set_aura_comet_supported(false);
     window.set_aura_flash_supported(false);
+    window.set_aura_power_ready(false);
     window.set_boot_sound(false);
     window.set_igpu_memory(0);
     window.set_status(
@@ -306,6 +309,15 @@ pub(crate) fn wire_window(window: &AppWindow) {
                         colour2: [r2, g2, b2],
                     },
                 );
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        window.on_aura_power_requested(move |which, on| {
+            if let Some(window) = weak.upgrade() {
+                request_aura_power(&window, which, on);
             }
         });
     }
@@ -580,6 +592,82 @@ async fn apply_advanced_client(
         completed.push(AdvancedApplyControl::Aspm);
     }
     Ok(observation)
+}
+
+fn apply_power_state(window: &AppWindow, power: Option<AuraPowerState>) {
+    window.set_aura_power_ready(power.is_some());
+    if let Some(power) = power {
+        window.set_aura_power_boot(power.boot);
+        window.set_aura_power_awake(power.awake);
+        window.set_aura_power_sleep(power.sleep);
+        window.set_aura_power_shutdown(power.shutdown);
+    }
+}
+
+/// Toggle one power state (0 boot, 1 awake, 2 sleep, 3 shutdown) of the
+/// keyboard zone, keeping the other three as currently shown.
+fn with_power_toggle(current: AuraPowerState, which: i32, on: bool) -> Option<AuraPowerState> {
+    let mut next = current;
+    match which {
+        0 => next.boot = on,
+        1 => next.awake = on,
+        2 => next.sleep = on,
+        3 => next.shutdown = on,
+        _ => return None,
+    }
+    Some(next)
+}
+
+fn request_aura_power(window: &AppWindow, which: i32, on: bool) {
+    if !window.get_aura_power_ready() || !window.get_aura_control_ready() {
+        tracing::warn!(which, "Aura power request rejected by UI gate");
+        return;
+    }
+    let current = AuraPowerState {
+        zone: AuraPowerState::KEYBOARD_ZONE,
+        boot: window.get_aura_power_boot(),
+        awake: window.get_aura_power_awake(),
+        sleep: window.get_aura_power_sleep(),
+        shutdown: window.get_aura_power_shutdown(),
+    };
+    let Some(requested) = with_power_toggle(current, which, on) else {
+        return;
+    };
+    let Some(context) = begin_mutation(window) else {
+        return;
+    };
+    let weak = window.as_weak();
+    let completion = context.mutating.clone();
+    context.runtime.spawn(async move {
+        let result = async {
+            let client = HardwareProductControlClient::connect_system().await?;
+            client.set_aura_power(requested).await
+        }
+        .await;
+        completion.store(false, Ordering::Release);
+        if let Err(error) = weak.upgrade_in_event_loop(move |window| {
+            window.set_applying(false);
+            match result {
+                Ok(observed) => {
+                    apply_power_state(&window, Some(observed));
+                    window.set_status("Подсветка по состояниям сохранена".into());
+                }
+                Err(error) => {
+                    apply_power_state(&window, Some(current));
+                    window.set_status(
+                        format!(
+                            "Не удалось изменить подсветку по состояниям · {}",
+                            write_error_label(&error)
+                        )
+                        .into(),
+                    );
+                }
+            }
+            refresh(&window);
+        }) {
+            tracing::warn!(error = ?error, "failed to publish Aura power result");
+        }
+    });
 }
 
 fn request_aura_effect(window: &AppWindow, request: AuraEffectRequest) {
@@ -942,6 +1030,7 @@ fn refresh_with_status(
             window.set_aura_secondary_red(aura.colour2.r as i32);
             window.set_aura_secondary_green(aura.colour2.g as i32);
             window.set_aura_secondary_blue(aura.colour2.b as i32);
+            apply_power_state(&window, aura.power);
 
             window.set_panel_overdrive_state_ready(panel.ready);
             window.set_panel_overdrive_control_ready(panel.ready && panel_write.is_supported());
@@ -1108,6 +1197,7 @@ fn aura_observed(result: Result<orbis_core::aura::AuraState, ProviderError>) -> 
                 supported_modes: aura_supported_modes(&state),
                 colour1: sent.colour1,
                 colour2: sent.colour2,
+                power: keyboard_power_state(&state),
                 status: format!(
                     "Aura mode={} speed={} (отправлено в прошивку, не подтверждено)",
                     aura_mode_label(mode),
@@ -1122,6 +1212,7 @@ fn aura_observed(result: Result<orbis_core::aura::AuraState, ProviderError>) -> 
             supported_modes: aura_supported_modes(&state),
             colour1: state.current_effect.colour1,
             colour2: state.current_effect.colour2,
+            power: keyboard_power_state(&state),
             status: format!(
                 "Aura mode={} speed={}",
                 aura_mode_label(state.current_mode),
@@ -1135,9 +1226,18 @@ fn aura_observed(result: Result<orbis_core::aura::AuraState, ProviderError>) -> 
             supported_modes: [false; 13],
             colour1: AuraRgb { r: 0, g: 0, b: 0 },
             colour2: AuraRgb { r: 0, g: 0, b: 0 },
+            power: None,
             status: error_status("Aura", &error),
         },
     }
+}
+
+fn keyboard_power_state(state: &orbis_core::aura::AuraState) -> Option<AuraPowerState> {
+    state
+        .power_states
+        .iter()
+        .copied()
+        .find(|s| s.zone == AuraPowerState::KEYBOARD_ZONE)
 }
 
 fn aura_supported_modes(state: &orbis_core::aura::AuraState) -> [bool; 13] {
@@ -1301,6 +1401,27 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+
+    #[test]
+    fn power_toggle_changes_only_the_chosen_state() {
+        let current = AuraPowerState {
+            zone: AuraPowerState::KEYBOARD_ZONE,
+            boot: true,
+            awake: true,
+            sleep: false,
+            shutdown: false,
+        };
+        let next = with_power_toggle(current, 2, true).unwrap();
+        assert_eq!(
+            next,
+            AuraPowerState {
+                sleep: true,
+                ..current
+            }
+        );
+        assert!(!with_power_toggle(current, 0, false).unwrap().boot);
+        assert!(with_power_toggle(current, 9, true).is_none());
+    }
     use crate::ClamshellState;
     use orbis_core::aura::{
         AuraBrightness, AuraDirection, AuraEffect, AuraRgb, AuraState, AuraZone,
@@ -1380,6 +1501,7 @@ mod tests {
                             supported_modes: vec![AuraMode::Static],
                             supported_zones: Vec::new(),
                             supported_brightness: vec![AuraBrightness::Med],
+                            power_states: Vec::new(),
                         }),
                         Ok(PanelOverdriveState::Enabled),
                         Ok(BootSoundState::Enabled),
@@ -1973,6 +2095,7 @@ mod tests {
             supported_modes: vec![AuraMode::Static],
             supported_zones: Vec::new(),
             supported_brightness: vec![AuraBrightness::Off, AuraBrightness::Med],
+            power_states: Vec::new(),
         }));
         assert!(state.ready);
         assert_eq!(state.effect, 0);

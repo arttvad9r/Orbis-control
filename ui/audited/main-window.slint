@@ -224,6 +224,12 @@ export component AppWindow inherits Window {
     callback auto-clamshell-requested(bool);
     callback theme-changed(bool);
     callback aura-effect-requested(int, int, int, int, int, int, int, int);
+    in property <bool> aura-power-ready: false;
+    in property <bool> aura-power-boot: false;
+    in property <bool> aura-power-awake: false;
+    in property <bool> aura-power-sleep: false;
+    in property <bool> aura-power-shutdown: false;
+    callback aura-power-requested(int, bool);
     callback start-minimized-changed(bool);
     callback remember-position-changed(bool);
     callback mode-notifications-changed(bool);
@@ -514,6 +520,12 @@ export component AppWindow inherits Window {
                         aura-secondary-green <=> root.aura-secondary-green;
                         aura-secondary-blue <=> root.aura-secondary-blue;
                         aura-effect-requested(a, b, c, d, e, f, g, h) => { root.aura-effect-requested(a, b, c, d, e, f, g, h); }
+                        aura-power-ready: root.aura-power-ready;
+                        aura-power-boot: root.aura-power-boot;
+                        aura-power-awake: root.aura-power-awake;
+                        aura-power-sleep: root.aura-power-sleep;
+                        aura-power-shutdown: root.aura-power-shutdown;
+                        aura-power-requested(which, on) => { root.aura-power-requested(which, on); }
                         aura-static-rgb-requested(a, b, c) => { root.aura-static-rgb-requested(a, b, c); }
                     }
                     if (root.active-section == Section.Display) : DisplaySection {

@@ -10,7 +10,9 @@
 //! - `supported_basic_modes` → array of u32;
 //! - `supported_basic_zones` → array of u32 (empty is valid for single-zone TUF);
 //! - `brightness` → u32 (`LedBrightness`);
-//! - `supported_brightness` → array of u32.
+//! - `supported_brightness` → array of u32;
+//! - `led_power` → struct `(a(ubbbb))` (per-zone boot/awake/sleep/shutdown),
+//!   optional: absent or malformed leaves `power_states` empty.
 //!
 //! Semantics:
 //! - service/path/interface absent → `Unsupported` (service missing →
@@ -22,7 +24,9 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use orbis_core::aura::{AuraBrightness, AuraEffect, AuraMode, AuraRgb, AuraState, AuraZone};
+use orbis_core::aura::{
+    AuraBrightness, AuraEffect, AuraMode, AuraPowerState, AuraRgb, AuraState, AuraZone,
+};
 use orbis_core::diagnostics::DiagnosticEntry;
 use orbis_core::identity::BackendIdentity;
 use zbus::proxy::Builder;
@@ -110,11 +114,35 @@ impl AsusAuraProvider {
         }
     }
 
+    /// Read `LedPower`; older asusd builds and other devices may not have it.
+    async fn get_power_states(&self) -> Result<Vec<AuraPowerState>, ProviderError> {
+        parse_power_states(self.get_property("LedPower").await?)
+    }
+
     /// Прочитать `LedModeData` (struct `(uu(yyy)(yyy)ss)`) в `AuraEffect`.
     async fn get_effect(&self) -> Result<AuraEffect, ProviderError> {
         let value = self.get_property("LedModeData").await?;
         parse_effect(value)
     }
+}
+
+/// Wire shape of `LedPower`: `(a(ubbbb))`.
+type LedPowerWire = (Vec<(u32, bool, bool, bool, bool)>,);
+
+fn parse_power_states(value: Value<'static>) -> Result<Vec<AuraPowerState>, ProviderError> {
+    let (states,) = LedPowerWire::try_from(value).map_err(|error| {
+        ProviderError::Internal(format!("asus aura: LedPower malformed: {error}"))
+    })?;
+    Ok(states
+        .into_iter()
+        .map(|(zone, boot, awake, sleep, shutdown)| AuraPowerState {
+            zone,
+            boot,
+            awake,
+            sleep,
+            shutdown,
+        })
+        .collect())
 }
 
 /// Разобрать `AuraEffect` из wire-структуры `(uu(yyy)(yyy)ss)`.
@@ -294,6 +322,10 @@ impl AuraProvider for AsusAuraProvider {
             .into_iter()
             .map(AuraBrightness::from_u32)
             .collect();
+        let power_states = self.get_power_states().await.unwrap_or_else(|error| {
+            tracing::debug!(%error, "asus aura: LedPower unavailable");
+            Vec::new()
+        });
         Ok(AuraState {
             current_mode,
             current_effect,
@@ -301,6 +333,7 @@ impl AuraProvider for AsusAuraProvider {
             supported_modes,
             supported_zones,
             supported_brightness,
+            power_states,
         })
     }
 }
@@ -358,6 +391,11 @@ mod tests {
         #[zbus(property)]
         async fn supported_brightness(&self) -> Vec<u32> {
             self.supported_brightness.clone()
+        }
+
+        #[zbus(property)]
+        async fn led_power(&self) -> (Vec<(u32, bool, bool, bool, bool)>,) {
+            (vec![(1, true, true, false, false)],)
         }
 
         /// Setters exist only to prove the provider never calls them.
@@ -443,6 +481,16 @@ mod tests {
 
             let state = provider.aura_state().await.expect("state");
             assert_eq!(state.current_mode, AuraMode::Static);
+            assert_eq!(
+                state.power_states,
+                vec![AuraPowerState {
+                    zone: AuraPowerState::KEYBOARD_ZONE,
+                    boot: true,
+                    awake: true,
+                    sleep: false,
+                    shutdown: false,
+                }]
+            );
             assert_eq!(state.current_effect.mode, AuraMode::Static);
             assert_eq!(state.current_effect.zone, AuraZone::None);
             assert_eq!(state.current_effect.speed, AuraSpeed::Med);

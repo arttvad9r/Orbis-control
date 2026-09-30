@@ -299,6 +299,27 @@ pub struct AuraEffect {
     pub direction: AuraDirection,
 }
 
+/// Lighting per power state for one zone (asusd `LedPower` entry).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuraPowerState {
+    /// asusd `PowerZones` wire value (0 logo, 1 keyboard, 2 lightbar, 3 lid,
+    /// 4 rear glow, …); kept raw so unknown zones round-trip unchanged.
+    pub zone: u32,
+    /// Lit while booting.
+    pub boot: bool,
+    /// Lit while the system is running.
+    pub awake: bool,
+    /// Lit while suspended.
+    pub sleep: bool,
+    /// Lit during shutdown.
+    pub shutdown: bool,
+}
+
+impl AuraPowerState {
+    /// asusd `PowerZones::Keyboard`.
+    pub const KEYBOARD_ZONE: u32 = 1;
+}
+
 /// Read-only Aura state snapshot (fresh authoritative read).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuraState {
@@ -315,6 +336,10 @@ pub struct AuraState {
     pub supported_zones: Vec<AuraZone>,
     /// Supported brightness levels (`supported_brightness`).
     pub supported_brightness: Vec<AuraBrightness>,
+    /// Per-power-state lighting (`LedPower`); empty when asusd does not
+    /// expose it.
+    #[serde(default)]
+    pub power_states: Vec<AuraPowerState>,
 }
 
 #[cfg(test)]
@@ -432,6 +457,7 @@ mod tests {
                 AuraBrightness::Med,
                 AuraBrightness::High,
             ],
+            power_states: Vec::new(),
         };
         let json = serde_json::to_string(&state).unwrap();
         let decoded: AuraState = serde_json::from_str(&json).unwrap();

@@ -233,6 +233,9 @@ fn demo_state(component: &AppWindow) {
     component.set_keyboard_brightness(2);
     component.set_aura_state_ready(true);
     component.set_aura_control_ready(true);
+    component.set_aura_power_ready(true);
+    component.set_aura_power_boot(true);
+    component.set_aura_power_awake(true);
     component.set_keyboard_effect(0);
     component.set_keyboard_speed(1);
 

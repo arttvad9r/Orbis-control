@@ -48,6 +48,14 @@ trait HardwareProductControls {
         colour1: (u8, u8, u8),
         colour2: (u8, u8, u8),
     ) -> zbus::Result<AuraEffectWire>;
+    fn set_aura_power(
+        &self,
+        zone: u32,
+        boot: bool,
+        awake: bool,
+        sleep: bool,
+        shutdown: bool,
+    ) -> zbus::Result<(u32, bool, bool, bool, bool)>;
 
     fn aspm_mutation_status(&self) -> zbus::Result<u8>;
     fn aspm_disabled(&self) -> zbus::Result<bool>;
@@ -563,6 +571,40 @@ impl HardwareProductControlClient {
             observed,
             result: ApplyResult::Accepted,
         })
+    }
+
+    /// Set one zone's boot/awake/sleep/shutdown lighting; the daemon confirms
+    /// it by reading asusd back, and this checks the echo once more.
+    pub(crate) async fn set_aura_power(
+        &self,
+        requested: orbis_core::aura::AuraPowerState,
+    ) -> Result<orbis_core::aura::AuraPowerState, ProviderError> {
+        require_supported(self.aura_status().await?, "Aura power states")?;
+        let proxy = self.proxy().await?;
+        let (zone, boot, awake, sleep, shutdown) = timed(
+            "Aura power-state mutation",
+            proxy.set_aura_power(
+                requested.zone,
+                requested.boot,
+                requested.awake,
+                requested.sleep,
+                requested.shutdown,
+            ),
+        )
+        .await?;
+        let observed = orbis_core::aura::AuraPowerState {
+            zone,
+            boot,
+            awake,
+            sleep,
+            shutdown,
+        };
+        if observed != requested {
+            return Err(ProviderError::BackendUnavailable(
+                "Hardware1 Aura power-state read-back mismatch".into(),
+            ));
+        }
+        Ok(observed)
     }
 
     pub(crate) async fn set_aura_effect(

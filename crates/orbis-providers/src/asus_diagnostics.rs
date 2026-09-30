@@ -325,6 +325,7 @@ mod tests {
                 supported_modes: vec![AuraMode::Static],
                 supported_zones: Vec::new(),
                 supported_brightness: vec![AuraBrightness::Off, AuraBrightness::Med],
+                power_states: Vec::new(),
             })
         }
     }

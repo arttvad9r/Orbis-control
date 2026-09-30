@@ -33,7 +33,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
-use orbis_core::aura::{AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraZone};
+use orbis_core::aura::{AuraEffect, AuraMode, AuraPowerState, AuraRgb, AuraSpeed, AuraZone};
 use orbis_providers::error::ProviderError;
 use zbus::Connection;
 
@@ -162,6 +162,43 @@ pub trait AsusdAuraClient: Send + Sync {
     async fn supported_basic_modes(&self) -> Result<Vec<u32>, ProviderError>;
     /// Set `LedModeData` (exactly one mutation).
     async fn set_led_mode_data(&self, effect: AuraEffect) -> Result<(), ProviderError>;
+
+    /// Fresh read `LedPower` (per-zone boot/awake/sleep/shutdown lighting).
+    async fn led_power(&self) -> Result<Vec<AuraPowerState>, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "asusd aura: LedPower not available".into(),
+        ))
+    }
+
+    /// Set `LedPower` (exactly one mutation).
+    async fn set_led_power(&self, _states: Vec<AuraPowerState>) -> Result<(), ProviderError> {
+        Err(ProviderError::Unsupported(
+            "asusd aura: LedPower not available".into(),
+        ))
+    }
+}
+
+/// Wire type of `LedPower`: struct `(a(ubbbb))`.
+type LedPowerWire = (Vec<(u32, bool, bool, bool, bool)>,);
+
+fn power_to_wire(states: &[AuraPowerState]) -> LedPowerWire {
+    (states
+        .iter()
+        .map(|s| (s.zone, s.boot, s.awake, s.sleep, s.shutdown))
+        .collect(),)
+}
+
+fn power_from_wire((states,): LedPowerWire) -> Vec<AuraPowerState> {
+    states
+        .into_iter()
+        .map(|(zone, boot, awake, sleep, shutdown)| AuraPowerState {
+            zone,
+            boot,
+            awake,
+            sleep,
+            shutdown,
+        })
+        .collect()
 }
 
 #[zbus::proxy(
@@ -178,6 +215,12 @@ trait AsusdAura {
 
     #[zbus(property)]
     fn supported_basic_modes(&self) -> zbus::Result<Vec<u32>>;
+
+    #[zbus(property)]
+    fn led_power(&self) -> zbus::Result<LedPowerWire>;
+
+    #[zbus(property)]
+    fn set_led_power(&self, states: LedPowerWire) -> zbus::Result<()>;
 }
 
 /// Production typed client for the asusd Aura backend.
@@ -225,6 +268,22 @@ impl AsusdAuraClient for ZbusAsusdAuraClient {
             .map_err(|error| {
                 ProviderError::Dbus(format!("asusd aura led_mode_data setter: {error}"))
             })
+    }
+
+    async fn led_power(&self) -> Result<Vec<AuraPowerState>, ProviderError> {
+        let wire =
+            self.proxy().await?.led_power().await.map_err(|error| {
+                ProviderError::Dbus(format!("asusd aura led_power read: {error}"))
+            })?;
+        Ok(power_from_wire(wire))
+    }
+
+    async fn set_led_power(&self, states: Vec<AuraPowerState>) -> Result<(), ProviderError> {
+        self.proxy()
+            .await?
+            .set_led_power(power_to_wire(&states))
+            .await
+            .map_err(|error| ProviderError::Dbus(format!("asusd aura led_power setter: {error}")))
     }
 }
 
@@ -349,6 +408,17 @@ pub trait AuraStaticRgbMutationBackend: Send + Sync {
     fn kernel_effect_modes(&self) -> Vec<AuraMode> {
         Vec::new()
     }
+
+    /// Replace one zone's power-state lighting and return the fresh asusd
+    /// read-back of that zone.
+    async fn set_power_state(
+        &self,
+        _requested: AuraPowerState,
+    ) -> Result<AuraPowerState, ProviderError> {
+        Err(ProviderError::Unsupported(
+            "aura power-state lighting unavailable".into(),
+        ))
+    }
 }
 
 /// Internal compatibility backend; it never writes the kernel directly.
@@ -443,6 +513,41 @@ where
         })
     }
 
+    /// Replace one zone of `LedPower`, keeping every other zone as asusd
+    /// reports it, then confirm the zone through a fresh read.
+    pub async fn set_power_state(
+        &self,
+        requested: AuraPowerState,
+    ) -> Result<AuraPowerState, ProviderError> {
+        let mut states = self.asusd.led_power().await?;
+        let Some(slot) = states.iter_mut().find(|s| s.zone == requested.zone) else {
+            return Err(ProviderError::Unsupported(format!(
+                "asus aura: power zone {} not reported by asusd",
+                requested.zone
+            )));
+        };
+        *slot = requested;
+        self.asusd.set_led_power(states).await?;
+        let observed = self
+            .asusd
+            .led_power()
+            .await?
+            .into_iter()
+            .find(|s| s.zone == requested.zone)
+            .ok_or_else(|| {
+                ProviderError::BackendUnavailable(format!(
+                    "asus aura: power zone {} vanished after write",
+                    requested.zone
+                ))
+            })?;
+        if observed != requested {
+            return Err(ProviderError::BackendUnavailable(format!(
+                "asus aura LedPower read-back mismatch: expected={requested:?}, got={observed:?}"
+            )));
+        }
+        Ok(observed)
+    }
+
     /// Validate, perform one asusd setter, then perform a fresh config-level
     /// read-back.
     pub async fn set_static_rgb(
@@ -515,6 +620,13 @@ where
 
     fn mutation_status(&self) -> AuraMutationStatus {
         AuraMutationStatus::Supported
+    }
+
+    async fn set_power_state(
+        &self,
+        requested: AuraPowerState,
+    ) -> Result<AuraPowerState, ProviderError> {
+        AsusdAuraStaticRgbMutationBackend::set_power_state(self, requested).await
     }
 
     fn kernel_effect_modes(&self) -> Vec<AuraMode> {
@@ -593,6 +705,23 @@ pub async fn handle_set_aura_static_rgb(
     }
 }
 
+/// Apply one zone's power-state lighting through Hardware1 with read-back.
+pub async fn handle_set_aura_power(
+    authorizer: &dyn Authorizer,
+    backend: &dyn AuraStaticRgbMutationBackend,
+    requested: AuraPowerState,
+    sender: &str,
+) -> zbus::fdo::Result<AuraPowerState> {
+    authorizer.authorize(sender).await.map_err(|e| match e {
+        AuthorizeError::Denied(msg) => zbus::fdo::Error::AccessDenied(msg),
+        AuthorizeError::Failed(msg) => zbus::fdo::Error::Failed(msg),
+    })?;
+    backend
+        .set_power_state(requested)
+        .await
+        .map_err(provider_error_to_dbus)
+}
+
 /// Apply a typed Aura effect through Hardware1 and require config read-back.
 pub async fn handle_set_aura_effect(
     authorizer: &dyn Authorizer,
@@ -639,6 +768,7 @@ mod tests {
         readback_error: Arc<Mutex<Option<String>>>,
         getter_override: Arc<Mutex<Option<AuraEffect>>>,
         last_set: Arc<Mutex<Option<AuraEffect>>>,
+        power: Arc<Mutex<Vec<AuraPowerState>>>,
     }
 
     impl FakeAsusd {
@@ -651,6 +781,10 @@ mod tests {
                 readback_error: Arc::new(Mutex::new(None)),
                 getter_override: Arc::new(Mutex::new(None)),
                 last_set: Arc::new(Mutex::new(None)),
+                power: Arc::new(Mutex::new(vec![
+                    power(0, true, true, true, true),
+                    power(AuraPowerState::KEYBOARD_ZONE, true, true, false, false),
+                ])),
             }
         }
 
@@ -694,6 +828,56 @@ mod tests {
             *self.effect.lock().unwrap() = effect;
             Ok(())
         }
+
+        async fn led_power(&self) -> Result<Vec<AuraPowerState>, ProviderError> {
+            Ok(self.power.lock().unwrap().clone())
+        }
+
+        async fn set_led_power(&self, states: Vec<AuraPowerState>) -> Result<(), ProviderError> {
+            self.setter_calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(error) = self.setter_error.lock().unwrap().clone() {
+                return Err(ProviderError::Dbus(error));
+            }
+            *self.power.lock().unwrap() = states;
+            Ok(())
+        }
+    }
+
+    fn power(zone: u32, boot: bool, awake: bool, sleep: bool, shutdown: bool) -> AuraPowerState {
+        AuraPowerState {
+            zone,
+            boot,
+            awake,
+            sleep,
+            shutdown,
+        }
+    }
+
+    #[tokio::test]
+    async fn power_state_replaces_only_the_requested_zone_and_reads_back() {
+        let asusd = FakeAsusd::new(static_effect(), vec![0]);
+        let backend = AsusdAuraStaticRgbMutationBackend::new(asusd.clone());
+        let requested = power(AuraPowerState::KEYBOARD_ZONE, false, true, true, false);
+        let observed = backend.set_power_state(requested).await.unwrap();
+        assert_eq!(observed, requested);
+        assert_eq!(asusd.setter_calls(), 1);
+        assert_eq!(
+            *asusd.power.lock().unwrap(),
+            vec![power(0, true, true, true, true), requested],
+            "other zones are written back unchanged"
+        );
+    }
+
+    #[tokio::test]
+    async fn power_state_for_an_unreported_zone_is_unsupported_without_writing() {
+        let asusd = FakeAsusd::new(static_effect(), vec![0]);
+        let backend = AsusdAuraStaticRgbMutationBackend::new(asusd.clone());
+        let error = backend
+            .set_power_state(power(3, true, true, true, true))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ProviderError::Unsupported(_)), "{error:?}");
+        assert_eq!(asusd.setter_calls(), 0);
     }
 
     fn static_effect() -> AuraEffect {

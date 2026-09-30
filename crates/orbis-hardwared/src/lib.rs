@@ -17,7 +17,9 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use orbis_core::action::ApplyResult;
-use orbis_core::aura::{AuraDirection, AuraEffect, AuraMode, AuraRgb, AuraSpeed, AuraZone};
+use orbis_core::aura::{
+    AuraDirection, AuraEffect, AuraMode, AuraPowerState, AuraRgb, AuraSpeed, AuraZone,
+};
 use orbis_core::profile::PerformanceProfile;
 use orbis_providers::asus_gpu_mode::{AsusGpuMode, ProductGpuOutcome};
 use orbis_providers::error::ProviderError;
@@ -1997,6 +1999,46 @@ impl HardwareService {
                 aura::AuraEffectRoute::Asusd => aura::AURA_OUTCOME_CONFIG_CONFIRMED,
                 aura::AuraEffectRoute::KernelDispatch => aura::AURA_OUTCOME_KERNEL_DISPATCHED,
             },
+        ))
+    }
+
+    /// Set which power states (boot, awake, sleep, shutdown) light one zone;
+    /// returns the fresh asusd read-back of that zone.
+    async fn set_aura_power(
+        &self,
+        zone: u32,
+        boot: bool,
+        awake: bool,
+        sleep: bool,
+        shutdown: bool,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<(u32, bool, bool, bool, bool)> {
+        let sender = header
+            .sender()
+            .map(|s| s.to_string())
+            .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
+        let backend = self.aura_backend.as_deref().ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("aura power backend unavailable".into())
+        })?;
+        let observed = aura::handle_set_aura_power(
+            self.aura_authorizer.as_ref(),
+            backend,
+            AuraPowerState {
+                zone,
+                boot,
+                awake,
+                sleep,
+                shutdown,
+            },
+            &sender,
+        )
+        .await?;
+        Ok((
+            observed.zone,
+            observed.boot,
+            observed.awake,
+            observed.sleep,
+            observed.shutdown,
         ))
     }
 

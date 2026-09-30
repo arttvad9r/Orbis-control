@@ -1,5 +1,6 @@
 // Backlight page — keyboard brightness/timeout and Aura effect, speed and color.
 import { ScrollView } from "std-widgets.slint";
+import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { PageHeader, SectionCard, SectionTitle, CardHeader, IconRow, LocalStatus, ChoiceButton, Segmented, FieldRow, Divider, LayoutMetrics, PageSurface } from "../common.slint";
 import { Icon, Icons } from "../../components/icon.slint";
 import { KeyboardPreview } from "../../components/keyboard-preview.slint";
@@ -93,6 +94,12 @@ export component BacklightSection inherits PageSurface {
     in-out property <int> aura-secondary-blue: 0;
     callback aura-static-rgb-requested(int, int, int);
     callback aura-effect-requested(int, int, int, int, int, int, int, int);
+    in property <bool> aura-power-ready: false;
+    in property <bool> aura-power-boot: false;
+    in property <bool> aura-power-awake: false;
+    in property <bool> aura-power-sleep: false;
+    in property <bool> aura-power-shutdown: false;
+    callback aura-power-requested(int, bool);
 
     function request-rgb(r: int, g: int, b: int) {
         root.rgb-red = r;
@@ -394,6 +401,53 @@ export component BacklightSection inherits PageSurface {
                         value: root.edit-blue;
                         disabled: !root.aura-control-ready;
                         changed(v) => { root.set-edit-color(root.edit-red, root.edit-green, v); }
+                    }
+                }
+            }
+
+            if (root.aura-power-ready) : SectionCard {
+                VerticalLayout {
+                    padding: LayoutMetrics.card-padding;
+                    spacing: 0px;
+
+                    CardHeader {
+                        title: "Подсветка по состояниям";
+                        detail: root.aura-control-ready ? "" : "Только чтение";
+                    }
+                    RequestToggleRow {
+                        icon-kind: Icons.rocket;
+                        label: "При загрузке";
+                        description: "Пока загружается система";
+                        checked: root.aura-power-boot;
+                        disabled: !root.aura-control-ready;
+                        toggled(value) => { root.aura-power-requested(0, value); }
+                    }
+                    RequestToggleRow {
+                        separator: true;
+                        icon-kind: Icons.sun;
+                        label: "Во время работы";
+                        description: "Пока система включена";
+                        checked: root.aura-power-awake;
+                        disabled: !root.aura-control-ready;
+                        toggled(value) => { root.aura-power-requested(1, value); }
+                    }
+                    RequestToggleRow {
+                        separator: true;
+                        icon-kind: Icons.moon;
+                        label: "Во сне";
+                        description: "В режиме сна";
+                        checked: root.aura-power-sleep;
+                        disabled: !root.aura-control-ready;
+                        toggled(value) => { root.aura-power-requested(2, value); }
+                    }
+                    RequestToggleRow {
+                        separator: true;
+                        icon-kind: Icons.power;
+                        label: "При выключении";
+                        description: "Пока ноутбук выключается";
+                        checked: root.aura-power-shutdown;
+                        disabled: !root.aura-control-ready;
+                        toggled(value) => { root.aura-power-requested(3, value); }
                     }
                 }
             }
