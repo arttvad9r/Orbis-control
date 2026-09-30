@@ -2871,6 +2871,10 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
                 let _ = app.window().with_winit_window(|winit_window| {
                     let _ = winit_window.drag_window();
                 });
+                // The compositor swallows the release that ends the move;
+                // without this the title bar keeps the pointer grab and the
+                // whole window stops answering clicks.
+                orbis_ui::window_chrome::end_system_move(&app);
             }
         });
     }

@@ -42,12 +42,30 @@ export component TitleBar inherits Rectangle {
     height: LayoutMetrics.titlebar-height;
     background: Palette.titlebar-background;
 
+    // The move is handed to the compositor only once the pointer actually
+    // travels (4 px), so a plain click or double-click on the bar stays a
+    // click. Double-click toggles maximize, as on every desktop.
+    property <length> press-x;
+    property <length> press-y;
+    property <bool> move-armed: false;
     drag-touch := TouchArea {
         pointer-event(event) => {
-            if (event.kind == PointerEventKind.down) {
+            if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                root.press-x = self.mouse-x;
+                root.press-y = self.mouse-y;
+                root.move-armed = true;
+            } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                root.move-armed = false;
+            }
+        }
+        moved => {
+            if (root.move-armed && self.pressed
+                && (Math.abs(self.mouse-x - root.press-x) > 4px || Math.abs(self.mouse-y - root.press-y) > 4px)) {
+                root.move-armed = false;
                 root.drag-started();
             }
         }
+        double-clicked => { root.maximize-requested(); }
     }
 
     HorizontalLayout {
