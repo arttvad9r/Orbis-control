@@ -30,5 +30,10 @@ pub trait CpuTuningBackend: Send + Sync {
     async fn set_epp(&self, preference: EnergyPreference) -> Result<(), ProviderError>;
     async fn set_boost(&self, enabled: bool) -> Result<(), ProviderError>;
     /// All-core Curve Optimizer offset, `-30..=0`.
-    async fn set_curve_optimizer(&self, offset: i32) -> Result<(), ProviderError>;
+    /// `interactive` as for NVIDIA tuning: only a user request may prompt.
+    async fn set_curve_optimizer(
+        &self,
+        offset: i32,
+        interactive: bool,
+    ) -> Result<(), ProviderError>;
 }

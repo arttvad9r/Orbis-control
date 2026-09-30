@@ -59,9 +59,15 @@ trait HardwareProductControls {
     fn set_cpu_boost(&self, enabled: bool) -> zbus::Result<bool>;
     fn curve_optimizer_mutation_status(&self) -> zbus::Result<u8>;
     fn set_curve_optimizer(&self, offset: i32) -> zbus::Result<i32>;
+    /// Same call with ALLOW_INTERACTIVE_AUTHORIZATION: polkit may prompt.
+    #[zbus(name = "SetCurveOptimizer", allow_interactive_auth)]
+    fn set_curve_optimizer_interactive(&self, offset: i32) -> zbus::Result<i32>;
 
     fn nvidia_tuning_mutation_status(&self) -> zbus::Result<u8>;
     fn set_nvidia_tuning(&self, field: u8, value: i32) -> zbus::Result<i32>;
+    /// Same call with ALLOW_INTERACTIVE_AUTHORIZATION: polkit may prompt.
+    #[zbus(name = "SetNvidiaTuning", allow_interactive_auth)]
+    fn set_nvidia_tuning_interactive(&self, field: u8, value: i32) -> zbus::Result<i32>;
 
     fn boot_sound_mutation_status(&self) -> zbus::Result<u8>;
     fn set_boot_sound(&self, enabled: bool) -> zbus::Result<u8>;
@@ -304,14 +310,26 @@ impl HardwareProductControlClient {
         )
     }
 
-    pub(crate) async fn set_curve_optimizer(&self, offset: i32) -> Result<(), ProviderError> {
+    pub(crate) async fn set_curve_optimizer(
+        &self,
+        offset: i32,
+        interactive: bool,
+    ) -> Result<(), ProviderError> {
         require_supported(self.curve_optimizer_status().await?, "Curve Optimizer")?;
         let proxy = self.proxy().await?;
-        let confirmed = timed(
-            "Curve Optimizer mutation",
-            proxy.set_curve_optimizer(offset),
-        )
-        .await?;
+        let confirmed = if interactive {
+            // A password prompt can take a while; no mutation timeout here.
+            proxy
+                .set_curve_optimizer_interactive(offset)
+                .await
+                .map_err(zbus_error_to_provider)?
+        } else {
+            timed(
+                "Curve Optimizer mutation",
+                proxy.set_curve_optimizer(offset),
+            )
+            .await?
+        };
         if confirmed != offset {
             return Err(ProviderError::BackendUnavailable(format!(
                 "Hardware1 Curve Optimizer mismatch: requested={offset}, returned={confirmed}"
@@ -364,14 +382,23 @@ impl HardwareProductControlClient {
         &self,
         field: NvidiaField,
         value: i32,
+        interactive: bool,
     ) -> Result<(), ProviderError> {
         require_supported(self.nvidia_tuning_status().await?, "NVIDIA tuning")?;
         let proxy = self.proxy().await?;
-        let confirmed = timed(
-            "NVIDIA tuning mutation",
-            proxy.set_nvidia_tuning(field.wire(), value),
-        )
-        .await?;
+        let confirmed = if interactive {
+            // A password prompt can take a while; no mutation timeout here.
+            proxy
+                .set_nvidia_tuning_interactive(field.wire(), value)
+                .await
+                .map_err(zbus_error_to_provider)?
+        } else {
+            timed(
+                "NVIDIA tuning mutation",
+                proxy.set_nvidia_tuning(field.wire(), value),
+            )
+            .await?
+        };
         if confirmed != value {
             return Err(ProviderError::BackendUnavailable(format!(
                 "Hardware1 NVIDIA {} read-back mismatch: requested={value}, returned={confirmed}",
@@ -739,8 +766,12 @@ impl CpuTuningBackend for SystemCpuTuning {
         self.client.set_cpu_boost(enabled).await
     }
 
-    async fn set_curve_optimizer(&self, offset: i32) -> Result<(), ProviderError> {
-        self.client.set_curve_optimizer(offset).await?;
+    async fn set_curve_optimizer(
+        &self,
+        offset: i32,
+        interactive: bool,
+    ) -> Result<(), ProviderError> {
+        self.client.set_curve_optimizer(offset, interactive).await?;
         *self.curve_optimizer_applied.lock().unwrap() = Some(offset);
         Ok(())
     }
@@ -790,8 +821,15 @@ impl NvidiaTuningBackend for SystemNvidiaTuning {
         ))
     }
 
-    async fn set(&self, field: NvidiaField, value: i32) -> Result<(), ProviderError> {
-        self.client.set_nvidia_tuning(field, value).await
+    async fn set(
+        &self,
+        field: NvidiaField,
+        value: i32,
+        interactive: bool,
+    ) -> Result<(), ProviderError> {
+        self.client
+            .set_nvidia_tuning(field, value, interactive)
+            .await
     }
 }
 

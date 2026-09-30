@@ -37,14 +37,14 @@
     <description xml:lang="ru">Изменить смещения частот и лимит мощности NVIDIA Orbis Control</description>
     <message>Permission is required to change NVIDIA GPU clock offsets and power limit</message>
     <message xml:lang="ru">Для изменения смещений частот и лимита мощности NVIDIA требуется разрешение</message>
-    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>yes</allow_active></defaults>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin_keep</allow_active></defaults>
   </action>
   <action id="io.github.orbiscontrol.hardware.set-curve-optimizer">
     <description>Change the Orbis Control AMD Curve Optimizer offset</description>
     <description xml:lang="ru">Изменить смещение Curve Optimizer процессора AMD в Orbis Control</description>
     <message>Permission is required to change the processor Curve Optimizer offset</message>
     <message xml:lang="ru">Для изменения смещения Curve Optimizer процессора требуется разрешение</message>
-    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>yes</allow_active></defaults>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin_keep</allow_active></defaults>
   </action>
   <action id="io.github.orbiscontrol.hardware.set-charge-limit">
     <description>Change the Orbis Control battery charge limit</description>

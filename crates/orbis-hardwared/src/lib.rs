@@ -401,6 +401,41 @@ pub enum AuthorizeError {
 pub trait Authorizer: Send + Sync {
     /// Разрешить ли caller (unique sender name на system bus) операцию.
     async fn authorize(&self, sender: &str) -> Result<(), AuthorizeError>;
+
+    /// Как `authorize`, но диалог аутентификации допускается только если
+    /// caller разрешил его флагом D-Bus `ALLOW_INTERACTIVE_AUTHORIZATION`
+    /// (явное действие пользователя). Автоматические повторы настроек флаг
+    /// не ставят и никогда не открывают диалог.
+    async fn authorize_with(&self, sender: &str, interactive: bool) -> Result<(), AuthorizeError> {
+        let _ = interactive;
+        self.authorize(sender).await
+    }
+}
+
+/// Authorizer, который передаёт интерактивность конкретного вызова.
+pub struct CallAuthorizer<'a> {
+    inner: &'a dyn Authorizer,
+    interactive: bool,
+}
+
+impl<'a> CallAuthorizer<'a> {
+    /// Интерактивность берётся из флагов входящего сообщения.
+    pub fn for_call(inner: &'a dyn Authorizer, header: &zbus::message::Header<'_>) -> Self {
+        Self {
+            inner,
+            interactive: header
+                .primary()
+                .flags()
+                .contains(zbus::message::Flags::AllowInteractiveAuth),
+        }
+    }
+}
+
+#[async_trait]
+impl Authorizer for CallAuthorizer<'_> {
+    async fn authorize(&self, sender: &str) -> Result<(), AuthorizeError> {
+        self.inner.authorize_with(sender, self.interactive).await
+    }
 }
 
 /// Production polkit authorizer.
@@ -427,6 +462,10 @@ impl PolkitAuthorizer {
 #[async_trait]
 impl Authorizer for PolkitAuthorizer {
     async fn authorize(&self, sender: &str) -> Result<(), AuthorizeError> {
+        self.authorize_with(sender, true).await
+    }
+
+    async fn authorize_with(&self, sender: &str, interactive: bool) -> Result<(), AuthorizeError> {
         let proxy = zbus_polkit::policykit1::AuthorityProxy::new(&self.connection)
             .await
             .map_err(|e| AuthorizeError::Failed(format!("polkit proxy: {e}")))?;
@@ -448,7 +487,12 @@ impl Authorizer for PolkitAuthorizer {
                 &subject,
                 self.action,
                 &std::collections::HashMap::new(),
-                zbus_polkit::policykit1::CheckAuthorizationFlags::AllowUserInteraction.into(),
+                {
+                    let allow: enumflags2::BitFlags<_> =
+                        zbus_polkit::policykit1::CheckAuthorizationFlags::AllowUserInteraction
+                            .into();
+                    if interactive { allow } else { allow & !allow }
+                },
                 "",
             )
             .await
@@ -1456,7 +1500,7 @@ impl HardwareService {
             zbus::fdo::Error::InvalidArgs(format!("hardwared: неизвестное поле NVIDIA {field}"))
         })?;
         handle_set_nvidia_tuning(
-            self.nvidia_tuning_authorizer.as_ref(),
+            &CallAuthorizer::for_call(self.nvidia_tuning_authorizer.as_ref(), &header),
             std::sync::Arc::new(orbis_providers::nvidia_tuning::NvmlDriver),
             field,
             value,
@@ -1481,7 +1525,7 @@ impl HardwareService {
             .map(|s| s.to_string())
             .ok_or_else(|| zbus::fdo::Error::Failed("hardwared: sender отсутствует".into()))?;
         handle_set_curve_optimizer(
-            self.curve_optimizer_authorizer.as_ref(),
+            &CallAuthorizer::for_call(self.curve_optimizer_authorizer.as_ref(), &header),
             std::sync::Arc::new(orbis_providers::amd_tuning::SystemRyzenAdj),
             offset,
             &sender,
@@ -3243,5 +3287,57 @@ mod tests {
                 "policy файл не содержит action '{action}'"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod call_authorizer_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct Recording(Mutex<Vec<bool>>);
+
+    #[async_trait]
+    impl Authorizer for Recording {
+        async fn authorize(&self, sender: &str) -> Result<(), AuthorizeError> {
+            self.authorize_with(sender, true).await
+        }
+        async fn authorize_with(
+            &self,
+            _sender: &str,
+            interactive: bool,
+        ) -> Result<(), AuthorizeError> {
+            self.0.lock().unwrap().push(interactive);
+            Ok(())
+        }
+    }
+
+    fn call(interactive: bool) -> zbus::Message {
+        let builder =
+            zbus::Message::method_call("/io/github/orbiscontrol/Hardware1", "SetNvidiaTuning")
+                .unwrap();
+        let builder = if interactive {
+            builder
+                .with_flags(zbus::message::Flags::AllowInteractiveAuth)
+                .unwrap()
+        } else {
+            builder
+        };
+        builder.build(&()).unwrap()
+    }
+
+    /// Only a caller that set ALLOW_INTERACTIVE_AUTHORIZATION (an explicit user
+    /// action) may get a polkit prompt; automatic replays never do.
+    #[test]
+    fn interactivity_follows_the_message_flag() {
+        let recording = Recording::default();
+        for interactive in [true, false] {
+            let message = call(interactive);
+            let header = message.header();
+            zbus::block_on(CallAuthorizer::for_call(&recording, &header).authorize(":1.7"))
+                .unwrap();
+        }
+        assert_eq!(*recording.0.lock().unwrap(), vec![true, false]);
     }
 }

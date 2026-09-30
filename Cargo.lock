@@ -3146,6 +3146,7 @@ name = "orbis-hardwared"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "enumflags2",
  "orbis-core",
  "orbis-providers",
  "serde",

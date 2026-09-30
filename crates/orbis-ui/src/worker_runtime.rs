@@ -669,7 +669,7 @@ async fn observe_profile_limits<G, B, R, F>(
             }
         }
         if let (false, Some(offset)) = (failed, replay.curve_optimizer) {
-            if let Err(error) = backend.set_curve_optimizer(offset).await {
+            if let Err(error) = backend.set_curve_optimizer(offset, false).await {
                 cpu_error = Some(format!("Curve Optimizer: {error}"));
                 failed = true;
             }
@@ -711,7 +711,7 @@ async fn replay_nvidia<F>(
     }
     let mut error = None;
     for (field, value) in values {
-        if let Err(failure) = backend.set(*field, *value).await {
+        if let Err(failure) = backend.set(*field, *value, false).await {
             error = Some(format!("NVIDIA, {}: {failure}", field.label()));
             break;
         }
@@ -967,7 +967,7 @@ async fn run_worker_inner<G, B, R, F>(
 
         if let WorkerCommand::SetNvidiaTuning { field, value } = command {
             let error = match tuning.nvidia {
-                Some(backend) => match backend.set(field, value).await {
+                Some(backend) => match backend.set(field, value, true).await {
                     Ok(()) => {
                         profile_limits.record_nvidia(field, value);
                         None
@@ -1128,7 +1128,7 @@ async fn run_worker_inner<G, B, R, F>(
             }
             WorkerCommand::SetCpuCurveOptimizer(offset) => {
                 let error = match cpu_tuning.as_deref() {
-                    Some(backend) => match backend.set_curve_optimizer(offset).await {
+                    Some(backend) => match backend.set_curve_optimizer(offset, true).await {
                         Ok(()) => {
                             profile_limits.record_curve_optimizer(offset);
                             None
@@ -2196,7 +2196,11 @@ mod tests {
             self.calls.lock().unwrap().push(format!("boost={enabled}"));
             Ok(())
         }
-        async fn set_curve_optimizer(&self, offset: i32) -> Result<(), ProviderError> {
+        async fn set_curve_optimizer(
+            &self,
+            offset: i32,
+            _interactive: bool,
+        ) -> Result<(), ProviderError> {
             self.calls.lock().unwrap().push(format!("co={offset}"));
             Ok(())
         }
@@ -2317,7 +2321,12 @@ mod tests {
         async fn availability(&self) -> NvidiaAvailability {
             self.availability
         }
-        async fn set(&self, field: NvidiaField, value: i32) -> Result<(), ProviderError> {
+        async fn set(
+            &self,
+            field: NvidiaField,
+            value: i32,
+            _interactive: bool,
+        ) -> Result<(), ProviderError> {
             self.calls
                 .lock()
                 .unwrap()
