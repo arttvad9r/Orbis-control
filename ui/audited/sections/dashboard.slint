@@ -2,7 +2,9 @@
 // telemetry with sparklines and three quick cards (fans, display, actions).
 import { ScrollView } from "std-widgets.slint";
 import { UiState, ChargeLimitState, PerformanceHwState } from "../model.slint";
-import { SectionCard, StatusPill, LocalStatus, LayoutMetrics } from "../common.slint";
+import { SectionCard, StatusPill, LocalStatus, Segmented, LayoutMetrics, PageSurface } from "../common.slint";
+import { Ripple } from "../../components/interaction.slint";
+import { Motion } from "../../themes/tokens.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { MetricCard } from "../../components/metric-card.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
@@ -63,16 +65,26 @@ component ActionRow inherits Rectangle {
     height: 46px;
     border-radius: 10px;
     border-width: 1px;
-    border-color: Palette.border-default;
+    border-color: root.clickable && touch.has-hover ? Palette.border-strong : Palette.border-default;
     background: root.clickable && touch.has-hover ? Palette.surface-hover : Palette.surface-raised;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-action-default => { if (root.clickable) { root.clicked(); } }
+    animate background, border-color { duration: Motion.fast; }
 
+    ripple := Ripple { radius: parent.border-radius; tint: Palette.accent-default; strength: 0.16; }
     touch := TouchArea {
         enabled: root.clickable;
+        mouse-cursor: root.clickable ? MouseCursor.pointer : MouseCursor.default;
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down) { ripple.press(self.mouse-x, self.mouse-y); }
+            else if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) { ripple.release(); }
+        }
         clicked => { root.clicked(); }
     }
     HorizontalLayout {
         padding-left: 14px;
-        padding-right: 10px;
+        padding-right: 8px;
         spacing: 12px;
         Icon { width: 22px; height: 22px; y: (parent.height - self.height) / 2; kind: root.icon-kind; tint: Palette.text-primary; }
         Text {
@@ -88,30 +100,7 @@ component ActionRow inherits Rectangle {
     }
 }
 
-component MiniChoice inherits Rectangle {
-    in property <string> label;
-    in property <bool> selected;
-    in property <bool> disabled;
-    callback clicked;
-    width: 32px;
-    height: 28px;
-    y: 9px;
-    border-radius: 8px;
-    background: root.selected ? Palette.accent-fill
-        : touch.has-hover && !root.disabled ? Palette.surface-hover
-        : Palette.surface-muted;
-    Text {
-        text: root.label;
-        font-size: 12px;
-        font-weight: root.selected ? 650 : 500;
-        color: root.selected ? Palette.text-on-accent : root.disabled ? Palette.text-disabled : Palette.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    touch := TouchArea { enabled: !root.disabled; clicked => { root.clicked(); } }
-}
-
-export component DashboardSection inherits Rectangle {
+export component DashboardSection inherits PageSurface {
     in property <UiState> ui-state;
     in property <string> device-name: "";
     in property <string> device-board: "";
@@ -372,8 +361,9 @@ export component DashboardSection inherits Rectangle {
                                 width: 30px;
                                 border-radius: 8px;
                                 background: fan-touch.has-hover ? Palette.surface-hover : transparent;
+                                animate background { duration: Motion.fast; }
                                 Icon { width: 18px; height: 18px; x: 6px; y: 6px; kind: Icons.chevron-right; tint: Palette.text-secondary; }
-                                fan-touch := TouchArea { clicked => { root.cooling-open-requested(); } }
+                                fan-touch := TouchArea { mouse-cursor: pointer; clicked => { root.cooling-open-requested(); } }
                             }
                         }
                         HorizontalLayout {
@@ -423,6 +413,8 @@ export component DashboardSection inherits Rectangle {
                 SectionCard {
                     width: (parent.width - 2 * LayoutMetrics.page-gap) * 0.27;
                     clip: true;
+                    border-color: display-touch.has-hover ? Palette.accent-border.transparentize(0.4) : Palette.border-default;
+                    animate border-color { duration: Motion.fast; }
                     Image {
                         x: parent.width * 0.18;
                         y: parent.height * 0.34;
@@ -432,7 +424,7 @@ export component DashboardSection inherits Rectangle {
                         image-fit: fill;
                         opacity: 0.8;
                     }
-                    display-touch := TouchArea { clicked => { root.display-open-requested(); } }
+                    display-touch := TouchArea { mouse-cursor: pointer; clicked => { root.display-open-requested(); } }
                     VerticalLayout {
                         padding: LayoutMetrics.card-padding;
                         spacing: 14px;
@@ -491,14 +483,14 @@ export component DashboardSection inherits Rectangle {
                         ActionRow {
                             icon-kind: Icons.keyboard;
                             title: root.keyboard-mutation-error != "" ? root.keyboard-mutation-error : "Подсветка";
-                            if (root.keyboard-state-ready) : HorizontalLayout {
-                                spacing: 4px;
-                                for level in 4: MiniChoice {
-                                    label: level == 0 ? "—" : level + "";
-                                    selected: root.keyboard-brightness == level;
-                                    disabled: !root.keyboard-control-ready;
-                                    clicked => { root.keyboard-brightness-requested(level); }
-                                }
+                            if (root.keyboard-state-ready) : Segmented {
+                                width: 148px;
+                                height: 32px;
+                                y: 7px;
+                                options: ["—", "1", "2", "3"];
+                                selected: root.keyboard-brightness;
+                                disabled: !root.keyboard-control-ready;
+                                changed(level) => { root.keyboard-brightness-requested(level); }
                             }
                             if (!root.keyboard-state-ready) : Text {
                                 text: "Чтение…";

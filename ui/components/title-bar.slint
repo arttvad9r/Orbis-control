@@ -4,6 +4,7 @@ import { Palette } from "../themes/dark.slint";
 import { LayoutMetrics } from "../audited/common.slint";
 import { AppMark } from "app-mark.slint";
 import { Icon, Icons } from "icon.slint";
+import { Motion } from "../themes/tokens.slint";
 
 component WindowButton inherits Rectangle {
     in property <int> icon-kind;
@@ -13,8 +14,10 @@ component WindowButton inherits Rectangle {
     width: 50px;
     height: LayoutMetrics.titlebar-height;
     background: btn-touch.has-hover
-        ? (root.danger ? Palette.error : Palette.surface-hover)
+        ? (root.danger ? (btn-touch.pressed ? Palette.error.darker(0.15) : Palette.error) : (btn-touch.pressed ? Palette.surface-pressed : Palette.surface-hover))
         : transparent;
+    accessible-role: button;
+    animate background { duration: Motion.fast; }
 
     Icon {
         width: 20px;
@@ -23,6 +26,7 @@ component WindowButton inherits Rectangle {
         y: (parent.height - self.height) / 2;
         kind: root.icon-kind;
         tint: btn-touch.has-hover && root.danger ? Palette.text-on-accent : Palette.text-primary;
+        animate tint { duration: Motion.fast; }
     }
     btn-touch := TouchArea { clicked => { root.clicked(); } }
 }
@@ -79,9 +83,9 @@ export component TitleBar inherits Rectangle {
 
         Rectangle { horizontal-stretch: 1; background: transparent; }
 
-        WindowButton { icon-kind: Icons.minus; clicked => { root.minimize-requested(); } }
-        WindowButton { icon-kind: Icons.maximize; clicked => { root.maximize-requested(); } }
-        WindowButton { icon-kind: Icons.close; danger: true; clicked => { root.close-requested(); } }
+        WindowButton { accessible-label: "Свернуть"; icon-kind: Icons.minus; clicked => { root.minimize-requested(); } }
+        WindowButton { accessible-label: "Развернуть"; icon-kind: Icons.maximize; clicked => { root.maximize-requested(); } }
+        WindowButton { accessible-label: "Закрыть"; icon-kind: Icons.close; danger: true; clicked => { root.close-requested(); } }
     }
 
 }

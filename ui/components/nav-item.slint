@@ -1,8 +1,11 @@
-// Sidebar navigation item: large line icon, title and a one/two-line hint.
-// The active row is a deep-blue gradient pill with a bright hairline border
-// (docs/references/orbis-visual-2026-09-24/).
+// Sidebar navigation item: large line icon, title and a one-line hint.
+// Selection fades in a deep-blue gradient pill while a short accent bar
+// grows at the leading edge (Fluent 2 navigation pattern); hover and press
+// are animated state layers with a ripple.
 import { Icon } from "icon.slint";
+import { Ripple, FocusRing } from "interaction.slint";
 import { Palette } from "../themes/dark.slint";
+import { Motion } from "../themes/tokens.slint";
 
 export component NavItem inherits Rectangle {
     in property <string> label;
@@ -18,11 +21,39 @@ export component NavItem inherits Rectangle {
     min-height: root.sublabel == "" ? 48px : 56px;
     vertical-stretch: 0;
     border-radius: 10px;
-    border-width: root.selected ? 1px : 0px;
-    border-color: Palette.accent-border.transparentize(0.35);
-    background: root.selected ? @linear-gradient(180deg, Palette.nav-selected-top 0%, Palette.nav-selected-bottom 100%)
-        : touch.has-hover ? Palette.surface-hover.transparentize(0.3)
-        : transparent;
+    background: transparent;
+    accessible-role: tab;
+    accessible-label: root.label;
+    accessible-description: root.sublabel;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.clicked(); }
+
+    // Hover state layer.
+    Rectangle {
+        border-radius: parent.border-radius;
+        background: Palette.surface-hover.transparentize(touch.has-hover && !root.selected ? 0.25 : 1);
+        animate background { duration: Motion.fast; }
+    }
+    // Selected pill.
+    Rectangle {
+        border-radius: parent.border-radius;
+        border-width: 1px;
+        border-color: Palette.accent-border.transparentize(0.35);
+        background: Palette.nav-selected-top.mix(Palette.nav-selected-bottom, 0.5);
+        opacity: root.selected ? 1 : 0;
+        animate opacity { duration: Motion.normal; easing: ease-out; }
+    }
+    ripple := Ripple { radius: parent.border-radius; tint: #FFFFFF; strength: 0.14; }
+    // Leading indicator bar.
+    Rectangle {
+        x: 4px;
+        width: 3px;
+        height: root.selected ? 22px : 0px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 1.5px;
+        background: #FFFFFF;
+        animate height { duration: Motion.slow; easing: cubic-bezier(0.2, 0, 0, 1); }
+    }
 
     Icon {
         x: root.row-inset;
@@ -30,7 +61,8 @@ export component NavItem inherits Rectangle {
         width: root.icon-size;
         height: root.icon-size;
         kind: root.icon-kind;
-        tint: root.selected ? Palette.text-on-accent : Palette.text-primary.transparentize(0.1);
+        tint: root.selected ? Palette.text-on-accent : touch.has-hover ? Palette.text-primary : Palette.text-primary.transparentize(0.12);
+        animate tint { duration: Motion.fast; }
     }
 
     VerticalLayout {
@@ -47,14 +79,31 @@ export component NavItem inherits Rectangle {
             font-weight: root.selected ? 600 : 500;
             color: root.selected ? Palette.text-on-accent : Palette.text-primary;
             overflow: elide;
+            animate color { duration: Motion.fast; }
         }
         if (root.sublabel != "") : Text {
             text: root.sublabel;
             font-size: 11.5px;
             color: root.selected ? Palette.text-on-accent.transparentize(0.18) : Palette.text-secondary;
             overflow: elide;
+            animate color { duration: Motion.fast; }
         }
     }
 
-    touch := TouchArea { clicked => { root.clicked(); } }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down) { ripple.press(self.mouse-x, self.mouse-y); }
+            else if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) { ripple.release(); }
+        }
+        clicked => { root.clicked(); }
+    }
+    focus := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+    FocusRing { shown: focus.has-focus; }
 }

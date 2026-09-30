@@ -1,11 +1,11 @@
 // Settings page — appearance, startup and window behavior.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, CardHeader, IconRow, ActionButton, ChoiceButton, FieldRow, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, CardHeader, IconRow, ActionButton, ChoiceButton, Segmented, FieldRow, LayoutMetrics, PageSurface } from "../common.slint";
 import { Icon, Icons } from "../../components/icon.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { Palette, ThemeState, ThemeMode } from "../../themes/dark.slint";
 
-export component SettingsSection inherits Rectangle {
+export component SettingsSection inherits PageSurface {
     callback theme-changed(bool);
     callback startup-changed(bool);
     in-out property <bool> startup: false;
@@ -96,17 +96,13 @@ export component SettingsSection inherits Rectangle {
                                 icon-kind: Icons.moon;
                                 title: "Тема";
                                 label-width: 110px;
-                                ChoiceButton {
-                                    min-width: 0px;
-                                    label: "Тёмная";
-                                    selected: ThemeState.mode == ThemeMode.Dark;
-                                    clicked => { ThemeState.mode = ThemeMode.Dark; root.theme-changed(false); }
-                                }
-                                ChoiceButton {
-                                    min-width: 0px;
-                                    label: "Светлая";
-                                    selected: ThemeState.mode == ThemeMode.Light;
-                                    clicked => { ThemeState.mode = ThemeMode.Light; root.theme-changed(true); }
+                                Segmented {
+                                    options: ["Тёмная", "Светлая"];
+                                    selected: ThemeState.mode == ThemeMode.Light ? 1 : 0;
+                                    changed(i) => {
+                                        ThemeState.mode = i == 1 ? ThemeMode.Light : ThemeMode.Dark;
+                                        root.theme-changed(i == 1);
+                                    }
                                 }
                             }
                         }

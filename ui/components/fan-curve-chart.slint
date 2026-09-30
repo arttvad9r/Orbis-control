@@ -3,6 +3,7 @@
 // the production software fallback share the same visual result.
 import { FanCurveHwState } from "../audited/model.slint";
 import { Palette } from "../themes/dark.slint";
+import { Motion } from "../themes/tokens.slint";
 
 component GraphPoint inherits Rectangle {
     in property <int> index;
@@ -18,18 +19,36 @@ component GraphPoint inherits Rectangle {
     width: 18px;
     background: transparent;
 
+    property <bool> hot: (drag.has-hover || root.active) && root.editable;
+    property <length> knob: root.active ? 20px : root.hot ? 18px : 14px;
+    property <length> center-y: (1 - Math.min(Math.max(root.shown / 255, 0), 1)) * (root.height - 16px) + 5px;
+
+    // Hover halo.
     Rectangle {
-        y: (1 - Math.min(Math.max(root.shown / 255, 0), 1)) * (parent.height - 16px) - 2px;
-        x: 2px;
-        width: 14px;
-        height: 14px;
-        border-radius: 7px;
+        width: 30px;
+        height: 30px;
+        x: (parent.width - self.width) / 2;
+        y: root.center-y - self.height / 2;
+        border-radius: 15px;
+        background: root.accent.transparentize(root.hot ? 0.8 : 1);
+        animate background { duration: Motion.fast; }
+    }
+    Rectangle {
+        width: root.knob;
+        height: root.knob;
+        x: (parent.width - self.width) / 2;
+        y: root.center-y - self.height / 2;
+        border-radius: self.width / 2;
         border-width: 3px;
         border-color: root.accent;
         background: Palette.surface-muted;
+        animate width, height { duration: Motion.fast; easing: ease-out; }
         Rectangle {
-            x: 3px; y: 3px; width: 8px; height: 8px;
-            border-radius: 4px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 6px;
+            height: self.width;
+            border-radius: self.width / 2;
             background: #FFFFFF;
         }
     }
@@ -54,6 +73,7 @@ component GraphPoint inherits Rectangle {
     }
 
     drag := TouchArea {
+        mouse-cursor: root.editable ? MouseCursor.grab : MouseCursor.default;
         width: 30px;
         x: (parent.width - self.width) / 2;
         enabled: root.editable;

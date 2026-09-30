@@ -1,6 +1,7 @@
 // Value slider with an authoritative external value. Dragging previews locally;
 // changed() is emitted once on release.
 import { Palette } from "../themes/dark.slint";
+import { Motion } from "../themes/tokens.slint";
 
 export component ValueSlider inherits Rectangle {
     in property <int> min: 40;
@@ -102,6 +103,8 @@ export component ValueSlider inherits Rectangle {
             min-width: 64px;
             background: transparent;
 
+            property <bool> hot: (touch.has-hover || root.gesture-active) && !root.disabled;
+
             track := Rectangle {
                 y: (parent.height - self.height) / 2;
                 width: parent.width;
@@ -111,33 +114,74 @@ export component ValueSlider inherits Rectangle {
 
                 Rectangle {
                     x: 0px;
-                    width: 9px + (parent.width - 18px) * root.frac;
+                    width: root.frac * (track.width - 20px) + 10px;
                     height: 100%;
                     border-radius: 3px;
-                    background: root.disabled ? Palette.text-disabled : Palette.accent-fill;
+                    background: root.disabled ? Palette.text-disabled
+                        : Palette.accent-fill;
+                    animate width { duration: root.gesture-active ? 0ms : Motion.normal; easing: cubic-bezier(0.2, 0, 0, 1); }
                 }
             }
 
+            // Hover / drag halo.
             Rectangle {
-                width: 18px;
-                height: 18px;
-                x: root.frac * (parent.width - 18px);
-                y: (parent.height - 18px) / 2;
-                border-radius: 9px;
-                background: root.disabled ? Palette.text-disabled : Palette.accent-fill;
-                border-width: focus-scope.has-focus ? 2px : 0px;
-                border-color: Palette.text-on-accent;
-                Rectangle {
-                    width: 8px;
-                    height: 8px;
-                    x: 5px;
-                    y: 5px;
-                    border-radius: 4px;
-                    background: Palette.text-on-accent;
+                width: 38px;
+                height: 38px;
+                x: thumb.x + thumb.width / 2 - self.width / 2;
+                y: (parent.height - self.height) / 2;
+                border-radius: 19px;
+                background: Palette.accent-default.transparentize(parent.hot ? (root.gesture-active ? 0.72 : 0.84) : 1);
+                animate background { duration: Motion.fast; }
+            }
+
+            thumb := Rectangle {
+                width: root.gesture-active && !root.keyboard-active ? 24px : 20px;
+                height: self.width;
+                x: root.frac * (parent.width - 20px) + 10px - self.width / 2;
+                y: (parent.height - self.height) / 2;
+                border-radius: self.width / 2;
+                background: root.disabled ? Palette.text-disabled : #FFFFFF;
+                border-width: 5px;
+                border-color: root.disabled ? Palette.surface-disabled : Palette.accent-fill;
+                animate width { duration: Motion.fast; easing: ease-out; }
+                animate x { duration: root.gesture-active ? 0ms : Motion.normal; easing: cubic-bezier(0.2, 0, 0, 1); }
+            }
+            // Keyboard focus ring around the thumb.
+            Rectangle {
+                width: thumb.width + 8px;
+                height: self.width;
+                x: thumb.x - 4px;
+                y: thumb.y - 4px;
+                border-radius: self.width / 2;
+                border-width: 2px;
+                border-color: Palette.accent-default;
+                background: transparent;
+                opacity: focus-scope.has-focus && root.keyboard-active ? 1 : 0;
+                animate opacity { duration: Motion.fast; }
+            }
+
+            // Value bubble while dragging (Material 3 value indicator).
+            Rectangle {
+                width: 48px;
+                height: 26px;
+                x: thumb.x + thumb.width / 2 - self.width / 2;
+                y: thumb.y - self.height - 8px;
+                border-radius: 8px;
+                background: Palette.accent-fill;
+                opacity: root.gesture-active ? 1 : 0;
+                animate opacity { duration: Motion.fast; }
+                Text {
+                    text: round(root.internal-value) + (root.unit == "" ? "" : root.unit == "%" ? "%" : " " + root.unit);
+                    font-size: 12px;
+                    font-weight: 650;
+                    color: Palette.text-on-accent;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
                 }
             }
 
             touch := TouchArea {
+                mouse-cursor: pointer;
                 width: parent.width;
                 height: 34px;
                 y: (parent.height - 34px) / 2;
@@ -175,8 +219,9 @@ export component ValueSlider inherits Rectangle {
             y: (parent.height - self.height) / 2;
             border-radius: 10px;
             border-width: 1px;
-            border-color: Palette.border-default;
+            border-color: root.gesture-active ? Palette.accent-border : Palette.border-default;
             background: Palette.surface-raised;
+            animate border-color { duration: Motion.fast; }
             Text {
                 text: round(root.internal-value) + (root.unit == "" ? "" : " " + root.unit);
                 font-size: 13.5px;

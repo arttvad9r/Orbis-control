@@ -1,5 +1,6 @@
 // Renderer-independent numeric and option controls used across product pages.
 import { Palette } from "../themes/dark.slint";
+import { Motion } from "../themes/tokens.slint";
 
 component StepGlyphButton inherits Rectangle {
     in property <string> glyph;
@@ -12,9 +13,10 @@ component StepGlyphButton inherits Rectangle {
     border-width: 1px;
     border-color: Palette.border-default;
     background: root.disabled ? Palette.surface-disabled
-        : touch.pressed ? Palette.surface-pressed
+        : touch.pressed ? Palette.accent-fill.transparentize(0.6)
         : touch.has-hover ? Palette.surface-hover
         : Palette.surface-raised;
+    animate background { duration: Motion.fast; }
     Text {
         text: root.glyph;
         font-size: 13px;

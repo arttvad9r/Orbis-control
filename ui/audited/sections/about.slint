@@ -1,11 +1,11 @@
 // About page — product identity, scope and version.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, CardHeader, IconBadge, InfoRow, ActionButton, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, CardHeader, IconBadge, InfoRow, ActionButton, LayoutMetrics, PageSurface } from "../common.slint";
 import { Icons } from "../../components/icon.slint";
 import { AppMark } from "../../components/app-mark.slint";
 import { Palette } from "../../themes/dark.slint";
 
-export component AboutSection inherits Rectangle {
+export component AboutSection inherits PageSurface {
     in property <string> version: "0.0.0";
     in property <string> update-status: "";
     in property <bool> update-problem: false;

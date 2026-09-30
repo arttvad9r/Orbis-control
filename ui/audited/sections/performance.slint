@@ -4,7 +4,7 @@
 // the backend's real unit; no invented CPU-boost entry exists.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, PerformanceHwState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, CardHeader, ActionButton, ChoiceButton, FieldRow, Divider, LocalStatus, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, CardHeader, ActionButton, ChoiceButton, Segmented, FieldRow, Divider, LocalStatus, LayoutMetrics, PageSurface } from "../common.slint";
 import { Icon, Icons } from "../../components/icon.slint";
 import { TempChart } from "../../components/temp-chart.slint";
 import { ModeCard } from "../../components/mode-card.slint";
@@ -50,7 +50,7 @@ export component LimitRow inherits Rectangle {
     }
 }
 
-export component PerformanceSection inherits Rectangle {
+export component PerformanceSection inherits PageSurface {
     in property <UiState> ui-state;
     callback perf-clicked(int);
     callback power-limit-changed(int, int);
@@ -297,12 +297,11 @@ export component PerformanceSection inherits Rectangle {
                         if (root.cpu-epp-supported) : VerticalLayout {
                             spacing: 8px;
                             Text { text: "Энергорежим (EPP)"; font-size: 13.5px; color: Palette.text-secondary; }
-                            HorizontalLayout {
-                                spacing: 6px;
-                                ChoiceButton { min-width: 0px; label: "Скорость"; selected: root.cpu-epp == 1; disabled: !root.cpu-epp-writable; clicked => { root.cpu-epp-requested(1); } }
-                                ChoiceButton { min-width: 0px; label: "Баланс+"; selected: root.cpu-epp == 2; disabled: !root.cpu-epp-writable; clicked => { root.cpu-epp-requested(2); } }
-                                ChoiceButton { min-width: 0px; label: "Баланс−"; selected: root.cpu-epp == 3; disabled: !root.cpu-epp-writable; clicked => { root.cpu-epp-requested(3); } }
-                                ChoiceButton { min-width: 0px; label: "Экономия"; selected: root.cpu-epp == 4; disabled: !root.cpu-epp-writable; clicked => { root.cpu-epp-requested(4); } }
+                            Segmented {
+                                options: ["Скорость", "Баланс+", "Баланс−", "Экономия"];
+                                selected: root.cpu-epp >= 1 && root.cpu-epp <= 4 ? root.cpu-epp - 1 : -1;
+                                disabled: !root.cpu-epp-writable;
+                                changed(i) => { root.cpu-epp-requested(i + 1); }
                             }
                         }
                         if (root.cpu-boost-known) : RequestToggleRow {
@@ -404,17 +403,19 @@ export component PerformanceSection inherits Rectangle {
                         spacing: 8px;
                             FieldRow {
                                 label: "От сети";
-                                ChoiceButton { label: "Не менять"; selected: root.power-rules-ac == 0; clicked => { root.power-rules-profile-requested(true, 0); } }
-                                ChoiceButton { label: "Тихий"; selected: root.power-rules-ac == 1; clicked => { root.power-rules-profile-requested(true, 1); } }
-                                ChoiceButton { label: "Баланс"; selected: root.power-rules-ac == 2; clicked => { root.power-rules-profile-requested(true, 2); } }
-                                ChoiceButton { label: "Турбо"; selected: root.power-rules-ac == 3; clicked => { root.power-rules-profile-requested(true, 3); } }
+                                Segmented {
+                                    options: ["Не менять", "Тихий", "Баланс", "Турбо"];
+                                    selected: root.power-rules-ac;
+                                    changed(i) => { root.power-rules-profile-requested(true, i); }
+                                }
                             }
                             FieldRow {
                                 label: "От батареи";
-                                ChoiceButton { label: "Не менять"; selected: root.power-rules-battery == 0; clicked => { root.power-rules-profile-requested(false, 0); } }
-                                ChoiceButton { label: "Тихий"; selected: root.power-rules-battery == 1; clicked => { root.power-rules-profile-requested(false, 1); } }
-                                ChoiceButton { label: "Баланс"; selected: root.power-rules-battery == 2; clicked => { root.power-rules-profile-requested(false, 2); } }
-                                ChoiceButton { label: "Турбо"; selected: root.power-rules-battery == 3; clicked => { root.power-rules-profile-requested(false, 3); } }
+                                Segmented {
+                                    options: ["Не менять", "Тихий", "Баланс", "Турбо"];
+                                    selected: root.power-rules-battery;
+                                    changed(i) => { root.power-rules-profile-requested(false, i); }
+                                }
                             }
                     }
                     if (root.power-rules-error != "") : LocalStatus {

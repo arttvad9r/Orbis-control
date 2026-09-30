@@ -5,7 +5,7 @@ import { ScrollView, TextEdit } from "std-widgets.slint";
 import { OptionStepper } from "../../components/steppers.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { UiState, ClamshellState } from "../model.slint";
-import { PageHeader, SectionCard, SectionTitle, CardHeader, IconBadge, InfoRow, LocalStatus, ActionButton, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, CardHeader, IconBadge, InfoRow, LocalStatus, ActionButton, LayoutMetrics, PageSurface } from "../common.slint";
 import { Icon, Icons } from "../../components/icon.slint";
 import { Palette } from "../../themes/dark.slint";
 
@@ -27,7 +27,7 @@ component SpecCell inherits HorizontalLayout {
     }
 }
 
-export component SystemSection inherits Rectangle {
+export component SystemSection inherits PageSurface {
     in property <UiState> ui-state;
     in property <string> device-name: "";
     in property <string> device-board: "";

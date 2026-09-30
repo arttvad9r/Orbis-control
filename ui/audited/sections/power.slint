@@ -2,7 +2,7 @@
 // health and the charge limit.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, ChargeLimitState } from "../model.slint";
-import { PageHeader, SectionCard, CardHeader, InfoRow, LocalStatus, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, CardHeader, InfoRow, LocalStatus, LayoutMetrics, PageSurface } from "../common.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
 import { Icon, Icons } from "../../components/icon.slint";
 import { Palette } from "../../themes/dark.slint";
@@ -39,7 +39,7 @@ component BatteryGauge inherits Rectangle {
             height: (parent.height - 18px) * parent.level;
             y: parent.height - 9px - self.height;
             border-radius: 9px;
-            background: @linear-gradient(180deg, root.tint.brighter(0.25) 0%, root.tint 100%);
+            background: root.tint;
         }
         if (root.charging) : Icon {
             width: 46px;
@@ -61,7 +61,7 @@ component StatusRow inherits HorizontalLayout {
     Text { horizontal-stretch: 1; text: root.value; font-size: 13.5px; font-weight: 550; color: Palette.text-primary; vertical-alignment: center; overflow: elide; }
 }
 
-export component PowerSection inherits Rectangle {
+export component PowerSection inherits PageSurface {
     in property <UiState> ui-state;
     in property <image> battery-spark;
     // Capacity relative to design capacity, percent (-1 unknown).

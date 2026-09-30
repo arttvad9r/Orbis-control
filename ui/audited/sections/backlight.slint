@@ -1,6 +1,6 @@
 // Backlight page — keyboard brightness/timeout and Aura effect, speed and color.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, SectionTitle, CardHeader, IconRow, LocalStatus, ChoiceButton, FieldRow, Divider, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, CardHeader, IconRow, LocalStatus, ChoiceButton, Segmented, FieldRow, Divider, LayoutMetrics, PageSurface } from "../common.slint";
 import { Icon, Icons } from "../../components/icon.slint";
 import { KeyboardPreview } from "../../components/keyboard-preview.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
@@ -58,7 +58,7 @@ component ChannelRow inherits Rectangle {
     }
 }
 
-export component BacklightSection inherits Rectangle {
+export component BacklightSection inherits PageSurface {
     in property <bool> keyboard-state-ready: false;
     in property <bool> keyboard-control-ready: false;
     in property <int> keyboard-brightness: -1;
@@ -110,6 +110,15 @@ export component BacklightSection inherits Rectangle {
     property <int> edit-red: root.edit-secondary ? root.aura-secondary-red : root.rgb-red;
     property <int> edit-green: root.edit-secondary ? root.aura-secondary-green : root.rgb-green;
     property <int> edit-blue: root.edit-secondary ? root.aura-secondary-blue : root.rgb-blue;
+
+    function timeout-index(secs: int) -> int {
+        if (secs == 0) { return 0; }
+        if (secs == 15) { return 1; }
+        if (secs == 30) { return 2; }
+        if (secs == 60) { return 3; }
+        if (secs == 300) { return 4; }
+        return -1;
+    }
 
     function timeout-label(secs: int) -> string {
         if (secs == 0) { return "Никогда"; }
@@ -176,12 +185,11 @@ export component BacklightSection inherits Rectangle {
                         title: "Яркость";
                         description: "Уровень подсветки клавиш";
                         label-width: 190px;
-                        for level in 4: ChoiceButton {
-                            min-width: 0px;
-                            label: level == 0 ? "Выкл" : "Уровень " + level;
-                            selected: root.keyboard-brightness == level;
+                        Segmented {
+                            options: ["Выкл", "Уровень 1", "Уровень 2", "Уровень 3"];
+                            selected: root.keyboard-brightness;
                             disabled: !root.keyboard-control-ready;
-                            clicked => { root.keyboard-brightness-requested(level); }
+                            changed(level) => { root.keyboard-brightness-requested(level); }
                         }
                     }
                     if (root.keyboard-state-ready) : IconRow {
@@ -190,11 +198,11 @@ export component BacklightSection inherits Rectangle {
                         title: "Гаснет от сети";
                         description: "Бездействие до отключения";
                         label-width: 190px;
-                        ChoiceButton { min-width: 0px; label: root.timeout-label(0); selected: root.keyboard-timeout-ac == 0; clicked => { root.keyboard-timeout-requested(true, 0); } }
-                        ChoiceButton { min-width: 0px; label: root.timeout-label(15); selected: root.keyboard-timeout-ac == 15; clicked => { root.keyboard-timeout-requested(true, 15); } }
-                        ChoiceButton { min-width: 0px; label: root.timeout-label(30); selected: root.keyboard-timeout-ac == 30; clicked => { root.keyboard-timeout-requested(true, 30); } }
-                        ChoiceButton { min-width: 0px; label: root.timeout-label(60); selected: root.keyboard-timeout-ac == 60; clicked => { root.keyboard-timeout-requested(true, 60); } }
-                        ChoiceButton { min-width: 0px; label: root.timeout-label(300); selected: root.keyboard-timeout-ac == 300; clicked => { root.keyboard-timeout-requested(true, 300); } }
+                        Segmented {
+                            options: ["Никогда", "15 с", "30 с", "1 мин", "5 мин"];
+                            selected: root.timeout-index(root.keyboard-timeout-ac);
+                            changed(i) => { root.keyboard-timeout-requested(true, [0, 15, 30, 60, 300][i]); }
+                        }
                     }
                     if (root.keyboard-state-ready) : IconRow {
                         separator: true;
@@ -202,11 +210,11 @@ export component BacklightSection inherits Rectangle {
                         title: "Гаснет от батареи";
                         description: "Бездействие до отключения";
                         label-width: 190px;
-                        ChoiceButton { min-width: 0px; label: root.timeout-label(0); selected: root.keyboard-timeout-battery == 0; clicked => { root.keyboard-timeout-requested(false, 0); } }
-                        ChoiceButton { min-width: 0px; label: root.timeout-label(15); selected: root.keyboard-timeout-battery == 15; clicked => { root.keyboard-timeout-requested(false, 15); } }
-                        ChoiceButton { min-width: 0px; label: root.timeout-label(30); selected: root.keyboard-timeout-battery == 30; clicked => { root.keyboard-timeout-requested(false, 30); } }
-                        ChoiceButton { min-width: 0px; label: root.timeout-label(60); selected: root.keyboard-timeout-battery == 60; clicked => { root.keyboard-timeout-requested(false, 60); } }
-                        ChoiceButton { min-width: 0px; label: root.timeout-label(300); selected: root.keyboard-timeout-battery == 300; clicked => { root.keyboard-timeout-requested(false, 300); } }
+                        Segmented {
+                            options: ["Никогда", "15 с", "30 с", "1 мин", "5 мин"];
+                            selected: root.timeout-index(root.keyboard-timeout-battery);
+                            changed(i) => { root.keyboard-timeout-requested(false, [0, 15, 30, 60, 300][i]); }
+                        }
                     }
                     if (root.keyboard-mutation-error != "") : LocalStatus {
                         text: root.keyboard-mutation-error;
@@ -279,9 +287,12 @@ export component BacklightSection inherits Rectangle {
                         title: "Скорость";
                         description: "Скорость анимации эффекта";
                         label-width: 190px;
-                        ChoiceButton { min-width: 0px; label: "Медленно"; selected: root.keyboard-speed == 0; disabled: !root.aura-control-ready; clicked => { root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, 0); } }
-                        ChoiceButton { min-width: 0px; label: "Обычно"; selected: root.keyboard-speed == 1; disabled: !root.aura-control-ready; clicked => { root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, 1); } }
-                        ChoiceButton { min-width: 0px; label: "Быстро"; selected: root.keyboard-speed == 2; disabled: !root.aura-control-ready; clicked => { root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, 2); } }
+                        Segmented {
+                            options: ["Медленно", "Обычно", "Быстро"];
+                            selected: root.keyboard-speed;
+                            disabled: !root.aura-control-ready;
+                            changed(speed) => { root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, speed); }
+                        }
                     }
 
                     IconRow {
@@ -290,9 +301,12 @@ export component BacklightSection inherits Rectangle {
                         title: "Цвет";
                         description: "Основной и второй цвет эффекта";
                         label-width: 190px;
-                        ChoiceButton { min-width: 0px; label: "Основной"; selected: !root.edit-secondary; clicked => { root.edit-secondary = false; } }
-                        ChoiceButton { min-width: 0px; label: "Второй"; selected: root.edit-secondary; clicked => { root.edit-secondary = true; } }
-                        Rectangle { horizontal-stretch: 2; }
+                        Segmented {
+                            max-width: 320px;
+                            options: ["Основной", "Второй"];
+                            selected: root.edit-secondary ? 1 : 0;
+                            changed(i) => { root.edit-secondary = i == 1; }
+                        }
                     }
                     HorizontalLayout {
                         height: 46px;

@@ -4,7 +4,7 @@ pkgrel=1
 pkgdesc='ASUS laptop monitoring and control for Linux'
 arch=('x86_64')
 url='https://github.com/arttvad9r/Orbis-control'
-license=('GPL-3.0-or-later')
+license=('GPL-3.0-or-later' 'OFL-1.1')
 depends=('curl' 'dbus' 'glibc' 'polkit' 'wayland' 'libx11' 'libxcb' 'libxkbcommon')
 makedepends=('cargo')
 _commit=794cd7a945d1e2b2e711337f72efc1e2bb7c65c3
@@ -38,4 +38,7 @@ package() {
     "$pkgdir/usr/share/metainfo/io.github.orbiscontrol.Orbis.metainfo.xml"
   install -Dm644 data/icons/hicolor/scalable/apps/io.github.orbiscontrol.Orbis.svg \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.orbiscontrol.Orbis.svg"
+  # Inter is embedded in orbis-control; its OFL must ship with the binary.
+  install -Dm644 ui/assets/fonts/OFL.txt \
+    "$pkgdir/usr/share/licenses/$pkgname/Inter-OFL.txt"
 }

@@ -1,13 +1,13 @@
 // Display page (reference 6) — built-in panel brightness, refresh rate and
 // overdrive as icon rows, with a preview card showing the active mode.
 import { ScrollView } from "std-widgets.slint";
-import { PageHeader, SectionCard, CardHeader, IconRow, LocalStatus, ChoiceButton, FieldRow, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, CardHeader, IconRow, LocalStatus, ChoiceButton, FieldRow, LayoutMetrics, PageSurface } from "../common.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
 import { RequestToggleRow } from "../../components/request-toggle-row.slint";
 import { Icon, Icons } from "../../components/icon.slint";
 import { Palette } from "../../themes/dark.slint";
 
-export component DisplaySection inherits Rectangle {
+export component DisplaySection inherits PageSurface {
     in property <bool> display-state-ready: false;
     in property <string> display-status: "Недоступно";
     in property <string> display-resolution: "";
@@ -123,8 +123,14 @@ export component DisplaySection inherits Rectangle {
                             border-radius: 12px;
                             border-width: 1px;
                             border-color: Palette.border-default;
-                            background: @radial-gradient(circle, Palette.glow.transparentize(0.55) 0%, Palette.surface-muted 70%);
+                            background: Palette.surface-muted;
                             clip: true;
+                            // Glow inset by the corner radius (gradients ignore rounding).
+                            Rectangle {
+                                x: 12px;
+                                width: parent.width - 24px;
+                                background: @radial-gradient(circle, Palette.glow.transparentize(0.55) 0%, #00000000 70%);
+                            }
                             Image {
                                 x: parent.width * 0.06;
                                 y: 12px;

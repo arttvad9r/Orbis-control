@@ -3,7 +3,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { UiState, GpuHwState, GpuModeHwState, NvidiaRow } from "../model.slint";
 import { ValueSlider } from "../../components/value-slider.slint";
-import { PageHeader, SectionCard, SectionTitle, CardHeader, InfoRow, LocalStatus, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, SectionTitle, CardHeader, InfoRow, LocalStatus, LayoutMetrics, PageSurface } from "../common.slint";
 import { Icon, Icons } from "../../components/icon.slint";
 import { ModeCard } from "../../components/mode-card.slint";
 import { Palette } from "../../themes/dark.slint";
@@ -57,7 +57,7 @@ component MuxDiagram inherits Rectangle {
         border-radius: 14px;
         border-width: 2px;
         border-color: root.route == 0 ? Palette.accent-default : root.route == 1 ? Palette.success : Palette.border-strong;
-        background: @linear-gradient(180deg, #1C2436 0%, #0E1320 100%);
+        background: #141B2B;
         VerticalLayout {
             alignment: center;
             spacing: 2px;
@@ -72,7 +72,7 @@ component MuxDiagram inherits Rectangle {
     }
 }
 
-export component GraphicsSection inherits Rectangle {
+export component GraphicsSection inherits PageSurface {
     in property <UiState> ui-state;
     callback gpu-clicked(int);
     in property <bool> gpu-optimized: false;

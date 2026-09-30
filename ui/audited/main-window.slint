@@ -5,6 +5,10 @@ import { UiState, NvidiaRow, Section, ChargeLimitState, GpuHwState, PerformanceH
 import { TitleBar } from "../components/title-bar.slint";
 import { NavItem } from "../components/nav-item.slint";
 import { Icons } from "../components/icon.slint";
+import "../assets/fonts/Inter-Regular.ttf";
+import "../assets/fonts/Inter-Medium.ttf";
+import "../assets/fonts/Inter-SemiBold.ttf";
+import "../assets/fonts/Inter-Bold.ttf";
 import { ThemeBridge, LayoutMetrics } from "common.slint";
 import { Palette } from "../themes/dark.slint";
 import { DashboardSection } from "sections/dashboard.slint";
@@ -27,6 +31,7 @@ export component AppWindow inherits Window {
     no-frame: true;
     background: transparent;
     title: "Orbis Control";
+    default-font-family: "Inter";
 
     in-out property <UiState> ui-state: {
         perf-selected: 1, available-perf-mask: 0, perf-state: PerformanceHwState.Loading, perf-writable: false, perf-unavailable-reason: "",
@@ -370,7 +375,16 @@ export component AppWindow inherits Window {
                     border-top-left-radius: 18px;
                     border-width: 1px;
                     border-color: Palette.border-default;
-                    background: @linear-gradient(170deg, Palette.window-background.brighter(0.08) 0%, Palette.window-background 45%, Palette.window-background.darker(0.1) 100%);
+                    background: Palette.window-background;
+
+                    // Ambient accent glow behind the content (reference backdrop).
+                    Rectangle {
+                        x: parent.width * 0.45;
+                        y: -parent.height * 0.35;
+                        width: parent.width * 0.9;
+                        height: parent.height * 0.8;
+                        background: @radial-gradient(circle, Palette.glow.transparentize(0.82) 0%, #00000000 65%);
+                    }
 
                     if (root.active-section == Section.Dashboard) : DashboardSection {
                         ui-state <=> root.ui-state;

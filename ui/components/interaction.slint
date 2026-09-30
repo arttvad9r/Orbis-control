@@ -1,0 +1,114 @@
+// Interaction primitives shared by every control: the press ripple and the
+// keyboard focus ring. Controls combine them with animated state layers
+// (hover/pressed tints) so feedback is consistent across the product.
+import { Palette } from "../themes/dark.slint";
+import { Motion, Shape } from "../themes/tokens.slint";
+
+// Press ripple (Material-style ink): a disc that grows from the pointer and
+// fades on release. It fills its parent.
+//
+// The software renderer clips only to rectangles, so the disc is drawn in
+// three rectangular bands that cover the rounded parent minus its corner
+// squares, and each corner is filled by a clipped quarter disc. Nothing ever
+// spills past the rounded corners.
+export component Ripple inherits Rectangle {
+    in property <color> tint: #FFFFFF;
+    in property <float> strength: 0.20;
+    in property <length> radius: Shape.control;
+
+    property <length> cx;
+    property <length> cy;
+    property <float> grow: 0;
+    property <float> fade: 1;
+    property <bool> instant: true;
+    property <length> reach: Math.sqrt(self.width * self.width / 1px / 1px + self.height * self.height / 1px / 1px) * 1px;
+    property <length> size: root.reach * 2 * root.grow;
+    property <color> ink: root.tint.transparentize(1 - root.strength * (1 - root.fade));
+
+    background: transparent;
+
+    for band[i] in [
+        { x: root.radius, y: 0px, w: root.width - 2 * root.radius, h: root.height },
+        { x: 0px, y: root.radius, w: root.radius, h: root.height - 2 * root.radius },
+        { x: root.width - root.radius, y: root.radius, w: root.radius, h: root.height - 2 * root.radius },
+    ] : Rectangle {
+        x: band.x;
+        y: band.y;
+        width: Math.max(band.w, 0px);
+        height: Math.max(band.h, 0px);
+        clip: true;
+        Rectangle {
+            width: root.size;
+            height: root.size;
+            x: root.cx - band.x - root.size / 2;
+            y: root.cy - band.y - root.size / 2;
+            border-radius: root.size / 2;
+            background: root.ink;
+        }
+    }
+
+    // Rounded corners: a quarter disc per corner (a radius-r circle clipped
+    // to the r×r corner square), inked once the wave reaches that corner.
+    for corner[i] in [
+        { x: 0px, y: 0px, left: true, top: true },
+        { x: root.width - root.radius, y: 0px, left: false, top: true },
+        { x: 0px, y: root.height - root.radius, left: true, top: false },
+        { x: root.width - root.radius, y: root.height - root.radius, left: false, top: false },
+    ] : Rectangle {
+        property <length> ccx: corner.left ? root.radius : root.width - root.radius;
+        property <length> ccy: corner.top ? root.radius : root.height - root.radius;
+        property <float> dx: (self.ccx - root.cx) / 1px;
+        property <float> dy: (self.ccy - root.cy) / 1px;
+        x: corner.x;
+        y: corner.y;
+        width: root.radius;
+        height: root.radius;
+        clip: true;
+        Rectangle {
+            x: corner.left ? 0px : -root.radius;
+            y: corner.top ? 0px : -root.radius;
+            width: 2 * root.radius;
+            height: 2 * root.radius;
+            border-radius: root.radius;
+            background: Math.sqrt(parent.dx * parent.dx + parent.dy * parent.dy) * 1px <= root.size / 2 ? root.ink : transparent;
+        }
+    }
+
+    public function press(x: length, y: length) {
+        root.instant = true;
+        root.grow = 0;
+        root.fade = 0;
+        root.cx = x;
+        root.cy = y;
+        root.instant = false;
+        root.grow = 1;
+    }
+
+    public function release() {
+        root.instant = false;
+        root.fade = 1;
+    }
+
+    animate grow { duration: root.instant ? 0ms : Motion.ripple; easing: cubic-bezier(0.2, 0, 0, 1); }
+    animate fade { duration: root.instant ? 0ms : Motion.ripple; easing: ease-out; }
+}
+
+// Keyboard focus indicator drawn just outside the control's edge
+// (WCAG 2.4.7 "focus visible"). Pointer clicks do not show it.
+export component FocusRing inherits Rectangle {
+    in property <bool> shown: false;
+    in property <length> radius: Shape.control;
+    background: transparent;
+    Rectangle {
+        x: -Shape.focus-offset;
+        y: -Shape.focus-offset;
+        width: parent.width + 2 * Shape.focus-offset;
+        height: parent.height + 2 * Shape.focus-offset;
+        border-radius: root.radius + Shape.focus-offset;
+        border-width: Shape.focus-width;
+        border-color: Palette.accent-default;
+        background: transparent;
+        opacity: root.shown ? 1 : 0;
+        animate opacity { duration: Motion.fast; }
+    }
+}

@@ -1,7 +1,7 @@
 // Cooling page — fan curve workspace: selectors, chart, points and one action bar.
 import { ScrollView } from "std-widgets.slint";
 import { UiState, FanCurveHwState } from "../model.slint";
-import { PageHeader, SectionCard, CardHeader, ActionButton, ChoiceButton, InfoRow, LayoutMetrics } from "../common.slint";
+import { PageHeader, SectionCard, CardHeader, ActionButton, ChoiceButton, Segmented, InfoRow, LayoutMetrics, PageSurface } from "../common.slint";
 import { Icon, Icons } from "../../components/icon.slint";
 import { FanCurveEditor } from "../fan-curve-editor-v3.slint";
 import { Palette } from "../../themes/dark.slint";
@@ -103,7 +103,7 @@ component CoolingSide inherits VerticalLayout {
     }
 }
 
-export component CoolingSection inherits Rectangle {
+export component CoolingSection inherits PageSurface {
     in property <UiState> ui-state;
     in property <bool> mutation-safety-blocked: false;
     in property <bool> factory-reset-available: true;
@@ -169,49 +169,21 @@ export component CoolingSection inherits Rectangle {
             HorizontalLayout {
                 height: 46px;
                 spacing: 16px;
-                Rectangle {
+                Segmented {
                     width: root.width < 900px ? 180px : 260px;
-                    border-radius: 10px;
-                    border-width: 1px;
-                    border-color: Palette.border-default;
-                    background: Palette.surface-raised;
-                    HorizontalLayout {
-                        padding: 3px;
-                        spacing: 3px;
-                        for fan[i] in ["CPU", "GPU"] : Rectangle {
-                            border-radius: 8px;
-                            border-width: root.ui-state.fan-selected == i ? 1px : 0px;
-                            border-color: Palette.accent-border;
-                            background: root.ui-state.fan-selected == i ? Palette.accent-fill
-                                : tab-touch.has-hover ? Palette.surface-hover : transparent;
-                            Text {
-                                text: fan;
-                                font-size: 14.5px;
-                                font-weight: root.ui-state.fan-selected == i ? 650 : 500;
-                                color: root.ui-state.fan-selected == i ? Palette.text-on-accent : Palette.text-primary;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                            tab-touch := TouchArea { clicked => { root.factory-reset-pending = false; root.fan-changed(i); } }
-                        }
-                    }
+                    height: 44px;
+                    options: ["CPU", "GPU"];
+                    selected: root.ui-state.fan-selected;
+                    changed(i) => { root.factory-reset-pending = false; root.fan-changed(i); }
                 }
                 Rectangle { horizontal-stretch: 0.01; }
                 Text { text: "Профиль"; font-size: 14px; color: Palette.text-secondary; vertical-alignment: center; }
-                HorizontalLayout {
-                    horizontal-stretch: 1;
+                Segmented {
                     max-width: 420px;
-                    spacing: 6px;
-                    ChoiceButton { min-width: 0px; max-width: 100px; label: "Баланс"; selected: root.ui-state.fan-profile-selected == 0; clicked => { root.factory-reset-pending = false; root.fan-profile-changed(0); } }
-                    ChoiceButton { min-width: 0px; max-width: 100px; label: "Турбо"; selected: root.ui-state.fan-profile-selected == 1; clicked => { root.factory-reset-pending = false; root.fan-profile-changed(1); } }
-                    ChoiceButton { min-width: 0px; max-width: 100px; label: "Тихий"; selected: root.ui-state.fan-profile-selected == 2; clicked => { root.factory-reset-pending = false; root.fan-profile-changed(2); } }
-                    if (root.fan-eco-profile-available || root.ui-state.fan-profile-selected == 3) : ChoiceButton {
-                        min-width: 0px;
-                        max-width: 100px;
-                        label: "Эко";
-                        selected: root.ui-state.fan-profile-selected == 3;
-                        clicked => { root.factory-reset-pending = false; root.fan-profile-changed(3); }
-                    }
+                    options: root.fan-eco-profile-available || root.ui-state.fan-profile-selected == 3
+                        ? ["Баланс", "Турбо", "Тихий", "Эко"] : ["Баланс", "Турбо", "Тихий"];
+                    selected: root.ui-state.fan-profile-selected;
+                    changed(i) => { root.factory-reset-pending = false; root.fan-profile-changed(i); }
                 }
             }
 

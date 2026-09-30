@@ -3,6 +3,8 @@
 // (progress in 0..1, negative hides it).
 import { Icon } from "icon.slint";
 import { Palette } from "../themes/dark.slint";
+import { Motion } from "../themes/tokens.slint";
+import { Skeleton } from "skeleton.slint";
 
 export component MetricCard inherits Rectangle {
     in property <string> label;
@@ -28,7 +30,7 @@ export component MetricCard inherits Rectangle {
     border-radius: 14px;
     border-width: 1px;
     border-color: Palette.border-default;
-    background: @linear-gradient(180deg, Palette.card-top 0%, Palette.surface-default 100%);
+    background: Palette.card-top.mix(Palette.surface-default, 0.5);
 
     VerticalLayout {
         padding: 18px;
@@ -58,12 +60,17 @@ export component MetricCard inherits Rectangle {
         HorizontalLayout {
             // Value aligns with the label; narrow cards reclaim the indent.
             padding-left: root.compact ? 0px : 44px;
-            Text {
+            if (root.value != "—") : Text {
                 text: root.value;
                 font-size: 30px;
                 font-weight: 700;
                 color: root.value-color;
                 overflow: elide;
+            }
+            // Loading placeholder instead of a bare dash.
+            if (root.value == "—") : Rectangle {
+                height: 38px;
+                Skeleton { width: 96px; height: 26px; y: 6px; }
             }
         }
 
@@ -111,7 +118,8 @@ export component MetricCard inherits Rectangle {
                 width: parent.width * Math.min(Math.max(root.progress, 0), 1);
                 height: parent.height;
                 border-radius: 3.5px;
-                background: root.progress >= 0 ? @linear-gradient(90deg, root.accent.darker(0.15) 0%, root.accent 100%) : transparent;
+                animate width { duration: Motion.data; easing: cubic-bezier(0.2, 0, 0, 1); }
+                background: root.progress >= 0 ? root.accent : transparent;
             }
         }
     }

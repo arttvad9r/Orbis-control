@@ -410,11 +410,45 @@ fn setup(width: u32, height: u32) -> Rc<slint::platform::software_renderer::Soft
     renderer
 }
 
+fn settle(ms: u64) {
+    let start = std::time::Instant::now();
+    loop {
+        slint::platform::update_timers_and_animations();
+        if start.elapsed() >= std::time::Duration::from_millis(ms) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 fn save(
     renderer: &slint::platform::software_renderer::SoftwareRenderer,
     window: &slint::Window,
     path: &str,
 ) -> anyhow::Result<()> {
+    // Let entry transitions and timers settle before capturing.
+    settle(500);
+    // Optional interaction probe for reviewing motion states:
+    // ORBIS_SNAPSHOT_POINTER="x,y[,press]" hovers (and presses) at a point,
+    // ORBIS_SNAPSHOT_AFTER_MS captures that many ms later.
+    if let Ok(spec) = std::env::var("ORBIS_SNAPSHOT_POINTER") {
+        let parts: Vec<&str> = spec.split(',').collect();
+        let x: f32 = parts.first().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        let y: f32 = parts.get(1).and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        let position = slint::LogicalPosition::new(x, y);
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        if parts.get(2) == Some(&"press") {
+            window.dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: slint::platform::PointerEventButton::Left,
+            });
+        }
+        let after = std::env::var("ORBIS_SNAPSHOT_AFTER_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(400);
+        settle(after);
+    }
     let size = window.size();
     let (width, height) = (size.width as usize, size.height as usize);
     let mut buffer = vec![Rgb8Pixel::new(0, 0, 0); width * height];

@@ -4,6 +4,7 @@ import { FanCurveHwState } from "model.slint";
 import { ChoiceButton } from "common.slint";
 import { FanCurveChart } from "../components/fan-curve-chart.slint";
 import { Palette } from "../themes/dark.slint";
+import { Motion } from "../themes/tokens.slint";
 
 component StepButton inherits Rectangle {
     in property <string> glyph;
@@ -16,9 +17,10 @@ component StepButton inherits Rectangle {
     border-width: 1px;
     border-color: Palette.border-default;
     background: !root.editable ? Palette.surface-disabled
-        : step-touch.pressed ? Palette.surface-pressed
+        : step-touch.pressed ? Palette.accent-fill.transparentize(0.6)
         : step-touch.has-hover ? Palette.surface-hover
         : Palette.surface-raised;
+    animate background { duration: Motion.fast; }
     Text {
         text: root.glyph;
         font-size: 13px;
@@ -28,6 +30,7 @@ component StepButton inherits Rectangle {
         vertical-alignment: center;
     }
     step-touch := TouchArea {
+        mouse-cursor: pointer;
         enabled: root.editable;
         clicked => { root.clicked(); }
     }
