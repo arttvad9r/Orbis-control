@@ -33,7 +33,7 @@ in the spirit of G-Helper and ROG Control Center, native to KDE Plasma and Wayla
 
 ## Features
 
-| | |
+| Area | What you get |
 |---|---|
 | **Performance** | Silent / Balanced / Turbo (through power-profiles-daemon), SPL / SPPT / FPPT, NVIDIA Dynamic Boost and GPU temperature target, AMD EPP and CPU boost — optionally remembered per profile and re-applied on every switch |
 | **Fans** | Custom CPU and GPU curves for each profile: drag the points in both axes, one-click factory reset |
