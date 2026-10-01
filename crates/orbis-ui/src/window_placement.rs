@@ -12,15 +12,16 @@
 
 /// Must match the `title` of the windows in ui/main-window.slint and
 /// ui/panels.slint.
-const MAIN_TITLE: &str = "Orbis Control";
-const FANS_TITLE: &str = "Вентиляторы и мощность";
-const EXTRA_TITLE: &str = "Дополнительно";
+pub(crate) const MAIN_TITLE: &str = "Orbis Control";
+pub(crate) const FANS_TITLE: &str = "Вентиляторы и мощность";
+pub(crate) const EXTRA_TITLE: &str = "Дополнительно";
 const PLUGIN_NAME: &str = "orbis-control-placement";
+const ACTIVATE_PLUGIN: &str = "orbis-control-activate";
 
 /// Load the placement script before the first window is shown (a couple
 /// of local D-Bus calls); failures are logged and placement is skipped.
 pub(crate) fn install() {
-    if let Err(error) = load(&script(std::process::id())) {
+    if let Err(error) = load(PLUGIN_NAME, "placement.js", &script(std::process::id())) {
         tracing::debug!(%error, "KWin window placement unavailable");
     }
 }
@@ -117,20 +118,46 @@ fn scripting_proxy() -> anyhow::Result<(zbus::blocking::Connection, zbus::blocki
     Ok((connection, proxy))
 }
 
-fn load(script: &str) -> anyhow::Result<()> {
+/// Bring an already visible Orbis window to the front with focus. Wayland
+/// clients cannot take focus themselves (KWin's focus-stealing prevention),
+/// so a one-shot KWin script activates it.
+pub(crate) fn activate(title: &'static str) {
+    let script = format!(
+        r#"for (const w of workspace.windowList()) {{
+    if (w.pid === {pid} && w.caption === {title:?}) {{
+        w.minimized = false;
+        workspace.activeWindow = w;
+    }}
+}}
+"#,
+        pid = std::process::id(),
+    );
+    std::thread::spawn(move || {
+        let result = load(ACTIVATE_PLUGIN, "activate.js", &script).and_then(|()| {
+            let (_, scripting) = scripting_proxy()?;
+            let _: bool = scripting.call("unloadScript", &(ACTIVATE_PLUGIN,))?;
+            Ok(())
+        });
+        if let Err(error) = result {
+            tracing::debug!(%error, "KWin window activation unavailable");
+        }
+    });
+}
+
+fn load(plugin: &str, file: &str, script: &str) -> anyhow::Result<()> {
     let dir = std::env::var_os("XDG_RUNTIME_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
         .join("orbis-control");
     std::fs::create_dir_all(&dir)?;
-    let path = dir.join("placement.js");
+    let path = dir.join(file);
     std::fs::write(&path, script)?;
     let path = path.to_string_lossy().into_owned();
 
     let (connection, scripting) = scripting_proxy()?;
     // Replace a script left behind by an earlier (crashed) instance.
-    let _: bool = scripting.call("unloadScript", &(PLUGIN_NAME,))?;
-    let id: i32 = scripting.call("loadScript", &(path.as_str(), PLUGIN_NAME))?;
+    let _: bool = scripting.call("unloadScript", &(plugin,))?;
+    let id: i32 = scripting.call("loadScript", &(path.as_str(), plugin))?;
     let script = zbus::blocking::Proxy::new(
         &connection,
         "org.kde.KWin",

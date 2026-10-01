@@ -118,12 +118,20 @@ fn set_extra_open(app: &AppWindow, open: bool) {
 
 /// Open the "Fans and power" window (tray menu).
 pub(crate) fn open_fans(app: &AppWindow) {
+    if app.get_fans_open() {
+        crate::window_placement::activate(crate::window_placement::FANS_TITLE);
+        return;
+    }
     app.set_fans_open(true);
     set_fans_open(app, true);
 }
 
 /// Open the "Extra" window (tray menu).
 pub(crate) fn open_extra(app: &AppWindow) {
+    if app.get_extra_open() {
+        crate::window_placement::activate(crate::window_placement::EXTRA_TITLE);
+        return;
+    }
     app.set_extra_open(true);
     set_extra_open(app, true);
 }

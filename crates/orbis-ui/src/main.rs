@@ -777,9 +777,14 @@ fn toggle_main_window(app: &AppWindow) {
     }
 }
 
-/// Show (or un-minimize) the main window; window_placement docks it.
+/// Show the main window (window_placement docks it), or bring it to the
+/// front when it is already open behind other windows.
 fn show_main_window(app: &AppWindow) {
     let window = app.window();
+    if window.is_visible() {
+        window_placement::activate(window_placement::MAIN_TITLE);
+        return;
+    }
     window.set_minimized(false);
     if let Err(error) = window.show() {
         tracing::warn!(?error, "main window could not be shown");
