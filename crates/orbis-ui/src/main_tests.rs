@@ -2545,24 +2545,6 @@ fn missing_start_minimized_defaults_to_visible_startup() {
 }
 
 #[test]
-fn start_minimized_window_state_is_applied_only_when_enabled() {
-    let calls = Cell::new(0usize);
-    let requested = Cell::new(false);
-    apply_start_minimized(false, |value| {
-        calls.set(calls.get() + 1);
-        requested.set(value);
-    });
-    assert_eq!(calls.get(), 0);
-
-    apply_start_minimized(true, |value| {
-        calls.set(calls.get() + 1);
-        requested.set(value);
-    });
-    assert_eq!(calls.get(), 1);
-    assert!(requested.get());
-}
-
-#[test]
 fn theme_toggle_persists_only_theme_field() {
     let td = tempfile::tempdir().expect("tempdir");
     let mut preferences = orbis_config::PreferencesConfig::default();

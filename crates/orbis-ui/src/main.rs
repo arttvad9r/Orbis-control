@@ -13,6 +13,7 @@ mod launch_context;
 mod panel_windows;
 mod preferences_backend;
 mod quick_controls_backend;
+mod single_instance;
 mod window_placement;
 
 use std::cell::{Cell, OnceCell, RefCell};
@@ -654,12 +655,6 @@ fn initialize_runtime_theme_with(
     initialize_runtime_preferences_with(load).theme_light
 }
 
-fn apply_start_minimized(start_minimized: bool, mut set_minimized: impl FnMut(bool)) {
-    if start_minimized {
-        set_minimized(true);
-    }
-}
-
 #[derive(Debug)]
 enum ThemePersistenceFailure {
     Load(PreferencesError),
@@ -769,6 +764,12 @@ fn apply_preferences_state(window: &AppWindow) {
 /// with its secondary windows. Hiding needs a tray to come back from.
 fn toggle_main_window(app: &AppWindow) {
     let window = app.window();
+    tracing::debug!(
+        visible = window.is_visible(),
+        minimized = window.is_minimized(),
+        tray_ready = quick_controls_backend::tray_ready(),
+        "toggle main window"
+    );
     if window.is_visible() && !window.is_minimized() && quick_controls_backend::tray_ready() {
         panel_windows::close_all(app);
         let _ = window.hide();
@@ -2925,6 +2926,25 @@ fn main() -> anyhow::Result<()> {
     let session_connection = runtime
         .block_on(zbus::Connection::session())
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к session bus: {e}"))?;
+    let activation_target = match runtime.block_on(single_instance::claim(&session_connection)) {
+        Ok(Some(target)) => Some(target),
+        Ok(None) => {
+            // Already running: a manual launch shows that window, the login
+            // autostart just leaves it alone.
+            if !background
+                && let Err(error) =
+                    runtime.block_on(single_instance::activate_running(&session_connection))
+            {
+                tracing::warn!(%error, "running instance did not accept activation");
+            }
+            tracing::info!("Orbis Control is already running");
+            return Ok(());
+        }
+        Err(error) => {
+            tracing::warn!(%error, "single-instance name unavailable; continuing");
+            None
+        }
+    };
     let system_connection = runtime
         .block_on(zbus::Connection::system())
         .map_err(|e| anyhow::anyhow!("не удалось подключиться к system bus: {e}"))?;
@@ -2970,6 +2990,9 @@ fn main() -> anyhow::Result<()> {
     let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();
 
     let app = build_app(&state, Some(worker_tx.clone()))?;
+    if let Some(target) = &activation_target {
+        let _ = target.set(app.as_weak());
+    }
     // Wayland/X11 app id = desktop file name, so the desktop maps the
     // windows to io.github.orbiscontrol.Orbis.desktop (name, icon).
     if let Err(error) = slint::set_xdg_app_id("io.github.orbiscontrol.Orbis") {
@@ -2979,9 +3002,6 @@ fn main() -> anyhow::Result<()> {
     quick_controls_backend::force_refresh(&app);
     wire_settings_section(&app);
     fit_window(&app);
-    apply_start_minimized(startup_preferences.start_minimized, |minimized| {
-        app.window().set_minimized(minimized);
-    });
 
     let keyboard_timeout = orbis_config::load_keyboard_timeout().unwrap_or_else(|error| {
         tracing::warn!(
@@ -3130,7 +3150,10 @@ fn main() -> anyhow::Result<()> {
     if let Err(error) = orbis_config::upgrade_legacy_autostart() {
         tracing::debug!(?error, "autostart entry not upgraded");
     }
-    if background {
+    // "Start minimized to tray" starts like the login autostart. Minimizing a
+    // not yet mapped window is ignored on Wayland while Slint keeps reporting
+    // it minimized, which made the first tray click do nothing.
+    if background || startup_preferences.start_minimized {
         // Give the tray host a moment to register; without one, show the window.
         let app_weak = app.as_weak();
         slint::Timer::single_shot(Duration::from_secs(3), move || {

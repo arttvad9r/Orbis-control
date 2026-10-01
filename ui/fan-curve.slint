@@ -98,21 +98,23 @@ export component FanCurve inherits Rectangle {
     property <length> left: 30px;
     property <length> bottom: 16px;
 
-    pure function lerp(t: float, t0: float, p0: float, t1: float, p1: float) -> float {
-        if (t1 - t0 <= 0) { return p1; }
-        return p0 + (p1 - p0) * (t - t0) / (t1 - t0);
+    // Curve point in the 1000×1000 viewbox of the plot paths.
+    pure function vx(t: int) -> float {
+        return (Math.min(Math.max(t, root.axis-min), root.axis-max) - root.axis-min) / (root.axis-max - root.axis-min) * 1000;
     }
-    pure function pwm-at(t: float) -> float {
-        if (t <= root.temps[0]) { return root.pwms[0]; }
-        if (t >= root.temps[7]) { return root.pwms[7]; }
-        if (t <= root.temps[1]) { return root.lerp(t, root.temps[0], root.pwms[0], root.temps[1], root.pwms[1]); }
-        if (t <= root.temps[2]) { return root.lerp(t, root.temps[1], root.pwms[1], root.temps[2], root.pwms[2]); }
-        if (t <= root.temps[3]) { return root.lerp(t, root.temps[2], root.pwms[2], root.temps[3], root.pwms[3]); }
-        if (t <= root.temps[4]) { return root.lerp(t, root.temps[3], root.pwms[3], root.temps[4], root.pwms[4]); }
-        if (t <= root.temps[5]) { return root.lerp(t, root.temps[4], root.pwms[4], root.temps[5], root.pwms[5]); }
-        if (t <= root.temps[6]) { return root.lerp(t, root.temps[5], root.pwms[5], root.temps[6], root.pwms[6]); }
-        return root.lerp(t, root.temps[6], root.pwms[6], root.temps[7], root.pwms[7]);
+    pure function vy(pwm: int) -> float {
+        return (1 - Math.min(Math.max(pwm, 0), 255) / 255) * 1000;
     }
+    property <string> curve-commands: "M 0 " + root.vy(root.pwms[0])
+        + " L " + root.vx(root.temps[0]) + " " + root.vy(root.pwms[0])
+        + " L " + root.vx(root.temps[1]) + " " + root.vy(root.pwms[1])
+        + " L " + root.vx(root.temps[2]) + " " + root.vy(root.pwms[2])
+        + " L " + root.vx(root.temps[3]) + " " + root.vy(root.pwms[3])
+        + " L " + root.vx(root.temps[4]) + " " + root.vy(root.pwms[4])
+        + " L " + root.vx(root.temps[5]) + " " + root.vy(root.pwms[5])
+        + " L " + root.vx(root.temps[6]) + " " + root.vy(root.pwms[6])
+        + " L " + root.vx(root.temps[7]) + " " + root.vy(root.pwms[7])
+        + " L 1000 " + root.vy(root.pwms[7]);
 
     for p[i] in [100, 75, 50, 25, 0] : Text {
         x: 0px;
@@ -147,28 +149,23 @@ export component FanCurve inherits Rectangle {
         for i in 3 : Rectangle { y: parent.height * (i + 1) / 4; height: 1px; background: Palette.border; }
         for i in 3 : Rectangle { x: parent.width * (i + 1) / 4; width: 1px; background: Palette.border; }
 
-        if (root.ready) : Rectangle {
-            clip: true;
-            // Light fill under the curve, then the curve as thin columns that
-            // span each step's rise (no path rendering in the software renderer).
-            for i in 200 : Rectangle {
-                property <float> a: Math.min(Math.max(root.pwm-at(root.axis-min + i / 200 * (root.axis-max - root.axis-min)) / 255, 0), 1);
-                property <float> b: Math.min(Math.max(root.pwm-at(root.axis-min + (i + 1) / 200 * (root.axis-max - root.axis-min)) / 255, 0), 1);
-                x: i * parent.width / 200;
-                width: parent.width / 200 + 1px;
-                y: parent.height * (1 - Math.min(self.a, self.b));
-                height: parent.height * Math.min(self.a, self.b);
-                background: Palette.accent.mix(Palette.view, 0.18);
-            }
-            for i in 200 : Rectangle {
-                property <float> a: Math.min(Math.max(root.pwm-at(root.axis-min + i / 200 * (root.axis-max - root.axis-min)) / 255, 0), 1);
-                property <float> b: Math.min(Math.max(root.pwm-at(root.axis-min + (i + 1) / 200 * (root.axis-max - root.axis-min)) / 255, 0), 1);
-                x: i * parent.width / 200;
-                width: parent.width / 200 + 1px;
-                y: parent.height * (1 - Math.max(self.a, self.b)) - 1.5px;
-                height: parent.height * Math.abs(self.a - self.b) + 3px;
-                background: Palette.accent;
-            }
+        // Anti-aliased vector curve: straight segments between the points,
+        // flat before the first and after the last.
+        if (root.ready) : Path {
+            viewbox-width: 1000;
+            viewbox-height: 1000;
+            fit: fill;
+            commands: root.curve-commands + " L 1000 1000 L 0 1000 Z";
+            fill: Palette.accent.mix(Palette.view, 0.18);
+        }
+        if (root.ready) : Path {
+            viewbox-width: 1000;
+            viewbox-height: 1000;
+            fit: fill;
+            commands: root.curve-commands;
+            stroke: Palette.accent;
+            stroke-width: 2px;
+            stroke-line-join: round;
         }
         if (root.ready) : Rectangle {
             for t[i] in root.temps : CurvePoint {
