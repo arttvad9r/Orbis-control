@@ -68,17 +68,12 @@ fn set_fans_open(app: &AppWindow, open: bool) {
             }
             let window = windows.fans.as_ref().expect("created above");
             sync_fans(app, window);
-            match window.show() {
-                Ok(()) => crate::window_placement::arrange_soon(),
-                Err(error) => {
-                    tracing::warn!(?error, "fans window could not be shown");
-                    app.set_fans_open(false);
-                }
+            if let Err(error) = window.show() {
+                tracing::warn!(?error, "fans window could not be shown");
+                app.set_fans_open(false);
             }
         } else if let Some(window) = &windows.fans {
             let _ = window.hide();
-            // Close the gap the hidden window leaves in the row.
-            crate::window_placement::arrange_soon();
         }
         update_timer(app, &mut windows);
     });
@@ -110,17 +105,12 @@ fn set_extra_open(app: &AppWindow, open: bool) {
             }
             let window = windows.extra.as_ref().expect("created above");
             sync_extra(app, window);
-            match window.show() {
-                Ok(()) => crate::window_placement::arrange_soon(),
-                Err(error) => {
-                    tracing::warn!(?error, "extra window could not be shown");
-                    app.set_extra_open(false);
-                }
+            if let Err(error) = window.show() {
+                tracing::warn!(?error, "extra window could not be shown");
+                app.set_extra_open(false);
             }
         } else if let Some(window) = &windows.extra {
             let _ = window.hide();
-            // Close the gap the hidden window leaves in the row.
-            crate::window_placement::arrange_soon();
         }
         update_timer(app, &mut windows);
     });

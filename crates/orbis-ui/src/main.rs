@@ -772,9 +772,8 @@ fn toggle_main_window(app: &AppWindow) {
         let _ = window.hide();
     } else {
         window.set_minimized(false);
-        match window.show() {
-            Ok(()) => window_placement::arrange_soon(),
-            Err(error) => tracing::warn!(?error, "main window could not be shown"),
+        if let Err(error) = window.show() {
+            tracing::warn!(?error, "main window could not be shown");
         }
     }
 }
@@ -2962,6 +2961,7 @@ fn main() -> anyhow::Result<()> {
     if let Err(error) = slint::set_xdg_app_id("io.github.orbiscontrol.Orbis") {
         tracing::warn!(?error, "xdg app id not set");
     }
+    window_placement::install();
     quick_controls_backend::force_refresh(&app);
     wire_settings_section(&app);
     fit_window(&app);
@@ -3124,18 +3124,17 @@ fn main() -> anyhow::Result<()> {
                 && let Some(app) = app_weak.upgrade()
             {
                 let _ = app.show();
-                window_placement::arrange_soon();
             }
         });
     } else {
         app.show()?;
-        window_placement::arrange_soon();
     }
     // Keep running with every window hidden: closing to the tray must not
     // end the process (power rules and timers live here). Quit paths call
     // `slint::quit_event_loop` explicitly.
     slint::run_event_loop_until_quit()?;
 
+    window_placement::uninstall();
     diagnostics_backend::clear();
     panel_windows::clear();
     quick_controls_backend::clear();
@@ -3174,11 +3173,6 @@ fn fit_window(app: &AppWindow) {
             && ((actual.width - width).abs() > 0.5 || (actual.height - height).abs() > 0.5)
         {
             request_window_size(&app, width, height);
-        }
-        // The height changes while sections load: keep the window docked
-        // at the bottom of the work area.
-        if app.window().is_visible() {
-            window_placement::arrange_soon();
         }
     });
 }
