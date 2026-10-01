@@ -116,6 +116,18 @@ fn set_extra_open(app: &AppWindow, open: bool) {
     });
 }
 
+/// Open the "Fans and power" window (tray menu).
+pub(crate) fn open_fans(app: &AppWindow) {
+    app.set_fans_open(true);
+    set_fans_open(app, true);
+}
+
+/// Open the "Extra" window (tray menu).
+pub(crate) fn open_extra(app: &AppWindow) {
+    app.set_extra_open(true);
+    set_extra_open(app, true);
+}
+
 /// Run the mirror timer only while a secondary window is open.
 fn update_timer(app: &AppWindow, windows: &mut Windows) {
     let needed = app.get_fans_open() || app.get_extra_open();

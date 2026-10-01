@@ -270,8 +270,11 @@ export component AppWindow inherits Window {
         if (index == 2) { return "Ultimate"; }
         return "—";
     }
+    // Greyed only for real unavailability or a slow write; a quick write in
+    // flight just ignores input (gpu-pending) so the row does not flash.
     property <bool> gpu-locked: root.s.gpu-mode-state != GpuModeHwState.Ready || !root.s.gpu-mode-writable
-        || root.s.gpu-mode-pending || root.s.gpu-mode-unconfirmed;
+        || gpu-busy.shown || root.s.gpu-mode-unconfirmed;
+    property <bool> gpu-pending: root.s.gpu-mode-pending;
     function gpu-note() -> string {
         if (root.s.gpu-mode-state == GpuModeHwState.Ready && !root.s.gpu-mode-writable) { return "Только чтение"; }
         if (root.s.gpu-section-error) { return "Изменение режима GPU не подтверждено"; }
@@ -376,6 +379,7 @@ export component AppWindow inherits Window {
                         selected: root.s.gpu-mode-state == GpuModeHwState.Ready && root.s.gpu-selected == 0 && !root.gpu-optimized;
                         pending: root.s.gpu-queued == 0;
                         disabled: root.gpu-locked;
+                        locked: root.gpu-pending;
                         clicked => {
                             if (root.gpu-optimized) { root.gpu-optimized-requested(false); }
                             root.gpu-clicked(0);
@@ -386,6 +390,7 @@ export component AppWindow inherits Window {
                         selected: root.s.gpu-mode-state == GpuModeHwState.Ready && root.s.gpu-selected == 1 && !root.gpu-optimized;
                         pending: root.s.gpu-queued == 1;
                         disabled: root.gpu-locked;
+                        locked: root.gpu-pending;
                         clicked => {
                             if (root.gpu-optimized) { root.gpu-optimized-requested(false); }
                             root.gpu-clicked(1);
@@ -396,6 +401,7 @@ export component AppWindow inherits Window {
                         selected: root.s.gpu-mode-state == GpuModeHwState.Ready && root.s.gpu-selected == 2 && !root.gpu-optimized;
                         pending: root.s.gpu-queued == 2 || root.s.gpu-ultimate-pending;
                         disabled: root.gpu-locked || root.s.gpu-ultimate-disabled;
+                        locked: root.gpu-pending;
                         clicked => {
                             if (root.gpu-optimized) { root.gpu-optimized-requested(false); }
                             root.gpu-clicked(2);
@@ -405,6 +411,7 @@ export component AppWindow inherits Window {
                         label: "Optimized";
                         selected: root.s.gpu-mode-state == GpuModeHwState.Ready && root.gpu-optimized;
                         disabled: root.gpu-locked;
+                        locked: root.gpu-pending;
                         clicked => { root.gpu-optimized-requested(true); }
                     }
                 }
@@ -547,8 +554,9 @@ export component AppWindow inherits Window {
                         max: 100;
                         unit: "%";
                         value: root.full-charge-restore >= 0 ? 100 : root.s.charge-limit;
-                        disabled: !root.s.charge-limit-writable || root.s.charge-limit-pending || root.s.charge-limit-unconfirmed
+                        disabled: !root.s.charge-limit-writable || charge-busy.shown || root.s.charge-limit-unconfirmed
                             || root.s.charge-limit-error != "" || root.full-charge-restore >= 0;
+                        locked: root.s.charge-limit-pending;
                         changed(v) => { root.charge-changed(v); }
                     }
                 }
@@ -564,7 +572,8 @@ export component AppWindow inherits Window {
                     }
                     Button {
                         label: root.full-charge-restore >= 0 ? "Отменить" : "Зарядить до 100 %";
-                        disabled: root.s.charge-limit-pending || root.s.charge-limit-unconfirmed;
+                        disabled: charge-busy.shown || root.s.charge-limit-unconfirmed;
+                        locked: root.s.charge-limit-pending;
                         clicked => { root.full-charge-requested(root.full-charge-restore < 0); }
                     }
                 }

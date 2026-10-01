@@ -37,6 +37,9 @@ orbis-sessiond = { workspace = true }
 # review/screenshot builds via the `ui-review` feature.
 orbis-test-support = { workspace = true, optional = true }
 image = { workspace = true }
+# StatusNotifierItem + DBusMenu tray. async-io keeps zbus off tokio for the
+# whole workspace (the tokio feature would switch every zbus connection).
+ksni = { version = "0.3.6", default-features = false, features = ["async-io", "blocking"] }
 
 [build-dependencies]
 slint-build = "1.16.1"

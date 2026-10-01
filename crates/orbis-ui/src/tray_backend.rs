@@ -1,34 +1,29 @@
-//! Minimal Linux StatusNotifierItem owner for Slint 1.13.x.
+//! Tray icon (StatusNotifierItem) with a right-click menu (DBusMenu), via
+//! the `ksni` crate.
 //!
-//! The locked Slint version predates its native SystemTrayIcon element, so this
-//! module implements only the standard session-bus StatusNotifierItem activation
-//! surface through the already-present zbus dependency. There is no shell helper,
-//! subprocess, arbitrary D-Bus method surface or hardware access.
+//! Left click toggles the main window, like G-Helper. The menu opens the
+//! windows, switches the performance profile through the main window's own
+//! request path (same gates as its buttons) and quits the application. There
+//! is no shell helper, subprocess, generic D-Bus surface or hardware access
+//! here.
 
 use std::cell::RefCell;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
 
+use ksni::blocking::TrayMethods;
+use ksni::menu::{MenuItem, RadioGroup, RadioItem, StandardItem};
 use slint::ComponentHandle;
-use tokio::sync::Notify;
-use tokio::sync::mpsc::UnboundedSender;
 
 use crate::AppWindow;
 
-#[allow(dead_code)]
-const WATCHER_SERVICE: &str = "org.kde.StatusNotifierWatcher";
-#[allow(dead_code)]
-const WATCHER_PATH: &str = "/StatusNotifierWatcher";
-const ITEM_PATH: &str = "/StatusNotifierItem";
-const RECHECK_INTERVAL: Duration = Duration::from_secs(15);
+const ICON_NAME: &str = "io.github.orbiscontrol.Orbis";
+const PROFILES: [&str; 3] = ["Тихий", "Баланс", "Турбо"];
 
-static TOOLTIP_DESCRIPTION: Mutex<String> = Mutex::new(String::new());
-static TOOLTIP_CHANGED: Notify = Notify::const_new();
+/// Set by the tray thread while a StatusNotifier host shows the icon.
+static READY: AtomicBool = AtomicBool::new(false);
 
-/// Latest telemetry as shown in the UI; unknown values are "—" or empty.
-#[derive(Debug, Clone, Default)]
+/// Latest state shown by the tray; unknown values are "—" or empty.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct TrayStats {
     pub cpu_temp: String,
     pub gpu_temp: String,
@@ -37,6 +32,12 @@ pub(crate) struct TrayStats {
     pub battery_percent: String,
     pub on_ac: Option<bool>,
     pub fresh: bool,
+    /// Selected profile index (0 quiet, 1 balanced, 2 turbo) when profiles
+    /// are readable; `None` hides the profile choice.
+    pub profile: Option<usize>,
+    /// Per-profile availability and the write gate for the radio items.
+    pub profiles_available: [bool; 3],
+    pub profiles_writable: bool,
 }
 
 fn known(value: &str) -> Option<&str> {
@@ -67,257 +68,160 @@ fn tooltip_description(stats: &TrayStats) -> String {
     lines.join("<br/>")
 }
 
-/// Publish the latest telemetry to the tray tooltip; a changed text re-notifies
-/// the host. Works before the tray is registered (the text is kept).
-pub(crate) fn publish_stats(stats: &TrayStats) {
-    let description = tooltip_description(stats);
-    let mut current = TOOLTIP_DESCRIPTION
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    if *current != description {
-        *current = description;
-        TOOLTIP_CHANGED.notify_one();
+struct OrbisTray {
+    app: slint::Weak<AppWindow>,
+    stats: TrayStats,
+}
+
+impl OrbisTray {
+    /// Run `action` on the UI thread with the main window.
+    fn on_ui(&self, action: impl FnOnce(AppWindow) + Send + 'static) {
+        if let Err(error) = self.app.upgrade_in_event_loop(action) {
+            tracing::debug!(?error, "tray action dispatch failed");
+        }
+    }
+
+    fn item(label: &str, action: fn(&AppWindow)) -> MenuItem<Self> {
+        StandardItem {
+            label: label.into(),
+            activate: Box::new(move |tray: &mut Self| tray.on_ui(move |app| action(&app))),
+            ..Default::default()
+        }
+        .into()
     }
 }
 
-#[zbus::proxy(
-    interface = "org.kde.StatusNotifierWatcher",
-    default_service = "org.kde.StatusNotifierWatcher",
-    default_path = "/StatusNotifierWatcher"
-)]
-trait StatusNotifierWatcher {
-    fn register_status_notifier_item(&self, service: &str) -> zbus::Result<()>;
-
-    #[zbus(property)]
-    fn is_status_notifier_host_registered(&self) -> zbus::Result<bool>;
-}
-
-#[derive(Debug, Clone, Copy)]
-enum TrayCommand {
-    Activate,
-}
-
-/// SNI `ToolTip`: icon name, pixmaps, title, description.
-type ToolTip = (String, Vec<(i32, i32, Vec<u8>)>, String, String);
-
-struct StatusNotifierItem {
-    commands: UnboundedSender<TrayCommand>,
-}
-
-#[zbus::interface(name = "org.kde.StatusNotifierItem")]
-impl StatusNotifierItem {
-    #[zbus(property)]
-    fn category(&self) -> String {
-        "ApplicationStatus".into()
-    }
-
-    #[zbus(property)]
+impl ksni::Tray for OrbisTray {
     fn id(&self) -> String {
         "orbis-control".into()
     }
 
-    #[zbus(property)]
     fn title(&self) -> String {
         "Orbis Control".into()
     }
 
-    #[zbus(property)]
-    fn status(&self) -> String {
-        "Active".into()
-    }
-
-    #[zbus(property)]
-    fn window_id(&self) -> u32 {
-        0
-    }
-
-    #[zbus(property)]
     fn icon_name(&self) -> String {
-        "io.github.orbiscontrol.Orbis".into()
+        ICON_NAME.into()
     }
 
-    #[zbus(property)]
-    fn attention_icon_name(&self) -> String {
-        String::new()
+    fn category(&self) -> ksni::Category {
+        ksni::Category::Hardware
     }
 
-    #[zbus(property)]
-    fn overlay_icon_name(&self) -> String {
-        String::new()
+    fn tool_tip(&self) -> ksni::ToolTip {
+        ksni::ToolTip {
+            icon_name: ICON_NAME.into(),
+            title: "Orbis Control".into(),
+            description: tooltip_description(&self.stats),
+            ..Default::default()
+        }
     }
 
-    #[zbus(property)]
-    fn tool_tip(&self) -> ToolTip {
-        let description = TOOLTIP_DESCRIPTION
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        (
-            "io.github.orbiscontrol.Orbis".into(),
-            Vec::new(),
-            "Orbis Control".into(),
-            description,
-        )
+    fn activate(&mut self, _x: i32, _y: i32) {
+        // Like G-Helper: the icon toggles the window (window_placement docks
+        // it above the icon).
+        self.on_ui(|app| crate::toggle_main_window(&app));
     }
 
-    #[zbus(signal)]
-    async fn new_tool_tip(emitter: &zbus::object_server::SignalEmitter<'_>) -> zbus::Result<()>;
-
-    #[zbus(property)]
-    fn item_is_menu(&self) -> bool {
-        false
+    fn menu(&self) -> Vec<MenuItem<Self>> {
+        let mut items = vec![Self::item("Открыть Orbis Control", crate::show_main_window)];
+        if let Some(selected) = self.stats.profile {
+            items.push(MenuItem::Separator);
+            items.push(
+                RadioGroup {
+                    selected,
+                    select: Box::new(|tray: &mut Self, index| {
+                        tray.on_ui(move |app| app.invoke_perf_clicked(index as i32));
+                    }),
+                    options: PROFILES
+                        .iter()
+                        .zip(self.stats.profiles_available)
+                        .map(|(label, available)| RadioItem {
+                            label: (*label).into(),
+                            enabled: available && self.stats.profiles_writable,
+                            ..Default::default()
+                        })
+                        .collect(),
+                }
+                .into(),
+            );
+        }
+        items.extend([
+            MenuItem::Separator,
+            Self::item("Вентиляторы и мощность", crate::panel_windows::open_fans),
+            Self::item("Дополнительно", crate::panel_windows::open_extra),
+            MenuItem::Separator,
+            StandardItem {
+                label: "Выход".into(),
+                icon_name: "application-exit".into(),
+                activate: Box::new(|tray: &mut Self| {
+                    tray.on_ui(|app| crate::quick_controls_backend::quit(&app));
+                }),
+                ..Default::default()
+            }
+            .into(),
+        ]);
+        items
     }
 
-    #[zbus(property)]
-    fn menu(&self) -> zbus::zvariant::ObjectPath<'static> {
-        zbus::zvariant::ObjectPath::try_from("/NO_DBUSMENU")
-            .expect("fixed StatusNotifierItem no-menu object path")
+    fn watcher_online(&self) {
+        READY.store(true, Ordering::Release);
     }
 
-    fn activate(&self, _x: i32, _y: i32) {
-        let _ = self.commands.send(TrayCommand::Activate);
+    fn watcher_offline(&self, _reason: ksni::OfflineReason) -> bool {
+        READY.store(false, Ordering::Release);
+        // Keep the service: the host may come back (Plasma restart).
+        true
     }
-
-    fn secondary_activate(&self, _x: i32, _y: i32) {
-        let _ = self.commands.send(TrayCommand::Activate);
-    }
-
-    fn context_menu(&self, _x: i32, _y: i32) {}
-
-    fn scroll(&self, _delta: i32, _orientation: &str) {}
-}
-
-#[derive(Clone)]
-struct TrayContext {
-    runtime: tokio::runtime::Handle,
-    started: Arc<AtomicBool>,
-    ready: Arc<AtomicBool>,
 }
 
 thread_local! {
-    static CONTEXT: RefCell<Option<TrayContext>> = const { RefCell::new(None) };
+    static HANDLE: RefCell<Option<ksni::blocking::Handle<OrbisTray>>> = const { RefCell::new(None) };
 }
 
-pub(crate) fn initialize(runtime: tokio::runtime::Handle) {
-    CONTEXT.with(|slot| {
-        *slot.borrow_mut() = Some(TrayContext {
-            runtime,
-            started: Arc::new(AtomicBool::new(false)),
-            ready: Arc::new(AtomicBool::new(false)),
-        });
+/// True while a StatusNotifier host shows the icon. Hiding the main window is
+/// unsafe when false because there would be no way to bring it back.
+pub(crate) fn is_ready() -> bool {
+    READY.load(Ordering::Acquire)
+}
+
+pub(crate) fn wire_app(app: &AppWindow) {
+    if HANDLE.with(|handle| handle.borrow().is_some()) {
+        return;
+    }
+    let tray = OrbisTray {
+        app: app.as_weak(),
+        stats: TrayStats::default(),
+    };
+    // Also waits for a watcher that appears later (login before the panel).
+    match tray.assume_sni_available(true).spawn() {
+        Ok(handle) => HANDLE.with(|slot| *slot.borrow_mut() = Some(handle)),
+        Err(error) => tracing::warn!(%error, "tray icon unavailable"),
+    }
+}
+
+/// Publish the latest state to the tray (tooltip and menu); unchanged state
+/// is not re-sent.
+pub(crate) fn publish_stats(stats: &TrayStats) {
+    HANDLE.with(|handle| {
+        if let Some(handle) = handle.borrow().as_ref() {
+            let stats = stats.clone();
+            handle.update(move |tray| {
+                if tray.stats != stats {
+                    tray.stats = stats;
+                }
+            });
+        }
     });
 }
 
 pub(crate) fn clear() {
-    CONTEXT.with(|slot| {
-        if let Some(context) = slot.borrow().as_ref() {
-            context.ready.store(false, Ordering::Release);
-        }
-        *slot.borrow_mut() = None;
-    });
-}
-
-/// True only after the standard watcher reports a currently registered host and
-/// accepts this exact item registration. Hiding the main window is unsafe when
-/// false because no user-visible activation path is proven.
-pub(crate) fn is_ready() -> bool {
-    CONTEXT.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .is_some_and(|context| context.ready.load(Ordering::Acquire))
-    })
-}
-
-pub(crate) fn wire_app(app: &AppWindow) {
-    let context = CONTEXT.with(|slot| slot.borrow().clone());
-    let Some(context) = context else {
-        return;
-    };
-    if context.started.swap(true, Ordering::AcqRel) {
-        return;
-    }
-
-    let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
-    let weak = app.as_weak();
-    context.runtime.spawn(async move {
-        while let Some(command) = command_rx.recv().await {
-            match command {
-                TrayCommand::Activate => {
-                    let weak = weak.clone();
-                    if let Err(error) = weak.upgrade_in_event_loop(move |app| {
-                        // Like G-Helper: the tray icon toggles the window
-                        // (window_placement docks it above the icon).
-                        crate::toggle_main_window(&app);
-                    }) {
-                        tracing::debug!(error = ?error, "tray activation UI dispatch failed");
-                    }
-                }
-            }
+    HANDLE.with(|handle| {
+        if let Some(handle) = handle.borrow_mut().take() {
+            handle.shutdown().wait();
         }
     });
-
-    let ready = context.ready.clone();
-    context.runtime.spawn(async move {
-        if let Err(error) = run_item_service(command_tx, ready.clone()).await {
-            ready.store(false, Ordering::Release);
-            tracing::warn!(error = ?error, "StatusNotifierItem backend unavailable");
-        }
-    });
-}
-
-async fn run_item_service(
-    commands: UnboundedSender<TrayCommand>,
-    ready: Arc<AtomicBool>,
-) -> zbus::Result<()> {
-    let connection = zbus::Connection::session().await?;
-    connection
-        .object_server()
-        .at(ITEM_PATH, StatusNotifierItem { commands })
-        .await?;
-
-    let service_name = format!(
-        "org.freedesktop.StatusNotifierItem-{}-1",
-        std::process::id()
-    );
-    connection.request_name(service_name.as_str()).await?;
-
-    let item = connection
-        .object_server()
-        .interface::<_, StatusNotifierItem>(ITEM_PATH)
-        .await?;
-    tokio::spawn(async move {
-        loop {
-            TOOLTIP_CHANGED.notified().await;
-            if let Err(error) = StatusNotifierItem::new_tool_tip(item.signal_emitter()).await {
-                tracing::debug!(error = ?error, "StatusNotifierItem tooltip signal failed");
-            }
-        }
-    });
-
-    loop {
-        let watcher = StatusNotifierWatcherProxy::new(&connection).await;
-        match watcher {
-            Ok(watcher) => match watcher.is_status_notifier_host_registered().await {
-                Ok(true) => match watcher.register_status_notifier_item(&service_name).await {
-                    Ok(()) => ready.store(true, Ordering::Release),
-                    Err(error) => {
-                        ready.store(false, Ordering::Release);
-                        tracing::debug!(error = ?error, "StatusNotifierWatcher registration failed");
-                    }
-                },
-                Ok(false) => ready.store(false, Ordering::Release),
-                Err(error) => {
-                    ready.store(false, Ordering::Release);
-                    tracing::debug!(error = ?error, "StatusNotifierWatcher host-state read failed");
-                }
-            },
-            Err(error) => {
-                ready.store(false, Ordering::Release);
-                tracing::debug!(error = ?error, "StatusNotifierWatcher unavailable");
-            }
-        }
-        tokio::time::sleep(RECHECK_INTERVAL).await;
-    }
+    READY.store(false, Ordering::Release);
 }
 
 #[cfg(test)]
@@ -333,6 +237,7 @@ mod tests {
             battery_percent: "87%".into(),
             on_ac: Some(false),
             fresh: true,
+            ..Default::default()
         }
     }
 

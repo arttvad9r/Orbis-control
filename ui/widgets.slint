@@ -14,6 +14,8 @@ export component Button inherits Rectangle {
     in property <string> label;
     in property <bool> primary: false;
     in property <bool> disabled: false;
+    // Ignores input without looking disabled (a short write in flight).
+    in property <bool> locked: false;
     callback clicked;
 
     min-width: 40px;
@@ -28,7 +30,7 @@ export component Button inherits Rectangle {
     accessible-role: button;
     accessible-label: root.label;
     accessible-enabled: !root.disabled;
-    accessible-action-default => { if (!root.disabled) { root.clicked(); } }
+    accessible-action-default => { if (!root.disabled && !root.locked) { root.clicked(); } }
 
     label-text := Text {
         text: root.label;
@@ -39,7 +41,7 @@ export component Button inherits Rectangle {
         overflow: elide;
     }
     touch := TouchArea {
-        enabled: !root.disabled;
+        enabled: !root.disabled && !root.locked;
         mouse-cursor: root.disabled ? MouseCursor.default : MouseCursor.pointer;
         clicked => { root.clicked(); }
     }
@@ -51,6 +53,8 @@ export component Seg inherits Rectangle {
     in property <bool> selected: false;
     in property <bool> pending: false;
     in property <bool> disabled: false;
+    // Ignores input without looking disabled (a short write in flight).
+    in property <bool> locked: false;
     callback clicked;
 
     // Long labels elide instead of widening the window.
@@ -70,7 +74,7 @@ export component Seg inherits Rectangle {
     accessible-label: root.label;
     accessible-checked: root.selected;
     accessible-enabled: !root.disabled;
-    accessible-action-default => { if (!root.disabled) { root.clicked(); } }
+    accessible-action-default => { if (!root.disabled && !root.locked) { root.clicked(); } }
 
     label-text := Text {
         text: root.label;
@@ -84,7 +88,7 @@ export component Seg inherits Rectangle {
         overflow: elide;
     }
     touch := TouchArea {
-        enabled: !root.disabled && !root.selected;
+        enabled: !root.disabled && !root.locked && !root.selected;
         mouse-cursor: self.enabled ? MouseCursor.pointer : MouseCursor.default;
         clicked => { root.clicked(); }
     }
@@ -253,6 +257,8 @@ export component ValueSlider inherits Rectangle {
     in property <int> value: 0;
     in property <string> unit: "";
     in property <bool> disabled: false;
+    // Ignores input without looking disabled (a short write in flight).
+    in property <bool> locked: false;
     // Highlights the readout while the value differs from the applied one.
     in property <bool> modified: false;
     in property <string> label;
@@ -297,7 +303,7 @@ export component ValueSlider inherits Rectangle {
         return root.min + Math.round((clamped - root.min) / Math.max(root.step, 1)) * Math.max(root.step, 1);
     }
     function edit-to(target: float) {
-        if (root.disabled) { return; }
+        if (root.disabled || root.locked) { return; }
         root.gesture-active = true;
         root.keyboard-active = true;
         root.preview-value = root.snap(target);
@@ -325,7 +331,7 @@ export component ValueSlider inherits Rectangle {
 
     focus-scope := FocusScope {
         focus-on-tab-navigation: true;
-        enabled: !root.disabled;
+        enabled: !root.disabled && !root.locked;
         key-pressed(event) => {
             if (event.text == Key.LeftArrow || event.text == Key.DownArrow) { root.nudge(-root.step); return accept; }
             if (event.text == Key.RightArrow || event.text == Key.UpArrow) { root.nudge(root.step); return accept; }
@@ -366,7 +372,7 @@ export component ValueSlider inherits Rectangle {
                 background: root.gesture-active || touch.has-hover ? Palette.accent : Palette.control;
             }
             touch := TouchArea {
-                enabled: !root.disabled;
+                enabled: !root.disabled && !root.locked;
                 mouse-cursor: self.enabled ? MouseCursor.pointer : MouseCursor.default;
                 pointer-event(ev) => {
                     if (ev.kind == PointerEventKind.down) {

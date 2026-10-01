@@ -514,6 +514,8 @@ fn current_ui_state() -> controller::UiState {
 fn publish_ui_state(app: &AppWindow, state: &controller::UiState) {
     app.set_ui_state(to_slint(state));
     UI_STATE.with(|slot| *slot.borrow_mut() = state.clone());
+    // The tray menu shows the current profile.
+    quick_controls_backend::publish_tray_stats(state);
 }
 
 fn build_app(
@@ -771,10 +773,16 @@ fn toggle_main_window(app: &AppWindow) {
         panel_windows::close_all(app);
         let _ = window.hide();
     } else {
-        window.set_minimized(false);
-        if let Err(error) = window.show() {
-            tracing::warn!(?error, "main window could not be shown");
-        }
+        show_main_window(app);
+    }
+}
+
+/// Show (or un-minimize) the main window; window_placement docks it.
+fn show_main_window(app: &AppWindow) {
+    let window = app.window();
+    window.set_minimized(false);
+    if let Err(error) = window.show() {
+        tracing::warn!(?error, "main window could not be shown");
     }
 }
 

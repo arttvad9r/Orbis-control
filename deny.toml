@@ -18,6 +18,8 @@ allow = [
     "Zlib",
     "Unicode-3.0",
     "MPL-2.0",
+    # ksni (tray): public-domain dedication, GPL-compatible.
+    "Unlicense",
     # Slint's OR expression is accepted through this GPL-3.0-only branch;
     # the custom Royalty-free and Software License branches remain disallowed.
     "GPL-3.0-only",

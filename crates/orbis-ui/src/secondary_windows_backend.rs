@@ -18,8 +18,7 @@ mod window_position_preferences_bridge;
 use crate::AppWindow;
 
 pub(crate) fn initialize(runtime: tokio::runtime::Handle, session_connection: zbus::Connection) {
-    extra_backend::initialize(runtime.clone(), session_connection);
-    tray_backend::initialize(runtime);
+    extra_backend::initialize(runtime, session_connection);
 }
 
 /// True once a StatusNotifier host has registered the tray icon.
@@ -45,6 +44,11 @@ pub(crate) fn publish_tray_stats(state: &crate::controller::UiState) {
             _ => None,
         },
         fresh: state.telemetry_fresh,
+        profile: (state.perf_state == crate::controller::PerformanceHwState::Ready
+            && (0..3).contains(&state.perf_selected))
+        .then_some(state.perf_selected as usize),
+        profiles_available: [1, 2, 4].map(|bit| state.available_perf_mask & bit != 0),
+        profiles_writable: state.perf_writable,
     });
 }
 
