@@ -249,7 +249,6 @@ export component AppWindow inherits Window {
     property <UiState> s: root.ui-state;
 
     function perf-note() -> string {
-        if (root.s.performance-delegated-pending) { return "Ожидание подтверждения"; }
         if (root.s.performance-delegated-error != "") { return root.s.performance-delegated-error; }
         if (root.s.perf-state == PerformanceHwState.Ready) {
             return root.s.perf-writable ? "" : "Профиль доступен только для чтения";
@@ -272,7 +271,6 @@ export component AppWindow inherits Window {
         || root.s.gpu-mode-pending || root.s.gpu-mode-unconfirmed;
     function gpu-note() -> string {
         if (root.s.gpu-mode-state == GpuModeHwState.Ready && !root.s.gpu-mode-writable) { return "Только чтение"; }
-        if (root.s.gpu-mode-pending) { return "Ожидание подтверждения"; }
         if (root.s.gpu-section-error) { return "Изменение режима GPU не подтверждено"; }
         if (root.s.gpu-mode-unconfirmed) { return "Результат неизвестен — обновите состояние перед новой записью"; }
         if (root.s.gpu-reboot-required) { return root.mode-label(root.s.gpu-queued) + " применится после перезагрузки"; }
@@ -335,7 +333,13 @@ export component AppWindow inherits Window {
 
             Section {
                 first: true;
-                SectionHeader { title: "Режим"; info: root.telemetry(); }
+                // Transient "applying" states live in the header so the
+                // window height does not jump while a value is confirmed.
+                SectionHeader {
+                    title: "Режим";
+                    info: root.s.performance-delegated-pending ? "применяется…" : root.telemetry();
+                    info-color: root.s.performance-delegated-pending ? Palette.neutral : Palette.muted;
+                }
                 HorizontalLayout {
                     spacing: 4px;
                     for p[i] in [{ label: "Тихий", bit: 1 }, { label: "Баланс", bit: 2 }, { label: "Турбо", bit: 4 }] : Seg {
@@ -357,7 +361,11 @@ export component AppWindow inherits Window {
             }
 
             if (root.s.gpu-mode-state != GpuModeHwState.Unavailable && root.s.available-gpu-mask != 0) : Section {
-                SectionHeader { title: "Графика"; info: root.gpu-info(); }
+                SectionHeader {
+                    title: "Графика";
+                    info: root.s.gpu-mode-pending ? "применяется…" : root.gpu-info();
+                    info-color: root.s.gpu-mode-pending ? Palette.neutral : Palette.muted;
+                }
                 HorizontalLayout {
                     spacing: 4px;
                     if (Bits.set(root.s.available-gpu-mask, 1)) : Seg {
@@ -524,8 +532,8 @@ export component AppWindow inherits Window {
             if (root.s.charge-limit-state != ChargeLimitState.Unavailable || root.s.battery-percent != "—") : Section {
                 SectionHeader {
                     title: "Батарея";
-                    info: root.battery-info();
-                    info-color: root.charging() ? Palette.positive : Palette.muted;
+                    info: root.s.charge-limit-pending ? "применяется…" : root.battery-info();
+                    info-color: root.s.charge-limit-pending ? Palette.neutral : root.charging() ? Palette.positive : Palette.muted;
                 }
                 if (root.s.charge-limit-state == ChargeLimitState.Ready) : Row {
                     label: "Лимит заряда";
@@ -557,9 +565,8 @@ export component AppWindow inherits Window {
                         clicked => { root.full-charge-requested(root.full-charge-restore < 0); }
                     }
                 }
-                if (root.s.charge-limit-pending || root.s.charge-limit-unconfirmed || root.s.charge-limit-error != "") : Note {
-                    text: root.s.charge-limit-pending ? "Ожидание подтверждения"
-                        : root.s.charge-limit-unconfirmed ? "Результат неизвестен — обновите состояние перед новой записью"
+                if (root.s.charge-limit-unconfirmed || root.s.charge-limit-error != "") : Note {
+                    text: root.s.charge-limit-unconfirmed ? "Результат неизвестен — обновите состояние перед новой записью"
                         : root.s.charge-limit-error;
                     kind: root.s.charge-limit-error != "" ? 2 : 1;
                 }
