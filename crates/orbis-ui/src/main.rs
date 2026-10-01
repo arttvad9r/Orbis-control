@@ -2949,6 +2949,11 @@ fn main() -> anyhow::Result<()> {
     let (worker_tx, worker_rx) = orbis_ui::worker::command_channel();
 
     let app = build_app(&state, Some(worker_tx.clone()))?;
+    // Wayland/X11 app id = desktop file name, so the desktop maps the
+    // windows to io.github.orbiscontrol.Orbis.desktop (name, icon).
+    if let Err(error) = slint::set_xdg_app_id("io.github.orbiscontrol.Orbis") {
+        tracing::warn!(?error, "xdg app id not set");
+    }
     quick_controls_backend::force_refresh(&app);
     wire_settings_section(&app);
     fit_window(&app);
