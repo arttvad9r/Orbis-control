@@ -48,8 +48,7 @@ impl AsusKeyboardBacklightProvider {
         let trimmed = raw.trim();
         trimmed.parse::<u32>().map_err(|error| {
             ProviderError::Internal(format!(
-                "asus kbd_backlight: malformed brightness {:?}: {error}",
-                trimmed
+                "asus kbd_backlight: malformed brightness {trimmed:?}: {error}"
             ))
         })
     }
@@ -61,8 +60,7 @@ impl AsusKeyboardBacklightProvider {
         let trimmed = raw.trim();
         trimmed.parse::<u32>().map_err(|error| {
             ProviderError::Internal(format!(
-                "asus kbd_backlight: malformed max_brightness {:?}: {error}",
-                trimmed
+                "asus kbd_backlight: malformed max_brightness {trimmed:?}: {error}"
             ))
         })
     }

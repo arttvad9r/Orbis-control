@@ -123,7 +123,7 @@ impl ChargeLimitBounds {
         if min.get() > max.get() {
             return Err(CoreError::invariant(
                 "ChargeLimitBounds.min",
-                format!("min ({}) > max ({})", min, max),
+                format!("min ({min}) > max ({max})"),
             ));
         }
         if step == 0 {

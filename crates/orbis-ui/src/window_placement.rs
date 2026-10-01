@@ -38,7 +38,7 @@ fn script(pid: u32) -> String {
     format!(
         r#"const pid = {pid};
 const gap = 8;
-const titles = {{ main: {main:?}, fans: {fans:?}, extra: {extra:?} }};
+const titles = {{ main: {MAIN_TITLE:?}, fans: {FANS_TITLE:?}, extra: {EXTRA_TITLE:?} }};
 // Tray click position: when the main window appears while the pointer is
 // below the work area (on the panel), it opens above the pointer.
 let anchorX = null;
@@ -100,9 +100,6 @@ workspace.windowRemoved.connect(function (w) {{
 }});
 for (const w of workspace.windowList()) track(w);
 "#,
-        main = MAIN_TITLE,
-        fans = FANS_TITLE,
-        extra = EXTRA_TITLE,
     )
 }
 
