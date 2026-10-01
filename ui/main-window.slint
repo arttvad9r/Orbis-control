@@ -8,7 +8,7 @@
 import { ScrollView, TextEdit } from "std-widgets.slint";
 import { UiState, NvidiaRow, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState, ClamshellState } from "model.slint";
 import { Palette, ThemeState, ThemeMode, ThemeBridge } from "theme.slint";
-import { Metrics, Button, Seg, Segmented, Switch, ToggleRow, Row, SectionHeader, Section, Note, ValueSlider, Dropdown, Swatch, KeyValue } from "widgets.slint";
+import { Delayed, Metrics, Button, Seg, Segmented, Switch, ToggleRow, Row, SectionHeader, Section, Note, ValueSlider, Dropdown, Swatch, KeyValue } from "widgets.slint";
 import { FanCurve } from "fan-curve.slint";
 
 global Bits {
@@ -241,6 +241,9 @@ export component AppWindow inherits Window {
     callback quit-requested;
 
     ThemeBridge { }
+    perf-busy := Delayed { active: root.s.performance-delegated-pending; }
+    gpu-busy := Delayed { active: root.s.gpu-mode-pending; }
+    charge-busy := Delayed { active: root.s.charge-limit-pending; }
 
 
 
@@ -337,8 +340,8 @@ export component AppWindow inherits Window {
                 // window height does not jump while a value is confirmed.
                 SectionHeader {
                     title: "Режим";
-                    info: root.s.performance-delegated-pending ? "применяется…" : root.telemetry();
-                    info-color: root.s.performance-delegated-pending ? Palette.neutral : Palette.muted;
+                    info: perf-busy.shown ? "применяется…" : root.telemetry();
+                    info-color: perf-busy.shown ? Palette.neutral : Palette.muted;
                 }
                 HorizontalLayout {
                     spacing: 4px;
@@ -363,8 +366,8 @@ export component AppWindow inherits Window {
             if (root.s.gpu-mode-state != GpuModeHwState.Unavailable && root.s.available-gpu-mask != 0) : Section {
                 SectionHeader {
                     title: "Графика";
-                    info: root.s.gpu-mode-pending ? "применяется…" : root.gpu-info();
-                    info-color: root.s.gpu-mode-pending ? Palette.neutral : Palette.muted;
+                    info: gpu-busy.shown ? "применяется…" : root.gpu-info();
+                    info-color: gpu-busy.shown ? Palette.neutral : Palette.muted;
                 }
                 HorizontalLayout {
                     spacing: 4px;
@@ -532,8 +535,8 @@ export component AppWindow inherits Window {
             if (root.s.charge-limit-state != ChargeLimitState.Unavailable || root.s.battery-percent != "—") : Section {
                 SectionHeader {
                     title: "Батарея";
-                    info: root.s.charge-limit-pending ? "применяется…" : root.battery-info();
-                    info-color: root.s.charge-limit-pending ? Palette.neutral : root.charging() ? Palette.positive : Palette.muted;
+                    info: charge-busy.shown ? "применяется…" : root.battery-info();
+                    info-color: charge-busy.shown ? Palette.neutral : root.charging() ? Palette.positive : Palette.muted;
                 }
                 if (root.s.charge-limit-state == ChargeLimitState.Ready) : Row {
                     label: "Лимит заряда";

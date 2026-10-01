@@ -5,7 +5,7 @@
 import { ScrollView, TextEdit } from "std-widgets.slint";
 import { UiState, NvidiaRow, FanCurveHwState, ClamshellState } from "model.slint";
 import { Palette, ThemeState, ThemeMode, ThemeBridge } from "theme.slint";
-import { Metrics, Button, Seg, Segmented, Switch, ToggleRow, Row, SectionHeader, Section, Note, ValueSlider, Dropdown, Swatch, KeyValue } from "widgets.slint";
+import { Delayed, Metrics, Button, Seg, Segmented, Switch, ToggleRow, Row, SectionHeader, Section, Note, ValueSlider, Dropdown, Swatch, KeyValue } from "widgets.slint";
 import { FanCurve } from "fan-curve.slint";
 
 global Bits {
@@ -87,6 +87,8 @@ export component FansWindow inherits Window {
     callback power-limit-changed(int, int);
 
     ThemeBridge { }
+    fan-busy := Delayed { active: root.s.fan-curve-pending; }
+    verify-busy := Delayed { active: root.s.power-limit-verification-mask != 0; }
 
     property <bool> fan-reset-pending: false;
     function fan-locked() -> bool {
@@ -95,7 +97,7 @@ export component FansWindow inherits Window {
     }
     function fan-status() -> string {
         if (root.s.fan-curve-error) { return "ошибка операции с кривой"; }
-        if (root.s.fan-curve-pending) { return "применяется…"; }
+        if (fan-busy.shown) { return "применяется…"; }
         if (root.s.fan-curve-unconfirmed) { return "результат неизвестен"; }
         if (root.mutation-safety-blocked) { return root.policy-status; }
         if (root.fan-reset-pending) { return "будут заводские значения"; }
@@ -106,7 +108,7 @@ export component FansWindow inherits Window {
         return "";
     }
     function fan-status-warn() -> bool {
-        return root.s.fan-curve-pending || root.s.fan-curve-unconfirmed || root.mutation-safety-blocked
+        return fan-busy.shown || root.s.fan-curve-unconfirmed || root.mutation-safety-blocked
             || root.fan-reset-pending || root.s.fan-curve-dirty;
     }
     property <int> co-draft: root.cpu-co-applied-known ? root.cpu-co-applied : 0;
@@ -211,7 +213,7 @@ export component FansWindow inherits Window {
                         changed(f, v) => { root.power-limit-changed(f, v); }
                     }
                     if (root.s.power-limit-error) : Note { text: "Лимиты не применены: доступ запрещён или запись отклонена"; kind: 2; }
-                    if (root.s.power-limit-verification-mask != 0) : Note { text: "Проверка записанных значений…"; kind: 1; }
+                    if (verify-busy.shown) : Note { text: "Проверка записанных значений…"; kind: 1; }
                     if (root.s.power-limits-writable) : HorizontalLayout {
                         spacing: 6px;
                         alignment: end;

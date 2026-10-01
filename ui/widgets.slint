@@ -270,7 +270,26 @@ export component ValueSlider inherits Rectangle {
     property <bool> gesture-active: false;
     property <bool> keyboard-active: false;
     property <float> preview-value: root.value;
-    property <float> shown: root.gesture-active ? root.preview-value : root.value;
+    // After a commit the slider keeps showing the chosen value until the
+    // authoritative one changes (or the wait times out), instead of
+    // snapping back to the old value for the duration of the write.
+    property <bool> awaiting: false;
+    property <float> committed-value: 0;
+    property <float> shown: root.gesture-active ? root.preview-value
+        : root.awaiting ? root.committed-value : root.value;
+    changed value => { root.awaiting = false; }
+
+    function commit(v: float) {
+        root.committed-value = v;
+        root.awaiting = true;
+        root.changed(v);
+    }
+
+    Timer {
+        interval: 3s;
+        running: root.awaiting;
+        triggered => { root.awaiting = false; }
+    }
     property <float> frac: root.max > root.min ? Math.min(Math.max((root.shown - root.min) / (root.max - root.min), 0), 1) : 0;
 
     function snap(v: float) -> float {
@@ -295,7 +314,7 @@ export component ValueSlider inherits Rectangle {
         root.keyboard-active = false;
         root.gesture-active = false;
         root.preview-value = root.value;
-        if (final-value != root.value) { root.changed(final-value); }
+        if (final-value != root.value) { root.commit(final-value); }
     }
 
     commit-timer := Timer {
@@ -362,7 +381,7 @@ export component ValueSlider inherits Rectangle {
                         let final-value = root.snap(root.min + self.mouse-x / self.width * (root.max - root.min));
                         root.gesture-active = false;
                         root.preview-value = root.value;
-                        if (final-value != root.value) { root.changed(final-value); }
+                        if (final-value != root.value) { root.commit(final-value); }
                     } else if (ev.kind == PointerEventKind.cancel) {
                         root.gesture-active = false;
                         root.preview-value = root.value;
@@ -499,4 +518,22 @@ export component KeyValue inherits HorizontalLayout {
     spacing: 8px;
     Text { width: Metrics.label; text: root.key; font-size: Metrics.font; color: Palette.muted; }
     Text { horizontal-stretch: 1; text: root.value == "" ? "—" : root.value; font-size: Metrics.font; color: Palette.text; wrap: word-wrap; }
+}
+
+// `shown` follows `active` only once it has stayed on for `delay`: quick
+// confirmations never flash a status, slow ones still say so.
+export component Delayed inherits Rectangle {
+    in property <bool> active: false;
+    in property <duration> delay: 700ms;
+    out property <bool> shown: false;
+    width: 0px;
+    height: 0px;
+    changed active => {
+        if (!root.active) { root.shown = false; }
+    }
+    Timer {
+        interval: root.delay;
+        running: root.active && !root.shown;
+        triggered => { root.shown = true; }
+    }
 }

@@ -94,7 +94,8 @@ trait StatusNotifierWatcher {
 
 #[derive(Debug, Clone, Copy)]
 enum TrayCommand {
-    Activate,
+    /// Tray icon click at global (x, y); (0, 0) when the host does not say.
+    Activate(i32, i32),
 }
 
 /// SNI `ToolTip`: icon name, pixmaps, title, description.
@@ -174,12 +175,12 @@ impl StatusNotifierItem {
             .expect("fixed StatusNotifierItem no-menu object path")
     }
 
-    fn activate(&self, _x: i32, _y: i32) {
-        let _ = self.commands.send(TrayCommand::Activate);
+    fn activate(&self, x: i32, y: i32) {
+        let _ = self.commands.send(TrayCommand::Activate(x, y));
     }
 
-    fn secondary_activate(&self, _x: i32, _y: i32) {
-        let _ = self.commands.send(TrayCommand::Activate);
+    fn secondary_activate(&self, x: i32, y: i32) {
+        let _ = self.commands.send(TrayCommand::Activate(x, y));
     }
 
     fn context_menu(&self, _x: i32, _y: i32) {}
@@ -242,13 +243,13 @@ pub(crate) fn wire_app(app: &AppWindow) {
     context.runtime.spawn(async move {
         while let Some(command) = command_rx.recv().await {
             match command {
-                TrayCommand::Activate => {
+                TrayCommand::Activate(x, y) => {
                     let weak = weak.clone();
                     if let Err(error) = weak.upgrade_in_event_loop(move |app| {
-                        app.window().set_minimized(false);
-                        if let Err(error) = app.show() {
-                            tracing::warn!(error = ?error, "tray activation could not show main window");
-                        }
+                        // Like G-Helper: the tray icon toggles the window and
+                        // shows it above the icon.
+                        crate::window_placement::remember_tray_click(x, y);
+                        crate::toggle_main_window(&app);
                     }) {
                         tracing::debug!(error = ?error, "tray activation UI dispatch failed");
                     }

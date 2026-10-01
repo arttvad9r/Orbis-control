@@ -13,6 +13,7 @@ mod launch_context;
 mod panel_windows;
 mod preferences_backend;
 mod quick_controls_backend;
+mod window_placement;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
@@ -762,6 +763,22 @@ fn apply_preferences_state(window: &AppWindow) {
     }
 }
 
+/// Show the main window (placed above the tray icon) or hide it together
+/// with its secondary windows. Hiding needs a tray to come back from.
+fn toggle_main_window(app: &AppWindow) {
+    let window = app.window();
+    if window.is_visible() && !window.is_minimized() && quick_controls_backend::tray_ready() {
+        panel_windows::close_all(app);
+        let _ = window.hide();
+    } else {
+        window.set_minimized(false);
+        match window.show() {
+            Ok(()) => window_placement::arrange_soon(),
+            Err(error) => tracing::warn!(?error, "main window could not be shown"),
+        }
+    }
+}
+
 /// Run one global-shortcut action on the UI thread.
 fn handle_shortcut(
     app: &AppWindow,
@@ -769,16 +786,7 @@ fn handle_shortcut(
     worker_tx: &UnboundedSender<WorkerCommand>,
 ) {
     match action {
-        global_shortcuts::ShortcutAction::ToggleWindow => {
-            let window = app.window();
-            if window.is_visible() && !window.is_minimized() && quick_controls_backend::tray_ready()
-            {
-                let _ = window.hide();
-            } else {
-                window.set_minimized(false);
-                let _ = window.show();
-            }
-        }
+        global_shortcuts::ShortcutAction::ToggleWindow => toggle_main_window(app),
         global_shortcuts::ShortcutAction::CycleProfile => {
             let state = current_ui_state();
             match next_profile(state.perf_selected, state.available_perf_mask) {
@@ -3116,10 +3124,12 @@ fn main() -> anyhow::Result<()> {
                 && let Some(app) = app_weak.upgrade()
             {
                 let _ = app.show();
+                window_placement::arrange_soon();
             }
         });
     } else {
         app.show()?;
+        window_placement::arrange_soon();
     }
     // Keep running with every window hidden: closing to the tray must not
     // end the process (power rules and timers live here). Quit paths call
@@ -3164,6 +3174,11 @@ fn fit_window(app: &AppWindow) {
             && ((actual.width - width).abs() > 0.5 || (actual.height - height).abs() > 0.5)
         {
             request_window_size(&app, width, height);
+        }
+        // The height changes while sections load: keep the window docked
+        // at the bottom of the work area.
+        if app.window().is_visible() {
+            window_placement::arrange_soon();
         }
     });
 }
