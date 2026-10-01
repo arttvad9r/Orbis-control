@@ -193,10 +193,18 @@ pub(crate) fn wire_app(app: &AppWindow) {
         app: app.as_weak(),
         stats: TrayStats::default(),
     };
+    // ksni reports a missing or lost watcher through `watcher_offline` (also
+    // during spawn) and calls `watcher_online` only after such a loss, so the
+    // icon counts as shown from the start until told otherwise. Set before
+    // spawning so an early offline report is not overwritten.
+    READY.store(true, Ordering::Release);
     // Also waits for a watcher that appears later (login before the panel).
     match tray.assume_sni_available(true).spawn() {
         Ok(handle) => HANDLE.with(|slot| *slot.borrow_mut() = Some(handle)),
-        Err(error) => tracing::warn!(%error, "tray icon unavailable"),
+        Err(error) => {
+            READY.store(false, Ordering::Release);
+            tracing::warn!(%error, "tray icon unavailable");
+        }
     }
 }
 
