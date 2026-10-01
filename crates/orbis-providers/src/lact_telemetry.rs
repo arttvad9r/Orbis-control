@@ -370,14 +370,13 @@ pub fn merge_telemetry(
             });
             primary.gpu_temp = discrete.and_then(|gpu| gpu.temperature);
             primary.power.gpu = discrete.and_then(|gpu| gpu.power);
-            if let Some(fan) = discrete.and_then(|gpu| gpu.fan.as_ref()) {
-                if primary
+            if let Some(fan) = discrete.and_then(|gpu| gpu.fan.as_ref())
+                && primary
                     .fans
                     .iter()
                     .all(|existing| existing.fan != FanId::Gpu)
-                {
-                    primary.fans.push(fan.clone());
-                }
+            {
+                primary.fans.push(fan.clone());
             }
             Ok(primary)
         }

@@ -812,15 +812,15 @@ fn announce_mode_changes(
     if was_ready
         && after.perf_state == controller::PerformanceHwState::Ready
         && after.perf_selected != perf_selected
+        && let Some((summary, body)) = desktop_notify::profile_text(after.perf_selected)
     {
-        if let Some((summary, body)) = desktop_notify::profile_text(after.perf_selected) {
-            desktop_notify::mode_changed(summary, body);
-        }
+        desktop_notify::mode_changed(summary, body);
     }
-    if after.gpu_queued != gpu_queued && after.gpu_queued >= 0 {
-        if let Some((summary, body)) = desktop_notify::gpu_queued_text(after.gpu_queued) {
-            desktop_notify::mode_changed(summary, body);
-        }
+    if after.gpu_queued != gpu_queued
+        && after.gpu_queued >= 0
+        && let Some((summary, body)) = desktop_notify::gpu_queued_text(after.gpu_queued)
+    {
+        desktop_notify::mode_changed(summary, body);
     }
 }
 
@@ -1955,27 +1955,21 @@ fn handle_worker_event(
         quick_controls_backend::refresh_if_due(app, Duration::from_secs(10));
     }
     // After factory reset, enqueue a refresh for the selected fan to load observed state.
-    if let Some(profile) = refresh_fan_curve {
-        if !s.fan_curve_unconfirmed {
-            if let Some(fan_id) = controller::UiState::fan_id_from_index(s.fan_selected) {
-                if let Err(e) = worker_tx.send(WorkerCommand::RefreshFanCurve {
-                    profile,
-                    fan: fan_id,
-                }) {
-                    tracing::warn!("fan factory reset refresh enqueue failed: {e:?}");
-                }
-            }
-        }
+    if let Some(profile) = refresh_fan_curve
+        && !s.fan_curve_unconfirmed
+        && let Some(fan_id) = controller::UiState::fan_id_from_index(s.fan_selected)
+        && let Err(e) = worker_tx.send(WorkerCommand::RefreshFanCurve {
+            profile,
+            fan: fan_id,
+        })
+    {
+        tracing::warn!("fan factory reset refresh enqueue failed: {e:?}");
     }
-    if refresh_product_gpu {
-        if let Err(e) = worker_tx.send(WorkerCommand::RefreshProductGpuStatus) {
-            tracing::warn!("product GPU resolution refresh enqueue failed: {e:?}");
-        }
+    if refresh_product_gpu && let Err(e) = worker_tx.send(WorkerCommand::RefreshProductGpuStatus) {
+        tracing::warn!("product GPU resolution refresh enqueue failed: {e:?}");
     }
-    if refresh_charge_limit {
-        if let Err(e) = worker_tx.send(WorkerCommand::RefreshChargeLimit) {
-            tracing::warn!("charge-limit resolution refresh enqueue failed: {e:?}");
-        }
+    if refresh_charge_limit && let Err(e) = worker_tx.send(WorkerCommand::RefreshChargeLimit) {
+        tracing::warn!("charge-limit resolution refresh enqueue failed: {e:?}");
     }
 }
 
@@ -2061,10 +2055,10 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             else {
                 return;
             };
-            if let Some(tx) = &worker_tx {
-                if let Err(error) = tx.send(WorkerCommand::SetCpuEpp(preference)) {
-                    tracing::warn!("worker closed, CPU EPP request not sent: {error:?}");
-                }
+            if let Some(tx) = &worker_tx
+                && let Err(error) = tx.send(WorkerCommand::SetCpuEpp(preference))
+            {
+                tracing::warn!("worker closed, CPU EPP request not sent: {error:?}");
             }
         });
     }
@@ -2077,30 +2071,30 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             else {
                 return;
             };
-            if let Some(tx) = &worker_tx {
-                if let Err(error) = tx.send(WorkerCommand::SetNvidiaTuning { field, value }) {
-                    tracing::warn!("worker closed, NVIDIA tuning request not sent: {error:?}");
-                }
+            if let Some(tx) = &worker_tx
+                && let Err(error) = tx.send(WorkerCommand::SetNvidiaTuning { field, value })
+            {
+                tracing::warn!("worker closed, NVIDIA tuning request not sent: {error:?}");
             }
         });
     }
     {
         let worker_tx = worker_tx.clone();
         app.on_cpu_boost_requested(move |enabled| {
-            if let Some(tx) = &worker_tx {
-                if let Err(error) = tx.send(WorkerCommand::SetCpuBoost(enabled)) {
-                    tracing::warn!("worker closed, CPU boost request not sent: {error:?}");
-                }
+            if let Some(tx) = &worker_tx
+                && let Err(error) = tx.send(WorkerCommand::SetCpuBoost(enabled))
+            {
+                tracing::warn!("worker closed, CPU boost request not sent: {error:?}");
             }
         });
     }
     {
         let worker_tx = worker_tx.clone();
         app.on_cpu_co_requested(move |offset| {
-            if let Some(tx) = &worker_tx {
-                if let Err(error) = tx.send(WorkerCommand::SetCpuCurveOptimizer(offset)) {
-                    tracing::warn!("worker closed, Curve Optimizer request not sent: {error:?}");
-                }
+            if let Some(tx) = &worker_tx
+                && let Err(error) = tx.send(WorkerCommand::SetCpuCurveOptimizer(offset))
+            {
+                tracing::warn!("worker closed, Curve Optimizer request not sent: {error:?}");
             }
         });
     }
@@ -2193,10 +2187,10 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
     {
         let worker_tx = worker_tx.clone();
         app.on_profile_limits_auto_apply_toggled(move |enabled| {
-            if let Some(tx) = &worker_tx {
-                if let Err(error) = tx.send(WorkerCommand::SetProfileLimitsAutoApply { enabled }) {
-                    tracing::warn!("worker closed, auto-apply toggle not sent: {error:?}");
-                }
+            if let Some(tx) = &worker_tx
+                && let Err(error) = tx.send(WorkerCommand::SetProfileLimitsAutoApply { enabled })
+            {
+                tracing::warn!("worker closed, auto-apply toggle not sent: {error:?}");
             }
         });
     }
@@ -3113,10 +3107,10 @@ fn main() -> anyhow::Result<()> {
         // Give the tray host a moment to register; without one, show the window.
         let app_weak = app.as_weak();
         slint::Timer::single_shot(Duration::from_secs(3), move || {
-            if !quick_controls_backend::tray_ready() {
-                if let Some(app) = app_weak.upgrade() {
-                    let _ = app.show();
-                }
+            if !quick_controls_backend::tray_ready()
+                && let Some(app) = app_weak.upgrade()
+            {
+                let _ = app.show();
             }
         });
     } else {

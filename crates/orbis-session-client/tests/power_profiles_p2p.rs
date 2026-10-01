@@ -85,7 +85,7 @@ async fn fake_client(
         mismatch,
     };
     let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
-    let server = Builder::unix_stream(server_stream)
+    let server = Builder::async_io_unix_stream(server_stream)
         .server(zbus::Guid::generate())
         .unwrap()
         .p2p()
@@ -93,7 +93,7 @@ async fn fake_client(
         .unwrap()
         .serve_at("/org/freedesktop/UPower/PowerProfiles", service)
         .unwrap();
-    let client = Builder::unix_stream(client_stream).p2p();
+    let client = Builder::async_io_unix_stream(client_stream).p2p();
     let (server, connection) = tokio::try_join!(server.build(), client.build()).unwrap();
     let daemon = ZbusPowerProfilesDaemonClient::new(connection.clone());
     (server, connection, daemon)

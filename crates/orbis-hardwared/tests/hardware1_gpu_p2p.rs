@@ -109,11 +109,11 @@ async fn connect_service(
     service: HardwareService,
 ) -> Result<(zbus::Connection, zbus::Connection), Box<dyn std::error::Error + Send + Sync>> {
     let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair()?;
-    let server_builder = Builder::unix_stream(server_stream)
+    let server_builder = Builder::async_io_unix_stream(server_stream)
         .server(zbus::Guid::generate())?
         .p2p()
         .serve_at(OBJECT_PATH, service)?;
-    let client_builder = Builder::unix_stream(client_stream).p2p();
+    let client_builder = Builder::async_io_unix_stream(client_stream).p2p();
     Ok(tokio::try_join!(
         server_builder.build(),
         client_builder.build()

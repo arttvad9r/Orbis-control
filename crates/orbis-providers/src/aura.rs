@@ -452,12 +452,12 @@ mod tests {
     {
         let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair()?;
         let guid = zbus::Guid::generate();
-        let server_builder = Builder::unix_stream(server_stream)
+        let server_builder = Builder::async_io_unix_stream(server_stream)
             .server(guid)?
             .p2p()
             .name(ASUS_AURA_DESTINATION)?
             .serve_at(ASUS_AURA_PATH, server)?;
-        let client_builder = Builder::unix_stream(client_stream).p2p();
+        let client_builder = Builder::async_io_unix_stream(client_stream).p2p();
         Ok(tokio::try_join!(
             server_builder.build(),
             client_builder.build()
@@ -608,7 +608,7 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), async {
             let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
             let guid = zbus::Guid::generate();
-            let server_builder = Builder::unix_stream(server_stream)
+            let server_builder = Builder::async_io_unix_stream(server_stream)
                 .server(guid)
                 .unwrap()
                 .p2p()
@@ -616,7 +616,7 @@ mod tests {
                 .unwrap()
                 .serve_at(ASUS_AURA_PATH, NotAura)
                 .unwrap();
-            let client_builder = Builder::unix_stream(client_stream).p2p();
+            let client_builder = Builder::async_io_unix_stream(client_stream).p2p();
             let (_server, client) =
                 tokio::try_join!(server_builder.build(), client_builder.build()).expect("p2p");
             let provider = AsusAuraProvider::new(client);
@@ -639,7 +639,7 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), async {
             let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
             let guid = zbus::Guid::generate();
-            let server_builder = Builder::unix_stream(server_stream)
+            let server_builder = Builder::async_io_unix_stream(server_stream)
                 .server(guid)
                 .unwrap()
                 .p2p()
@@ -647,7 +647,7 @@ mod tests {
                 .unwrap()
                 .serve_at(ASUS_AURA_PATH, MalformedAura)
                 .unwrap();
-            let client_builder = Builder::unix_stream(client_stream).p2p();
+            let client_builder = Builder::async_io_unix_stream(client_stream).p2p();
             let (_server, client) =
                 tokio::try_join!(server_builder.build(), client_builder.build()).expect("p2p");
             let provider = AsusAuraProvider::new(client);

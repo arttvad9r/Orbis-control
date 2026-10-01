@@ -185,12 +185,12 @@ async fn connect_service(
 ) -> Result<(zbus::Connection, zbus::Connection), Box<dyn std::error::Error + Send + Sync>> {
     let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair()?;
     let guid = zbus::Guid::generate();
-    let server_builder = Builder::unix_stream(server_stream)
+    let server_builder = Builder::async_io_unix_stream(server_stream)
         .server(guid)?
         .p2p()
         .name(BUS_NAME)?
         .serve_at(OBJECT_PATH, service)?;
-    let client_builder = Builder::unix_stream(client_stream).p2p();
+    let client_builder = Builder::async_io_unix_stream(client_stream).p2p();
     let (server_conn, client_conn) =
         tokio::try_join!(server_builder.build(), client_builder.build())?;
     Ok((server_conn, client_conn))

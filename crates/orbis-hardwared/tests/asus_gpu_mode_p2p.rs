@@ -96,7 +96,7 @@ async fn client(
     mux: FakeAttribute,
 ) -> (zbus::Connection, AsusdGpuMutationClient) {
     let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
-    let server = Builder::unix_stream(server_stream)
+    let server = Builder::async_io_unix_stream(server_stream)
         .server(zbus::Guid::generate())
         .expect("server builder")
         .p2p()
@@ -105,8 +105,11 @@ async fn client(
         .serve_at(ASUSD_GPU_MUX_MODE_PATH, mux)
         .expect("mux object")
         .build();
-    let (server, connection) =
-        tokio::try_join!(server, Builder::unix_stream(client_stream).p2p().build()).unwrap();
+    let (server, connection) = tokio::try_join!(
+        server,
+        Builder::async_io_unix_stream(client_stream).p2p().build()
+    )
+    .unwrap();
     let typed = AsusdGpuMutationClient::new(connection.clone());
     std::mem::forget(server);
     (connection, typed)

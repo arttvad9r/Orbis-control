@@ -44,12 +44,12 @@ async fn connect_hardware(
 ) -> Result<(zbus::Connection, zbus::Connection), Box<dyn std::error::Error + Send + Sync>> {
     let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair()?;
     let guid = zbus::Guid::generate();
-    let server_builder = Builder::unix_stream(server_stream)
+    let server_builder = Builder::async_io_unix_stream(server_stream)
         .server(guid)?
         .p2p()
         .name(DBUS_NAME)?
         .serve_at(DBUS_OBJECT_PATH, object)?;
-    let client_builder = Builder::unix_stream(client_stream).p2p();
+    let client_builder = Builder::async_io_unix_stream(client_stream).p2p();
     Ok(tokio::try_join!(
         server_builder.build(),
         client_builder.build()

@@ -187,10 +187,10 @@ impl TelemetryProvider for SysfsTelemetryProvider {
                     fans = read_fans;
                     // A fully failing fan set is recorded as one aggregate gap;
                     // individual skipped fans stay optional-sensor behavior.
-                    if fans.is_empty() {
-                        if let Some(error) = first_failure {
-                            record_gap(&mut field_gaps, TelemetryField::Fans, &error);
-                        }
+                    if fans.is_empty()
+                        && let Some(error) = first_failure
+                    {
+                        record_gap(&mut field_gaps, TelemetryField::Fans, &error);
                     }
                 }
                 _ => {}

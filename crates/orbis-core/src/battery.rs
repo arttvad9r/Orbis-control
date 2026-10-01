@@ -170,13 +170,13 @@ impl ChargeLimit {
                 ("ChargeLimit.configured_percent", configured_percent),
                 ("ChargeLimit.effective_percent", effective_percent),
             ] {
-                if let Some(p) = p {
-                    if p < b.min || p > b.max {
-                        return Err(CoreError::invariant(
-                            name,
-                            format!("percent {p} вне [{}, {}]", b.min, b.max),
-                        ));
-                    }
+                if let Some(p) = p
+                    && (p < b.min || p > b.max)
+                {
+                    return Err(CoreError::invariant(
+                        name,
+                        format!("percent {p} вне [{}, {}]", b.min, b.max),
+                    ));
                 }
             }
         }

@@ -84,13 +84,13 @@ impl PowerLimitValue {
                 max,
             ));
         }
-        if let Some(d) = default {
-            if d < min || d > max {
-                return Err(CoreError::invariant(
-                    "PowerLimitValue.default",
-                    format!("default {d} вне [{min}, {max}]"),
-                ));
-            }
+        if let Some(d) = default
+            && (d < min || d > max)
+        {
+            return Err(CoreError::invariant(
+                "PowerLimitValue.default",
+                format!("default {d} вне [{min}, {max}]"),
+            ));
         }
         Ok(Self {
             value,

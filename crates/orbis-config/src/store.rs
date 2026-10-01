@@ -126,12 +126,12 @@ impl AppConfig {
                 self.ui.theme
             )));
         }
-        if let Some(limit) = self.battery.charge_limit {
-            if !(20..=100).contains(&limit) {
-                return Err(ConfigError::Schema(format!(
-                    "charge_limit {limit} вне [20,100]; используйте None, чтобы не управлять threshold"
-                )));
-            }
+        if let Some(limit) = self.battery.charge_limit
+            && !(20..=100).contains(&limit)
+        {
+            return Err(ConfigError::Schema(format!(
+                "charge_limit {limit} вне [20,100]; используйте None, чтобы не управлять threshold"
+            )));
         }
         Ok(())
     }
@@ -233,12 +233,12 @@ pub fn save_to_dir(cfg: &AppConfig, dir: &Path) -> Result<PathBuf, ConfigError> 
     };
 
     let (mut temp, temp_path) = create_unique_temp(dir)?;
-    if let Some(permissions) = existing_permissions {
-        if let Err(error) = temp.set_permissions(permissions) {
-            drop(temp);
-            let _ = fs::remove_file(&temp_path);
-            return Err(error.into());
-        }
+    if let Some(permissions) = existing_permissions
+        && let Err(error) = temp.set_permissions(permissions)
+    {
+        drop(temp);
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.into());
     }
 
     if let Err(error) = temp.write_all(text.as_bytes()) {

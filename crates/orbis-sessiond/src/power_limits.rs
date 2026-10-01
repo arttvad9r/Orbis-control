@@ -259,12 +259,12 @@ impl PowerLimitProvider for AsusDualPowerLimitProvider {
         match (primary, fallback) {
             (Ok(primary), Ok(fallback)) => {
                 for (field, value) in &primary.fields {
-                    if let Some(other) = fallback.fields.get(field) {
-                        if value != other {
-                            return Err(ProviderError::Conflict(format!(
-                                "ASUS PPT mismatch for {field:?}: Armoury={value:?}, asus-nb-wmi={other:?}"
-                            )));
-                        }
+                    if let Some(other) = fallback.fields.get(field)
+                        && value != other
+                    {
+                        return Err(ProviderError::Conflict(format!(
+                            "ASUS PPT mismatch for {field:?}: Armoury={value:?}, asus-nb-wmi={other:?}"
+                        )));
                     }
                 }
                 Ok(primary)

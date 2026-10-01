@@ -656,43 +656,43 @@ async fn observe_profile_limits<G, B, R, F>(
         }
     }
     if let (false, Some(backend)) = (failed, tuning.cpu) {
-        if let Some(preference) = replay.epp {
-            if let Err(error) = backend.set_epp(preference).await {
-                cpu_error = Some(format!("EPP: {error}"));
-                failed = true;
-            }
+        if let Some(preference) = replay.epp
+            && let Err(error) = backend.set_epp(preference).await
+        {
+            cpu_error = Some(format!("EPP: {error}"));
+            failed = true;
         }
-        if let (false, Some(enabled)) = (failed, replay.cpu_boost) {
-            if let Err(error) = backend.set_boost(enabled).await {
-                cpu_error = Some(format!("boost: {error}"));
-                failed = true;
-            }
+        if let (false, Some(enabled)) = (failed, replay.cpu_boost)
+            && let Err(error) = backend.set_boost(enabled).await
+        {
+            cpu_error = Some(format!("boost: {error}"));
+            failed = true;
         }
-        if let (false, Some(offset)) = (failed, replay.curve_optimizer) {
-            if let Err(error) = backend.set_curve_optimizer(offset, false).await {
-                cpu_error = Some(format!("Curve Optimizer: {error}"));
-                failed = true;
-            }
-        }
-    }
-    if let Some(backend) = tuning.cpu {
-        if profile_changed {
-            emit(WorkerEvent::CpuTuning {
-                state: backend.read().await,
-                error: cpu_error,
-            });
+        if let (false, Some(offset)) = (failed, replay.curve_optimizer)
+            && let Err(error) = backend.set_curve_optimizer(offset, false).await
+        {
+            cpu_error = Some(format!("Curve Optimizer: {error}"));
+            failed = true;
         }
     }
-    if let (false, Some(backend)) = (failed, tuning.nvidia) {
-        if !replay.nvidia.is_empty() {
-            replay_nvidia(backend, &replay.nvidia, emit).await;
-        }
+    if let Some(backend) = tuning.cpu
+        && profile_changed
+    {
+        emit(WorkerEvent::CpuTuning {
+            state: backend.read().await,
+            error: cpu_error,
+        });
+    }
+    if let (false, Some(backend)) = (failed, tuning.nvidia)
+        && !replay.nvidia.is_empty()
+    {
+        replay_nvidia(backend, &replay.nvidia, emit).await;
     }
     let after = tracker.view();
-    if after != before {
-        if let Some(view) = after {
-            emit(WorkerEvent::ProfileLimits(view));
-        }
+    if after != before
+        && let Some(view) = after
+    {
+        emit(WorkerEvent::ProfileLimits(view));
     }
 }
 
@@ -1147,10 +1147,12 @@ async fn run_worker_inner<G, B, R, F>(
                 let gpu_was_optimized = power_rules.rules().gpu_optimized;
                 let apply = power_rules.set_rules(rules);
                 emit(WorkerEvent::PowerRules(power_rules.view()));
-                if apply.is_ok() && rules.gpu_optimized && !gpu_was_optimized {
-                    if let Some(ac) = power_rules.last_ac() {
-                        apply_gpu_optimized(product_gpu.as_deref(), ac, true, &mut emit).await;
-                    }
+                if apply.is_ok()
+                    && rules.gpu_optimized
+                    && !gpu_was_optimized
+                    && let Some(ac) = power_rules.last_ac()
+                {
+                    apply_gpu_optimized(product_gpu.as_deref(), ac, true, &mut emit).await;
                 }
                 if let Ok(Some(rule)) = apply {
                     apply_power_rule(
@@ -1375,13 +1377,13 @@ mod tests {
         hardware: PrivatePerformanceHardware,
     ) -> (zbus::Connection, zbus::Connection) {
         let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
-        let server = zbus::connection::Builder::unix_stream(server_stream)
+        let server = zbus::connection::Builder::async_io_unix_stream(server_stream)
             .server(zbus::Guid::generate())
             .unwrap()
             .p2p()
             .serve_at("/io/github/orbiscontrol/Hardware", hardware)
             .unwrap();
-        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        let client = zbus::connection::Builder::async_io_unix_stream(client_stream).p2p();
         tokio::try_join!(server.build(), client.build()).unwrap()
     }
 
@@ -1502,13 +1504,13 @@ mod tests {
         hardware: PrivateProductGpuHardware,
     ) -> (zbus::Connection, zbus::Connection) {
         let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
-        let server = zbus::connection::Builder::unix_stream(server_stream)
+        let server = zbus::connection::Builder::async_io_unix_stream(server_stream)
             .server(zbus::Guid::generate())
             .unwrap()
             .p2p()
             .serve_at("/io/github/orbiscontrol/Hardware", hardware)
             .unwrap();
-        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        let client = zbus::connection::Builder::async_io_unix_stream(client_stream).p2p();
         tokio::try_join!(server.build(), client.build()).unwrap()
     }
 
@@ -1809,13 +1811,13 @@ mod tests {
         hardware: PrivateFanHardware,
     ) -> (zbus::Connection, zbus::Connection) {
         let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
-        let server = zbus::connection::Builder::unix_stream(server_stream)
+        let server = zbus::connection::Builder::async_io_unix_stream(server_stream)
             .server(zbus::Guid::generate())
             .unwrap()
             .p2p()
             .serve_at("/io/github/orbiscontrol/Hardware", hardware)
             .unwrap();
-        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        let client = zbus::connection::Builder::async_io_unix_stream(client_stream).p2p();
         tokio::try_join!(server.build(), client.build()).unwrap()
     }
 
@@ -2004,13 +2006,13 @@ mod tests {
         hardware: PrivatePowerLimitHardware,
     ) -> (zbus::Connection, zbus::Connection) {
         let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
-        let server = zbus::connection::Builder::unix_stream(server_stream)
+        let server = zbus::connection::Builder::async_io_unix_stream(server_stream)
             .server(zbus::Guid::generate())
             .unwrap()
             .p2p()
             .serve_at("/io/github/orbiscontrol/Hardware", hardware)
             .unwrap();
-        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        let client = zbus::connection::Builder::async_io_unix_stream(client_stream).p2p();
         tokio::try_join!(server.build(), client.build()).unwrap()
     }
 
@@ -2221,10 +2223,10 @@ mod tests {
                     .await
                     .expect("worker event")
                     .expect("worker alive");
-                if let WorkerEvent::ProfileLimits(view) = event {
-                    if pick(&view) {
-                        return view;
-                    }
+                if let WorkerEvent::ProfileLimits(view) = event
+                    && pick(&view)
+                {
+                    return view;
                 }
             }
         }
@@ -2346,10 +2348,10 @@ mod tests {
                     .await
                     .expect("worker event")
                     .expect("worker alive");
-                if let WorkerEvent::ProfileLimits(view) = event {
-                    if pick(&view) {
-                        return view;
-                    }
+                if let WorkerEvent::ProfileLimits(view) = event
+                    && pick(&view)
+                {
+                    return view;
                 }
             }
         }
@@ -3210,13 +3212,13 @@ mod tests {
         hardware: ScriptedGpuHardware,
     ) -> (zbus::Connection, zbus::Connection) {
         let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
-        let server = zbus::connection::Builder::unix_stream(server_stream)
+        let server = zbus::connection::Builder::async_io_unix_stream(server_stream)
             .server(zbus::Guid::generate())
             .unwrap()
             .p2p()
             .serve_at("/io/github/orbiscontrol/Hardware", hardware)
             .unwrap();
-        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        let client = zbus::connection::Builder::async_io_unix_stream(client_stream).p2p();
         tokio::try_join!(server.build(), client.build()).unwrap()
     }
 

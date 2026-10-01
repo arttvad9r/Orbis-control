@@ -39,7 +39,7 @@ v0.1.0 was validated on an ASUS TUF Gaming A17 FA707NV. Other models get exactly
 
 ## Arch Linux development setup
 
-Rust workspace: edition 2024, MSRV/toolchain 1.87.
+Rust workspace: edition 2024, MSRV/toolchain 1.88.
 
 Install the native build/runtime dependencies:
 
@@ -53,10 +53,10 @@ sudo pacman -S --needed \
   dbus openssl systemd polkit upower \
   glib2 cairo pango gdk-pixbuf2
 
-rustup toolchain install 1.87 --profile minimal --component rustfmt clippy
+rustup toolchain install 1.88 --profile minimal --component rustfmt clippy
 ```
 
-The repository's `rust-toolchain.toml` selects Rust 1.87 automatically inside the checkout.
+The repository's `rust-toolchain.toml` selects Rust 1.88 automatically inside the checkout.
 
 Run the GUI during development:
 

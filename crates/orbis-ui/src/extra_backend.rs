@@ -1749,13 +1749,13 @@ mod tests {
         hardware: FakeProductGpuHardware,
     ) -> (zbus::Connection, zbus::Connection) {
         let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
-        let server = zbus::connection::Builder::unix_stream(server_stream)
+        let server = zbus::connection::Builder::async_io_unix_stream(server_stream)
             .server(zbus::Guid::generate())
             .unwrap()
             .p2p()
             .serve_at(OBJECT_PATH, hardware)
             .unwrap();
-        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        let client = zbus::connection::Builder::async_io_unix_stream(client_stream).p2p();
         tokio::try_join!(server.build(), client.build()).unwrap()
     }
 
@@ -1804,13 +1804,13 @@ mod tests {
         hardware: FakeAdvancedHardware,
     ) -> (zbus::Connection, zbus::Connection) {
         let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
-        let server = zbus::connection::Builder::unix_stream(server_stream)
+        let server = zbus::connection::Builder::async_io_unix_stream(server_stream)
             .server(zbus::Guid::generate())
             .unwrap()
             .p2p()
             .serve_at(OBJECT_PATH, hardware)
             .unwrap();
-        let client = zbus::connection::Builder::unix_stream(client_stream).p2p();
+        let client = zbus::connection::Builder::async_io_unix_stream(client_stream).p2p();
         tokio::try_join!(server.build(), client.build()).unwrap()
     }
 

@@ -137,22 +137,22 @@ async fn connect_composition(
     };
     let (upower_server_stream, upower_client_stream) = std::os::unix::net::UnixStream::pair()?;
     let upower_guid = zbus::Guid::generate();
-    let upower_server_builder = Builder::unix_stream(upower_server_stream)
+    let upower_server_builder = Builder::async_io_unix_stream(upower_server_stream)
         .server(upower_guid)?
         .p2p()
         .name(UPOWER_BUS_NAME)?
         .serve_at(BATTERY_OBJECT_PATH, fake)?;
-    let upower_client_builder = Builder::unix_stream(upower_client_stream).p2p();
+    let upower_client_builder = Builder::async_io_unix_stream(upower_client_stream).p2p();
     let (upower_server_conn, upower_client_conn) =
         tokio::try_join!(upower_server_builder.build(), upower_client_builder.build(),)?;
 
     // Session pair: server builder передаётся composition helper без name/serve_at.
     let (session_server_stream, session_client_stream) = std::os::unix::net::UnixStream::pair()?;
     let session_guid = zbus::Guid::generate();
-    let session_server_builder = Builder::unix_stream(session_server_stream)
+    let session_server_builder = Builder::async_io_unix_stream(session_server_stream)
         .server(session_guid)?
         .p2p();
-    let session_client_builder = Builder::unix_stream(session_client_stream).p2p();
+    let session_client_builder = Builder::async_io_unix_stream(session_client_stream).p2p();
 
     let object_path: zbus::zvariant::OwnedObjectPath = BATTERY_OBJECT_PATH
         .to_string()

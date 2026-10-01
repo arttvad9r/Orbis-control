@@ -2925,13 +2925,13 @@ mod tests {
         let guid = zbus::Guid::generate();
         // The Hardware1 object path contract (/io/github/orbiscontrol/Hardware)
         // is pinned by orbis-hardwared's own tests; no system bus is involved.
-        let server_builder = Builder::unix_stream(server_stream)
+        let server_builder = Builder::async_io_unix_stream(server_stream)
             .server(guid)
             .expect("server builder")
             .p2p()
             .serve_at("/io/github/orbiscontrol/Hardware", object)
             .expect("serve Hardware1");
-        let client_builder = Builder::unix_stream(client_stream).p2p();
+        let client_builder = Builder::async_io_unix_stream(client_stream).p2p();
         tokio::try_join!(server_builder.build(), client_builder.build()).expect("p2p connect")
     }
 

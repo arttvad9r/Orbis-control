@@ -51,10 +51,10 @@ jobs:
             libpango1.0-dev \
             libgdk-pixbuf-2.0-dev
 
-      - name: Install Rust 1.87
+      - name: Install Rust 1.88
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: '1.87'
+          toolchain: '1.88'
 
       - name: Render canonical screenshots
         run: bash scripts/update-ui-screenshots.sh

@@ -200,11 +200,11 @@ fn refresh(app: &AppWindow, minimum_interval: Option<Duration>) {
             .last_started
             .lock()
             .expect("quick-controls refresh timestamp lock poisoned");
-        if let (Some(minimum), Some(previous)) = (minimum_interval, *last) {
-            if now.duration_since(previous) < minimum {
-                context.refreshing.store(false, Ordering::Release);
-                return;
-            }
+        if let (Some(minimum), Some(previous)) = (minimum_interval, *last)
+            && now.duration_since(previous) < minimum
+        {
+            context.refreshing.store(false, Ordering::Release);
+            return;
         }
         *last = Some(now);
     }

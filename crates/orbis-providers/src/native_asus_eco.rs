@@ -678,14 +678,14 @@ impl NativeAsusEcoPreflightSource for SystemNativeAsusEcoPreflightSource {
                         }
                     }
                 }
-                if let Ok(content) = std::fs::read_to_string(entry.path().join("maps")) {
-                    if content.lines().any(|l| {
+                if let Ok(content) = std::fs::read_to_string(entry.path().join("maps"))
+                    && content.lines().any(|l| {
                         l.contains("/dev/nvidia")
                             || l.contains("libnvidia-")
                             || l.contains("libcuda.so")
-                    }) {
-                        maps.push(pid.to_string());
-                    }
+                    })
+                {
+                    maps.push(pid.to_string());
                 }
             }
         }

@@ -253,16 +253,16 @@ pub fn save_window_state_to_dir(
     };
 
     let (mut temp, temp_path) = create_unique_temp(dir)?;
-    if let Some(permissions) = existing_permissions {
-        if let Err(source) = temp.set_permissions(permissions) {
-            drop(temp);
-            let _ = fs::remove_file(&temp_path);
-            return Err(io_failure(
-                "set window state temporary file permissions",
-                temp_path,
-                source,
-            ));
-        }
+    if let Some(permissions) = existing_permissions
+        && let Err(source) = temp.set_permissions(permissions)
+    {
+        drop(temp);
+        let _ = fs::remove_file(&temp_path);
+        return Err(io_failure(
+            "set window state temporary file permissions",
+            temp_path,
+            source,
+        ));
     }
 
     for (operation, result) in [

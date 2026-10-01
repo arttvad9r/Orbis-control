@@ -1,6 +1,6 @@
 # Pinned minimum toolchain compatible with the locked dependency graph.
-# `fontdue 0.9.4` uses integer sign-cast APIs stabilized in Rust 1.87.
+# Slint 1.16 (Wayland frame-callback fix from 1.15) requires Rust 1.88.
 [toolchain]
-channel = "1.87"
+channel = "1.88"
 components = ["rustfmt", "clippy"]
 profile = "minimal"

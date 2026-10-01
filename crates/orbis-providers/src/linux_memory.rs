@@ -137,12 +137,12 @@ pub fn parse_meminfo(raw: &str) -> Result<SystemMemoryTelemetry, ProviderError> 
             .map_err(|error| {
                 ProviderError::Internal(format!("invalid meminfo integer: {error}"))
             })?;
-        if let Some(unit) = fields.next() {
-            if unit != "kB" {
-                return Err(ProviderError::Internal(format!(
-                    "unexpected meminfo unit '{unit}'"
-                )));
-            }
+        if let Some(unit) = fields.next()
+            && unit != "kB"
+        {
+            return Err(ProviderError::Internal(format!(
+                "unexpected meminfo unit '{unit}'"
+            )));
         }
         Ok(value)
     }

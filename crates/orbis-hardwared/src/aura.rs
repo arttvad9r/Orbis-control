@@ -802,10 +802,10 @@ mod tests {
         async fn led_mode_data(&self) -> Result<AuraEffect, ProviderError> {
             // `readback_error` applies only to reads after the setter, so the
             // initial fresh read (step 1) still succeeds.
-            if self.setter_calls.load(Ordering::SeqCst) > 0 {
-                if let Some(error) = self.readback_error.lock().unwrap().clone() {
-                    return Err(ProviderError::Dbus(error));
-                }
+            if self.setter_calls.load(Ordering::SeqCst) > 0
+                && let Some(error) = self.readback_error.lock().unwrap().clone()
+            {
+                return Err(ProviderError::Dbus(error));
             }
             Ok(self
                 .getter_override
@@ -1278,7 +1278,7 @@ mod tests {
 
             let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
             let guid = zbus::Guid::generate();
-            let server_builder = zbus::connection::Builder::unix_stream(server_stream)
+            let server_builder = zbus::connection::Builder::async_io_unix_stream(server_stream)
                 .server(guid)
                 .unwrap()
                 .p2p()
@@ -1286,7 +1286,8 @@ mod tests {
                 .unwrap()
                 .serve_at(ASUSD_AURA_PATH, MalformedAura)
                 .unwrap();
-            let client_builder = zbus::connection::Builder::unix_stream(client_stream).p2p();
+            let client_builder =
+                zbus::connection::Builder::async_io_unix_stream(client_stream).p2p();
             let (_server, client) =
                 tokio::try_join!(server_builder.build(), client_builder.build()).expect("p2p");
 

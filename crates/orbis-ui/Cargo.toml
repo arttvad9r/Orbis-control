@@ -39,12 +39,12 @@ orbis-test-support = { workspace = true, optional = true }
 image = { workspace = true }
 
 [build-dependencies]
-slint-build = "1"
+slint-build = "1.16.1"
 
 [dev-dependencies]
 async-trait = { workspace = true }
 tempfile = { workspace = true }
-i-slint-backend-testing = "=1.13.1"
+i-slint-backend-testing = "=1.16.1"
 orbis-test-support = { workspace = true }
 orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }
 orbis-hardwared = { workspace = true }

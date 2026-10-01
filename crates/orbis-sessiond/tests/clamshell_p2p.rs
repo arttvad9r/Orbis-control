@@ -80,11 +80,11 @@ impl ClamshellInhibitor for FakeInhibitor {
 async fn pair(inhibitor: Arc<dyn ClamshellInhibitor>) -> (zbus::Connection, zbus::Connection) {
     let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
     let guid = zbus::Guid::generate();
-    let server = Builder::unix_stream(server_stream)
+    let server = Builder::async_io_unix_stream(server_stream)
         .server(guid)
         .unwrap()
         .p2p();
-    let client = Builder::unix_stream(client_stream).p2p();
+    let client = Builder::async_io_unix_stream(client_stream).p2p();
     tokio::try_join!(
         build_session_server_with_clamshell(
             server,

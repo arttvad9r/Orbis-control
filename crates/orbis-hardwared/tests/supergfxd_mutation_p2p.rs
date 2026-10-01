@@ -115,11 +115,11 @@ async fn connect_fake(
 ) -> Result<(zbus::Connection, zbus::Connection), Box<dyn std::error::Error + Send + Sync>> {
     let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair()?;
     let guid = zbus::Guid::generate();
-    let server_builder = Builder::unix_stream(server_stream)
+    let server_builder = Builder::async_io_unix_stream(server_stream)
         .server(guid)?
         .p2p()
         .serve_at(OBJECT_PATH, FakeSupergfxd { state })?;
-    let client_builder = Builder::unix_stream(client_stream).p2p();
+    let client_builder = Builder::async_io_unix_stream(client_stream).p2p();
     Ok(tokio::try_join!(
         server_builder.build(),
         client_builder.build()

@@ -111,7 +111,7 @@ async fn connect_discovery(
 ) -> Result<(zbus::Connection, zbus::Connection), Box<dyn std::error::Error + Send + Sync>> {
     let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair()?;
     let guid = zbus::Guid::generate();
-    let mut server_builder = Builder::unix_stream(server_stream)
+    let mut server_builder = Builder::async_io_unix_stream(server_stream)
         .server(guid)?
         .p2p()
         .name(UPOWER_BUS_NAME)?
@@ -119,7 +119,7 @@ async fn connect_discovery(
     for (path, state) in devices {
         server_builder = server_builder.serve_at(path, FakeDevice { state })?;
     }
-    let client_builder = Builder::unix_stream(client_stream).p2p();
+    let client_builder = Builder::async_io_unix_stream(client_stream).p2p();
     let (server_conn, client_conn) =
         tokio::try_join!(server_builder.build(), client_builder.build())?;
     Ok((server_conn, client_conn))
