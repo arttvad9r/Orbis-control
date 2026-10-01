@@ -15,57 +15,81 @@ thread_local! {
 
 /// A fresh window on this test thread's own testing backend (the Slint
 /// context is per thread, so tests stay independent).
-fn window_with(panel: Panel) -> AppWindow {
+fn backend() {
     BACKEND.with(|ready| {
         if !ready.get() {
             i_slint_backend_testing::init_no_event_loop();
             ready.set(true);
         }
     });
+}
+
+// Tall enough that no row is clipped by a scroll area (the element search
+// skips clipped items, as a user could not see them).
+fn main_window() -> AppWindow {
+    backend();
     let app = AppWindow::new().expect("headless AppWindow");
-    app.set_panel(panel);
-    // Tall enough that no row is clipped by a panel's scroll area (the
-    // element search skips clipped items, as a user could not see them).
     app.window()
-        .set_size(slint::LogicalSize::new(841.0, 4000.0));
+        .set_size(slint::LogicalSize::new(400.0, 4000.0));
     app
 }
 
-fn shows(app: &AppWindow, label: &str) -> bool {
+fn fans_window() -> FansWindow {
+    backend();
+    let window = FansWindow::new().expect("headless FansWindow");
+    window
+        .window()
+        .set_size(slint::LogicalSize::new(440.0, 4000.0));
+    window
+}
+
+fn extra_window() -> ExtraWindow {
+    backend();
+    let window = ExtraWindow::new().expect("headless ExtraWindow");
+    window
+        .window()
+        .set_size(slint::LogicalSize::new(440.0, 4000.0));
+    window
+}
+
+fn shows(app: &impl ComponentHandle, label: &str) -> bool {
     ElementHandle::find_by_accessible_label(app, label)
         .next()
         .is_some()
 }
 
-fn control(app: &AppWindow, label: &str, role: AccessibleRole) -> ElementHandle {
+fn control(app: &impl ComponentHandle, label: &str, role: AccessibleRole) -> ElementHandle {
     ElementHandle::find_by_accessible_label(app, label)
         .find(|element| element.accessible_role() == Some(role))
         .unwrap_or_else(|| panic!("no {role:?} labelled {label:?}"))
 }
 
 #[test]
-fn footer_buttons_toggle_the_side_panels() {
-    let app = window_with(Panel::None);
+fn main_buttons_toggle_the_secondary_windows() {
+    let app = main_window();
     let seen = Rc::new(RefCell::new(Vec::new()));
-    let sink = seen.clone();
-    app.on_panel_changed(move |panel| sink.borrow_mut().push(panel));
+    let fans = seen.clone();
+    app.on_fans_toggled(move |open| fans.borrow_mut().push(("fans", open)));
+    let extra = seen.clone();
+    app.on_extra_toggled(move |open| extra.borrow_mut().push(("extra", open)));
 
     control(&app, "Вентиляторы", AccessibleRole::Button).invoke_accessible_default_action();
-    assert_eq!(app.get_panel(), Panel::Fans);
     control(&app, "Дополнительно", AccessibleRole::Button).invoke_accessible_default_action();
-    assert_eq!(app.get_panel(), Panel::Extra);
-    control(&app, "Дополнительно", AccessibleRole::Button).invoke_accessible_default_action();
-    assert_eq!(
-        app.get_panel(),
-        Panel::None,
-        "second press closes the panel"
+    assert!(
+        app.get_fans_open() && app.get_extra_open(),
+        "both can be open"
     );
-    assert_eq!(*seen.borrow(), vec![Panel::Fans, Panel::Extra, Panel::None]);
+    control(&app, "Вентиляторы", AccessibleRole::Button).invoke_accessible_default_action();
+    assert!(!app.get_fans_open(), "second press closes the window");
+    assert_eq!(
+        *seen.borrow(),
+        vec![("fans", true), ("extra", true), ("fans", false)]
+    );
 }
 
 #[test]
 fn power_state_lighting_follows_asusd_evidence_and_write_gate() {
-    let app = window_with(Panel::Extra);
+    let app = extra_window();
     assert!(!shows(&app, "Во сне"), "hidden without LedPower");
 
     app.set_aura_power_ready(true);
@@ -91,7 +115,7 @@ fn power_state_lighting_follows_asusd_evidence_and_write_gate() {
 
 #[test]
 fn keyboard_row_offers_only_reported_controls() {
-    let app = window_with(Panel::None);
+    let app = main_window();
     assert!(!shows(&app, "Эффект подсветки"));
     assert!(!shows(&app, "Яркость подсветки 2"));
 
@@ -117,7 +141,7 @@ fn keyboard_row_offers_only_reported_controls() {
 
 #[test]
 fn graphics_hides_unreported_modes_and_names_the_queued_one() {
-    let app = window_with(Panel::None);
+    let app = main_window();
     let mut state = controller::UiState::from_mock_profile("zephyrus-full");
     state.available_gpu_mask = 0b0011;
     state.gpu_queued = -1;
@@ -137,7 +161,7 @@ fn graphics_hides_unreported_modes_and_names_the_queued_one() {
 
 #[test]
 fn power_limits_stay_hidden_until_reported_and_cpu_boost_respects_write_gate() {
-    let app = window_with(Panel::Fans);
+    let app = fans_window();
     app.set_ui_state(to_slint(&controller::UiState::production_initial()));
     assert!(!shows(&app, "Лимиты мощности"));
     assert!(!shows(&app, "Dynamic Boost"));
@@ -159,7 +183,7 @@ fn power_limits_stay_hidden_until_reported_and_cpu_boost_respects_write_gate() {
 
 #[test]
 fn fan_apply_sends_the_factory_reset_only_after_it_was_chosen() {
-    let app = window_with(Panel::Fans);
+    let app = fans_window();
     let mut state = controller::UiState::from_mock_profile("zephyrus-full");
     state.fan_curve_state = controller::FanCurveHwState::Ready;
     state.fan_curve_writable = true;
@@ -178,7 +202,7 @@ fn fan_apply_sends_the_factory_reset_only_after_it_was_chosen() {
 
 #[test]
 fn system_rows_appear_only_with_their_evidence() {
-    let app = window_with(Panel::Extra);
+    let app = extra_window();
     app.set_auto_clamshell_state(ClamshellState::Unavailable);
     for label in [
         "Звук при включении",
@@ -201,4 +225,26 @@ fn system_rows_appear_only_with_their_evidence() {
     ] {
         assert!(shows(&app, label), "{label} missing with evidence");
     }
+}
+
+#[test]
+fn secondary_window_mirrors_main_state_and_forwards_requests() {
+    let app = main_window();
+    let window = fans_window();
+    crate::panel_windows::forward_fans(&app, &window);
+    app.set_cpu_tuning_ready(true);
+    app.set_cpu_boost_known(true);
+    app.set_cpu_boost_writable(true);
+    assert!(!shows(&window, "Турбо-буст"), "nothing until mirrored");
+    crate::panel_windows::sync_fans(&app, &window);
+
+    let requests = Rc::new(RefCell::new(Vec::new()));
+    let seen = requests.clone();
+    app.on_cpu_boost_requested(move |on| seen.borrow_mut().push(on));
+    control(&window, "Турбо-буст", AccessibleRole::Switch).invoke_accessible_default_action();
+    assert_eq!(
+        *requests.borrow(),
+        vec![true],
+        "the main window handler runs"
+    );
 }

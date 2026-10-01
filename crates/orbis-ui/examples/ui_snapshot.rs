@@ -1,4 +1,4 @@
-//! Offscreen snapshots of the main window (ui-review companion).
+//! Offscreen snapshots of the main and secondary windows (ui-review companion).
 //!
 //! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <view> [path] [theme] [height] [state]`
 //! Views: main | fans | extra. States: normal | dirty | pending | error | unsupported | readonly.
@@ -10,6 +10,12 @@ use slint::platform::{Platform, PlatformError, Renderer, WindowAdapter, WindowEv
 use slint::{ComponentHandle, LogicalSize, PhysicalSize, Rgb8Pixel, WindowSize};
 
 slint::include_modules!();
+
+#[allow(dead_code)]
+mod panel_sync {
+    use super::*;
+    include!("../src/panel_sync.rs");
+}
 
 struct SoftwareWindowAdapter {
     renderer: Rc<slint::platform::software_renderer::SoftwareRenderer>,
@@ -410,14 +416,11 @@ fn main() -> anyhow::Result<()> {
         "light" => true,
         other => anyhow::bail!("unknown theme: {other}"),
     };
-    let panel = match view.as_str() {
-        "main" => Panel::None,
-        "fans" => Panel::Fans,
-        "extra" => Panel::Extra,
-        other => anyhow::bail!("unknown view: {other}"),
-    };
+    if !matches!(view.as_str(), "main" | "fans" | "extra") {
+        anyhow::bail!("unknown view: {view}");
+    }
 
-    let renderer = setup(841, 800);
+    let renderer = setup(440, 800);
     let component = AppWindow::new()?;
     component.global::<ThemeState>().set_mode(if light {
         ThemeMode::Light
@@ -426,18 +429,33 @@ fn main() -> anyhow::Result<()> {
     });
     demo_state(&component);
     apply_snapshot_state(&component, &state)?;
-    component.set_panel(panel);
-    let width = component.get_main_width()
-        + if panel == Panel::None {
-            0.0
-        } else {
-            component.get_panel_width() + 1.0
-        };
-    component.window().set_size(LogicalSize::new(
-        width,
-        height.unwrap_or(component.get_main_height()),
-    ));
-    component.show()?;
-    save(&renderer, component.window(), &path)?;
+    match view.as_str() {
+        "fans" => {
+            let window = FansWindow::new()?;
+            panel_sync::sync_fans(&component, &window);
+            window
+                .window()
+                .set_size(LogicalSize::new(440.0, height.unwrap_or(600.0)));
+            window.show()?;
+            save(&renderer, window.window(), &path)?;
+        }
+        "extra" => {
+            let window = ExtraWindow::new()?;
+            panel_sync::sync_extra(&component, &window);
+            window
+                .window()
+                .set_size(LogicalSize::new(440.0, height.unwrap_or(600.0)));
+            window.show()?;
+            save(&renderer, window.window(), &path)?;
+        }
+        _ => {
+            component.window().set_size(LogicalSize::new(
+                component.get_main_width(),
+                height.unwrap_or(component.get_main_height()),
+            ));
+            component.show()?;
+            save(&renderer, component.window(), &path)?;
+        }
+    }
     Ok(())
 }

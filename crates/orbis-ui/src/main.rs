@@ -10,6 +10,7 @@ mod desktop_notify;
 mod diagnostics_backend;
 mod global_shortcuts;
 mod launch_context;
+mod panel_windows;
 mod preferences_backend;
 mod quick_controls_backend;
 
@@ -95,14 +96,12 @@ thread_local! {
 /// Разобранные аргументы командной строки.
 struct Args {
     ui_state: String,
-    ui_panel: Option<String>,
     screenshot: Option<String>,
     background: bool,
 }
 
 fn parse_args() -> Args {
     let mut ui_state = "default".to_string();
-    let mut ui_panel = None;
     let mut screenshot = None;
     let mut background = false;
     let mut it = std::env::args().skip(1);
@@ -117,17 +116,11 @@ fn parse_args() -> Args {
             // Login autostart: stay in the tray (the window shows anyway when
             // no tray host appears, so the app is never invisible).
             "--background" => background = true,
-            "--ui-panel" => {
-                if let Some(v) = it.next() {
-                    ui_panel = Some(v);
-                }
-            }
             other => eprintln!("orbis-control: игнорирую неизвестный аргумент '{other}'"),
         }
     }
     Args {
         ui_state,
-        ui_panel,
         screenshot,
         background,
     }
@@ -2570,20 +2563,12 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
         });
     }
 
-    // Side panel: the window is as wide as the main column plus the open panel.
-    {
-        let app_weak = app.as_weak();
-        app.on_panel_changed(move |_| {
-            if let Some(app) = app_weak.upgrade() {
-                fit_window_to_panel(&app);
-            }
-        });
-    }
+    panel_windows::wire(app);
     {
         let app_weak = app.as_weak();
         app.on_fit_requested(move || {
             if let Some(app) = app_weak.upgrade() {
-                fit_window_to_panel(&app);
+                fit_window(&app);
             }
         });
     }
@@ -2855,13 +2840,8 @@ impl Platform for SoftwarePlatform {
     }
 }
 
-fn render_screenshot(
-    state: &controller::UiState,
-    path: &str,
-    ui_panel: Option<&str>,
-) -> anyhow::Result<()> {
-    // Wide enough for the main column plus a side panel; resized below.
-    let (width, height) = (841u32, 640u32);
+fn render_screenshot(state: &controller::UiState, path: &str) -> anyhow::Result<()> {
+    let (width, height) = (400u32, 520u32);
     let renderer = Rc::new(slint::platform::software_renderer::SoftwareRenderer::new());
     let adapter = Rc::new(SoftwareWindowAdapter {
         renderer: renderer.clone(),
@@ -2877,19 +2857,8 @@ fn render_screenshot(
     slint::platform::set_platform(Box::new(SoftwarePlatform { adapter })).expect("platform once");
 
     let app = build_app(state, None)?;
-    app.set_panel(match ui_panel {
-        Some("fans") => Panel::Fans,
-        Some("extra") => Panel::Extra,
-        _ => Panel::None,
-    });
-    let width = app.get_main_width()
-        + if app.get_panel() == Panel::None {
-            0.0
-        } else {
-            app.get_panel_width() + 1.0
-        };
     app.window()
-        .set_size(LogicalSize::new(width, height as f32));
+        .set_size(LogicalSize::new(app.get_main_width(), height as f32));
     app.show()?;
 
     let size = app.window().size();
@@ -2932,7 +2901,7 @@ fn main() -> anyhow::Result<()> {
 
     let background = args.background;
     if let Some(path) = args.screenshot {
-        return render_screenshot(&state, &path, args.ui_panel.as_deref());
+        return render_screenshot(&state, &path);
     }
 
     init_tracing();
@@ -2988,7 +2957,7 @@ fn main() -> anyhow::Result<()> {
     let app = build_app(&state, Some(worker_tx.clone()))?;
     quick_controls_backend::force_refresh(&app);
     wire_settings_section(&app);
-    fit_window_to_panel(&app);
+    fit_window(&app);
     apply_start_minimized(startup_preferences.start_minimized, |minimized| {
         app.window().set_minimized(minimized);
     });
@@ -3159,6 +3128,7 @@ fn main() -> anyhow::Result<()> {
     slint::run_event_loop_until_quit()?;
 
     diagnostics_backend::clear();
+    panel_windows::clear();
     quick_controls_backend::clear();
     drop(app);
     drop(worker_tx);
@@ -3175,10 +3145,9 @@ mod main_tests;
 #[cfg(test)]
 mod ui_behavior_tests;
 
-/// Window size follows the content: main column plus the open side panel in
-/// width (the layout pins min = max width), the main column's natural height.
-/// With a panel open, a taller window the user chose is kept.
-fn fit_window_to_panel(app: &AppWindow) {
+/// The main window is as large as its column: fixed width, natural height
+/// (sections appear as their capabilities load).
+fn fit_window(app: &AppWindow) {
     let (width, height) = fitted_size(app);
     request_window_size(app, width, height);
     // A configure from the compositor can race with the request (KWin answers
@@ -3193,7 +3162,7 @@ fn fit_window_to_panel(app: &AppWindow) {
             window.inner_size().to_logical::<f32>(window.scale_factor())
         });
         if let Some(actual) = actual
-            && ((actual.width - width).abs() > 0.5 || actual.height + 0.5 < height)
+            && ((actual.width - width).abs() > 0.5 || (actual.height - height).abs() > 0.5)
         {
             request_window_size(&app, width, height);
         }
@@ -3201,27 +3170,7 @@ fn fit_window_to_panel(app: &AppWindow) {
 }
 
 fn fitted_size(app: &AppWindow) -> (f32, f32) {
-    let panel_open = app.get_panel() != Panel::None;
-    let width = app.get_main_width()
-        + if panel_open {
-            app.get_panel_width() + 1.0
-        } else {
-            0.0
-        };
-    let current = app
-        .window()
-        .size()
-        .to_logical(app.window().scale_factor())
-        .height;
-    let natural = app.get_main_height();
-    (
-        width,
-        if panel_open {
-            natural.max(current)
-        } else {
-            natural
-        },
-    )
+    (app.get_main_width(), app.get_main_height())
 }
 
 fn request_window_size(app: &AppWindow, width: f32, height: f32) {

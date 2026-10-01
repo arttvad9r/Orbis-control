@@ -133,7 +133,7 @@ impl StatusNotifierItem {
 
     #[zbus(property)]
     fn icon_name(&self) -> String {
-        "applications-system".into()
+        "io.github.orbiscontrol.Orbis".into()
     }
 
     #[zbus(property)]
@@ -153,7 +153,7 @@ impl StatusNotifierItem {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         (
-            "applications-system".into(),
+            "io.github.orbiscontrol.Orbis".into(),
             Vec::new(),
             "Orbis Control".into(),
             description,

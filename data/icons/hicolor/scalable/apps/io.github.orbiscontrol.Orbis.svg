@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <rect width="256" height="256" rx="68" fill="#14181d"/>
-  <rect x="28" y="28" width="200" height="200" rx="56" fill="#172a45" stroke="#5a9cff" stroke-opacity=".52" stroke-width="6"/>
-  <circle cx="128" cy="128" r="58" fill="none" stroke="#5a9cff" stroke-width="14"/>
-  <circle cx="128" cy="128" r="17" fill="#5a9cff"/>
-  <circle cx="181" cy="75" r="17" fill="#5a9cff" stroke="#f3f6f9" stroke-width="7"/>
+  <!-- Clay accent tile with an orbit: ring, core and one satellite. -->
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#D97757"/>
+  <circle cx="128" cy="128" r="66" fill="none" stroke="#FAF9F5" stroke-width="18"/>
+  <circle cx="128" cy="128" r="22" fill="#FAF9F5"/>
+  <circle cx="174.7" cy="81.3" r="25" fill="#D97757"/>
+  <circle cx="174.7" cy="81.3" r="15" fill="#FAF9F5"/>
 </svg>

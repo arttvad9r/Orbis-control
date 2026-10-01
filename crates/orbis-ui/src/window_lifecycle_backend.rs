@@ -149,6 +149,7 @@ fn handle_close_request(app: &AppWindow) -> CloseRequestResponse {
         // `Ask` has no dialog; it behaves like the tray default.
         CloseAction::HideToTray | CloseAction::Ask if super::tray_backend::is_ready() => {
             tracing::debug!("main window closing to registered StatusNotifier tray");
+            crate::panel_windows::close_all(app);
             CloseRequestResponse::HideWindow
         }
         CloseAction::HideToTray | CloseAction::Ask => {
