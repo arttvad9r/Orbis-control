@@ -6,24 +6,14 @@ cd "$ROOT"
 
 mkdir -p screenshots
 
-sections=(
-  "dashboard:01-dashboard.png"
-  "performance:02-performance.png"
-  "power:03-power.png"
-  "cooling:04-cooling-fan-editor.png"
-  "graphics:05-graphics.png"
-  "backlight:06-backlight.png"
-  "display:07-display.png"
-  "system:08-system-diagnostics.png"
-  "settings:09-settings.png"
-  "about:10-about.png"
-)
-
-for entry in "${sections[@]}"; do
-  section="${entry%%:*}"
-  file="${entry#*:}"
-  echo "→ $section -> screenshots/$file"
-  cargo run --quiet -p orbis-ui --example ui_snapshot -- "$section" "screenshots/$file" dark
+count=0
+for view in main fans extra; do
+  for theme in light dark; do
+    file="screenshots/$view-$theme.png"
+    echo "→ $view ($theme) -> $file"
+    cargo run --quiet -p orbis-ui --example ui_snapshot -- "$view" "$file" "$theme"
+    count=$((count + 1))
+  done
 done
 
-echo "✓ Refreshed ${#sections[@]} Orbis UI screenshots"
+echo "✓ Refreshed $count Orbis UI screenshots"

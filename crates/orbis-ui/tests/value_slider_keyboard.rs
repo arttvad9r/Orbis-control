@@ -5,7 +5,7 @@ use slint::ComponentHandle;
 use slint::platform::WindowEvent;
 
 slint::slint! {
-    import { ValueSlider } from "../../ui/components/value-slider.slint";
+    import { ValueSlider } from "../../ui/widgets.slint";
 
     export component Harness inherits Window {
         width: 400px;
@@ -44,14 +44,14 @@ fn setup(disabled: bool) -> (Harness, Rc<RefCell<Vec<f32>>>) {
     window.set_size(slint::LogicalSize::new(400.0, 100.0));
     window.dispatch_event(WindowEvent::WindowActiveChanged(true));
     window.dispatch_event(WindowEvent::PointerMoved {
-        position: slint::LogicalPosition::new(200.0, 35.0),
+        position: slint::LogicalPosition::new(200.0, 50.0),
     });
     window.dispatch_event(WindowEvent::PointerPressed {
-        position: slint::LogicalPosition::new(200.0, 35.0),
+        position: slint::LogicalPosition::new(200.0, 50.0),
         button: slint::platform::PointerEventButton::Left,
     });
     window.dispatch_event(WindowEvent::PointerReleased {
-        position: slint::LogicalPosition::new(200.0, 35.0),
+        position: slint::LogicalPosition::new(200.0, 50.0),
         button: slint::platform::PointerEventButton::Left,
     });
     assert!(

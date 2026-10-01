@@ -118,9 +118,9 @@ pub(crate) fn wire_close_request(app: &AppWindow) {
     });
 }
 
-/// Close-request disposition shared by the native path and the frameless
-/// title bar button (spec §3): persist position, then honor CloseAction.
-pub(crate) fn handle_close_request(app: &AppWindow) -> CloseRequestResponse {
+/// Close-request disposition for the window close button: persist position,
+/// then honor CloseAction.
+fn handle_close_request(app: &AppWindow) -> CloseRequestResponse {
     let _ = persist_position(app);
 
     let action = match load_preferences() {
@@ -161,6 +161,15 @@ pub(crate) fn handle_close_request(app: &AppWindow) -> CloseRequestResponse {
             }
             CloseRequestResponse::HideWindow
         }
+    }
+}
+
+/// Explicit "Quit" (footer button): persist position and end the event loop
+/// regardless of the close action.
+pub(crate) fn quit(app: &AppWindow) {
+    let _ = persist_position(app);
+    if let Err(error) = slint::quit_event_loop() {
+        tracing::warn!(error = ?error, "quit could not terminate Slint event loop");
     }
 }
 

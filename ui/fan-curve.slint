@@ -1,0 +1,199 @@
+// Fan curve: eight (temperature, duty) points. Points drag in both axes; the
+// gesture previews locally and commits once on release. Validation of the
+// result stays with the controller (fan-curve-invalid-draft).
+import { FanCurveHwState } from "model.slint";
+import { Palette } from "theme.slint";
+import { Metrics } from "widgets.slint";
+
+component CurvePoint inherits Rectangle {
+    in property <int> index;
+    in property <int> temp;
+    in property <int> pwm;
+    in property <int> temp-low;
+    in property <int> temp-high;
+    in property <int> axis-min;
+    in property <int> axis-max;
+    in property <length> plot-width;
+    in property <length> plot-height;
+    in property <bool> editable;
+    callback committed(int, int, int);
+
+    out property <bool> active: false;
+    out property <int> shown-temp: root.active ? root.preview-temp : root.temp;
+    out property <int> shown-pwm: root.active ? root.preview-pwm : root.pwm;
+    property <int> preview-temp: root.temp;
+    property <int> preview-pwm: root.pwm;
+
+    width: 22px;
+    height: 22px;
+    x: (root.shown-temp - root.axis-min) / (root.axis-max - root.axis-min) * root.plot-width - self.width / 2;
+    y: (1 - root.shown-pwm / 255) * root.plot-height - self.height / 2;
+
+    function track(px: length, py: length) {
+        let t = Math.round(root.axis-min + px / root.plot-width * (root.axis-max - root.axis-min));
+        root.preview-temp = Math.min(Math.max(t, root.temp-low), root.temp-high);
+        root.preview-pwm = Math.min(Math.max(Math.round((1 - py / root.plot-height) * 255), 0), 255);
+    }
+
+    Rectangle {
+        width: root.active || (touch.has-hover && root.editable) ? 12px : 9px;
+        height: self.width;
+        border-radius: self.width / 2;
+        border-width: 2px;
+        border-color: Palette.accent;
+        background: root.active ? Palette.accent : Palette.view;
+    }
+    if (root.active || touch.has-hover) : Rectangle {
+        x: root.x < 60px ? 14px : -self.width - 4px;
+        y: -18px;
+        width: 70px;
+        height: 18px;
+        border-radius: 3px;
+        background: Palette.control;
+        border-width: 1px;
+        border-color: Palette.border;
+        Text {
+            text: root.shown-temp + "° · " + Math.round(root.shown-pwm * 100 / 255) + "%";
+            font-size: 11px;
+            color: Palette.text;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.editable;
+        mouse-cursor: root.editable ? MouseCursor.move : MouseCursor.default;
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down) {
+                root.preview-temp = root.temp;
+                root.preview-pwm = root.pwm;
+                root.active = true;
+            } else if (ev.kind == PointerEventKind.move && self.pressed && root.active) {
+                root.track(root.x + self.mouse-x, root.y + self.mouse-y);
+            } else if (ev.kind == PointerEventKind.up && root.active) {
+                root.active = false;
+                root.committed(root.index, root.preview-temp, root.preview-pwm);
+            } else if (ev.kind == PointerEventKind.cancel) {
+                root.active = false;
+            }
+        }
+    }
+}
+
+export component FanCurve inherits Rectangle {
+    in property <FanCurveHwState> state: FanCurveHwState.Loading;
+    in property <bool> editable: false;
+    in property <int> axis-min: 30;
+    in property <int> axis-max: 110;
+    in property <[int]> temps: [0, 0, 0, 0, 0, 0, 0, 0];
+    in property <[int]> pwms: [0, 0, 0, 0, 0, 0, 0, 0];
+    callback temp-changed(int, int);
+    callback pwm-changed(int, int);
+
+    min-height: 150px;
+    accessible-role: groupbox;
+    accessible-label: "Кривая вентилятора";
+
+    property <bool> ready: root.state == FanCurveHwState.Ready;
+    property <length> left: 30px;
+    property <length> bottom: 16px;
+
+    pure function lerp(t: float, t0: float, p0: float, t1: float, p1: float) -> float {
+        if (t1 - t0 <= 0) { return p1; }
+        return p0 + (p1 - p0) * (t - t0) / (t1 - t0);
+    }
+    pure function pwm-at(t: float) -> float {
+        if (t <= root.temps[0]) { return root.pwms[0]; }
+        if (t >= root.temps[7]) { return root.pwms[7]; }
+        if (t <= root.temps[1]) { return root.lerp(t, root.temps[0], root.pwms[0], root.temps[1], root.pwms[1]); }
+        if (t <= root.temps[2]) { return root.lerp(t, root.temps[1], root.pwms[1], root.temps[2], root.pwms[2]); }
+        if (t <= root.temps[3]) { return root.lerp(t, root.temps[2], root.pwms[2], root.temps[3], root.pwms[3]); }
+        if (t <= root.temps[4]) { return root.lerp(t, root.temps[3], root.pwms[3], root.temps[4], root.pwms[4]); }
+        if (t <= root.temps[5]) { return root.lerp(t, root.temps[4], root.pwms[4], root.temps[5], root.pwms[5]); }
+        if (t <= root.temps[6]) { return root.lerp(t, root.temps[5], root.pwms[5], root.temps[6], root.pwms[6]); }
+        return root.lerp(t, root.temps[6], root.pwms[6], root.temps[7], root.pwms[7]);
+    }
+
+    for p[i] in [100, 75, 50, 25, 0] : Text {
+        x: 0px;
+        y: plot.y + (1 - p / 100) * plot.height - 7px;
+        width: root.left - 6px;
+        height: 14px;
+        text: p + "%";
+        font-size: 10px;
+        color: Palette.muted;
+        horizontal-alignment: right;
+    }
+    for t[i] in 5 : Text {
+        x: plot.x + i / 4 * plot.width - 20px;
+        y: plot.y + plot.height + 2px;
+        width: 40px;
+        height: 14px;
+        text: (root.axis-min + i * (root.axis-max - root.axis-min) / 4) + "°";
+        font-size: 10px;
+        color: Palette.muted;
+        horizontal-alignment: center;
+    }
+
+    plot := Rectangle {
+        x: root.left;
+        y: 8px;
+        width: root.width - root.left - 8px;
+        height: root.height - root.bottom - 8px;
+        border-width: 1px;
+        border-color: Palette.border;
+        background: Palette.view;
+
+        for i in 3 : Rectangle { y: parent.height * (i + 1) / 4; height: 1px; background: Palette.border; }
+        for i in 3 : Rectangle { x: parent.width * (i + 1) / 4; width: 1px; background: Palette.border; }
+
+        if (root.ready) : Rectangle {
+            clip: true;
+            // Light fill under the curve, then the curve as thin columns that
+            // span each step's rise (no path rendering in the software renderer).
+            for i in 200 : Rectangle {
+                property <float> a: Math.min(Math.max(root.pwm-at(root.axis-min + i / 200 * (root.axis-max - root.axis-min)) / 255, 0), 1);
+                property <float> b: Math.min(Math.max(root.pwm-at(root.axis-min + (i + 1) / 200 * (root.axis-max - root.axis-min)) / 255, 0), 1);
+                x: i * parent.width / 200;
+                width: parent.width / 200 + 1px;
+                y: parent.height * (1 - Math.min(self.a, self.b));
+                height: parent.height * Math.min(self.a, self.b);
+                background: Palette.accent.mix(Palette.view, 0.18);
+            }
+            for i in 200 : Rectangle {
+                property <float> a: Math.min(Math.max(root.pwm-at(root.axis-min + i / 200 * (root.axis-max - root.axis-min)) / 255, 0), 1);
+                property <float> b: Math.min(Math.max(root.pwm-at(root.axis-min + (i + 1) / 200 * (root.axis-max - root.axis-min)) / 255, 0), 1);
+                x: i * parent.width / 200;
+                width: parent.width / 200 + 1px;
+                y: parent.height * (1 - Math.max(self.a, self.b)) - 1.5px;
+                height: parent.height * Math.abs(self.a - self.b) + 3px;
+                background: Palette.accent;
+            }
+        }
+        if (root.ready) : Rectangle {
+            for t[i] in root.temps : CurvePoint {
+                index: i;
+                temp: t;
+                pwm: root.pwms[i];
+                temp-low: i == 0 ? root.axis-min : root.temps[i - 1] + 1;
+                temp-high: i == 7 ? root.axis-max : root.temps[i + 1] - 1;
+                axis-min: root.axis-min;
+                axis-max: root.axis-max;
+                plot-width: plot.width;
+                plot-height: plot.height;
+                editable: root.editable;
+                committed(index, temp, pwm) => {
+                    if (temp != root.temps[index]) { root.temp-changed(index, temp); }
+                    if (pwm != root.pwms[index]) { root.pwm-changed(index, pwm); }
+                }
+            }
+        }
+        if (!root.ready) : Text {
+            text: root.state == FanCurveHwState.Loading ? "Чтение кривой…" : "Кривая недоступна";
+            font-size: Metrics.small;
+            color: Palette.muted;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

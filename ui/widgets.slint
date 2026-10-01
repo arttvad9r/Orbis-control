@@ -1,0 +1,502 @@
+// Small, flat building blocks: everything is a 28px row control.
+import { Palette } from "theme.slint";
+
+export global Metrics {
+    out property <length> control: 28px;
+    out property <length> radius: 5px;
+    out property <length> gutter: 12px;
+    out property <length> label: 104px;
+    out property <length> font: 13px;
+    out property <length> small: 12px;
+}
+
+export component Button inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> disabled: false;
+    callback clicked;
+
+    min-width: 40px;
+    preferred-width: label-text.preferred-width + 20px;
+    height: Metrics.control;
+    border-radius: Metrics.radius;
+    border-width: 1px;
+    border-color: root.primary && !root.disabled ? Palette.accent
+        : touch.has-hover && !root.disabled ? Palette.accent : Palette.border;
+    background: root.primary && !root.disabled ? (touch.has-hover ? Palette.accent-hover : Palette.accent)
+        : touch.has-hover && !root.disabled ? Palette.control-hover : Palette.control;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: !root.disabled;
+    accessible-action-default => { if (!root.disabled) { root.clicked(); } }
+
+    label-text := Text {
+        text: root.label;
+        font-size: Metrics.font;
+        color: root.disabled ? Palette.disabled : root.primary ? Palette.on-accent : Palette.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    touch := TouchArea {
+        enabled: !root.disabled;
+        mouse-cursor: root.disabled ? MouseCursor.default : MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// One segment of a choice row. `pending` marks a queued (not yet applied) choice.
+export component Seg inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    in property <bool> pending: false;
+    in property <bool> disabled: false;
+    callback clicked;
+
+    // Long labels elide instead of widening the window.
+    min-width: 24px;
+    preferred-width: label-text.preferred-width + 12px;
+    horizontal-stretch: 1;
+    height: Metrics.control;
+    border-radius: Metrics.radius;
+    border-width: 1px;
+    border-color: root.selected ? Palette.accent
+        : root.pending ? Palette.accent
+        : touch.has-hover && !root.disabled ? Palette.accent : Palette.border;
+    background: root.selected ? Palette.accent
+        : root.pending ? Palette.selection
+        : touch.has-hover && !root.disabled ? Palette.control-hover : Palette.control;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checked: root.selected;
+    accessible-enabled: !root.disabled;
+    accessible-action-default => { if (!root.disabled) { root.clicked(); } }
+
+    label-text := Text {
+        text: root.label;
+        font-size: Metrics.font;
+        font-weight: root.selected ? 600 : 400;
+        color: root.selected ? Palette.on-accent
+            : root.disabled ? Palette.disabled
+            : root.pending ? Palette.accent-hover : Palette.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    touch := TouchArea {
+        enabled: !root.disabled && !root.selected;
+        mouse-cursor: self.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Choice row from a list of labels.
+export component Segmented inherits HorizontalLayout {
+    in property <[string]> options;
+    in property <int> selected: -1;
+    in property <bool> disabled: false;
+    callback changed(int);
+    spacing: 4px;
+    for option[i] in root.options : Seg {
+        label: option;
+        selected: i == root.selected;
+        disabled: root.disabled;
+        clicked => { root.changed(i); }
+    }
+}
+
+export component Switch inherits Rectangle {
+    in property <bool> checked: false;
+    in property <bool> disabled: false;
+    in property <string> label;
+    callback toggled(bool);
+
+    width: 34px;
+    height: 18px;
+    border-radius: 9px;
+    border-width: 1px;
+    border-color: root.checked && !root.disabled ? Palette.accent : Palette.border;
+    background: root.checked ? (root.disabled ? Palette.disabled : Palette.accent) : Palette.view;
+    accessible-role: switch;
+    accessible-label: root.label;
+    accessible-checked: root.checked;
+    accessible-enabled: !root.disabled;
+    accessible-action-default => { if (!root.disabled) { root.toggled(!root.checked); } }
+
+    Rectangle {
+        width: 12px;
+        height: 12px;
+        y: 2px;
+        x: root.checked ? parent.width - self.width - 3px : 3px;
+        border-radius: 6px;
+        background: root.checked ? Palette.on-accent : root.disabled ? Palette.disabled : Palette.muted;
+        animate x { duration: 120ms; easing: ease-out; }
+    }
+    TouchArea {
+        enabled: !root.disabled;
+        mouse-cursor: self.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { root.toggled(!root.checked); }
+    }
+}
+
+// Label on the left, a switch on the right, optional hint below.
+export component ToggleRow inherits VerticalLayout {
+    in property <string> label;
+    in property <string> hint: "";
+    in property <bool> checked: false;
+    in property <bool> disabled: false;
+    callback toggled(bool);
+    spacing: 1px;
+    HorizontalLayout {
+        min-height: Metrics.control;
+        spacing: 8px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.label;
+            font-size: Metrics.font;
+            color: root.disabled ? Palette.muted : Palette.text;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        Rectangle {
+            width: 34px;
+            Switch {
+                y: (parent.height - self.height) / 2;
+                label: root.label;
+                checked: root.checked;
+                disabled: root.disabled;
+                toggled(v) => { root.toggled(v); }
+            }
+        }
+    }
+    if (root.hint != "") : Text {
+        text: root.hint;
+        font-size: Metrics.small;
+        color: Palette.muted;
+        wrap: word-wrap;
+    }
+}
+
+// Fixed-width label followed by the row's controls.
+export component Row inherits HorizontalLayout {
+    in property <string> label;
+    in property <length> label-width: Metrics.label;
+    min-height: Metrics.control;
+    spacing: 8px;
+    Text {
+        width: root.label-width;
+        text: root.label;
+        font-size: Metrics.font;
+        color: Palette.text;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    @children
+}
+
+export component SectionHeader inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> info: "";
+    in property <color> info-color: Palette.muted;
+    height: 20px;
+    spacing: 8px;
+    Text {
+        text: root.title;
+        font-size: Metrics.font;
+        font-weight: 650;
+        color: Palette.text;
+        vertical-alignment: center;
+    }
+    Text {
+        horizontal-stretch: 1;
+        text: root.info;
+        font-size: Metrics.small;
+        color: root.info-color;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// Section block: padded column with a hairline above (except the first).
+export component Section inherits Rectangle {
+    in property <bool> first: false;
+    if (!root.first) : Rectangle {
+        y: 0px;
+        height: 1px;
+        background: Palette.border;
+    }
+    VerticalLayout {
+        padding-left: Metrics.gutter;
+        padding-right: Metrics.gutter;
+        padding-top: 9px;
+        padding-bottom: 10px;
+        spacing: 6px;
+        @children
+    }
+}
+
+// One-line status under a control: 0 muted, 1 warning, 2 error, 3 positive.
+export component Note inherits Text {
+    in property <int> kind: 0;
+    font-size: Metrics.small;
+    color: root.kind == 1 ? Palette.neutral : root.kind == 2 ? Palette.negative : root.kind == 3 ? Palette.positive : Palette.muted;
+    wrap: word-wrap;
+}
+
+// Slider with an authoritative external value. Dragging previews locally;
+// changed() fires once on release, or 0.6 s after the last key press / Enter.
+export component ValueSlider inherits Rectangle {
+    in property <int> min: 0;
+    in property <int> max: 100;
+    in property <int> step: 1;
+    in property <int> value: 0;
+    in property <string> unit: "";
+    in property <bool> disabled: false;
+    // Highlights the readout while the value differs from the applied one.
+    in property <bool> modified: false;
+    in property <string> label;
+    out property <bool> has-keyboard-focus: focus-scope.has-focus;
+    callback changed(float);
+
+    height: Metrics.control;
+    accessible-role: slider;
+    accessible-label: root.label;
+    accessible-value: round(root.shown) + (root.unit == "" ? "" : " " + root.unit);
+    accessible-value-minimum: root.min;
+    accessible-value-maximum: root.max;
+    accessible-enabled: !root.disabled;
+
+    property <bool> gesture-active: false;
+    property <bool> keyboard-active: false;
+    property <float> preview-value: root.value;
+    property <float> shown: root.gesture-active ? root.preview-value : root.value;
+    property <float> frac: root.max > root.min ? Math.min(Math.max((root.shown - root.min) / (root.max - root.min), 0), 1) : 0;
+
+    function snap(v: float) -> float {
+        let clamped = Math.min(Math.max(v, root.min), root.max);
+        return root.min + Math.round((clamped - root.min) / Math.max(root.step, 1)) * Math.max(root.step, 1);
+    }
+    function edit-to(target: float) {
+        if (root.disabled) { return; }
+        root.gesture-active = true;
+        root.keyboard-active = true;
+        root.preview-value = root.snap(target);
+        commit-timer.running = false;
+        commit-timer.running = true;
+    }
+    function nudge(delta: float) {
+        root.edit-to((root.keyboard-active ? root.preview-value : root.value) + delta);
+    }
+    function commit-keyboard() {
+        commit-timer.running = false;
+        if (!root.keyboard-active) { return; }
+        let final-value = root.snap(root.preview-value);
+        root.keyboard-active = false;
+        root.gesture-active = false;
+        root.preview-value = root.value;
+        if (final-value != root.value) { root.changed(final-value); }
+    }
+
+    commit-timer := Timer {
+        interval: 600ms;
+        running: false;
+        triggered => { root.commit-keyboard(); }
+    }
+
+    focus-scope := FocusScope {
+        focus-on-tab-navigation: true;
+        enabled: !root.disabled;
+        key-pressed(event) => {
+            if (event.text == Key.LeftArrow || event.text == Key.DownArrow) { root.nudge(-root.step); return accept; }
+            if (event.text == Key.RightArrow || event.text == Key.UpArrow) { root.nudge(root.step); return accept; }
+            if (event.text == Key.PageDown) { root.nudge(-10 * root.step); return accept; }
+            if (event.text == Key.PageUp) { root.nudge(10 * root.step); return accept; }
+            if (event.text == Key.Home) { root.edit-to(root.min); return accept; }
+            if (event.text == Key.End) { root.edit-to(root.max); return accept; }
+            if (event.text == Key.Return) { root.commit-keyboard(); return accept; }
+            return reject;
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        area := Rectangle {
+            horizontal-stretch: 1;
+            min-width: 60px;
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                height: 4px;
+                border-radius: 2px;
+                background: Palette.border;
+                Rectangle {
+                    x: 0px;
+                    width: root.frac * (parent.width - 14px) + 7px;
+                    border-radius: 2px;
+                    background: root.disabled ? Palette.disabled : Palette.accent;
+                }
+            }
+            thumb := Rectangle {
+                width: 14px;
+                height: 14px;
+                x: root.frac * (parent.width - self.width);
+                y: (parent.height - self.height) / 2;
+                border-radius: 7px;
+                border-width: focus-scope.has-focus && root.keyboard-active ? 3px : 2px;
+                border-color: root.disabled ? Palette.disabled : Palette.accent;
+                background: root.gesture-active || touch.has-hover ? Palette.accent : Palette.control;
+            }
+            touch := TouchArea {
+                enabled: !root.disabled;
+                mouse-cursor: self.enabled ? MouseCursor.pointer : MouseCursor.default;
+                pointer-event(ev) => {
+                    if (ev.kind == PointerEventKind.down) {
+                        focus-scope.focus();
+                        commit-timer.running = false;
+                        root.keyboard-active = false;
+                        root.gesture-active = true;
+                        root.preview-value = root.snap(root.min + self.mouse-x / self.width * (root.max - root.min));
+                    } else if (ev.kind == PointerEventKind.move && self.pressed) {
+                        root.preview-value = root.snap(root.min + self.mouse-x / self.width * (root.max - root.min));
+                    } else if (ev.kind == PointerEventKind.up && root.gesture-active) {
+                        let final-value = root.snap(root.min + self.mouse-x / self.width * (root.max - root.min));
+                        root.gesture-active = false;
+                        root.preview-value = root.value;
+                        if (final-value != root.value) { root.changed(final-value); }
+                    } else if (ev.kind == PointerEventKind.cancel) {
+                        root.gesture-active = false;
+                        root.preview-value = root.value;
+                    }
+                }
+            }
+        }
+        Text {
+            width: 58px;
+            text: round(root.shown) + (root.unit == "" ? "" : " " + root.unit);
+            font-size: Metrics.font;
+            color: root.disabled ? Palette.disabled : root.modified || root.gesture-active ? Palette.accent : Palette.muted;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Compact drop-down list.
+export component Dropdown inherits Rectangle {
+    in property <[string]> options;
+    // Per-option availability; an empty list offers every option.
+    in property <[bool]> available: [];
+    in property <int> selected: -1;
+    in property <bool> disabled: false;
+    in property <string> placeholder: "—";
+    in property <string> label;
+    callback changed(int);
+
+    height: Metrics.control;
+    min-width: 90px;
+    border-radius: Metrics.radius;
+    border-width: 1px;
+    border-color: touch.has-hover && !root.disabled ? Palette.accent : Palette.border;
+    background: Palette.control;
+    accessible-role: combobox;
+    accessible-label: root.label;
+    accessible-action-default => { if (!root.disabled) { popup.show(); } }
+    accessible-value: root.selected >= 0 && root.selected < root.options.length ? root.options[root.selected] : root.placeholder;
+    accessible-enabled: !root.disabled;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.selected >= 0 && root.selected < root.options.length ? root.options[root.selected] : root.placeholder;
+            font-size: Metrics.font;
+            color: root.disabled ? Palette.disabled : Palette.text;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        // Down chevron drawn from rows (no glyph/path dependency).
+        Rectangle {
+            width: 9px;
+            for i in 5 : Rectangle {
+                x: i * 1px;
+                y: (parent.height - 5px) / 2 + i * 1px;
+                width: 9px - 2px * i;
+                height: 1px;
+                background: Palette.muted;
+            }
+        }
+    }
+    touch := TouchArea {
+        enabled: !root.disabled;
+        mouse-cursor: self.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { popup.show(); }
+    }
+    popup := PopupWindow {
+        x: 0px;
+        y: root.height + 2px;
+        width: root.width;
+        Rectangle {
+            border-radius: Metrics.radius;
+            border-width: 1px;
+            border-color: Palette.border;
+            background: Palette.control;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: #00000030;
+        }
+        VerticalLayout {
+            padding: 3px;
+            for option[i] in root.options : Rectangle {
+                visible: root.available.length == 0 || root.available[i];
+                height: self.visible ? 26px : 0px;
+                border-radius: 3px;
+                background: item.has-hover ? Palette.selection : transparent;
+                accessible-role: list-item;
+                accessible-label: option;
+                accessible-action-default => { root.changed(i); }
+                Text {
+                    x: 6px;
+                    text: option;
+                    font-size: Metrics.font;
+                    font-weight: i == root.selected ? 600 : 400;
+                    color: i == root.selected ? Palette.accent : Palette.text;
+                    vertical-alignment: center;
+                }
+                item := TouchArea { clicked => { root.changed(i); } }
+            }
+        }
+    }
+}
+
+export component Swatch inherits Rectangle {
+    in property <color> swatch;
+    in property <bool> selected: false;
+    in property <bool> disabled: false;
+    in property <string> label: "Цвет";
+    callback clicked;
+    width: Metrics.control;
+    height: Metrics.control;
+    border-radius: Metrics.radius;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Palette.text : Palette.border;
+    background: root.swatch;
+    opacity: root.disabled ? 0.5 : 1;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: !root.disabled;
+    accessible-action-default => { if (!root.disabled) { root.clicked(); } }
+    TouchArea {
+        enabled: !root.disabled;
+        mouse-cursor: self.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component KeyValue inherits HorizontalLayout {
+    in property <string> key;
+    in property <string> value;
+    spacing: 8px;
+    Text { width: Metrics.label; text: root.key; font-size: Metrics.font; color: Palette.muted; }
+    Text { horizontal-stretch: 1; text: root.value == "" ? "—" : root.value; font-size: Metrics.font; color: Palette.text; wrap: word-wrap; }
+}

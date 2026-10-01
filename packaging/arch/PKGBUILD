@@ -45,7 +45,4 @@ package() {
     "$pkgdir/usr/share/metainfo/io.github.orbiscontrol.Orbis.metainfo.xml"
   install -Dm644 data/icons/hicolor/scalable/apps/io.github.orbiscontrol.Orbis.svg \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.orbiscontrol.Orbis.svg"
-  # Inter is embedded in orbis-control; its OFL must ship with the binary.
-  install -Dm644 ui/assets/fonts/OFL.txt \
-    "$pkgdir/usr/share/licenses/$pkgname/Inter-OFL.txt"
 }

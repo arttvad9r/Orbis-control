@@ -1,0 +1,1144 @@
+// Orbis Control main window: one compact column of everyday controls (mode,
+// GPU, screen, keyboard, battery) and an optional side panel — "Fans and power"
+// or "Extra" — next to it, the way G-Helper opens its secondary windows.
+//
+// Every value comes from Rust (UiState projection and plain properties);
+// controls only emit request callbacks. A control is shown only when its
+// capability is reported.
+import { ScrollView, TextEdit } from "std-widgets.slint";
+import { UiState, NvidiaRow, Panel, ChargeLimitState, GpuHwState, PerformanceHwState, GpuModeHwState, FanCurveHwState, ClamshellState } from "model.slint";
+import { Palette, ThemeState, ThemeMode, ThemeBridge } from "theme.slint";
+import { Metrics, Button, Seg, Segmented, Switch, ToggleRow, Row, SectionHeader, Section, Note, ValueSlider, Dropdown, Swatch, KeyValue } from "widgets.slint";
+import { FanCurve } from "fan-curve.slint";
+
+global Bits {
+    pure public function set(mask: int, bit: int) -> bool {
+        let shifted = Math.floor(mask / bit);
+        return shifted - 2 * Math.floor(shifted / 2) == 1;
+    }
+}
+
+// One power/thermal limit: draft value while dirty, else the applied one.
+component LimitRow inherits Row {
+    in property <int> field;
+    in property <int> bit;
+    in property <UiState> s;
+    in property <int> value;
+    in property <int> draft;
+    in property <int> min;
+    in property <int> max;
+    in property <int> step;
+    in property <string> unit;
+    callback changed(int, int);
+    label-width: 96px;
+    ValueSlider {
+        horizontal-stretch: 1;
+        label: root.label;
+        min: root.min;
+        max: root.max;
+        step: root.step;
+        unit: root.unit;
+        value: Bits.set(root.s.power-limit-dirty-mask, root.bit) ? root.draft : root.value;
+        modified: Bits.set(root.s.power-limit-dirty-mask, root.bit);
+        disabled: !root.s.power-limits-writable || Bits.set(root.s.power-limit-pending-mask, root.bit);
+        changed(v) => { root.changed(root.field, Math.round(v)); }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Orbis Control";
+    background: Palette.window;
+    default-font-size: Metrics.font;
+    min-width: root.main-width + (root.panel == Panel.None ? 0px : root.panel-width + 1px);
+    preferred-width: self.min-width;
+    max-width: self.min-width;
+    min-height: main-column.min-height;
+    preferred-height: main-column.preferred-height;
+
+    out property <length> main-width: 400px;
+    out property <length> panel-width: 440px;
+    // Natural height of the main column; Rust sizes the window to it.
+    out property <length> main-height: main-column.preferred-height;
+
+    in-out property <UiState> ui-state: {
+        perf-selected: 1, perf-state: PerformanceHwState.Loading,
+        gpu-selected: 1, gpu-mode-state: GpuModeHwState.Loading, gpu-queued: -1,
+        charge-limit: 80, charge-limit-state: ChargeLimitState.Loading,
+        gpu-power-state: GpuHwState.Loading, gpu-mux-state: GpuHwState.Loading, gpu-access-state: GpuHwState.Loading,
+        cpu-temp: "—", gpu-temp: "—", igpu-temp: "—", cpu-fan-rpm: "—", gpu-fan-rpm: "—",
+        battery-percent: "—", battery-percent-value: -1, power-ac-mw: "—", battery-health: "—", battery-cycles: "—",
+        ac-online: "—", gpu-power: "—", version: "0.1.0",
+        fan-curve-state: FanCurveHwState.Loading,
+    };
+
+    // Which side panel is open; Rust resizes the window on change.
+    in-out property <Panel> panel: Panel.None;
+    callback panel-changed(Panel);
+    // Sections appear as their capabilities load: ask Rust to refit the window.
+    callback fit-requested;
+    changed main-height => { root.fit-requested(); }
+
+    // Device facts.
+    in property <string> device-name: "";
+    in property <string> device-board: "";
+    in property <string> bios-version: "";
+    in property <string> bios-date: "";
+    in property <string> cpu-model: "";
+    in property <string> cpu-detail: "";
+    in property <string> memory-total: "";
+    in property <string> kernel-release: "";
+    in property <string> gpu-model: "";
+
+    // Mode / GPU.
+    callback perf-clicked(int);
+    callback gpu-clicked(int);
+    in property <bool> gpu-optimized: false;
+    callback gpu-optimized-requested(bool);
+    in property <bool> nvidia-visible: false;
+    in property <bool> nvidia-writable: false;
+    in property <string> nvidia-status: "";
+    in property <string> nvidia-error: "";
+    in property <[NvidiaRow]> nvidia-rows: [];
+    callback nvidia-tuning-requested(int, int);
+
+    // Battery.
+    callback charge-changed(float);
+    callback full-charge-requested(bool);
+    in property <int> full-charge-restore: -1;
+
+    // Screen.
+    in property <bool> display-state-ready: false;
+    in property <string> display-status: "";
+    in property <string> display-resolution: "";
+    in property <bool> panel-refresh-known: false;
+    in property <[int]> panel-refresh-rates: [];
+    in property <int> panel-refresh-current: 0;
+    in property <string> panel-refresh-error: "";
+    callback panel-refresh-requested(int);
+    in property <bool> panel-brightness-known: false;
+    in property <int> panel-brightness: 0;
+    in property <string> panel-brightness-error: "";
+    callback panel-brightness-requested(int);
+    in property <bool> panel-overdrive-state-ready: false;
+    in property <bool> panel-overdrive-control-ready: false;
+    in-out property <bool> panel-overdrive: false;
+    callback panel-overdrive-requested(bool);
+
+    // Keyboard.
+    in property <bool> keyboard-state-ready: false;
+    in property <bool> keyboard-control-ready: false;
+    in property <int> keyboard-brightness: -1;
+    in property <string> keyboard-mutation-error: "";
+    callback keyboard-brightness-requested(int);
+    in property <int> keyboard-timeout-ac: 0;
+    in property <int> keyboard-timeout-battery: 0;
+    in property <string> keyboard-timeout-status: "";
+    in property <bool> keyboard-timeout-problem: false;
+    callback keyboard-timeout-requested(bool, int);
+    in property <bool> aura-state-ready: false;
+    in property <bool> aura-control-ready: false;
+    in-out property <int> keyboard-effect: -1;
+    in-out property <int> keyboard-speed: -1;
+    in-out property <int> rgb-red: 255;
+    in-out property <int> rgb-green: 65;
+    in-out property <int> rgb-blue: 77;
+    in-out property <int> aura-secondary-red: 0;
+    in-out property <int> aura-secondary-green: 0;
+    in-out property <int> aura-secondary-blue: 0;
+    in property <bool> aura-static-supported: false;
+    in property <bool> aura-breathe-supported: false;
+    in property <bool> aura-rainbow-supported: false;
+    in property <bool> aura-rainbow-wave-supported: false;
+    in property <bool> aura-star-supported: false;
+    in property <bool> aura-rain-supported: false;
+    in property <bool> aura-highlight-supported: false;
+    in property <bool> aura-laser-supported: false;
+    in property <bool> aura-ripple-supported: false;
+    in property <bool> aura-pulse-supported: false;
+    in property <bool> aura-comet-supported: false;
+    in property <bool> aura-flash-supported: false;
+    callback aura-effect-requested(int, int, int, int, int, int, int, int);
+    in property <bool> aura-power-ready: false;
+    in property <bool> aura-power-boot: false;
+    in property <bool> aura-power-awake: false;
+    in property <bool> aura-power-sleep: false;
+    in property <bool> aura-power-shutdown: false;
+    callback aura-power-requested(int, bool);
+
+    // Fans.
+    in property <bool> fan-eco-profile-available: false;
+    in property <bool> mutation-safety-blocked: false;
+    in property <bool> factory-reset-available: true;
+    in property <string> policy-status: "";
+    callback fan-changed(int);
+    callback fan-profile-changed(int);
+    callback fan-temp-point-changed(int, int);
+    callback fan-pwm-point-changed(int, int);
+    callback fan-apply-clicked(bool);
+
+    // Power limits, CPU tuning, per-profile memory, power rules.
+    callback power-limit-changed(int, int);
+    callback power-limit-apply-clicked;
+    in property <bool> profile-limits-known: false;
+    in property <bool> profile-limits-auto-apply: false;
+    in property <string> profile-limits-summary: "";
+    callback profile-limits-auto-apply-toggled(bool);
+    in property <bool> cpu-tuning-ready: false;
+    in property <int> cpu-epp: 0;
+    in property <bool> cpu-epp-supported: false;
+    in property <bool> cpu-epp-writable: false;
+    in property <bool> cpu-boost-known: false;
+    in property <bool> cpu-boost: false;
+    in property <bool> cpu-boost-writable: false;
+    in property <string> cpu-tuning-error: "";
+    callback cpu-epp-requested(int);
+    callback cpu-boost-requested(bool);
+    in property <bool> cpu-co-supported: false;
+    in property <bool> cpu-co-writable: false;
+    in property <bool> cpu-co-applied-known: false;
+    in property <int> cpu-co-applied: 0;
+    callback cpu-co-requested(int);
+    in property <bool> power-rules-known: false;
+    in property <bool> power-rules-enabled: false;
+    in property <int> power-rules-ac: 0;
+    in property <int> power-rules-battery: 0;
+    in property <int> power-rules-ac-hz: 0;
+    in property <int> power-rules-battery-hz: 0;
+    in property <string> power-rules-error: "";
+    callback power-rules-enabled-toggled(bool);
+    callback power-rules-profile-requested(bool, int);
+    callback power-rules-refresh-requested(bool, int);
+
+    // System (staged ASUS attributes) and diagnostics.
+    in property <bool> backend-ready: false;
+    in property <bool> applying: false;
+    in property <string> status: "";
+    in property <bool> boot-sound-state-ready: false;
+    in property <bool> boot-sound-control-ready: false;
+    in-out property <bool> boot-sound: false;
+    in property <bool> igpu-memory-state-ready: false;
+    in property <bool> igpu-memory-control-ready: false;
+    in property <bool> igpu-memory-pending: false;
+    in-out property <int> igpu-memory: 0;
+    in property <bool> aspm-state-ready: false;
+    in property <bool> aspm-control-ready: false;
+    in-out property <bool> disable-aspm: false;
+    in property <ClamshellState> auto-clamshell-state: ClamshellState.Loading;
+    in property <string> lid-other-handler: "";
+    in property <bool> advanced-apply-ready: false;
+    callback reload-requested;
+    callback boot-sound-requested(bool);
+    callback igpu-memory-requested(int);
+    callback aspm-requested(bool);
+    callback auto-clamshell-requested(bool);
+    callback apply-requested;
+    in property <string> diagnostics-summary: "";
+    in-out property <bool> refresh-enabled: false;
+    in property <bool> refresh-pending: false;
+    in property <bool> export-enabled: false;
+    in property <string> diagnostics-status: "";
+    callback diagnostics-refresh-requested;
+    callback diagnostics-export-requested;
+
+    // App settings.
+    callback theme-changed(bool);
+    in-out property <bool> startup: false;
+    in-out property <bool> startup-enabled: false;
+    in property <string> startup-status: "";
+    callback startup-changed(bool);
+    in property <bool> start-minimized: false;
+    in property <bool> start-minimized-enabled: false;
+    callback start-minimized-changed(bool);
+    in property <bool> remember-position: false;
+    in property <bool> remember-position-enabled: false;
+    callback remember-position-changed(bool);
+    in property <bool> mode-notifications: true;
+    callback mode-notifications-changed(bool);
+    in property <int> close-action: 0;
+    in property <bool> close-action-enabled: false;
+    in property <bool> hide-to-tray-enabled: false;
+    callback close-action-changed(int);
+    in-out property <string> settings-local-status: "";
+    in property <string> update-status: "";
+    in property <bool> update-problem: false;
+    in property <bool> update-busy: false;
+    callback update-check-requested;
+    callback quit-requested;
+
+    ThemeBridge { }
+
+    function open(target: Panel) {
+        root.panel = root.panel == target ? Panel.None : target;
+        root.panel-changed(root.panel);
+    }
+
+    // ---- derived text ------------------------------------------------------
+
+    property <UiState> s: root.ui-state;
+
+    function perf-note() -> string {
+        if (root.s.performance-delegated-pending) { return "Ожидание подтверждения"; }
+        if (root.s.performance-delegated-error != "") { return root.s.performance-delegated-error; }
+        if (root.s.perf-state == PerformanceHwState.Ready) {
+            return root.s.perf-writable ? "" : "Профиль доступен только для чтения";
+        }
+        if (root.s.perf-state == PerformanceHwState.Loading) { return ""; }
+        return root.s.perf-unavailable-reason != "" ? root.s.perf-unavailable-reason : "Профили недоступны";
+    }
+    function telemetry() -> string {
+        let gpu = root.s.gpu-temp != "—" || root.s.igpu-temp == "—" ? root.s.gpu-temp : root.s.igpu-temp;
+        return "CPU " + root.s.cpu-temp + (root.s.cpu-fan-rpm != "—" ? " · " + root.s.cpu-fan-rpm : "")
+            + "   GPU " + gpu + (root.s.gpu-fan-rpm != "—" ? " · " + root.s.gpu-fan-rpm : "");
+    }
+    function mode-label(index: int) -> string {
+        if (index == 0) { return "Eco"; }
+        if (index == 1) { return "Standard"; }
+        if (index == 2) { return "Ultimate"; }
+        return "—";
+    }
+    property <bool> gpu-locked: root.s.gpu-mode-state != GpuModeHwState.Ready || !root.s.gpu-mode-writable
+        || root.s.gpu-mode-pending || root.s.gpu-mode-unconfirmed;
+    function gpu-note() -> string {
+        if (root.s.gpu-mode-state == GpuModeHwState.Ready && !root.s.gpu-mode-writable) { return "Только чтение"; }
+        if (root.s.gpu-mode-pending) { return "Ожидание подтверждения"; }
+        if (root.s.gpu-section-error) { return "Изменение режима GPU не подтверждено"; }
+        if (root.s.gpu-mode-unconfirmed) { return "Результат неизвестен — обновите состояние перед новой записью"; }
+        if (root.s.gpu-reboot-required) { return root.mode-label(root.s.gpu-queued) + " применится после перезагрузки"; }
+        if (root.gpu-optimized) { return "Eco от батареи, Standard от сети (после перезагрузки)"; }
+        return "";
+    }
+    function gpu-info() -> string {
+        if (root.s.gpu-power-state == GpuHwState.Ready) {
+            if (root.s.gpu-power-value == 0) { return "dGPU активна" + (root.s.gpu-power != "—" ? " · " + root.s.gpu-power : ""); }
+            if (root.s.gpu-power-value == 1) { return "dGPU спит"; }
+            if (root.s.gpu-power-value == 2) { return "dGPU выключена"; }
+        }
+        return "";
+    }
+    function charging() -> bool {
+        return root.s.battery-status == "Charging" || root.s.battery-status == "charging";
+    }
+    function battery-info() -> string {
+        let st = root.s.battery-status;
+        let label = root.charging() ? "заряжается"
+            : st == "Discharging" || st == "discharging" ? "разряжается"
+            : st == "Full" || st == "full" ? "заряжена"
+            : st == "Not charging" || st == "Not Charging" ? "не заряжается"
+            : st;
+        return root.s.battery-percent + (label != "" ? " · " + label : "")
+            + (root.s.power-ac-mw != "—" ? " · " + root.s.power-ac-mw : "");
+    }
+    // Fans panel local state.
+    property <bool> fan-reset-pending: false;
+    function fan-locked() -> bool {
+        return root.mutation-safety-blocked || !root.s.fan-curve-writable || root.s.fan-curve-error
+            || root.s.fan-curve-pending || root.s.fan-curve-unconfirmed;
+    }
+    function fan-status() -> string {
+        if (root.s.fan-curve-error) { return "ошибка операции с кривой"; }
+        if (root.s.fan-curve-pending) { return "применяется…"; }
+        if (root.s.fan-curve-unconfirmed) { return "результат неизвестен"; }
+        if (root.mutation-safety-blocked) { return root.policy-status; }
+        if (root.fan-reset-pending) { return "будут заводские значения"; }
+        if (root.s.fan-curve-state != FanCurveHwState.Ready) { return ""; }
+        if (!root.s.fan-curve-writable) { return "только чтение"; }
+        if (root.s.fan-curve-dirty) { return "есть неприменённые изменения"; }
+        if (root.s.fan-curve-enabled-known) { return root.s.fan-curve-enabled ? "своя кривая активна" : "кривая выключена (авто)"; }
+        return "";
+    }
+    function fan-status-warn() -> bool {
+        return root.s.fan-curve-pending || root.s.fan-curve-unconfirmed || root.mutation-safety-blocked
+            || root.fan-reset-pending || root.s.fan-curve-dirty;
+    }
+    property <int> co-draft: root.cpu-co-applied-known ? root.cpu-co-applied : 0;
+    property <bool> co-confirming: false;
+
+    // Extra panel helpers.
+    property <[string]> timeout-names: ["Никогда", "15 с", "30 с", "1 мин", "5 мин"];
+    property <[int]> timeout-secs: [0, 15, 30, 60, 300];
+    function timeout-index(secs: int) -> int {
+        if (secs == 0) { return 0; }
+        if (secs == 15) { return 1; }
+        if (secs == 30) { return 2; }
+        if (secs == 60) { return 3; }
+        if (secs == 300) { return 4; }
+        return -1;
+    }
+    property <bool> rules-visible: root.power-rules-known && root.s.perf-writable;
+    property <bool> profile-memory-visible: root.profile-limits-known
+        && (root.s.power-limits-writable || root.cpu-epp-writable || root.cpu-boost-writable || root.cpu-co-writable);
+    property <bool> system-visible: root.boot-sound-state-ready || root.igpu-memory-state-ready || root.aspm-state-ready
+        || root.auto-clamshell-state != ClamshellState.Unavailable;
+    function clamshell-hint() -> string {
+        if (root.auto-clamshell-state == ClamshellState.Active && root.lid-other-handler != "") {
+            return root.lid-other-handler + " тоже обрабатывает крышку: задайте ему «Ничего не делать»";
+        }
+        if (root.auto-clamshell-state == ClamshellState.Loading) { return "Проверка…"; }
+        if (root.auto-clamshell-state == ClamshellState.PermissionDenied) { return "Компонент сессии отклонил доступ"; }
+        if (root.auto-clamshell-state == ClamshellState.StartFailed) { return "Не удалось включить"; }
+        if (root.auto-clamshell-state == ClamshellState.ExitFailed) { return "Не удалось выключить"; }
+        if (root.auto-clamshell-state == ClamshellState.Unknown) { return "Состояние не определено"; }
+        return "";
+    }
+
+    property <bool> edit-secondary: false;
+    property <int> edit-r: root.edit-secondary ? root.aura-secondary-red : root.rgb-red;
+    property <int> edit-g: root.edit-secondary ? root.aura-secondary-green : root.rgb-green;
+    property <int> edit-b: root.edit-secondary ? root.aura-secondary-blue : root.rgb-blue;
+    property <bool> keyboard-visible: root.keyboard-state-ready || root.aura-state-ready;
+    property <[int]> effect-ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12];
+    property <[string]> effect-names: ["Статичный", "Дыхание", "Радуга", "Волна", "Звёзды", "Дождь", "Подсветка", "Лазер", "Рябь", "Пульс", "Комета", "Вспышка"];
+    function aura-speed() -> int { return root.keyboard-speed < 0 ? 1 : root.keyboard-speed; }
+    function request-effect(mode: int, speed: int) {
+        root.aura-effect-requested(mode, speed, root.rgb-red, root.rgb-green, root.rgb-blue,
+            root.aura-secondary-red, root.aura-secondary-green, root.aura-secondary-blue);
+    }
+    // Color edits keep a color-using effect; anything else falls back to Static.
+    function set-color(secondary: bool, r: int, g: int, b: int) {
+        if (secondary) {
+            root.aura-secondary-red = r;
+            root.aura-secondary-green = g;
+            root.aura-secondary-blue = b;
+            root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, root.aura-speed());
+        } else {
+            root.rgb-red = r;
+            root.rgb-green = g;
+            root.rgb-blue = b;
+            root.request-effect(root.keyboard-effect == 1 ? 1 : 0, root.aura-speed());
+        }
+    }
+
+    HorizontalLayout {
+        // ===================== main column =====================
+        main-column := VerticalLayout {
+            width: root.main-width;
+            alignment: start;
+
+            Section {
+                first: true;
+                SectionHeader { title: "Режим"; info: root.telemetry(); }
+                HorizontalLayout {
+                    spacing: 4px;
+                    for p[i] in [{ label: "Тихий", bit: 1 }, { label: "Баланс", bit: 2 }, { label: "Турбо", bit: 4 }] : Seg {
+                        label: p.label;
+                        selected: root.s.perf-state == PerformanceHwState.Ready && root.s.perf-selected == i;
+                        disabled: root.s.perf-state != PerformanceHwState.Ready || !root.s.perf-writable || !Bits.set(root.s.available-perf-mask, p.bit);
+                        clicked => { root.perf-clicked(i); }
+                    }
+                    Seg {
+                        label: "Вентиляторы";
+                        pending: root.panel == Panel.Fans;
+                        clicked => { root.open(Panel.Fans); }
+                    }
+                }
+                if (root.perf-note() != "") : Note {
+                    text: root.perf-note();
+                    kind: root.s.performance-delegated-error != "" ? 2 : 1;
+                }
+            }
+
+            if (root.s.gpu-mode-state != GpuModeHwState.Unavailable && root.s.available-gpu-mask != 0) : Section {
+                SectionHeader { title: "Графика"; info: root.gpu-info(); }
+                HorizontalLayout {
+                    spacing: 4px;
+                    if (Bits.set(root.s.available-gpu-mask, 1)) : Seg {
+                        label: "Eco";
+                        selected: root.s.gpu-mode-state == GpuModeHwState.Ready && root.s.gpu-selected == 0 && !root.gpu-optimized;
+                        pending: root.s.gpu-queued == 0;
+                        disabled: root.gpu-locked;
+                        clicked => {
+                            if (root.gpu-optimized) { root.gpu-optimized-requested(false); }
+                            root.gpu-clicked(0);
+                        }
+                    }
+                    if (Bits.set(root.s.available-gpu-mask, 2)) : Seg {
+                        label: "Standard";
+                        selected: root.s.gpu-mode-state == GpuModeHwState.Ready && root.s.gpu-selected == 1 && !root.gpu-optimized;
+                        pending: root.s.gpu-queued == 1;
+                        disabled: root.gpu-locked;
+                        clicked => {
+                            if (root.gpu-optimized) { root.gpu-optimized-requested(false); }
+                            root.gpu-clicked(1);
+                        }
+                    }
+                    if (Bits.set(root.s.available-gpu-mask, 4)) : Seg {
+                        label: "Ultimate";
+                        selected: root.s.gpu-mode-state == GpuModeHwState.Ready && root.s.gpu-selected == 2 && !root.gpu-optimized;
+                        pending: root.s.gpu-queued == 2 || root.s.gpu-ultimate-pending;
+                        disabled: root.gpu-locked || root.s.gpu-ultimate-disabled;
+                        clicked => {
+                            if (root.gpu-optimized) { root.gpu-optimized-requested(false); }
+                            root.gpu-clicked(2);
+                        }
+                    }
+                    if (Bits.set(root.s.available-gpu-mask, 8)) : Seg {
+                        label: "Optimized";
+                        selected: root.s.gpu-mode-state == GpuModeHwState.Ready && root.gpu-optimized;
+                        disabled: root.gpu-locked;
+                        clicked => { root.gpu-optimized-requested(true); }
+                    }
+                }
+                if (root.gpu-note() != "") : Note {
+                    text: root.gpu-note();
+                    kind: root.s.gpu-section-error ? 2 : root.gpu-optimized && !root.s.gpu-reboot-required ? 0 : 1;
+                }
+            }
+
+            if (root.panel-refresh-known || root.panel-brightness-known || root.panel-overdrive-state-ready) : Section {
+                SectionHeader { title: "Экран"; info: root.display-resolution; }
+                if (root.panel-refresh-known || root.panel-overdrive-state-ready) : HorizontalLayout {
+                    spacing: 4px;
+                    if (root.panel-refresh-known) : HorizontalLayout {
+                        spacing: 4px;
+                        horizontal-stretch: root.panel-refresh-rates.length;
+                        for hz in root.panel-refresh-rates : Seg {
+                            label: hz + " Гц";
+                            selected: root.panel-refresh-current == hz;
+                            clicked => { root.panel-refresh-requested(hz); }
+                        }
+                    }
+                    if (root.panel-overdrive-state-ready) : Seg {
+                        label: "Overdrive";
+                        selected: root.panel-overdrive;
+                        disabled: !root.panel-overdrive-control-ready || root.applying;
+                        accessible-role: switch;
+                        clicked => { root.panel-overdrive-requested(!root.panel-overdrive); }
+                    }
+                }
+                if (root.panel-brightness-known) : Row {
+                    label: "Яркость";
+                    ValueSlider {
+                        horizontal-stretch: 1;
+                        label: "Яркость экрана";
+                        min: 1;
+                        max: 100;
+                        unit: "%";
+                        value: root.panel-brightness;
+                        changed(v) => { root.panel-brightness-requested(v); }
+                    }
+                }
+                if (root.panel-refresh-error != "") : Note { text: root.panel-refresh-error; kind: 2; }
+                if (root.panel-brightness-error != "") : Note { text: root.panel-brightness-error; kind: 2; }
+            }
+
+            if (root.keyboard-visible) : Section {
+                SectionHeader {
+                    title: "Клавиатура";
+                    info: root.keyboard-control-ready || root.aura-control-ready ? "" : "только чтение";
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    if (root.aura-state-ready) : Dropdown {
+                        horizontal-stretch: 1;
+                        label: "Эффект подсветки";
+                        options: root.effect-names;
+                        available: [root.aura-static-supported, root.aura-breathe-supported, root.aura-rainbow-supported,
+                            root.aura-rainbow-wave-supported, root.aura-star-supported, root.aura-rain-supported,
+                            root.aura-highlight-supported, root.aura-laser-supported, root.aura-ripple-supported,
+                            root.aura-pulse-supported, root.aura-comet-supported, root.aura-flash-supported];
+                        selected: root.keyboard-effect == 10 ? 9 : root.keyboard-effect == 11 ? 10 : root.keyboard-effect == 12 ? 11 : root.keyboard-effect;
+                        disabled: !root.aura-control-ready;
+                        changed(i) => { root.request-effect(root.effect-ids[i], root.aura-speed()); }
+                    }
+                    if (root.aura-state-ready) : swatch-holder := Rectangle {
+                        width: Metrics.control;
+                        Swatch {
+                            label: "Цвет подсветки";
+                            swatch: rgb(root.rgb-red, root.rgb-green, root.rgb-blue);
+                            disabled: !root.aura-control-ready;
+                            clicked => { color-popup.show(); }
+                        }
+                        color-popup := PopupWindow {
+                            x: Metrics.gutter - swatch-holder.absolute-position.x;
+                            y: Metrics.control + 4px;
+                            width: root.main-width - 2 * Metrics.gutter;
+                            close-policy: close-on-click-outside;
+                            Rectangle {
+                                border-radius: Metrics.radius;
+                                border-width: 1px;
+                                border-color: Palette.border;
+                                background: Palette.window;
+                                drop-shadow-blur: 10px;
+                                drop-shadow-color: #00000040;
+                            }
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 6px;
+                                Segmented {
+                                    options: ["Основной цвет", "Второй цвет"];
+                                    selected: root.edit-secondary ? 1 : 0;
+                                    changed(i) => { root.edit-secondary = i == 1; }
+                                }
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    for c in [
+                                        { r: 255, g: 45, b: 58 }, { r: 255, g: 122, b: 26 }, { r: 255, g: 210, b: 26 },
+                                        { r: 46, g: 224, b: 110 }, { r: 26, g: 224, b: 240 }, { r: 31, g: 94, b: 245 },
+                                        { r: 155, g: 61, b: 255 }, { r: 255, g: 61, b: 216 }, { r: 244, g: 247, b: 255 },
+                                    ] : Swatch {
+                                        swatch: rgb(c.r, c.g, c.b);
+                                        selected: root.edit-r == c.r && root.edit-g == c.g && root.edit-b == c.b;
+                                        clicked => { root.set-color(root.edit-secondary, c.r, c.g, c.b); }
+                                    }
+                                }
+                                Row { label: "Красный"; label-width: 70px; ValueSlider { horizontal-stretch: 1; label: "Красный"; max: 255; value: root.edit-r; changed(v) => { root.set-color(root.edit-secondary, v, root.edit-g, root.edit-b); } } }
+                                Row { label: "Зелёный"; label-width: 70px; ValueSlider { horizontal-stretch: 1; label: "Зелёный"; max: 255; value: root.edit-g; changed(v) => { root.set-color(root.edit-secondary, root.edit-r, v, root.edit-b); } } }
+                                Row { label: "Синий"; label-width: 70px; ValueSlider { horizontal-stretch: 1; label: "Синий"; max: 255; value: root.edit-b; changed(v) => { root.set-color(root.edit-secondary, root.edit-r, root.edit-g, v); } } }
+                            }
+                        }
+                    }
+                    if (root.keyboard-state-ready) : HorizontalLayout {
+                        spacing: 4px;
+                        width: 150px;
+                        for level[i] in ["0", "1", "2", "3"] : Seg {
+                            label: level;
+                            accessible-label: i == 0 ? "Подсветка выключена" : "Яркость подсветки " + i;
+                            selected: root.keyboard-brightness == i;
+                            disabled: !root.keyboard-control-ready;
+                            clicked => { root.keyboard-brightness-requested(i); }
+                        }
+                    }
+                }
+                if (root.keyboard-mutation-error != "") : Note { text: root.keyboard-mutation-error; kind: 2; }
+            }
+
+            if (root.s.charge-limit-state != ChargeLimitState.Unavailable || root.s.battery-percent != "—") : Section {
+                SectionHeader {
+                    title: "Батарея";
+                    info: root.battery-info();
+                    info-color: root.charging() ? Palette.positive : Palette.muted;
+                }
+                if (root.s.charge-limit-state == ChargeLimitState.Ready) : Row {
+                    label: "Лимит заряда";
+                    ValueSlider {
+                        horizontal-stretch: 1;
+                        label: "Лимит заряда";
+                        min: 20;
+                        max: 100;
+                        unit: "%";
+                        value: root.full-charge-restore >= 0 ? 100 : root.s.charge-limit;
+                        disabled: !root.s.charge-limit-writable || root.s.charge-limit-pending || root.s.charge-limit-unconfirmed
+                            || root.s.charge-limit-error != "" || root.full-charge-restore >= 0;
+                        changed(v) => { root.charge-changed(v); }
+                    }
+                }
+                if (root.s.charge-limit-state == ChargeLimitState.Ready && root.s.charge-limit-writable) : HorizontalLayout {
+                    spacing: 8px;
+                    Note {
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        text: root.full-charge-restore >= 0
+                            ? "Зарядка до 100 %, затем лимит вернётся к " + root.full-charge-restore + " %"
+                            : "";
+                        kind: 3;
+                    }
+                    Button {
+                        label: root.full-charge-restore >= 0 ? "Отменить" : "Зарядить до 100 %";
+                        disabled: root.s.charge-limit-pending || root.s.charge-limit-unconfirmed;
+                        clicked => { root.full-charge-requested(root.full-charge-restore < 0); }
+                    }
+                }
+                if (root.s.charge-limit-pending || root.s.charge-limit-unconfirmed || root.s.charge-limit-error != "") : Note {
+                    text: root.s.charge-limit-pending ? "Ожидание подтверждения"
+                        : root.s.charge-limit-unconfirmed ? "Результат неизвестен — обновите состояние перед новой записью"
+                        : root.s.charge-limit-error;
+                    kind: root.s.charge-limit-error != "" ? 2 : 1;
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+
+            Rectangle {
+                height: 1px;
+                background: Palette.border;
+            }
+            HorizontalLayout {
+                padding: 8px;
+                padding-left: Metrics.gutter;
+                padding-right: Metrics.gutter;
+                spacing: 6px;
+                Rectangle {
+                    width: 34px;
+                    Switch {
+                        y: (parent.height - self.height) / 2;
+                        label: "Автозапуск";
+                        checked: root.startup;
+                        disabled: !root.startup-enabled;
+                        toggled(v) => { root.startup-changed(v); }
+                    }
+                }
+                Text { text: "Автозапуск"; color: root.startup-enabled ? Palette.text : Palette.muted; vertical-alignment: center; overflow: elide; }
+                Rectangle { horizontal-stretch: 1; }
+                Seg {
+                    horizontal-stretch: 0;
+                    label: "Дополнительно";
+                    pending: root.panel == Panel.Extra;
+                    clicked => { root.open(Panel.Extra); }
+                }
+                Button { label: "Выход"; clicked => { root.quit-requested(); } }
+            }
+        }
+
+        if (root.panel != Panel.None) : Rectangle {
+            width: 1px;
+            background: Palette.border;
+        }
+
+        // ===================== Fans and power =====================
+        if (root.panel == Panel.Fans) : ScrollView {
+            width: root.panel-width;
+            VerticalLayout {
+                // Pinned to the visible width: content never scrolls sideways.
+                width: root.panel-width - 12px;
+                alignment: start;
+
+                Section {
+                    first: true;
+                    SectionHeader {
+                        title: "Вентиляторы";
+                        info: root.fan-status();
+                        info-color: root.s.fan-curve-error ? Palette.negative : root.fan-status-warn() ? Palette.neutral : Palette.muted;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Segmented {
+                            width: 110px;
+                            options: ["CPU", "GPU"];
+                            selected: root.s.fan-selected;
+                            changed(i) => { root.fan-reset-pending = false; root.fan-changed(i); }
+                        }
+                        Segmented {
+                            options: root.fan-eco-profile-available || root.s.fan-profile-selected == 3
+                                ? ["Баланс", "Турбо", "Тихий", "Эко"] : ["Баланс", "Турбо", "Тихий"];
+                            selected: root.s.fan-profile-selected;
+                            changed(i) => { root.fan-reset-pending = false; root.fan-profile-changed(i); }
+                        }
+                    }
+                    FanCurve {
+                        height: 180px;
+                        state: root.s.fan-curve-state;
+                        editable: root.s.fan-curve-writable && !root.mutation-safety-blocked && !root.s.fan-curve-pending
+                            && !root.s.fan-curve-unconfirmed && !root.s.fan-curve-error;
+                        temps: [root.s.fan-temp-0, root.s.fan-temp-1, root.s.fan-temp-2, root.s.fan-temp-3,
+                            root.s.fan-temp-4, root.s.fan-temp-5, root.s.fan-temp-6, root.s.fan-temp-7];
+                        pwms: [root.s.fan-pwm-0, root.s.fan-pwm-1, root.s.fan-pwm-2, root.s.fan-pwm-3,
+                            root.s.fan-pwm-4, root.s.fan-pwm-5, root.s.fan-pwm-6, root.s.fan-pwm-7];
+                        temp-changed(i, v) => { root.fan-reset-pending = false; root.fan-temp-point-changed(i, v); }
+                        pwm-changed(i, v) => { root.fan-reset-pending = false; root.fan-pwm-point-changed(i, v); }
+                    }
+                    if (root.s.fan-curve-invalid-draft != "") : Note { text: root.s.fan-curve-invalid-draft; kind: 2; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: end;
+                        Button {
+                            label: "Заводская";
+                            disabled: root.fan-locked() || !root.factory-reset-available;
+                            clicked => { root.fan-reset-pending = true; }
+                        }
+                        Button {
+                            label: "Применить";
+                            primary: root.fan-reset-pending || root.s.fan-curve-dirty;
+                            disabled: root.fan-locked() || (!root.fan-reset-pending && !root.s.fan-curve-dirty);
+                            clicked => {
+                                let reset = root.fan-reset-pending;
+                                root.fan-apply-clicked(reset);
+                                root.fan-reset-pending = false;
+                            }
+                        }
+                    }
+                }
+
+                if (root.s.power-limits-ready) : Section {
+                    SectionHeader {
+                        title: "Лимиты мощности";
+                        info: root.s.power-limits-writable ? "" : "только чтение";
+                    }
+                    if (root.s.spl-unit != "") : LimitRow {
+                        label: "SPL"; field: 0; bit: 1; s: root.s;
+                        value: root.s.spl-value; draft: root.s.spl-draft; min: root.s.spl-min; max: root.s.spl-max; step: root.s.spl-step; unit: root.s.spl-unit;
+                        changed(f, v) => { root.power-limit-changed(f, v); }
+                    }
+                    if (root.s.sppt-unit != "") : LimitRow {
+                        label: "SPPT"; field: 1; bit: 2; s: root.s;
+                        value: root.s.sppt-value; draft: root.s.sppt-draft; min: root.s.sppt-min; max: root.s.sppt-max; step: root.s.sppt-step; unit: root.s.sppt-unit;
+                        changed(f, v) => { root.power-limit-changed(f, v); }
+                    }
+                    if (root.s.fppt-unit != "") : LimitRow {
+                        label: "FPPT"; field: 2; bit: 4; s: root.s;
+                        value: root.s.fppt-value; draft: root.s.fppt-draft; min: root.s.fppt-min; max: root.s.fppt-max; step: root.s.fppt-step; unit: root.s.fppt-unit;
+                        changed(f, v) => { root.power-limit-changed(f, v); }
+                    }
+                    if (root.s.cpu-temp-limit-unit != "") : LimitRow {
+                        label: "Темп. CPU"; field: 3; bit: 8; s: root.s;
+                        value: root.s.cpu-temp-limit-value; draft: root.s.cpu-temp-limit-draft; min: root.s.cpu-temp-limit-min; max: root.s.cpu-temp-limit-max; step: root.s.cpu-temp-limit-step; unit: root.s.cpu-temp-limit-unit;
+                        changed(f, v) => { root.power-limit-changed(f, v); }
+                    }
+                    if (root.s.gpu-dynamic-boost-unit != "") : LimitRow {
+                        label: "Dynamic Boost"; field: 4; bit: 16; s: root.s;
+                        value: root.s.gpu-dynamic-boost-value; draft: root.s.gpu-dynamic-boost-draft; min: root.s.gpu-dynamic-boost-min; max: root.s.gpu-dynamic-boost-max; step: root.s.gpu-dynamic-boost-step; unit: root.s.gpu-dynamic-boost-unit;
+                        changed(f, v) => { root.power-limit-changed(f, v); }
+                    }
+                    if (root.s.gpu-temp-target-unit != "") : LimitRow {
+                        label: "Темп. GPU"; field: 5; bit: 32; s: root.s;
+                        value: root.s.gpu-temp-target-value; draft: root.s.gpu-temp-target-draft; min: root.s.gpu-temp-target-min; max: root.s.gpu-temp-target-max; step: root.s.gpu-temp-target-step; unit: root.s.gpu-temp-target-unit;
+                        changed(f, v) => { root.power-limit-changed(f, v); }
+                    }
+                    if (root.s.power-limit-error) : Note { text: "Лимиты не применены: доступ запрещён или запись отклонена"; kind: 2; }
+                    if (root.s.power-limit-verification-mask != 0) : Note { text: "Проверка записанных значений…"; kind: 1; }
+                    if (root.s.power-limits-writable) : HorizontalLayout {
+                        spacing: 6px;
+                        alignment: end;
+                        Button {
+                            label: "Применить";
+                            primary: root.s.power-limit-dirty-mask != 0;
+                            disabled: root.s.power-limit-dirty-mask == 0 || root.s.power-limit-pending-mask != 0;
+                            clicked => { root.power-limit-apply-clicked(); }
+                        }
+                    }
+                }
+
+                if (root.cpu-tuning-ready) : Section {
+                    SectionHeader {
+                        title: "Процессор";
+                        info: root.cpu-epp-writable || root.cpu-boost-writable || root.cpu-co-writable ? "" : "только чтение";
+                    }
+                    if (root.cpu-epp-supported) : Row {
+                        label: "EPP";
+                        label-width: 96px;
+                        Segmented {
+                            options: ["Скорость", "Баланс+", "Баланс−", "Эконом"];
+                            selected: root.cpu-epp >= 1 && root.cpu-epp <= 4 ? root.cpu-epp - 1 : -1;
+                            disabled: !root.cpu-epp-writable;
+                            changed(i) => { root.cpu-epp-requested(i + 1); }
+                        }
+                    }
+                    if (root.cpu-boost-known) : ToggleRow {
+                        label: "Турбо-буст";
+                        checked: root.cpu-boost;
+                        disabled: !root.cpu-boost-writable;
+                        toggled(v) => { root.cpu-boost-requested(v); }
+                    }
+                    if (root.cpu-co-supported) : Row {
+                        label: "Curve Optimizer";
+                        label-width: 96px;
+                        ValueSlider {
+                            horizontal-stretch: 1;
+                            label: "Curve Optimizer";
+                            min: -30;
+                            max: 0;
+                            value: root.co-draft;
+                            modified: root.co-draft != (root.cpu-co-applied-known ? root.cpu-co-applied : 0);
+                            disabled: !root.cpu-co-writable;
+                            changed(v) => { root.co-draft = Math.round(v); root.co-confirming = false; }
+                        }
+                    }
+                    if (root.co-confirming) : Note { text: "Ниже −15 часто нестабильно: при сбое система перезагрузится. Нажмите ещё раз."; kind: 1; }
+                    if (root.cpu-co-supported) : HorizontalLayout {
+                        spacing: 6px;
+                        alignment: end;
+                        Note {
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            text: root.cpu-co-applied-known ? "Применено: " + root.cpu-co-applied : "Не применялось";
+                        }
+                        Button {
+                            label: "Сбросить";
+                            disabled: !root.cpu-co-writable || !root.cpu-co-applied-known || root.cpu-co-applied == 0;
+                            clicked => { root.co-confirming = false; root.co-draft = 0; root.cpu-co-requested(0); }
+                        }
+                        Button {
+                            label: root.co-confirming ? "Подтвердить" : "Применить";
+                            primary: true;
+                            disabled: !root.cpu-co-writable || (root.cpu-co-applied-known && root.cpu-co-applied == root.co-draft)
+                                || (!root.cpu-co-applied-known && root.co-draft == 0);
+                            clicked => {
+                                if (root.co-draft < -15 && !root.co-confirming) {
+                                    root.co-confirming = true;
+                                } else {
+                                    root.co-confirming = false;
+                                    root.cpu-co-requested(root.co-draft);
+                                }
+                            }
+                        }
+                    }
+                    if (root.cpu-tuning-error != "") : Note { text: root.cpu-tuning-error; kind: 2; }
+                }
+
+                if (root.nvidia-visible) : Section {
+                    SectionHeader {
+                        title: "NVIDIA";
+                        info: root.nvidia-rows.length == 0 ? "недоступно" : root.nvidia-writable ? "применяется при отпускании" : "только чтение";
+                    }
+                    if (root.nvidia-status != "") : Note { text: root.nvidia-status; }
+                    for row in root.nvidia-rows : Row {
+                        label: row.label;
+                        label-width: 96px;
+                        ValueSlider {
+                            horizontal-stretch: 1;
+                            label: row.label;
+                            min: row.min;
+                            max: row.max;
+                            value: row.current;
+                            unit: row.unit;
+                            disabled: !root.nvidia-writable;
+                            changed(v) => { root.nvidia-tuning-requested(row.field, Math.round(v)); }
+                        }
+                    }
+                    if (root.nvidia-error != "") : Note { text: root.nvidia-error; kind: 2; }
+                }
+            }
+        }
+
+        // ===================== Extra =====================
+        if (root.panel == Panel.Extra) : ScrollView {
+            width: root.panel-width;
+            VerticalLayout {
+                // Pinned to the visible width: content never scrolls sideways.
+                width: root.panel-width - 12px;
+                alignment: start;
+
+                if (root.keyboard-visible || root.aura-power-ready) : Section {
+                    first: true;
+                    SectionHeader { title: "Подсветка клавиатуры"; }
+                    if (root.aura-state-ready) : Row {
+                        label: "Скорость";
+                        Segmented {
+                            options: ["Медленно", "Обычно", "Быстро"];
+                            selected: root.keyboard-speed;
+                            disabled: !root.aura-control-ready;
+                            changed(i) => { root.request-effect(root.keyboard-effect < 0 ? 0 : root.keyboard-effect, i); }
+                        }
+                    }
+                    if (root.keyboard-state-ready) : Row {
+                        label: "Гаснет от сети";
+                        Dropdown {
+                            horizontal-stretch: 1;
+                            label: "Гаснет от сети";
+                            options: root.timeout-names;
+                            selected: root.timeout-index(root.keyboard-timeout-ac);
+                            changed(i) => { root.keyboard-timeout-requested(true, root.timeout-secs[i]); }
+                        }
+                    }
+                    if (root.keyboard-state-ready) : Row {
+                        label: "от батареи";
+                        Dropdown {
+                            horizontal-stretch: 1;
+                            label: "Гаснет от батареи";
+                            options: root.timeout-names;
+                            selected: root.timeout-index(root.keyboard-timeout-battery);
+                            changed(i) => { root.keyboard-timeout-requested(false, root.timeout-secs[i]); }
+                        }
+                    }
+                    if (root.keyboard-timeout-problem && root.keyboard-timeout-status != "") : Note { text: root.keyboard-timeout-status; kind: 1; }
+                    if (root.aura-power-ready) : VerticalLayout {
+                        spacing: 0px;
+                        Note { text: "Светится:"; }
+                        ToggleRow { label: "При загрузке"; checked: root.aura-power-boot; disabled: !root.aura-control-ready; toggled(v) => { root.aura-power-requested(0, v); } }
+                        ToggleRow { label: "Во время работы"; checked: root.aura-power-awake; disabled: !root.aura-control-ready; toggled(v) => { root.aura-power-requested(1, v); } }
+                        ToggleRow { label: "Во сне"; checked: root.aura-power-sleep; disabled: !root.aura-control-ready; toggled(v) => { root.aura-power-requested(2, v); } }
+                        ToggleRow { label: "При выключении"; checked: root.aura-power-shutdown; disabled: !root.aura-control-ready; toggled(v) => { root.aura-power-requested(3, v); } }
+                    }
+                }
+
+                if (root.rules-visible || root.profile-memory-visible) : Section {
+                    first: !(root.keyboard-visible || root.aura-power-ready);
+                    SectionHeader { title: "Автоматика"; }
+                    if (root.profile-memory-visible) : ToggleRow {
+                        label: "Запоминать лимиты и настройки CPU для каждого профиля";
+                        hint: root.profile-limits-summary;
+                        checked: root.profile-limits-auto-apply;
+                        toggled(v) => { root.profile-limits-auto-apply-toggled(v); }
+                    }
+                    if (root.rules-visible) : ToggleRow {
+                        label: "Профиль и частота экрана по источнику питания";
+                        checked: root.power-rules-enabled;
+                        toggled(v) => { root.power-rules-enabled-toggled(v); }
+                    }
+                    if (root.rules-visible && root.power-rules-enabled) : VerticalLayout {
+                        spacing: 4px;
+                        for src[k] in [{ label: "От сети", ac: true }, { label: "От батареи", ac: false }] : Row {
+                            label: src.label;
+                            Dropdown {
+                                horizontal-stretch: 1;
+                                label: src.label + ": профиль";
+                                options: ["Профиль: не менять", "Тихий", "Баланс", "Турбо"];
+                                selected: src.ac ? root.power-rules-ac : root.power-rules-battery;
+                                changed(i) => { root.power-rules-profile-requested(src.ac, i); }
+                            }
+                            if (root.panel-refresh-known) : HorizontalLayout {
+                                spacing: 4px;
+                                Seg {
+                                    label: "—";
+                                    accessible-label: src.label + ": частота не меняется";
+                                    selected: (src.ac ? root.power-rules-ac-hz : root.power-rules-battery-hz) == 0;
+                                    clicked => { root.power-rules-refresh-requested(src.ac, 0); }
+                                }
+                                for hz in root.panel-refresh-rates : Seg {
+                                    label: hz;
+                                    accessible-label: src.label + ": " + hz + " Гц";
+                                    selected: (src.ac ? root.power-rules-ac-hz : root.power-rules-battery-hz) == hz;
+                                    clicked => { root.power-rules-refresh-requested(src.ac, hz); }
+                                }
+                            }
+                        }
+                    }
+                    if (root.power-rules-error != "") : Note { text: root.power-rules-error; kind: 2; }
+                }
+
+                if (root.system-visible) : Section {
+                    SectionHeader { title: "Система"; info: root.applying ? "применение…" : root.backend-ready ? "" : "чтение…"; }
+                    if (root.status != "") : Note { text: root.status; }
+                    if (root.boot-sound-state-ready) : ToggleRow {
+                        label: "Звук при включении";
+                        checked: root.boot-sound;
+                        disabled: !root.boot-sound-control-ready || root.applying;
+                        toggled(v) => { root.boot-sound-requested(v); }
+                    }
+                    if (root.aspm-state-ready) : ToggleRow {
+                        label: "Без энергосбережения PCIe (до перезагрузки)";
+                        checked: root.disable-aspm;
+                        disabled: !root.aspm-control-ready || root.applying;
+                        toggled(v) => { root.aspm-requested(v); }
+                    }
+                    if (root.igpu-memory-state-ready) : Row {
+                        label: "Память iGPU";
+                        Dropdown {
+                            horizontal-stretch: 1;
+                            label: "Память iGPU";
+                            options: ["Авто", "512 МБ", "1 ГБ", "2 ГБ", "4 ГБ", "8 ГБ", "16 ГБ", "32 ГБ", "64 ГБ"];
+                            selected: root.igpu-memory;
+                            disabled: !root.igpu-memory-control-ready || root.applying;
+                            changed(i) => { root.igpu-memory-requested(i); }
+                        }
+                    }
+                    if (root.igpu-memory-pending) : Note { text: "Память iGPU изменится после перезагрузки"; kind: 1; }
+                    if (root.auto-clamshell-state != ClamshellState.Unavailable) : ToggleRow {
+                        label: "Не засыпать при закрытой крышке";
+                        hint: root.clamshell-hint();
+                        checked: root.auto-clamshell-state == ClamshellState.Active;
+                        disabled: (root.auto-clamshell-state != ClamshellState.Inactive && root.auto-clamshell-state != ClamshellState.Active) || root.applying;
+                        toggled(v) => { root.auto-clamshell-requested(v); }
+                    }
+                    if (root.boot-sound-state-ready || root.igpu-memory-state-ready || root.aspm-state-ready) : HorizontalLayout {
+                        spacing: 6px;
+                        alignment: end;
+                        Button { label: "Обновить"; disabled: root.applying; clicked => { root.reload-requested(); } }
+                        Button {
+                            label: root.applying ? "Применение…" : "Применить";
+                            primary: root.advanced-apply-ready;
+                            disabled: !root.advanced-apply-ready || root.applying;
+                            clicked => { root.apply-requested(); }
+                        }
+                    }
+                }
+
+                Section {
+                    first: !(root.keyboard-visible || root.aura-power-ready || root.rules-visible || root.profile-memory-visible || root.system-visible);
+                    SectionHeader { title: "Приложение"; }
+                    if (root.startup-status != "") : Note { text: root.startup-status; kind: 1; }
+                    Row {
+                        label: "Тема";
+                        Segmented {
+                            options: ["Светлая", "Тёмная"];
+                            selected: ThemeState.mode == ThemeMode.Light ? 0 : 1;
+                            changed(i) => {
+                                ThemeState.mode = i == 0 ? ThemeMode.Light : ThemeMode.Dark;
+                                root.theme-changed(i == 0);
+                            }
+                        }
+                    }
+                    Row {
+                        label: "Закрытие окна";
+                        Segmented {
+                            options: ["Выход", "В трей"];
+                            selected: root.close-action;
+                            disabled: !root.close-action-enabled;
+                            changed(i) => {
+                                if (i == 0 || root.hide-to-tray-enabled) { root.close-action-changed(i); }
+                            }
+                        }
+                    }
+                    ToggleRow {
+                        label: "Запускать свёрнутым в трей";
+                        checked: root.start-minimized;
+                        disabled: !root.start-minimized-enabled;
+                        toggled(v) => { root.start-minimized-changed(v); }
+                    }
+                    // Window position is an X11-only capability (Wayland has none).
+                    if (root.remember-position-enabled || root.remember-position) : ToggleRow {
+                        label: "Помнить положение окна";
+                        checked: root.remember-position;
+                        disabled: !root.remember-position-enabled;
+                        toggled(v) => { root.remember-position-changed(v); }
+                    }
+                    ToggleRow {
+                        label: "Уведомления о смене режима";
+                        checked: root.mode-notifications;
+                        toggled(v) => { root.mode-notifications-changed(v); }
+                    }
+                    Note { text: "Ctrl+Shift+F5 — следующий профиль · Ctrl+Shift+F12 — показать/скрыть окно · Fn+F5 — профиль клавишей ноутбука"; }
+                    if (root.settings-local-status != "") : Note { text: root.settings-local-status; kind: 1; }
+                }
+
+                Section {
+                    SectionHeader { title: "Устройство"; }
+                    KeyValue { key: "Модель"; value: root.device-name; }
+                    KeyValue { key: "BIOS"; value: root.bios-version + (root.bios-date != "" ? " · " + root.bios-date : ""); }
+                    KeyValue { key: "Процессор"; value: root.cpu-model; }
+                    KeyValue { key: "Графика"; value: root.gpu-model; }
+                    KeyValue { key: "Память"; value: root.memory-total; }
+                    if (root.s.battery-health != "—") : KeyValue {
+                        key: "Батарея";
+                        value: "ёмкость " + root.s.battery-health + (root.s.battery-cycles != "—" ? " · циклов " + root.s.battery-cycles : "");
+                    }
+                    KeyValue { key: "Ядро"; value: root.kernel-release; }
+                    KeyValue { key: "Orbis"; value: root.s.version; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button {
+                            label: root.update-busy ? "Проверяю…" : "Проверить обновления";
+                            disabled: root.update-busy;
+                            clicked => { root.update-check-requested(); }
+                        }
+                        Note {
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            text: root.update-status;
+                            kind: root.update-problem ? 2 : 0;
+                        }
+                    }
+                }
+
+                Section {
+                    SectionHeader { title: "Диагностика"; }
+                    Note { text: root.diagnostics-status; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Button {
+                            label: root.refresh-pending ? "Обновление…" : "Снять снимок";
+                            disabled: !root.refresh-enabled || root.refresh-pending;
+                            clicked => { root.diagnostics-refresh-requested(); }
+                        }
+                        Button {
+                            label: "Копировать";
+                            disabled: root.diagnostics-summary == "";
+                            clicked => { summary.select-all(); summary.copy(); }
+                        }
+                        Button {
+                            label: "Экспорт…";
+                            disabled: !root.export-enabled;
+                            clicked => { root.diagnostics-export-requested(); }
+                        }
+                    }
+                    summary := TextEdit {
+                        visible: root.diagnostics-summary != "";
+                        height: self.visible ? 140px : 0px;
+                        read-only: true;
+                        font-size: 11px;
+                        text: root.diagnostics-summary;
+                    }
+                }
+            }
+        }
+    }
+}

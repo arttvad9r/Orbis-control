@@ -1,0 +1,42 @@
+// Clay palette (the KDE ClayLight / ClayDark color schemes), light and dark.
+import { Palette as WidgetPalette } from "std-widgets.slint";
+
+export enum ThemeMode { Dark, Light }
+
+export global ThemeState {
+    in-out property <ThemeMode> mode: ThemeMode.Dark;
+}
+
+export global Palette {
+    property <bool> light: ThemeState.mode == ThemeMode.Light;
+    // Window background (Clay Window).
+    out property <color> window: root.light ? #F0EEE6 : #262624;
+    // Controls: buttons, segments, inputs (Clay Button).
+    out property <color> control: root.light ? #FAF9F5 : #30302E;
+    out property <color> control-hover: root.light ? #FFFFFF : #3D3D3A;
+    // Recessed areas: chart plot, text boxes (Clay View).
+    out property <color> view: root.light ? #FAF9F5 : #1F1E1D;
+    out property <color> border: root.light ? #D6D2C4 : #3D3D3A;
+    out property <color> text: root.light ? #141413 : #F0EEE6;
+    out property <color> muted: root.light ? #5E5D59 : #B0AEA5;
+    out property <color> disabled: root.light ? #A8A69E : #6B6A65;
+    out property <color> accent: #D97757;
+    out property <color> accent-hover: root.light ? #C6613F : #E38D70;
+    out property <color> on-accent: #FFFFFF;
+    out property <color> selection: root.light ? #E3DACC : #4A3F3A;
+    out property <color> negative: root.light ? #B5473A : #E0826F;
+    out property <color> positive: root.light ? #5E7045 : #A3B585;
+    out property <color> neutral: root.light ? #A06A2C : #D4A27F;
+}
+
+// Keeps std widgets (ScrollView, TextEdit) in the same light/dark scheme.
+export component ThemeBridge inherits Rectangle {
+    width: 0px;
+    height: 0px;
+    property <ThemeMode> observed: ThemeState.mode;
+    function sync() {
+        WidgetPalette.color-scheme = root.observed == ThemeMode.Light ? ColorScheme.light : ColorScheme.dark;
+    }
+    init => { root.sync(); }
+    changed observed => { root.sync(); }
+}

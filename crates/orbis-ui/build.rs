@@ -1,7 +1,4 @@
-//! Compile the audited Orbis Control Slint interface.
-//!
-//! The entrypoint re-exports the stable public types expected by Rust while
-//! selecting the screenshot-audited window implementations under `ui/audited`.
+//! Compile the Orbis Control Slint interface (`ui/app-entry.slint`).
 
 use std::path::PathBuf;
 

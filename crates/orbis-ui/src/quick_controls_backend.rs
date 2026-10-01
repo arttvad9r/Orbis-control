@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use hardware_controls_backend::{HardwareProductControlClient, ProductWriteStatus};
-use orbis_core::aura::AuraRgb;
 use orbis_core::display_output::DisplayOutputSnapshot;
 use orbis_core::keyboard_backlight::KeyboardBacklightState;
 use orbis_providers::error::ProviderError;
@@ -74,8 +73,8 @@ pub(crate) fn tray_ready() -> bool {
     secondary_windows_backend::tray_ready()
 }
 
-pub(crate) fn handle_close_request(app: &AppWindow) {
-    secondary_windows_backend::handle_close_request(app);
+pub(crate) fn quit(app: &AppWindow) {
+    secondary_windows_backend::quit(app);
 }
 
 /// Settings section remember-position/close-action request handlers.
@@ -164,50 +163,6 @@ pub(crate) fn wire_window(app: &AppWindow) {
                     refresh(&app, None);
                 }) {
                     tracing::warn!(error = ?error, "failed to publish keyboard mutation result");
-                }
-            });
-        });
-    }
-
-    {
-        let weak = app.as_weak();
-        let request_context = context.clone();
-        app.on_aura_static_rgb_requested(move |r, g, b| {
-            let Some(context) = request_context.clone() else {
-                return;
-            };
-            let Some(app) = weak.upgrade() else {
-                return;
-            };
-            if !app.get_aura_control_ready() {
-                tracing::warn!("Aura request ignored: write evidence unavailable");
-                return;
-            }
-            let rgb = AuraRgb {
-                r: r as u8,
-                g: g as u8,
-                b: b as u8,
-            };
-            app.set_aura_control_ready(false);
-            let result_weak = app.as_weak();
-            context.runtime.spawn(async move {
-                let result = async {
-                    let client = HardwareProductControlClient::connect_system().await?;
-                    client.set_aura_static_rgb(rgb).await
-                }
-                .await;
-                if let Err(error) = result_weak.upgrade_in_event_loop(move |app| {
-                    app.set_status(match result {
-                        Ok(observed) => format!(
-                            "Aura Static RGB accepted · config read-back {:?}",
-                            observed.observed
-                        )
-                        .into(),
-                        Err(error) => format!("Aura write failed · {error}").into(),
-                    });
-                    force_refresh(&app);
-                }) {
-                    tracing::warn!(error = ?error, "failed to publish Aura mutation result");
                 }
             });
         });

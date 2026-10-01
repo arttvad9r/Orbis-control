@@ -6,8 +6,6 @@
 //! tray, window lifecycle/close-action, the Extra hardware section backend,
 //! and the fail-closed action dialog.
 
-#[path = "action_dialog_backend.rs"]
-mod action_dialog_backend;
 #[path = "extra_backend.rs"]
 mod extra_backend;
 #[path = "tray_backend.rs"]
@@ -32,16 +30,6 @@ pub(crate) fn tray_ready() -> bool {
 pub(crate) fn clear() {
     tray_backend::clear();
     extra_backend::clear();
-}
-
-fn show_preview_dialog(kind: i32) -> Result<(), slint::PlatformError> {
-    crate::show_preview_dialog(kind)?;
-    crate::PREVIEW_DIALOG_WINDOW.with(|slot| {
-        if let Some(window) = slot.borrow().as_ref() {
-            action_dialog_backend::wire(window, kind.clamp(0, 3));
-        }
-    });
-    Ok(())
 }
 
 pub(crate) fn publish_tray_stats(state: &crate::controller::UiState) {
@@ -70,18 +58,12 @@ pub(crate) fn wire_window(app: &AppWindow) {
     extra_backend::refresh(app);
 
     window_position_preferences_bridge::wire(app);
-
-    app.on_preview_dialog_clicked(|kind| {
-        if let Err(error) = show_preview_dialog(kind) {
-            tracing::warn!(error = ?error, "failed to open fail-closed action dialog");
-        }
-    });
 }
 
 /// Close-request disposition shared by the native close path and the frameless
 /// title bar button (spec §3): persist position, then honor CloseAction.
-pub(crate) fn handle_close_request(app: &AppWindow) {
-    window_lifecycle_backend::handle_close_request(app);
+pub(crate) fn quit(app: &AppWindow) {
+    window_lifecycle_backend::quit(app);
 }
 
 /// Settings section remember-position/close-action request handlers.

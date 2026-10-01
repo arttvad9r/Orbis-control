@@ -44,19 +44,12 @@ pub(crate) fn wire(app: &AppWindow) {
                     if preferences.window.remember_position {
                         let _ = super::window_lifecycle_backend::persist_position(&app);
                     }
-                    app.set_settings_local_status(
-                        if preferences.window.remember_position {
-                            "Window position memory enabled · X11 lifecycle active"
-                        } else {
-                            "Window position memory disabled"
-                        }
-                        .into(),
-                    );
+                    app.set_settings_local_status("".into());
                 }
                 Err(error) => {
                     tracing::warn!(error = %error, "Remember Position preference save failed");
                     crate::apply_preferences_state(&app);
-                    app.set_settings_local_status("Could not save Remember Position".into());
+                    app.set_settings_local_status("Не удалось сохранить настройку".into());
                 }
             }
             sync_close_capabilities(&app);
@@ -90,9 +83,7 @@ pub(crate) fn wire(app: &AppWindow) {
                     tracing::warn!("HideToTray request ignored: tray host unavailable");
                     crate::apply_preferences_state(&app);
                     sync_close_capabilities(&app);
-                    app.set_settings_local_status(
-                        "Hide to tray is unavailable on this desktop".into(),
-                    );
+                    app.set_settings_local_status("Трей недоступен на этом рабочем столе".into());
                     return;
                 }
                 other => {
@@ -113,20 +104,13 @@ pub(crate) fn wire(app: &AppWindow) {
                     // setting to a transient tray-host observation.
                     crate::apply_preferences_state(&app);
                     sync_close_capabilities(&app);
-                    app.set_settings_local_status(
-                        match preferences.window.close_action {
-                            CloseAction::HideToTray => "Close button will hide Orbis to the tray",
-                            CloseAction::Quit => "Close button will quit Orbis",
-                            CloseAction::Ask => "Close confirmation mode is not exposed here",
-                        }
-                        .into(),
-                    );
+                    app.set_settings_local_status("".into());
                 }
                 Err(error) => {
                     tracing::warn!(error = %error, "Close Action preference save failed");
                     crate::apply_preferences_state(&app);
                     sync_close_capabilities(&app);
-                    app.set_settings_local_status("Could not save Close Action".into());
+                    app.set_settings_local_status("Не удалось сохранить настройку".into());
                 }
             }
         });

@@ -2592,28 +2592,6 @@ fn theme_toggle_persists_only_theme_field() {
 }
 
 #[test]
-fn all_open_theme_targets_receive_same_runtime_theme() {
-    let targets = [
-        Cell::new(false),
-        Cell::new(false),
-        Cell::new(false),
-        Cell::new(false),
-        Cell::new(false),
-        Cell::new(false),
-        Cell::new(false),
-        Cell::new(false),
-    ];
-
-    for target in &targets {
-        apply_theme_if_open(Some(target), true, |target, mode| {
-            target.set(matches!(mode, ThemeMode::Light));
-        });
-    }
-
-    assert!(targets.iter().all(Cell::get));
-}
-
-#[test]
 fn new_window_theme_is_derived_from_current_runtime_theme() {
     set_current_theme_light(true);
     assert!(matches!(current_theme_mode(), ThemeMode::Light));

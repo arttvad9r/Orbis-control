@@ -53,17 +53,17 @@ pub(crate) fn map_autostart_status(status: AutostartStatus) -> AutostartUiState 
         AutostartStatus::Missing => AutostartUiState {
             enabled: false,
             writable: true,
-            status: "Disabled",
+            status: "",
         },
         AutostartStatus::Enabled => AutostartUiState {
             enabled: true,
             writable: true,
-            status: "Enabled",
+            status: "",
         },
         AutostartStatus::Invalid => AutostartUiState {
             enabled: false,
             writable: true,
-            status: "Entry differs · enable to repair",
+            status: "Запись автозапуска изменена — включите, чтобы исправить",
         },
     }
 }
@@ -117,11 +117,9 @@ pub(crate) fn map_window_preferences(load: PreferencesLoad) -> WindowPreferences
         // capability while preserving this storage-writability evidence.
         close_action_writable: !has_warning,
         status: if has_warning {
-            "Preferences source preserved · editing disabled"
-        } else if position_writable {
-            "Startup and X11 window-position lifecycle connected · tray capability detected separately"
+            "Файл настроек не прочитан — изменения отключены"
         } else {
-            "Startup connected · window position unavailable on this session · tray capability detected separately"
+            ""
         },
     }
 }
@@ -196,7 +194,7 @@ mod tests {
         let state = map_autostart_status(AutostartStatus::Invalid);
         assert!(!state.enabled);
         assert!(state.writable);
-        assert!(state.status.contains("repair"));
+        assert!(state.status.contains("исправить"));
     }
 
     #[test]

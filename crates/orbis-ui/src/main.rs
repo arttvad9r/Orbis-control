@@ -12,7 +12,6 @@ mod global_shortcuts;
 mod launch_context;
 mod preferences_backend;
 mod quick_controls_backend;
-mod telemetry_history;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
@@ -90,21 +89,20 @@ thread_local! {
     /// (`to_slint`), so nothing is decoded back from Slint.
     static UI_STATE: RefCell<controller::UiState> =
         RefCell::new(controller::UiState::production_initial());
-    static PREVIEW_DIALOG_WINDOW: RefCell<Option<PreviewDialogWindow>> = const { RefCell::new(None) };
     static THEME_LIGHT: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Разобранные аргументы командной строки.
 struct Args {
     ui_state: String,
-    ui_section: Option<String>,
+    ui_panel: Option<String>,
     screenshot: Option<String>,
     background: bool,
 }
 
 fn parse_args() -> Args {
     let mut ui_state = "default".to_string();
-    let mut ui_section = None;
+    let mut ui_panel = None;
     let mut screenshot = None;
     let mut background = false;
     let mut it = std::env::args().skip(1);
@@ -119,9 +117,9 @@ fn parse_args() -> Args {
             // Login autostart: stay in the tray (the window shows anyway when
             // no tray host appears, so the app is never invisible).
             "--background" => background = true,
-            "--ui-section" => {
+            "--ui-panel" => {
                 if let Some(v) = it.next() {
-                    ui_section = Some(v);
+                    ui_panel = Some(v);
                 }
             }
             other => eprintln!("orbis-control: игнорирую неизвестный аргумент '{other}'"),
@@ -129,7 +127,7 @@ fn parse_args() -> Args {
     }
     Args {
         ui_state,
-        ui_section,
+        ui_panel,
         screenshot,
         background,
     }
@@ -715,21 +713,9 @@ fn persist_theme(light: bool) -> Result<(), ThemePersistenceFailure> {
     persist_theme_with(light, load_preferences, save_preferences)
 }
 
-fn apply_theme_if_open<T>(window: Option<&T>, light: bool, apply: impl FnOnce(&T, ThemeMode)) {
-    if let Some(window) = window {
-        apply(window, theme_mode(light));
-    }
-}
-
 fn apply_theme_to_all(app: &AppWindow, light: bool) {
     set_current_theme_light(light);
     app.global::<ThemeState>().set_mode(theme_mode(light));
-    PREVIEW_DIALOG_WINDOW.with(|slot| {
-        let slot = slot.borrow();
-        apply_theme_if_open(slot.as_ref(), light, |window, mode| {
-            window.global::<ThemeState>().set_mode(mode);
-        });
-    });
 }
 
 fn apply_autostart_state_to_window(
@@ -764,7 +750,7 @@ fn apply_preferences_state(window: &AppWindow) {
             tracing::warn!(error = %error, "failed to read user autostart state");
             window.set_startup(false);
             window.set_startup_enabled(false);
-            window.set_startup_status("Autostart unavailable".into());
+            window.set_startup_status("Автозапуск недоступен".into());
         }
     }
 
@@ -778,29 +764,9 @@ fn apply_preferences_state(window: &AppWindow) {
             window.set_remember_position_enabled(false);
             window.set_close_action(0);
             window.set_close_action_enabled(false);
-            window.set_settings_local_status("Preferences backend unavailable".into());
+            window.set_settings_local_status("Настройки недоступны".into());
         }
     }
-}
-
-fn show_preview_dialog(kind: i32) -> Result<(), slint::PlatformError> {
-    PREVIEW_DIALOG_WINDOW.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_none() {
-            let window = PreviewDialogWindow::new()?;
-            let weak = window.as_weak();
-            window.on_dismiss_clicked(move || {
-                if let Some(window) = weak.upgrade() {
-                    let _ = window.hide();
-                }
-            });
-            *slot = Some(window);
-        }
-        let window = slot.as_ref().expect("PreviewDialogWindow initialized");
-        window.set_kind(kind.clamp(0, 3));
-        window.global::<ThemeState>().set_mode(current_theme_mode());
-        window.show()
-    })
 }
 
 /// Run one global-shortcut action on the UI thread.
@@ -1992,7 +1958,6 @@ fn handle_worker_event(
         app.set_factory_reset_available(available);
     }
     if refresh_quick_controls {
-        telemetry_history::record(app, &s);
         quick_controls_backend::publish_tray_stats(&s);
         quick_controls_backend::refresh_if_due(app, Duration::from_secs(10));
     }
@@ -2453,34 +2418,6 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
         });
     }
     {
-        let worker_tx = worker_tx.clone();
-        let app_weak = app.as_weak();
-        app.on_fan_selection_discarded(move |fan_index, profile_index| {
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
-            let Some(fan) = controller::UiState::fan_id_from_index(fan_index) else {
-                tracing::warn!("fan-selection-discarded: invalid fan index {fan_index}");
-                return;
-            };
-            let Some(profile) = controller::UiState::asusd_profile_from_index(profile_index) else {
-                tracing::warn!("fan-selection-discarded: invalid profile index {profile_index}");
-                return;
-            };
-            let mut s = current_ui_state();
-            controller::UiState::discard_fan_selection(&mut s, fan_index, profile_index);
-            publish_ui_state(&app, &s);
-            match &worker_tx {
-                Some(tx) => {
-                    if let Err(e) = tx.send(WorkerCommand::RefreshFanCurve { profile, fan }) {
-                        tracing::warn!("discarded fan draft refresh enqueue failed: {e:?}");
-                    }
-                }
-                None => tracing::warn!("fan-selection-discarded вне интерактивного режима"),
-            }
-        });
-    }
-    {
         let app_weak = app.as_weak();
         app.on_fan_temp_point_changed(move |index, value| {
             let Some(app) = app_weak.upgrade() else {
@@ -2633,68 +2570,28 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
         });
     }
 
-    // Frameless title bar (spec §3): drag via the winit accessor, minimize via
-    // the window handle, close via the shared close-action decision path.
+    // Side panel: the window is as wide as the main column plus the open panel.
     {
         let app_weak = app.as_weak();
-        app.on_titlebar_minimize_requested(move || {
+        app.on_panel_changed(move |_| {
             if let Some(app) = app_weak.upgrade() {
-                app.window().set_minimized(true);
+                fit_window_to_panel(&app);
             }
         });
     }
     {
         let app_weak = app.as_weak();
-        app.on_titlebar_maximize_requested(move || {
+        app.on_fit_requested(move || {
             if let Some(app) = app_weak.upgrade() {
-                let window = app.window();
-                let next = !window.is_maximized();
-                window.set_maximized(next);
-                app.set_maximized(next);
+                fit_window_to_panel(&app);
             }
         });
     }
     {
         let app_weak = app.as_weak();
-        app.on_titlebar_close_requested(move || {
+        app.on_quit_requested(move || {
             if let Some(app) = app_weak.upgrade() {
-                quick_controls_backend::handle_close_request(&app);
-            }
-        });
-    }
-    {
-        let app_weak = app.as_weak();
-        app.on_titlebar_drag_started(move || {
-            if let Some(app) = app_weak.upgrade() {
-                let _ = app.window().with_winit_window(|winit_window| {
-                    let _ = winit_window.drag_window();
-                });
-                // The compositor swallows the release that ends the move;
-                // without this the title bar keeps the pointer grab and the
-                // whole window stops answering clicks.
-                orbis_ui::window_chrome::end_system_move(&app);
-            }
-        });
-    }
-    {
-        let app_weak = app.as_weak();
-        app.on_resize_started(move |edge| {
-            use slint::winit_030::winit::window::ResizeDirection;
-            let direction = match edge {
-                0 => ResizeDirection::North,
-                1 => ResizeDirection::South,
-                2 => ResizeDirection::East,
-                3 => ResizeDirection::West,
-                4 => ResizeDirection::NorthEast,
-                5 => ResizeDirection::NorthWest,
-                6 => ResizeDirection::SouthEast,
-                _ => ResizeDirection::SouthWest,
-            };
-            if let Some(app) = app_weak.upgrade() {
-                let _ = app.window().with_winit_window(|winit_window| {
-                    let _ = winit_window.drag_resize_window(direction);
-                });
-                orbis_ui::window_chrome::end_system_move(&app);
+                quick_controls_backend::quit(&app);
             }
         });
     }
@@ -2844,23 +2741,16 @@ fn wire_settings_section(app: &AppWindow) {
                 return;
             };
             app.set_startup_enabled(false);
-            app.set_startup_status("Applying…".into());
+            app.set_startup_status("Применение…".into());
             match preferences_backend::set_autostart(enabled) {
                 Ok(state) => {
                     apply_autostart_state_to_window(&app, &state);
-                    app.set_settings_local_status(
-                        if state.enabled {
-                            "Autostart enabled"
-                        } else {
-                            "Autostart disabled"
-                        }
-                        .into(),
-                    );
+                    app.set_settings_local_status("".into());
                 }
                 Err(error) => {
                     tracing::warn!(error = %error, "autostart change failed");
                     apply_preferences_state(&app);
-                    app.set_settings_local_status("Autostart change failed".into());
+                    app.set_settings_local_status("Не удалось изменить автозапуск".into());
                 }
             }
         });
@@ -2877,7 +2767,7 @@ fn wire_settings_section(app: &AppWindow) {
                 Ok(preferences) => {
                     app.set_start_minimized(preferences.window.start_minimized);
                     app.set_start_minimized_enabled(true);
-                    app.set_settings_local_status("Saved · applies on next launch".into());
+                    app.set_settings_local_status("".into());
                 }
                 Err(error) => {
                     tracing::warn!(error = %error, "start-minimized preference save failed");
@@ -2968,9 +2858,10 @@ impl Platform for SoftwarePlatform {
 fn render_screenshot(
     state: &controller::UiState,
     path: &str,
-    ui_section: Option<&str>,
+    ui_panel: Option<&str>,
 ) -> anyhow::Result<()> {
-    let (width, height) = (1200u32, 800u32);
+    // Wide enough for the main column plus a side panel; resized below.
+    let (width, height) = (841u32, 640u32);
     let renderer = Rc::new(slint::platform::software_renderer::SoftwareRenderer::new());
     let adapter = Rc::new(SoftwareWindowAdapter {
         renderer: renderer.clone(),
@@ -2986,20 +2877,19 @@ fn render_screenshot(
     slint::platform::set_platform(Box::new(SoftwarePlatform { adapter })).expect("platform once");
 
     let app = build_app(state, None)?;
-    match ui_section {
-        Some("performance") => app.set_active_section(Section::Performance),
-        Some("power") => app.set_active_section(Section::Power),
-        Some("fans") | Some("cooling") => app.set_active_section(Section::Cooling),
-        Some("graphics") => app.set_active_section(Section::Graphics),
-        Some("backlight") => app.set_active_section(Section::Backlight),
-        Some("display") => app.set_active_section(Section::Display),
-        Some("extra") | Some("system") => app.set_active_section(Section::System),
-        Some("settings") => app.set_active_section(Section::Settings),
-        Some("about") => app.set_active_section(Section::About),
-        _ => app.set_active_section(Section::Dashboard),
-    }
+    app.set_panel(match ui_panel {
+        Some("fans") => Panel::Fans,
+        Some("extra") => Panel::Extra,
+        _ => Panel::None,
+    });
+    let width = app.get_main_width()
+        + if app.get_panel() == Panel::None {
+            0.0
+        } else {
+            app.get_panel_width() + 1.0
+        };
     app.window()
-        .set_size(LogicalSize::new(width as f32, height as f32));
+        .set_size(LogicalSize::new(width, height as f32));
     app.show()?;
 
     let size = app.window().size();
@@ -3042,7 +2932,7 @@ fn main() -> anyhow::Result<()> {
 
     let background = args.background;
     if let Some(path) = args.screenshot {
-        return render_screenshot(&state, &path, args.ui_section.as_deref());
+        return render_screenshot(&state, &path, args.ui_panel.as_deref());
     }
 
     init_tracing();
@@ -3098,7 +2988,7 @@ fn main() -> anyhow::Result<()> {
     let app = build_app(&state, Some(worker_tx.clone()))?;
     quick_controls_backend::force_refresh(&app);
     wire_settings_section(&app);
-    app.window().set_size(LogicalSize::new(1240.0, 820.0));
+    fit_window_to_panel(&app);
     apply_start_minimized(startup_preferences.start_minimized, |minimized| {
         app.window().set_minimized(minimized);
     });
@@ -3268,7 +3158,6 @@ fn main() -> anyhow::Result<()> {
     // `slint::quit_event_loop` explicitly.
     slint::run_event_loop_until_quit()?;
 
-    PREVIEW_DIALOG_WINDOW.with(|slot| *slot.borrow_mut() = None);
     diagnostics_backend::clear();
     quick_controls_backend::clear();
     drop(app);
@@ -3285,3 +3174,64 @@ mod main_tests;
 
 #[cfg(test)]
 mod ui_behavior_tests;
+
+/// Window size follows the content: main column plus the open side panel in
+/// width (the layout pins min = max width), the main column's natural height.
+/// With a panel open, a taller window the user chose is kept.
+fn fit_window_to_panel(app: &AppWindow) {
+    let (width, height) = fitted_size(app);
+    request_window_size(app, width, height);
+    // A configure from the compositor can race with the request (KWin answers
+    // activation with the old size); check once more after it settled.
+    let weak = app.as_weak();
+    slint::Timer::single_shot(Duration::from_millis(250), move || {
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        let (width, height) = fitted_size(&app);
+        let actual = app.window().with_winit_window(|window| {
+            window.inner_size().to_logical::<f32>(window.scale_factor())
+        });
+        if let Some(actual) = actual
+            && ((actual.width - width).abs() > 0.5 || actual.height + 0.5 < height)
+        {
+            request_window_size(&app, width, height);
+        }
+    });
+}
+
+fn fitted_size(app: &AppWindow) -> (f32, f32) {
+    let panel_open = app.get_panel() != Panel::None;
+    let width = app.get_main_width()
+        + if panel_open {
+            app.get_panel_width() + 1.0
+        } else {
+            0.0
+        };
+    let current = app
+        .window()
+        .size()
+        .to_logical(app.window().scale_factor())
+        .height;
+    let natural = app.get_main_height();
+    (
+        width,
+        if panel_open {
+            natural.max(current)
+        } else {
+            natural
+        },
+    )
+}
+
+fn request_window_size(app: &AppWindow, width: f32, height: f32) {
+    app.window().set_size(LogicalSize::new(width, height));
+    // Slint skips the request when it already tracks this size (e.g. after
+    // the compositor overrode it); ask the windowing system directly too.
+    let _ = app.window().with_winit_window(|window| {
+        let _ = window.request_inner_size(slint::winit_030::winit::dpi::LogicalSize::new(
+            f64::from(width),
+            f64::from(height),
+        ));
+    });
+}

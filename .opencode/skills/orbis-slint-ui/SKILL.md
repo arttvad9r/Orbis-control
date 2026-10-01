@@ -8,9 +8,9 @@ description: Current Slint UI paths and implementation rules for Orbis Control. 
 ## Current source layout
 
 - Slint entrypoint: `ui/app-entry.slint`.
-- Main shell and sections: `ui/audited/main-window.slint` and `ui/audited/sections/`.
-- Shared components: `ui/components/`.
-- Themes: `ui/themes/dark.slint` and `ui/themes/light.slint`.
+- Main window (main column + "Fans and power" / "Extra" side panels): `ui/main-window.slint`.
+- Widgets: `ui/widgets.slint`; fan curve: `ui/fan-curve.slint`.
+- Clay light/dark palette: `ui/theme.slint`; Rust-owned state projection: `ui/model.slint`.
 - Rust UI/runtime: `crates/orbis-ui/src/`.
 - Active worker runtime: `crates/orbis-ui/src/worker_runtime.rs`.
 

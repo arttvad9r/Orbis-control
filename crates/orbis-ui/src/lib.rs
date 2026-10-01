@@ -19,9 +19,7 @@ pub mod nvidia_tuning_runtime;
 pub mod power_rules_runtime;
 pub mod product_mutation_promotion;
 pub mod profile_limits_runtime;
-pub mod sparkline;
 pub mod system_summary;
 pub mod update_check;
-pub mod window_chrome;
 #[path = "worker_runtime.rs"]
 pub mod worker;

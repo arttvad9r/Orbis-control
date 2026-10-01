@@ -1,8 +1,7 @@
-//! Offscreen section snapshots for the single-window UI (ui-review companion).
+//! Offscreen snapshots of the main window (ui-review companion).
 //!
-//! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <section> [path] [theme] [width] [height] [state]`
-//! Sections: dashboard | performance | power | cooling | graphics | backlight
-//! | display | system | settings | about | dialog.
+//! Usage: `cargo run -p orbis-ui --example ui_snapshot -- <view> [path] [theme] [height] [state]`
+//! Views: main | fans | extra. States: normal | dirty | pending | error | unsupported | readonly.
 
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
@@ -215,14 +214,12 @@ fn demo_state(component: &AppWindow) {
     component.set_aura_static_supported(true);
     component.set_aura_star_supported(true);
 
-    demo_history(component);
     component.set_cpu_model("AMD Ryzen 7 7735HS".into());
     component.set_cpu_detail("16 потоков".into());
     component.set_gpu_model("GeForce RTX 4060".into());
     component.set_memory_total("16 ГБ".into());
     component.set_kernel_release("6.16.8-arch1-1".into());
     component.set_display_resolution("1920 × 1080".into());
-    component.set_battery_health_value(89);
     component.set_device_name("ASUS TUF Gaming A17 FA707NV".into());
     component.set_device_board("FA707NV".into());
     component.set_bios_version("FA707NV.318".into());
@@ -277,122 +274,49 @@ fn demo_state(component: &AppWindow) {
     component.set_diagnostics_status("Диагностика актуальна".into());
 }
 
-/// Deterministic telemetry history so sparklines and the temperature chart
-/// render as they do after a couple of minutes of real polling.
-fn demo_history(component: &AppWindow) {
-    use orbis_ui::sparkline::{CHART, Range, SPARK, line_chart_svg};
-    let wave = |base: f32, amp: f32, phase: f32, n: usize| -> Vec<i32> {
-        (0..n)
-            .map(|i| {
-                let t = i as f32 / 6.0 + phase;
-                (base + amp * (t.sin() * 0.7 + (t * 2.3).cos() * 0.3) + i as f32 * amp / 40.0)
-                    .round() as i32
-            })
-            .collect()
-    };
-    let image = |values: &[i32], range: Range, canvas| {
-        line_chart_svg(values, range, canvas)
-            .and_then(|svg| slint::Image::load_from_svg_data(svg.as_bytes()).ok())
-            .unwrap_or_default()
-    };
-    let cpu = wave(52.0, 4.0, 0.0, 60);
-    let gpu = wave(46.0, 3.0, 1.3, 60);
-    let auto = Range::Auto { min_span: 8.0 };
-    component.set_cpu_temp_spark(image(&cpu, auto, SPARK));
-    component.set_gpu_temp_spark(image(&gpu, auto, SPARK));
-    component.set_power_spark(image(
-        &wave(23.0, 3.0, 2.1, 60),
-        Range::Auto { min_span: 6.0 },
-        SPARK,
-    ));
-    component.set_battery_spark(image(
-        &(0..60).map(|i| 70 + i / 8).collect::<Vec<_>>(),
-        Range::Auto { min_span: 4.0 },
-        SPARK,
-    ));
-    component.set_cpu_fan_spark(image(
-        &wave(2300.0, 180.0, 0.4, 60),
-        Range::Auto { min_span: 600.0 },
-        SPARK,
-    ));
-    component.set_gpu_fan_spark(image(
-        &wave(2100.0, 160.0, 2.4, 60),
-        Range::Auto { min_span: 600.0 },
-        SPARK,
-    ));
-    component.set_cpu_fan_level(2300.0 / 6000.0);
-    component.set_gpu_fan_level(2100.0 / 6000.0);
-    let axis = Range::Fixed {
-        min: 20.0,
-        max: 100.0,
-    };
-    component.set_cpu_temp_chart(image(&cpu, axis, CHART));
-    component.set_gpu_temp_chart(image(&gpu, axis, CHART));
-    component.set_history_span("−2 мин".into());
-}
-
-fn apply_snapshot_state(
-    component: &AppWindow,
-    section: &str,
-    state_name: &str,
-) -> anyhow::Result<()> {
-    let applicable = match state_name {
-        "normal" => true,
-        "dirty" => section == "cooling",
-        "pending" | "error" | "unsupported" | "readonly" => matches!(
-            section,
-            "dashboard" | "performance" | "cooling" | "graphics"
-        ),
+fn apply_snapshot_state(component: &AppWindow, state_name: &str) -> anyhow::Result<()> {
+    let mut s = component.get_ui_state();
+    match state_name {
+        "normal" => {}
+        "dirty" => {
+            s.fan_curve_dirty = true;
+            s.power_limit_dirty_mask = 0b1;
+            s.spl_draft = 60;
+        }
+        "pending" => {
+            s.performance_delegated_pending = true;
+            s.gpu_queued = 2;
+            s.gpu_reboot_required = true;
+            s.fan_curve_pending = true;
+            s.charge_limit_pending = true;
+        }
+        "error" => {
+            s.performance_delegated_error = "Ошибка чтения профиля производительности".into();
+            s.gpu_section_error = true;
+            s.fan_curve_error = true;
+            s.power_limit_error = true;
+            s.charge_limit_error = "Запись лимита заряда отклонена".into();
+        }
+        "unsupported" => {
+            s.perf_state = PerformanceHwState::Unavailable;
+            s.perf_writable = false;
+            s.perf_unavailable_reason = "Поддержка профиля не обнаружена".into();
+            s.gpu_mode_state = GpuModeHwState::Unavailable;
+            s.gpu_mode_writable = false;
+            s.fan_curve_state = FanCurveHwState::Unavailable;
+            s.fan_curve_writable = false;
+            s.power_limits_ready = false;
+        }
+        "readonly" => {
+            s.perf_writable = false;
+            s.gpu_mode_writable = false;
+            s.fan_curve_writable = false;
+            s.power_limits_writable = false;
+            s.charge_limit_writable = false;
+        }
         other => anyhow::bail!("unknown snapshot state: {other}"),
-    };
-    if !applicable {
-        anyhow::bail!("snapshot state {state_name:?} is not applicable to section {section:?}");
     }
-
-    let mut ui_state = component.get_ui_state();
-    match (section, state_name) {
-        (_, "normal") => {}
-        ("cooling", "dirty") => ui_state.fan_curve_dirty = true,
-        ("cooling", "pending") => ui_state.fan_curve_pending = true,
-        ("cooling", "error") => ui_state.fan_curve_error = true,
-        ("cooling", "unsupported") => {
-            ui_state.fan_curve_state = FanCurveHwState::Unavailable;
-            ui_state.fan_curve_writable = false;
-            ui_state.fan_curve_unavailable_reason =
-                "Поддержка кривой вентиляторов не обнаружена".into();
-        }
-        ("cooling", "readonly") => ui_state.fan_curve_writable = false,
-        ("performance", "pending") => ui_state.performance_delegated_pending = true,
-        ("performance", "error") => {
-            ui_state.performance_delegated_error =
-                "Ошибка чтения профиля производительности".into();
-        }
-        ("dashboard", "pending") => {
-            ui_state.perf_state = PerformanceHwState::Unavailable;
-            ui_state.perf_writable = false;
-            ui_state.perf_unavailable_reason = "Ожидание подтверждения".into();
-        }
-        ("dashboard", "error") => {
-            ui_state.perf_state = PerformanceHwState::Unavailable;
-            ui_state.perf_writable = false;
-            ui_state.perf_unavailable_reason = "Ошибка чтения профиля производительности".into();
-        }
-        ("performance", "unsupported") | ("dashboard", "unsupported") => {
-            ui_state.perf_state = PerformanceHwState::Unavailable;
-            ui_state.perf_writable = false;
-            ui_state.perf_unavailable_reason = "Поддержка профиля не обнаружена".into();
-        }
-        ("performance", "readonly") | ("dashboard", "readonly") => ui_state.perf_writable = false,
-        ("graphics", "pending") => ui_state.gpu_mode_pending = true,
-        ("graphics", "error") => ui_state.gpu_section_error = true,
-        ("graphics", "unsupported") => {
-            ui_state.gpu_mode_state = GpuModeHwState::Unavailable;
-            ui_state.gpu_mode_writable = false;
-        }
-        ("graphics", "readonly") => ui_state.gpu_mode_writable = false,
-        _ => unreachable!("applicability checked above"),
-    }
-    component.set_ui_state(ui_state);
+    component.set_ui_state(s);
     Ok(())
 }
 
@@ -473,11 +397,10 @@ fn save(
 
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
-    let kind = args.next().unwrap_or_else(|| "dashboard".to_string());
-    let path = args.next().unwrap_or_else(|| format!("{kind}.png"));
+    let view = args.next().unwrap_or_else(|| "main".to_string());
+    let path = args.next().unwrap_or_else(|| format!("{view}.png"));
     let theme = args.next().unwrap_or_else(|| "dark".to_string());
-    let requested_width = args.next().map(|value| value.parse()).transpose()?;
-    let requested_height = args.next().map(|value| value.parse()).transpose()?;
+    let height: Option<f32> = args.next().map(|value| value.parse()).transpose()?;
     let state = args.next().unwrap_or_else(|| "normal".to_string());
     if args.next().is_some() {
         anyhow::bail!("too many arguments");
@@ -487,63 +410,34 @@ fn main() -> anyhow::Result<()> {
         "light" => true,
         other => anyhow::bail!("unknown theme: {other}"),
     };
-
-    let (default_width, default_height) = if kind == "dialog" {
-        (470, 228)
-    } else {
-        (1240, 820)
+    let panel = match view.as_str() {
+        "main" => Panel::None,
+        "fans" => Panel::Fans,
+        "extra" => Panel::Extra,
+        other => anyhow::bail!("unknown view: {other}"),
     };
-    let width = requested_width.unwrap_or(default_width);
-    let height = requested_height.unwrap_or(default_height);
 
-    let renderer = setup(width, height);
-
-    match kind.as_str() {
-        "dashboard" | "performance" | "power" | "fans" | "cooling" | "graphics" | "backlight"
-        | "display" | "extra" | "system" | "settings" | "about" => {
-            let component = AppWindow::new()?;
-            component.global::<ThemeState>().set_mode(if light {
-                ThemeMode::Light
-            } else {
-                ThemeMode::Dark
-            });
-            demo_state(&component);
-            apply_snapshot_state(&component, &kind, &state)?;
-            let section = match kind.as_str() {
-                "performance" => Section::Performance,
-                "power" => Section::Power,
-                "fans" | "cooling" => Section::Cooling,
-                "graphics" => Section::Graphics,
-                "backlight" => Section::Backlight,
-                "display" => Section::Display,
-                "extra" | "system" => Section::System,
-                "settings" => Section::Settings,
-                "about" => Section::About,
-                _ => Section::Dashboard,
-            };
-            component.set_active_section(section);
-            component
-                .window()
-                .set_size(LogicalSize::new(width as f32, height as f32));
-            component.show()?;
-            save(&renderer, component.window(), &path)?;
-        }
-        "dialog" => {
-            let component = PreviewDialogWindow::new()?;
-            component.global::<ThemeState>().set_mode(if light {
-                ThemeMode::Light
-            } else {
-                ThemeMode::Dark
-            });
-            component.set_kind(3);
-            component
-                .window()
-                .set_size(LogicalSize::new(width as f32, height as f32));
-            component.show()?;
-            save(&renderer, component.window(), &path)?;
-        }
-        other => anyhow::bail!("unknown section: {other}"),
-    }
-
+    let renderer = setup(841, 800);
+    let component = AppWindow::new()?;
+    component.global::<ThemeState>().set_mode(if light {
+        ThemeMode::Light
+    } else {
+        ThemeMode::Dark
+    });
+    demo_state(&component);
+    apply_snapshot_state(&component, &state)?;
+    component.set_panel(panel);
+    let width = component.get_main_width()
+        + if panel == Panel::None {
+            0.0
+        } else {
+            component.get_panel_width() + 1.0
+        };
+    component.window().set_size(LogicalSize::new(
+        width,
+        height.unwrap_or(component.get_main_height()),
+    ));
+    component.show()?;
+    save(&renderer, component.window(), &path)?;
     Ok(())
 }
