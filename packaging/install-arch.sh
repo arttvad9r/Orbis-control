@@ -7,6 +7,7 @@
 #
 # Usage:
 #   bash packaging/install-arch.sh
+#   ORBIS_ROOT_CMD=sudo bash packaging/install-arch.sh
 #   bash packaging/install-arch.sh --uninstall
 #   DESTDIR=/tmp/orbis-root bash packaging/install-arch.sh
 
@@ -37,7 +38,8 @@ if [[ -n "$DESTDIR" ]]; then
   # Staging install: write into DESTDIR without touching the running system.
   ROOT_CMD=()
 else
-  ROOT_CMD=(pkexec)
+  # ORBIS_ROOT_CMD=sudo avoids one polkit prompt per step.
+  ROOT_CMD=("${ORBIS_ROOT_CMD:-pkexec}")
 fi
 
 if [[ "${1:-}" == "--uninstall" ]]; then
@@ -45,7 +47,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     echo "ERROR: --uninstall removes a live install and does not support DESTDIR staging" >&2
     exit 1
   fi
-  for tool in pkexec systemctl; do
+  for tool in "${ROOT_CMD[0]}" systemctl; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "ERROR: required tool not found: $tool" >&2
       exit 1
@@ -81,7 +83,7 @@ for tool in cargo install; do
   fi
 done
 if [[ -z "$DESTDIR" ]]; then
-  for tool in pkexec systemctl; do
+  for tool in "${ROOT_CMD[0]}" systemctl; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "ERROR: required tool not found: $tool" >&2
       exit 1
