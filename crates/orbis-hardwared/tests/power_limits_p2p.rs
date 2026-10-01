@@ -209,3 +209,46 @@ async fn authorization_failure_timeout_and_unsupported_are_honest() {
     .unwrap_err();
     assert!(matches!(unsupported, zbus::fdo::Error::InvalidArgs(_)));
 }
+
+struct TimerProbe;
+
+#[zbus::interface(name = "io.github.orbiscontrol.Test.TimerProbe")]
+impl TimerProbe {
+    /// Uses a tokio timer inside a D-Bus method, like `SetPowerLimit` does.
+    async fn wait(&self) -> u32 {
+        tokio::time::timeout(Duration::from_secs(1), async { 7 })
+            .await
+            .unwrap_or(0)
+    }
+}
+
+/// Hardware1 methods use tokio timers (`handle_set_power_limit`), so zbus
+/// must run D-Bus handlers on the daemon's tokio runtime. Without the zbus
+/// `tokio` feature they ran on zbus's own executor thread and every
+/// SetPowerLimit call panicked inside the daemon.
+#[tokio::test]
+async fn dbus_method_handlers_run_on_the_tokio_runtime() {
+    let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+    let server = zbus::connection::Builder::async_io_unix_stream(server_stream)
+        .server(zbus::Guid::generate())
+        .unwrap()
+        .p2p()
+        .serve_at("/probe", TimerProbe)
+        .unwrap();
+    let client = zbus::connection::Builder::async_io_unix_stream(client_stream).p2p();
+    let (_server, client) = tokio::try_join!(server.build(), client.build()).unwrap();
+    let reply = tokio::time::timeout(
+        Duration::from_secs(5),
+        client.call_method(
+            None::<&str>,
+            "/probe",
+            Some("io.github.orbiscontrol.Test.TimerProbe"),
+            "Wait",
+            &(),
+        ),
+    )
+    .await
+    .expect("handler answered instead of panicking")
+    .expect("method call succeeded");
+    assert_eq!(reply.body().deserialize::<u32>().unwrap(), 7);
+}
