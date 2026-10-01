@@ -14,11 +14,11 @@ description = "Orbis Control: application boundary между UI и provider tra
 # MockProvider/orbis-test-support.
 [dependencies]
 orbis-core = { workspace = true }
-orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false }
+orbis-providers = { path = "../orbis-providers", version = "0.2.0", default-features = false }
 
 [dev-dependencies]
 tokio = { workspace = true }
 async-trait = { workspace = true }
 orbis-test-support = { workspace = true }
 # Тестовая сборка включает feature `mock` для доступа к MockProvider.
-orbis-providers = { path = "../orbis-providers", version = "0.1.0", features = ["mock"] }
+orbis-providers = { path = "../orbis-providers", version = "0.2.0", features = ["mock"] }

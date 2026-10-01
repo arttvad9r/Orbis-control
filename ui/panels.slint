@@ -517,13 +517,13 @@ export component ExtraWindow inherits Window {
                     first: !(root.keyboard-visible || root.aura-power-ready);
                     SectionHeader { title: "Автоматика"; }
                     if (root.profile-memory-visible) : ToggleRow {
-                        label: "Запоминать лимиты и настройки CPU для каждого профиля";
+                        label: "Свои лимиты и CPU для каждого профиля";
                         hint: root.profile-limits-summary;
                         checked: root.profile-limits-auto-apply;
                         toggled(v) => { root.profile-limits-auto-apply-toggled(v); }
                     }
                     if (root.rules-visible) : ToggleRow {
-                        label: "Профиль и частота экрана по источнику питания";
+                        label: "Профиль и частота по источнику питания";
                         checked: root.power-rules-enabled;
                         toggled(v) => { root.power-rules-enabled-toggled(v); }
                     }

@@ -13,12 +13,29 @@
     <p>Orbis Control is a native Linux application for monitoring and controlling supported ASUS laptop capabilities.</p>
     <p>Available controls depend on runtime capability probes and hardware evidence. Unsupported features are not presented as universally available.</p>
   </description>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Main window with the Fans and power and Extra windows</caption>
+      <image>https://raw.githubusercontent.com/arttvad9r/Orbis-control/v0.2.0/screenshots/overview-light.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Dark theme</caption>
+      <image>https://raw.githubusercontent.com/arttvad9r/Orbis-control/v0.2.0/screenshots/overview-dark.png</image>
+    </screenshot>
+  </screenshots>
   <launchable type="desktop-id">io.github.orbiscontrol.Orbis.desktop</launchable>
   <categories>
     <category>Settings</category>
     <category>HardwareSettings</category>
   </categories>
   <releases>
+    <release version="0.2.0" date="2026-10-01">
+      <description>
+        <p>New compact interface in the style of G-Helper: one window with the everyday controls, "Fans and power" and "Extra" as separate windows docked next to it above the tray, light and dark Clay themes. Tray menu with profiles and quit.</p>
+        <p>New: power limits per profile, EPP and CPU boost, AC/battery rules for profile and refresh rate, GPU Optimized mode, NVIDIA clock offsets, Aura effects and per-state lighting, keyboard backlight auto-off, screen brightness and refresh rate, global shortcuts and mode notifications, update check.</p>
+        <p>Fixed: power limits never applied (daemon panic; several limits in one apply), window freezing after a move on Wayland.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-09-28">
       <description>
         <p>First release: performance profiles, battery charge limit, custom fan curves, GPU mode switching with reboot queue, keyboard backlight and Aura static colour, Panel Overdrive, capability-gated ASUS advanced parameters, telemetry dashboard, diagnostics export and tray.</p>

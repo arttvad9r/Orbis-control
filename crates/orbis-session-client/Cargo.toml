@@ -11,13 +11,13 @@ description = "Orbis Control: client-side read-only provider поверх sessio
 [dependencies]
 async-trait = { workspace = true }
 zbus = { workspace = true }
-orbis-core = { path = "../orbis-core", version = "0.1.0" }
-orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false }
-orbis-session-protocol = { path = "../orbis-session-protocol", version = "0.1.0" }
-orbis-hardwared = { path = "../orbis-hardwared", version = "0.1.0" }
+orbis-core = { path = "../orbis-core", version = "0.2.0" }
+orbis-providers = { path = "../orbis-providers", version = "0.2.0", default-features = false }
+orbis-session-protocol = { path = "../orbis-session-protocol", version = "0.2.0" }
+orbis-hardwared = { path = "../orbis-hardwared", version = "0.2.0" }
 tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
 zbus = { workspace = true, features = ["p2p"] }
-orbis-sessiond = { path = "../orbis-sessiond", version = "0.1.0", default-features = false }
+orbis-sessiond = { path = "../orbis-sessiond", version = "0.2.0", default-features = false }

@@ -17,6 +17,21 @@ mod panel_sync {
     include!("../src/panel_sync.rs");
 }
 
+/// Device pixel ratio of the snapshot (`ORBIS_SNAPSHOT_SCALE`, default 1).
+fn scale() -> f32 {
+    std::env::var("ORBIS_SNAPSHOT_SCALE")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1.0)
+}
+
+/// Apply the snapshot scale before the first layout.
+fn apply_scale(window: &slint::Window) {
+    window.dispatch_event(WindowEvent::ScaleFactorChanged {
+        scale_factor: scale(),
+    });
+}
+
 struct SoftwareWindowAdapter {
     renderer: Rc<slint::platform::software_renderer::SoftwareRenderer>,
     window: OnceCell<slint::Window>,
@@ -37,9 +52,10 @@ impl WindowAdapter for SoftwareWindowAdapter {
     }
 
     fn set_size(&self, size: WindowSize) {
+        let scale = scale();
         let (logical, physical) = match size {
-            WindowSize::Physical(p) => (p.to_logical(1.0), p),
-            WindowSize::Logical(l) => (l, l.to_physical(1.0)),
+            WindowSize::Physical(p) => (p.to_logical(scale), p),
+            WindowSize::Logical(l) => (l, l.to_physical(scale)),
         };
         self.size.set(physical);
         self.window()
@@ -199,18 +215,6 @@ fn demo_state(component: &AppWindow) {
             max: 1000,
             default_known: true,
             default: 0,
-            saved_known: false,
-            saved: 0,
-        },
-        NvidiaRow {
-            field: 2,
-            label: "Лимит мощности".into(),
-            unit: "W".into(),
-            current: 115,
-            min: 60,
-            max: 140,
-            default_known: true,
-            default: 115,
             saved_known: false,
             saved: 0,
         },
@@ -432,6 +436,7 @@ fn main() -> anyhow::Result<()> {
     match view.as_str() {
         "fans" => {
             let window = FansWindow::new()?;
+            apply_scale(window.window());
             panel_sync::sync_fans(&component, &window);
             window
                 .window()
@@ -441,6 +446,7 @@ fn main() -> anyhow::Result<()> {
         }
         "extra" => {
             let window = ExtraWindow::new()?;
+            apply_scale(window.window());
             panel_sync::sync_extra(&component, &window);
             window
                 .window()
@@ -449,6 +455,7 @@ fn main() -> anyhow::Result<()> {
             save(&renderer, window.window(), &path)?;
         }
         _ => {
+            apply_scale(component.window());
             component.window().set_size(LogicalSize::new(
                 component.get_main_width(),
                 height.unwrap_or(component.get_main_height()),

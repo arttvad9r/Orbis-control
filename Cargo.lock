@@ -3226,7 +3226,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-application"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "orbis-core",
@@ -3237,7 +3237,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-capabilities"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "orbis-core",
  "serde",
@@ -3248,7 +3248,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "orbis-core",
@@ -3263,7 +3263,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dirs",
  "orbis-core",
@@ -3275,7 +3275,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3284,7 +3284,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-hardwared"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "enumflags2",
@@ -3301,7 +3301,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-providers"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "nvml-wrapper",
@@ -3321,7 +3321,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-session-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "orbis-core",
@@ -3336,7 +3336,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-session-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "zbus",
@@ -3344,7 +3344,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-sessiond"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "orbis-core",
@@ -3358,7 +3358,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-test-support"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "orbis-capabilities",
  "orbis-core",
@@ -3368,7 +3368,7 @@ dependencies = [
 
 [[package]]
 name = "orbis-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -1,148 +1,140 @@
+<div align="center">
+
+<img src="data/icons/hicolor/scalable/apps/io.github.orbiscontrol.Orbis.svg" width="96" alt="Orbis Control icon">
+
 # Orbis Control
 
-Orbis Control is a Rust + Slint Linux application for monitoring and controlling supported ASUS ROG/TUF/Zephyrus laptop features. It is Wayland-first, keeps unsupported hardware honest, and routes privileged mutations through a narrow typed `Hardware1` service instead of running the GUI as root.
+**A compact control center for ASUS ROG / TUF / Zephyrus laptops on Linux**
 
-`main` is the canonical development branch. The primary development environment is Arch Linux; the repository has no Nix/NixOS build dependency.
+Performance modes, fan curves, power limits, GPU modes, keyboard lighting and battery care —
+in the spirit of G-Helper and ROG Control Center, native to KDE Plasma and Wayland.
 
-## What already exists
+[![Release](https://img.shields.io/github/v/release/arttvad9r/Orbis-control?color=D97757&label=release)](https://github.com/arttvad9r/Orbis-control/releases/latest)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-5E7045)](LICENSE)
+![Rust + Slint](https://img.shields.io/badge/Rust%20%2B%20Slint-1.88%2B-A06A2C)
+![Linux · Wayland](https://img.shields.io/badge/Linux-Wayland%20%C2%B7%20X11-5E5D59)
 
-The current codebase includes production paths for the core application shell and a substantial part of the daily-control feature set, including:
+**English** · [Русский](README.ru.md)
 
-- system telemetry and capability discovery;
-- Performance profile read/write with read-back;
-- Battery charge-limit read/write with read-back;
-- fan state/curve support and ASUS fan mutation paths where capability evidence permits them;
-- ASUS product GPU mode read/queued mutation flow;
-- keyboard backlight and selected ASUS extra controls;
-- preferences, autostart, tray/window lifecycle and diagnostics;
-- read-only CLI status output;
-- systemd, D-Bus and polkit integration;
-- fake-system/private-P2P integration tests for privileged boundaries.
+</div>
 
-The current release is v0.1.0. Remaining work (G-Helper feature parity) is tracked in the single plan [`PLAN.md`](PLAN.md). A feature is considered finished only when the user-visible flow is connected end to end.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/overview-dark.png">
+  <img src="screenshots/overview-light.png" alt="Orbis Control: main window with the Fans and power and Extra windows">
+</picture>
 
-## Install (Arch Linux)
+## Why Orbis Control
 
-The v0.1.0 release is packaged with the pinned `packaging/arch/PKGBUILD`:
+- **One small window for everyday things.** Mode, GPU, screen, keyboard and battery fit in a single 400-px column. Fan curves, power limits and the rest open in their own windows next to it — like G-Helper.
+- **Lives in the tray.** Left click shows or hides the window right above the tray icon; right click opens a menu with profiles and Quit. Global shortcuts: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F5</kbd> cycles the profile, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F12</kbd> toggles the window, and <kbd>Fn</kbd>+<kbd>F5</kbd> is followed too.
+- **Honest about your hardware.** Every control appears only when the laptop actually reports the capability, and only becomes writable when the write path is proven. A value counts as applied after it is read back, not when the request is sent.
+- **Safe by design.** The GUI never runs as root. Hardware changes go through a narrow, typed D-Bus service (`orbis-hardwared`) guarded by polkit — there is no generic root shell or sysfs proxy.
+- **Looks like your desktop.** Flat, quiet design in the warm Clay palette, light and dark.
+
+## Features
+
+| | |
+|---|---|
+| **Performance** | Silent / Balanced / Turbo (through power-profiles-daemon), SPL / SPPT / FPPT, NVIDIA Dynamic Boost and GPU temperature target, AMD EPP and CPU boost — optionally remembered per profile and re-applied on every switch |
+| **Fans** | Custom CPU and GPU curves for each profile: drag the points in both axes, one-click factory reset |
+| **Graphics** | Eco / Standard / Ultimate with an honest reboot queue, Optimized (Eco on battery, Standard on AC), NVIDIA core / memory clock offsets |
+| **Screen** | Refresh rate, brightness, Panel Overdrive |
+| **Keyboard** | Brightness, Aura effects and colours, lighting per power state (boot, awake, sleep, shutdown), auto-off on idle for AC and battery separately |
+| **Battery** | Charge limit, one-time full charge that restores the limit by itself, health and cycle count |
+| **Automation** | Profile and refresh rate on AC / battery, mode-change notifications |
+| **System** | POST sound, iGPU memory, PCIe ASPM, stay awake with the lid closed — each only when supported |
+| **App** | Tray with live temperatures in the tooltip, autostart, diagnostics export, update check |
+
+<table>
+  <tr>
+    <td align="center"><img src="screenshots/main-light.png" width="260" alt="Main window"><br><sub>Main window</sub></td>
+    <td align="center"><img src="screenshots/fans-light.png" width="286" alt="Fans and power"><br><sub>Fans and power</sub></td>
+    <td align="center"><img src="screenshots/extra-light.png" width="286" alt="Extra"><br><sub>Extra</sub></td>
+  </tr>
+</table>
+
+> The interface is currently in Russian.
+
+## Install
+
+### Arch Linux (and derivatives)
+
+Download `orbis-control-0.2.0-1-x86_64.pkg.tar.zst` from the [latest release](https://github.com/arttvad9r/Orbis-control/releases/latest), then:
 
 ```bash
-git clone --branch v0.1.0 https://github.com/arttvad9r/Orbis-control.git
-cd Orbis-control/packaging/arch
-makepkg -si
+sudo pacman -U orbis-control-0.2.0-1-x86_64.pkg.tar.zst
 sudo systemctl enable --now orbis-hardwared.service
 systemctl --user enable --now orbis-sessiond.service
 ```
 
-A prebuilt `orbis-control-0.1.0-*.pkg.tar.zst` is attached to the GitHub release (`sudo pacman -U <file>`). Runtime requirements: `asusd` for ASUS controls; `power-profiles-daemon` is used for performance profiles when it is running.
-
-v0.1.0 was validated on an ASUS TUF Gaming A17 FA707NV. Other models get exactly the controls their runtime evidence supports.
-
-## Arch Linux development setup
-
-Rust workspace: edition 2024, MSRV/toolchain 1.88.
-
-Install the native build/runtime dependencies:
+Or build the package yourself from the pinned `PKGBUILD`:
 
 ```bash
-sudo pacman -S --needed \
-  base-devel rustup pkgconf \
-  fontconfig freetype2 libglvnd \
-  libx11 libxcursor libxrandr libxi \
-  libxkbcommon libxkbcommon-x11 \
-  wayland wayland-protocols \
-  dbus openssl systemd polkit upower \
-  glib2 cairo pango gdk-pixbuf2
-
-rustup toolchain install 1.88 --profile minimal --component rustfmt clippy
+git clone --branch v0.2.0 https://github.com/arttvad9r/Orbis-control.git
+cd Orbis-control/packaging/arch
+makepkg -si
 ```
 
-The repository's `rust-toolchain.toml` selects Rust 1.88 automatically inside the checkout.
+Then start **Orbis Control** from the application menu.
 
-Run the GUI during development:
+### What it uses on your system
 
-```bash
-cargo run -p orbis-ui --bin orbis-control
-```
+| Component | Needed for |
+|---|---|
+| `asusd` (asusctl) | fan curves, charge limit, keyboard backlight and Aura, GPU modes |
+| `power-profiles-daemon` | Silent / Balanced / Turbo |
+| `supergfxctl` | GPU mode switching on models managed by supergfxd |
+| `nvidia-utils` | NVIDIA clock offsets and GPU telemetry |
+| `kscreen` | refresh-rate switching on KDE Plasma |
+| `ryzenadj` | AMD Curve Optimizer, on models whose firmware accepts it |
 
-Build the release workspace:
+Everything is optional: whatever is missing simply does not show up.
 
-```bash
-cargo build --workspace --release --locked
-```
+## Hardware
 
-Install the current checkout as a local developer build:
+Orbis Control decides what to show from what the running system reports, not from the model name, so other ASUS laptops supported by `asus-wmi` and `asusd` should get the controls they actually have. Version 0.2.0 is developed and tested only on an **ASUS TUF Gaming A17 FA707NV** (Ryzen 5 7535HS, RTX 4060) with Arch Linux / CachyOS and KDE Plasma 6 on Wayland — reports from other models are welcome.
 
-```bash
-bash packaging/install-arch.sh
-```
+Window placement next to the tray uses a KWin script, so it is KDE-only; on other desktops the windows open where the window manager puts them.
 
-This installs the four binaries and desktop/AppStream metadata under `/usr/local`, rewrites the systemd units to that prefix, and installs the D-Bus policy and polkit actions. It is deliberately separate from the pacman-owned `/usr/bin` layout of the release package; uninstall it (`--uninstall`) before installing the package, otherwise `/usr/local/bin/orbis-control` shadows the packaged one.
+## Known limitations
 
-To update only the privileged helper during development:
+- Some firmware rejects AMD Curve Optimizer (the FA707NV does); the control then hides itself.
+- Screen gamma / colour temperature is not implemented (KWin offers no portable API besides Night Light).
+- AnimeMatrix / Slash, MiniLED, XG Mobile and ASUS peripherals are not supported yet.
 
-```bash
-bash packaging/deploy-dev-hardwared.sh
-```
-
-## Verification
-
-Use real build/test checks rather than documentation/source-marker contracts:
-
-```bash
-scripts/verify crate orbis-ui   # targeted crate while iterating
-scripts/verify quick            # fmt + workspace check
-scripts/verify task             # fmt + check + tests + clippy
-scripts/verify full             # task checks + release build + packaging asset validation
-```
-
-Do not run the full suite after every small edit. Implement a coherent batch, run targeted checks, fix failures, and use broader verification at the end of the vertical slice.
-
-CI uses the pinned Rust toolchain and normal Linux system packages; it does not use Nix.
-
-## Architecture
-
-Read path:
+## How it works
 
 ```text
-UPower / kernel / asusd / supergfxd / read-only sysfs / compositor observation
-→ providers / orbis-sessiond
-→ Session1 / application runtime
-→ worker
-→ GUI / CLI / diagnostics
+UPower · kernel · asusd · supergfxd · power-profiles-daemon · KWin
+        │ read                                    ▲ write (polkit, read-back)
+        ▼                                         │
+ orbis-sessiond (user session)          orbis-hardwared (system, typed Hardware1 API)
+        │                                         ▲
+        └──────────────►  orbis-control (GUI, unprivileged)  ──┘
 ```
 
-Privileged mutation path:
+- the GUI is an ordinary user-session application;
+- requested, observed and pending state stay distinct, and "accepted" is not "applied";
+- a write whose outcome is unknown is never retried blindly.
 
-```text
-original application caller
-→ typed Hardware1 system-bus API
-→ capability-specific polkit
-→ narrow backend
-→ authoritative read-back / explicit pending / honest error
+More in [`docs/architecture.md`](docs/architecture.md) and the ADRs in [`docs/adr/`](docs/adr/).
+
+## Development
+
+Rust 2024 edition, toolchain 1.88 (selected by `rust-toolchain.toml`). On Arch:
+
+```bash
+sudo pacman -S --needed base-devel rustup pkgconf fontconfig freetype2 libglvnd \
+  libx11 libxcursor libxrandr libxi libxkbcommon libxkbcommon-x11 \
+  wayland wayland-protocols dbus openssl systemd polkit upower
+cargo run -p orbis-ui --bin orbis-control      # run the GUI
+scripts/verify task                             # fmt + check + tests + clippy
+ORBIS_ROOT_CMD=sudo bash packaging/install-arch.sh   # local install under /usr/local
+scripts/update-ui-screenshots.sh                # refresh these screenshots
 ```
 
-Important invariants:
-
-- the GUI is an unprivileged user-session application;
-- `orbis-sessiond` is not a privileged mutation deputy;
-- no generic root/sysfs/shell proxy;
-- runtime evidence determines capability support, not the laptop model name alone;
-- read and write support are independent;
-- requested, observed and pending state stay distinct;
-- `Accepted` is not automatically `Applied`;
-- an unknown mutation outcome is never blindly retried.
-
-Stable architecture details live in [`docs/architecture.md`](docs/architecture.md) and accepted ADRs under [`docs/adr/`](docs/adr/). Hardware evidence under `docs/hardware-evidence/` is revision/device-specific reference material, not a development gate.
-Comparative project decisions are recorded in [`docs/research/comparative-projects.md`](docs/research/comparative-projects.md); they guide ownership and state semantics but do not authorize copying external code or enabling unsupported mutations.
-
-## Repository workflow for AI agents
-
-[`AGENTS.md`](AGENTS.md) is intentionally product-first: agents are expected to complete coherent vertical work, continue across necessary crates, and stop only at a real blocker. Documentation maintenance and source-marker test generation are not default development work.
-
-When asked simply to continue or finish the project, start from [`PLAN.md`](PLAN.md), verify the actual source/runtime state, complete the highest-priority actionable slice, and continue to the next related item instead of stopping after a micro-fix.
+The local install lives under `/usr/local` and shadows the package; remove it with `bash packaging/install-arch.sh --uninstall` before installing the package. The work queue is [`PLAN.md`](PLAN.md); rules for AI agents are in [`AGENTS.md`](AGENTS.md).
 
 ## License
 
-GPL-3.0-or-later.
-
-Orbis Control is an independent project and is not affiliated with ASUSTeK Computer Inc.
+GPL-3.0-or-later. Orbis Control is an independent project and is not affiliated with ASUSTeK Computer Inc.

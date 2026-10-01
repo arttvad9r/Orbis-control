@@ -4,7 +4,7 @@ pkgrel=1
 pkgdesc='ASUS laptop monitoring and control for Linux'
 arch=('x86_64')
 url='https://github.com/arttvad9r/Orbis-control'
-license=('GPL-3.0-or-later' 'OFL-1.1')
+license=('GPL-3.0-or-later')
 depends=('curl' 'dbus' 'glibc' 'polkit' 'wayland' 'libx11' 'libxcb' 'libxkbcommon')
 optdepends=('asusctl: fan curves, charge limit, keyboard backlight and Aura (asusd)'
             'power-profiles-daemon: Silent/Balanced/Turbo performance profiles'

@@ -26,10 +26,10 @@ slint = { workspace = true, features = ["unstable-winit-030"] }
 orbis-core = { workspace = true }
 orbis-config = { workspace = true }
 orbis-capabilities = { workspace = true }
-orbis-application = { path = "../orbis-application", version = "0.1.0" }
-orbis-session-client = { path = "../orbis-session-client", version = "0.1.0" }
-orbis-session-protocol = { path = "../orbis-session-protocol", version = "0.1.0" }
-orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false }
+orbis-application = { path = "../orbis-application", version = "0.2.0" }
+orbis-session-client = { path = "../orbis-session-client", version = "0.2.0" }
+orbis-session-protocol = { path = "../orbis-session-protocol", version = "0.2.0" }
+orbis-providers = { path = "../orbis-providers", version = "0.2.0", default-features = false }
 orbis-sessiond = { workspace = true }
 # Fixture-derived UiState bootstrap is no longer part of the release graph
 # (#115): production startup uses `UiState::production_initial`. The fixture
@@ -49,7 +49,7 @@ async-trait = { workspace = true }
 tempfile = { workspace = true }
 i-slint-backend-testing = "=1.16.1"
 orbis-test-support = { workspace = true }
-orbis-providers = { path = "../orbis-providers", version = "0.1.0", default-features = false, features = ["mock"] }
+orbis-providers = { path = "../orbis-providers", version = "0.2.0", default-features = false, features = ["mock"] }
 orbis-hardwared = { workspace = true }
 
 [features]

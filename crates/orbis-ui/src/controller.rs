@@ -685,7 +685,7 @@ impl UiState {
             ac_online,
             gpu_power_display: gpu_power,
             power_ac,
-            version: "0.1.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             mock_profile: profile_name.to_string(),
             // Fan Curve Editor: Loading до первого authoritative refresh;
             // mock profile не предоставляет real fan curve hardware state.
