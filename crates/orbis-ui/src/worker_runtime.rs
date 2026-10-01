@@ -61,10 +61,14 @@ pub enum WorkerCommand {
     StartFullCharge,
     /// End a one-time full charge now and restore the remembered limit.
     StopFullCharge,
-    /// Apply one typed SPL/SPPT/FPPT value through Hardware1.
-    SetPowerLimit {
-        field: orbis_core::limits::PowerLimitField,
-        value: i32,
+    /// Apply the edited SPL/SPPT/FPPT/… values of one "Apply" through
+    /// Hardware1, in order. `snapshot_identity` is the snapshot the edits were
+    /// made against; it is checked once, before the first write (each write
+    /// changes the snapshot, so later fields cannot be checked against it).
+    /// The first failure or unknown outcome stops the batch; the remaining
+    /// fields are reported as not applied.
+    SetPowerLimits {
+        limits: Vec<(orbis_core::limits::PowerLimitField, i32)>,
         snapshot_identity: u64,
     },
     RefreshChargeLimit,
@@ -1071,26 +1075,39 @@ async fn run_worker_inner<G, B, R, F>(
                     product_gpu_status_read(product_gpu.as_deref()).await,
                 )
             }
-            WorkerCommand::SetPowerLimit {
-                field,
-                value,
+            WorkerCommand::SetPowerLimits {
+                limits,
                 snapshot_identity,
             } => {
-                let result = write_power_limit(
-                    runtime.power_limits.as_ref(),
-                    field.clone(),
-                    value,
-                    Some(snapshot_identity),
-                    &mut emit,
-                )
-                .await;
-                if matches!(result, Ok(ApplyResult::Applied)) {
-                    profile_limits.record_applied(&field, value);
-                    if let Some(view) = profile_limits.view() {
-                        emit(WorkerEvent::ProfileLimits(view));
-                    }
+                let mut expected = Some(snapshot_identity);
+                let mut stopped = false;
+                for (field, value) in limits {
+                    let result = if stopped {
+                        Err(ProviderError::Conflict(
+                            "not applied: an earlier limit of this apply failed".into(),
+                        ))
+                    } else {
+                        let result = write_power_limit(
+                            runtime.power_limits.as_ref(),
+                            field.clone(),
+                            value,
+                            expected.take(),
+                            &mut emit,
+                        )
+                        .await;
+                        if matches!(result, Ok(ApplyResult::Applied)) {
+                            profile_limits.record_applied(&field, value);
+                            if let Some(view) = profile_limits.view() {
+                                emit(WorkerEvent::ProfileLimits(view));
+                            }
+                        } else {
+                            stopped = true;
+                        }
+                        result
+                    };
+                    emit(WorkerEvent::PowerLimit { field, result });
                 }
-                WorkerEvent::PowerLimit { field, result }
+                continue;
             }
             WorkerCommand::SetCpuEpp(preference) => {
                 let error = match cpu_tuning.as_deref() {
@@ -2877,9 +2894,8 @@ mod tests {
             .unwrap();
 
         // Off: applied value is not remembered and a switch replays nothing.
-        tx.send(WorkerCommand::SetPowerLimit {
-            field: Spl,
-            value: 45,
+        tx.send(WorkerCommand::SetPowerLimits {
+            limits: vec![(Spl, 45)],
             snapshot_identity: initial.identity,
         })
         .unwrap();
@@ -2917,9 +2933,8 @@ mod tests {
             WorkerEvent::PowerLimitsRefresh(Ok(snapshot)) => snapshot,
             _ => unreachable!(),
         };
-        tx.send(WorkerCommand::SetPowerLimit {
-            field: Spl,
-            value: 50,
+        tx.send(WorkerCommand::SetPowerLimits {
+            limits: vec![(Spl, 50)],
             snapshot_identity: snapshot.identity,
         })
         .unwrap();
@@ -2950,6 +2965,63 @@ mod tests {
         let calls = calls.lock().unwrap();
         assert_eq!(calls.len(), before + 1);
         assert_eq!(*calls.last().unwrap(), (0, 50));
+    }
+
+    /// One "Apply" with several edited limits: every write changes the
+    /// snapshot, so only the first write may be checked against the identity
+    /// the edits were made against. Sending each field with that identity
+    /// rejected every field after the first ("snapshot changed").
+    #[tokio::test]
+    async fn worker_loop_applies_several_edited_limits_in_one_apply() {
+        use orbis_core::limits::PowerLimitField::{GpuDynamicBoost, Spl};
+        let owner = PrivatePowerLimitHardware {
+            values: Arc::new(StdMutex::new(Default::default())),
+            calls: Arc::new(StdMutex::new(Vec::new())),
+        };
+        let owner_values = owner.values.clone();
+        let (_server, connection) = private_power_limit_peer(owner).await;
+        let reads = Arc::new(StdMutex::new([(Spl, 30), (GpuDynamicBoost, 0)].into()));
+        let runtime = power_limit_runtime(
+            orbis_session_client::ZbusHardwarePowerLimitSource::new(connection),
+            reads,
+        );
+        let initial = runtime
+            .power_limits
+            .as_ref()
+            .unwrap()
+            .power_limit_snapshot()
+            .await
+            .unwrap();
+        let (tx, rx) = command_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let worker = tokio::spawn(run_worker(runtime, rx, move |event| {
+            let _ = event_tx.send(event);
+        }));
+
+        tx.send(WorkerCommand::SetPowerLimits {
+            limits: vec![(Spl, 45), (GpuDynamicBoost, 25)],
+            snapshot_identity: initial.identity,
+        })
+        .unwrap();
+        let mut applied = Vec::new();
+        while applied.len() < 2 {
+            let event = tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if let WorkerEvent::PowerLimit { field, result } = event {
+                assert!(
+                    matches!(result, Ok(ApplyResult::Applied)),
+                    "{field:?}: {result:?}"
+                );
+                applied.push(field);
+            }
+        }
+        assert_eq!(applied, vec![Spl, GpuDynamicBoost]);
+        assert_eq!(owner_values.lock().unwrap().get(&0), Some(&45));
+        assert_eq!(owner_values.lock().unwrap().get(&4), Some(&25));
+        drop(tx);
+        worker.await.unwrap();
     }
 
     #[tokio::test]
@@ -2986,9 +3058,8 @@ mod tests {
         ));
         let mut snapshot = initial.clone();
         for (field, value, wire) in [(Spl, 45, 0), (GpuDynamicBoost, 25, 4)] {
-            tx.send(WorkerCommand::SetPowerLimit {
-                field: field.clone(),
-                value,
+            tx.send(WorkerCommand::SetPowerLimits {
+                limits: vec![(field.clone(), value)],
                 snapshot_identity: snapshot.identity,
             })
             .unwrap();
@@ -3016,9 +3087,8 @@ mod tests {
         assert_eq!(*calls.lock().unwrap(), vec![(0, 45), (4, 25)]);
 
         let before = calls.lock().unwrap().len();
-        tx.send(WorkerCommand::SetPowerLimit {
-            field: Spl,
-            value: 50,
+        tx.send(WorkerCommand::SetPowerLimits {
+            limits: vec![(Spl, 50)],
             snapshot_identity: initial.identity,
         })
         .unwrap();
@@ -3052,9 +3122,8 @@ mod tests {
             .await
             .unwrap();
         assert!(removed);
-        tx.send(WorkerCommand::SetPowerLimit {
-            field: Spl,
-            value: 55,
+        tx.send(WorkerCommand::SetPowerLimits {
+            limits: vec![(Spl, 55)],
             snapshot_identity: snapshot.identity,
         })
         .unwrap();
@@ -3094,9 +3163,8 @@ mod tests {
             let _ = fresh_event_tx.send(event);
         }));
         fresh_tx
-            .send(WorkerCommand::SetPowerLimit {
-                field: GpuDynamicBoost,
-                value: 35,
+            .send(WorkerCommand::SetPowerLimits {
+                limits: vec![(GpuDynamicBoost, 35)],
                 snapshot_identity: fresh_snapshot.identity,
             })
             .unwrap();

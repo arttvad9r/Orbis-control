@@ -2229,16 +2229,17 @@ fn wire_callbacks(app: &AppWindow, worker_tx: Option<UnboundedSender<WorkerComma
             let Some(tx) = &worker_tx else {
                 return;
             };
-            let drafts: Vec<_> = state.power_limit_drafts.clone().into_iter().collect();
-            for (field, value) in drafts {
-                state.power_limit_pending.insert(field.clone());
-                if let Err(error) = tx.send(WorkerCommand::SetPowerLimit {
-                    field: field.clone(),
-                    value,
-                    snapshot_identity: state.power_limit_snapshot_identity,
-                }) {
-                    state.power_limit_pending.remove(&field);
-                    tracing::warn!("worker closed, power-limit command not sent: {error:?}");
+            // One batch: the snapshot identity is checked before the first
+            // write only, since every write changes the snapshot.
+            let limits: Vec<_> = state.power_limit_drafts.clone().into_iter().collect();
+            let fields: Vec<_> = limits.iter().map(|(field, _)| field.clone()).collect();
+            match tx.send(WorkerCommand::SetPowerLimits {
+                limits,
+                snapshot_identity: state.power_limit_snapshot_identity,
+            }) {
+                Ok(()) => state.power_limit_pending.extend(fields),
+                Err(error) => {
+                    tracing::warn!("worker closed, power-limit command not sent: {error:?}")
                 }
             }
             publish_ui_state(&app, &state);
