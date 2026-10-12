@@ -6,7 +6,7 @@ Rust + Slint Linux application for ASUS ROG/TUF/Zephyrus laptops. Goal: ship com
 - `PLAN.md` is the only execution queue. For broad requests such as continue/finish, start at the earliest actionable unchecked phase and keep working through a coherent vertical slice.
 - Current behavior source order: production code → executable tests/build config → `PLAN.md` → relevant current issues → README/ADR/stable docs.
 - Do not create parallel roadmaps, status matrices, remediation logs or evidence dumps unless explicitly requested.
-- `main` is the canonical development branch. Historical branches/documents are background unless the task says otherwise.
+- Historical branches/documents are background unless the task says otherwise.
 
 ## Development
 - Canonical environment: Arch Linux, native Rust/Cargo and normal Linux systemd/D-Bus/polkit assets. Do not introduce Nix infrastructure.
@@ -35,3 +35,9 @@ Rust + Slint Linux application for ASUS ROG/TUF/Zephyrus laptops. Goal: ship com
 - Stop only for a genuine authority/input blocker, destructive real-world action, unresolved product choice, or required physical-hardware validation.
 - Documentation is updated only when a completed change would otherwise leave stable docs materially false.
 - Optional project skills in `.opencode/skills/`: `orbis-slint-ui`, `orbis-hardware-safety`, `orbis-system-integration`.
+
+## Git
+- `main` holds released code only; every merge into `main` is a release tagged `vX.Y.Z`.
+- `dev` is the integration branch and must always build and pass checks.
+- Work in `feat/<name>` / `fix/<name>` from `dev`; several branches may run in parallel. Merge verified work into `dev`, then delete the branch.
+- Push, tags and releases only with the owner's explicit permission.
