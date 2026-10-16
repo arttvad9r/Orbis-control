@@ -545,17 +545,21 @@ where
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
 
+    static FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
+
     fn fixture_root() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "orbis-fan-curve-test-{}-{}",
+            "orbis-fan-curve-test-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_nanos())
-                .unwrap_or(0)
+                .unwrap_or(0),
+            FIXTURE_ID.fetch_add(1, Ordering::Relaxed),
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("fixture root");
