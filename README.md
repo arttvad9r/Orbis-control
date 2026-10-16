@@ -10,6 +10,7 @@ Performance modes, fan curves, power limits, GPU modes, keyboard lighting and ba
 in the spirit of G-Helper and ROG Control Center, native to KDE Plasma and Wayland.
 
 [![Release](https://img.shields.io/github/v/release/arttvad9r/Orbis-control?color=D97757&label=release)](https://github.com/arttvad9r/Orbis-control/releases/latest)
+[![CI](https://github.com/arttvad9r/Orbis-control/actions/workflows/ci.yml/badge.svg)](https://github.com/arttvad9r/Orbis-control/actions/workflows/ci.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-5E7045)](LICENSE)
 ![Rust + Slint](https://img.shields.io/badge/Rust%20%2B%20Slint-1.88%2B-A06A2C)
 ![Linux · Wayland](https://img.shields.io/badge/Linux-Wayland%20%C2%B7%20X11-5E5D59)
@@ -134,6 +135,8 @@ scripts/update-ui-screenshots.sh                # refresh these screenshots
 ```
 
 The local install lives under `/usr/local` and shadows the package; remove it with `bash packaging/install-arch.sh --uninstall` before installing the package. The work queue is [`PLAN.md`](PLAN.md); rules for AI agents are in [`AGENTS.md`](AGENTS.md).
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution rules and [SECURITY.md](SECURITY.md) for the privileged hardware-control threat boundary.
 
 ## License
 
